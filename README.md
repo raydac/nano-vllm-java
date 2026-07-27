@@ -15,15 +15,15 @@ inference engine.
 ## Requirements
 
 * JDK 21+
-* Maven via `mvn22` on this machine
+* Maven via `mvn` on this machine
 * Gson (pulled by Maven)
 
 ## Build
 
 ```bash
 cd nano-vllm-java
-mvn22 -q test
-mvn22 -q package
+mvn -q test
+mvn -q package
 ```
 
 ## Model
@@ -51,7 +51,7 @@ Windows: `.\models\download-qwen3-0.6b.ps1` / `.\models\download-gemma3-270m.ps1
 
 | Override    | Example                                                        |
 |-------------|----------------------------------------------------------------|
-| CLI         | `mvn22 … -Dexec.args=models/Gemma3-270M`                       |
+| CLI         | `mvn … -Dexec.args=models/Gemma3-270M`                         |
 | Property    | `-Dnanovllm.model=models/Gemma3-270M`                          |
 | Force arch  | `-Dnanovllm.arch=gemma3` or `qwen3`                            |
 | Env         | `NANOVLLM_MODEL=models/Gemma3-270M`                            |
@@ -70,7 +70,7 @@ assistant> ...
 ```
 
 ```bash
-MAVEN_OPTS="-Xmx8g" mvn22 -q exec:java -Dexec.mainClass=io.nanovllm.Example
+MAVEN_OPTS="-Xmx8g" mvn -q exec:java -Dexec.mainClass=io.nanovllm.Example
 ```
 
 Requires `--add-modules jdk.incubator.vector` (already set in the POM for `test` / `exec:java`).
