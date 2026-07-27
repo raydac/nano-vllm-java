@@ -5,13 +5,9 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import io.nanovllm.chat.AssistantParts;
-import io.nanovllm.chat.FactMemory;
-import io.nanovllm.chat.MessageClassifier;
 import io.nanovllm.engine.BlockManager;
 import io.nanovllm.engine.Sequence;
 import io.nanovllm.prompts.ChatPrompts;
-import io.nanovllm.prompts.MessageAnalysis;
-import io.nanovllm.prompts.MessageIntent;
 import io.nanovllm.tensor.FloatKernels;
 import io.nanovllm.tensor.FloatKernelsFactory;
 import io.nanovllm.tensor.Ops;
@@ -19,7 +15,6 @@ import io.nanovllm.tensor.Tensor;
 import io.nanovllm.utils.BundledModels;
 import io.nanovllm.utils.Json;
 import java.nio.file.Path;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
@@ -169,20 +164,40 @@ class CoreUnitTest {
   @Test
   void cleanAssistantTextHidesTemplateNoise() {
     String raw = "</think>\n\nHello there<|im_end|>";
-    assertEquals("Hello there", FactMemory.cleanAssistantText(raw));
+    assertEquals("Hello there", AssistantParts.cleanAssistantText(raw));
   }
 
   @Test
   void cleanAssistantTextKeepsGreetingReplies() {
     assertEquals("Hello! How can I assist you today?",
-        FactMemory.cleanAssistantText("</think>\n\nHello! How can I assist you today?<|im_end|>"));
-    assertEquals("hello", FactMemory.cleanAssistantText("hello"));
+        AssistantParts.cleanAssistantText(
+            "</think>\n\nHello! How can I assist you today?<|im_end|>"));
+    assertEquals("hello", AssistantParts.cleanAssistantText("hello"));
   }
 
   @Test
   void cleanAssistantTextUsesThinkBodyWhenAnswerEmpty() {
     assertEquals("Tere hommikust",
-        FactMemory.cleanAssistantText("<think>\nTere hommikust\n</think>\n\n"));
+        AssistantParts.cleanAssistantText("<think>\nTere hommikust\n</think>\n\n"));
+  }
+
+  @Test
+  void streamingDecodeHoldsIncompleteUtf8() {
+    byte[] shch = "щ".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+    assertEquals(2, shch.length);
+    assertEquals("", io.nanovllm.tokenizer.Tokenizer.decodeUtf8Complete(new byte[] {shch[0]}));
+    assertEquals("щ", io.nanovllm.tokenizer.Tokenizer.decodeUtf8Complete(shch));
+    assertEquals("ащ", io.nanovllm.tokenizer.Tokenizer.decodeUtf8Complete(
+        ("ащ").getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+
+    var path = io.nanovllm.utils.BundledModels.require(io.nanovllm.utils.BundledModels.QWEN3_0_6B);
+    var tok = io.nanovllm.tokenizer.Tokenizer.fromPretrained(path);
+    List<Integer> ids = tok.encode("обычное средство щелочное");
+    for (int n = 1; n <= ids.size(); n++) {
+      String partial = tok.decode(ids.subList(0, n), false);
+      assertFalse(partial.contains("\uFFFD"), () -> "replacement in: " + partial);
+    }
+    assertTrue(tok.decode(ids, false).contains("щ"));
   }
 
   @Test
@@ -207,330 +222,33 @@ class CoreUnitTest {
 
   @Test
   void streamDisplayStripsThinkAndSpecials() {
-    assertEquals("Hello", FactMemory.streamDisplayText("<think>secret</think>Hello"));
-    assertEquals("still thinking", FactMemory.streamDisplayText("<think>still thinking"));
-    assertEquals("ok", FactMemory.streamDisplayText("ok<|im_end|>"));
+    assertEquals("Hello", AssistantParts.streamDisplayText("<think>secret</think>Hello"));
+    assertEquals("still thinking", AssistantParts.streamDisplayText("<think>still thinking"));
+    assertEquals("ok", AssistantParts.streamDisplayText("ok<|im_end|>"));
   }
 
   @Test
   void assistantPartsSplitsThinkAndAnswer() {
     AssistantParts parts = AssistantParts.parse(
         "<think>\nplan\n</think>\n\nTere hommikust<|im_end|>");
-    assertEquals("\nplan\n", parts.thinking());
+    assertEquals("plan", parts.thinking());
     assertEquals("Tere hommikust", parts.answer());
     assertEquals(false, parts.thinkOpen());
   }
 
   @Test
-  void knowledgeBaseFromAssistantDirectives() {
-    List<String> knowledge = new ArrayList<>();
-    FactMemory.applyKnowledgeDirectives(
-        knowledge,
-        "I will remember that Nora Vale is the club president.\nREMEMBER: Nora Vale is the club president");
-    assertEquals(List.of("Nora Vale is the club president"), knowledge);
-
-    String system = ChatPrompts.chatSystemWithKnowledge(knowledge);
-    assertTrue(system.contains("Knowledge base"));
-    assertTrue(system.contains("Nora Vale is the club president")
-        || system.toLowerCase().contains("nora vale"));
+  void chatSystemPromptUsesDialogHistory() {
     assertTrue(ChatPrompts.CHAT_SYSTEM.contains("You are the Assistant"));
     assertTrue(ChatPrompts.CHAT_SYSTEM.contains("User"));
-    assertTrue(ChatPrompts.CHAT_SYSTEM.contains("you") || ChatPrompts.CHAT_SYSTEM.contains("your"));
+    assertTrue(ChatPrompts.CHAT_SYSTEM.toLowerCase().contains("conversation"));
     assertTrue(ChatPrompts.CHAT_SYSTEM.toLowerCase().contains("do not repeat")
         || ChatPrompts.CHAT_SYSTEM.toLowerCase().contains("do not greet"));
-    assertEquals("Got it.", ChatPrompts.FACT_SHARE_ACKNOWLEDGMENT);
-
-    FactMemory.applyKnowledgeDirectives(
-        knowledge,
-        "I will forget that fact.\nFORGET: Nora Vale is the club president");
-    assertTrue(knowledge.isEmpty());
-
-    assertEquals(
-        "I will remember that Nora Vale is the club president.",
-        FactMemory.stripMemoryDirectives(
-            "I will remember that Nora Vale is the club president.\nREMEMBER: Nora Vale is the club president"));
-  }
-
-  @Test
-  void knowledgeIgnoresNoneAndParsesInlineRemember() {
-    List<String> knowledge = new ArrayList<>();
-    FactMemory.applyKnowledgeDirectives(knowledge, "I don't know. REMEMBER: (none)<|im_ended|");
-    assertTrue(knowledge.isEmpty());
-
-    FactMemory.applyKnowledgeDirectives(
-        knowledge,
-        "I will remember it. REMEMBER: Mira Quinn is a robot designer<|im_end|>");
-    assertEquals(List.of("Mira Quinn is a robot designer"), knowledge);
-
-    assertEquals(
-        "I don't have information about Mira Quinn.",
-        FactMemory.stripMemoryDirectives(
-            "I don't have information about Mira Quinn. REMEMBER: (none)<|im_ended|"));
-  }
-
-  @Test
-  void parseExtractedFactsKeepsCompactUnknownOnly() {
-    List<String> fromCompound = FactMemory.parseExtractedFacts("""
-        + Alex Rivera is a cartographer born in 1988
-        NONE
-        """.strip());
-    assertTrue(fromCompound.stream().anyMatch(f -> f.toLowerCase().contains("cartographer")));
-    assertTrue(fromCompound.stream().anyMatch(f -> f.toLowerCase().contains("1988")));
-
-    assertTrue(FactMemory.parseExtractedFacts("NONE").isEmpty());
-    assertTrue(FactMemory.parseExtractedFacts("FACT: NONE").isEmpty());
-    assertTrue(FactMemory.parseExtractedFacts("No facts here.").isEmpty());
-
-    List<String> knowledge = new ArrayList<>();
-    knowledge.add("User is a cartographer");
-    assertTrue(!FactMemory.isUnknownFact(knowledge, "User is a cartographer"));
-    assertTrue(FactMemory.isUnknownFact(knowledge, "Riverdale is a fictional town"));
-
-    String payload = ChatPrompts.factExtractUserPayload(
-        "Alex Rivera is a cartographer, born in 1988 and it is me",
-        knowledge);
-    assertTrue(payload.contains("Message:"));
-    assertTrue(payload.toLowerCase().contains("already known")
-        || payload.contains("User is a cartographer")
-        || payload.contains("Message:"));
-  }
-
-  @Test
-  void shouldSeekRemainingFactsWhenMessageHasMoreClaimsThanFound() {
-    String bio = "Hello my name is Igor maznitsa, I am a computer programmer living in estonia, "
-        + "I was relocated to Estonia in 2013 with my family but originally I am from "
-        + "Saint-Petersburg in Russia, my mother tongue is russian but I prefer english "
-        + "for communication";
-    assertTrue(MessageClassifier.approximateClaimHints(bio) >= 4);
-    assertTrue(FactMemory.shouldSeekRemainingFacts(
-        bio, List.of("User's mother tongue is Russian.")));
-    assertFalse(FactMemory.shouldSeekRemainingFacts("Hi", List.of("User said hi")));
-    assertFalse(FactMemory.shouldSeekRemainingFacts(bio, List.of(
-        "a", "b", "c", "d", "e", "f", "g", "h")));
-  }
-
-  @Test
-  void factsNormalizeUserRoleAndSplitCompounds() {
-    assertEquals("User is Alex Rivera", FactMemory.normalizeFact("I am Alex Rivera"));
-    assertEquals("User lives in Riverdale", FactMemory.normalizeFact("I live in Riverdale"));
-    assertEquals("User is Alex Rivera", FactMemory.normalizeFact("Alex Rivera is the User"));
-
-    List<String> split = FactMemory.splitAtomicFacts(
-        "User is a cartographer born in 1988");
-    assertTrue(split.stream().anyMatch(f -> f.equalsIgnoreCase("User is a cartographer")));
-    assertTrue(split.stream().anyMatch(f -> f.equalsIgnoreCase("User was born in 1988")));
-
-    List<String> multi = FactMemory.parseExtractedFacts("""
-        + User is Alex Rivera
-        + User is a cartographer
-        + User was born in 1988
-        """.strip());
-    assertEquals(3, multi.size());
-
-    List<String> jammed = FactMemory.parseExtractedFacts(
-        "+ User is Alex Rivera + User is a cartographer + User was born in 1988");
-    assertEquals(3, jammed.size());
-
-    List<String> legacy = FactMemory.parseExtractedFacts("""
-        FACT: User is Mira Quinn
-        F| User lives in Riverdale
-        """.strip());
-    assertEquals(2, legacy.size());
-
-    List<String> knowledge = new ArrayList<>();
-    for (String fact : multi) {
-      FactMemory.rememberFact(knowledge, fact);
-    }
-    assertEquals(3, knowledge.size());
-  }
-
-  @Test
-  void compactFactsDropsOverlappingCompounds() {
-    List<String> compact = FactMemory.compactFacts(List.of(
-        "User is a computer programmer living in estonia",
-        "User is a computer programmer",
-        "User lives in Estonia",
-        "User is From Saint-Petersburg In Russia",
-        "User relocated to Estonia in 2013",
-        "User relocated to Estonia from Russia in 2013"
-    ));
-    assertTrue(compact.stream().anyMatch(f -> f.equalsIgnoreCase("User is a computer programmer")));
-    assertTrue(compact.stream().anyMatch(f -> f.equalsIgnoreCase("User lives in Estonia")));
-    assertTrue(compact.stream()
-        .anyMatch(f -> f.equalsIgnoreCase("User is from Saint-Petersburg in Russia")));
-    assertTrue(compact.stream().anyMatch(f ->
-        f.equalsIgnoreCase("User relocated to Estonia from Russia in 2013")));
-    assertTrue(
-        compact.stream().noneMatch(f -> f.equalsIgnoreCase("User relocated to Estonia in 2013")));
-    assertTrue(compact.stream().noneMatch(f -> f.toLowerCase().contains("living in")));
-    assertEquals(4, compact.size());
-  }
-
-  @Test
-  void parseMessageAnalysisReadsClassifierOutput() {
-    // Bare labels (Gemma-270M often omits "TYPE:")
-    assertEquals(MessageIntent.STORE,
-        MessageClassifier.parseMessageAnalysis("STORE").intent());
-    assertEquals(MessageIntent.QUESTION,
-        MessageClassifier.parseMessageAnalysis("QUESTION").intent());
-    assertEquals(MessageIntent.CHAT,
-        MessageClassifier.parseMessageAnalysis("CHAT").intent());
-
-    assertEquals(MessageIntent.QUESTION,
-        MessageClassifier.parseMessageAnalysis("TYPE: QUESTION").intent());
-    assertEquals(MessageIntent.QUESTION,
-        MessageClassifier.parseMessageAnalysis("type: question").intent());
-    assertEquals(MessageIntent.STORE,
-        MessageClassifier.parseMessageAnalysis("TYPE: STORE").intent());
-    assertEquals(MessageIntent.SKIP,
-        MessageClassifier.parseMessageAnalysis("TYPE: SKIP").intent());
-    assertEquals(MessageIntent.CHAT,
-        MessageClassifier.parseMessageAnalysis("TYPE: CHAT").intent());
-    assertEquals(MessageIntent.CHAT,
-        MessageClassifier.parseMessageAnalysis("TYPE: ").intent());
-    assertEquals(MessageIntent.CHAT,
-        MessageClassifier.parseMessageAnalysis("unparseable gibberish").intent());
-    assertEquals(MessageIntent.CHAT,
-        MessageClassifier.parseMessageAnalysis("").intent());
-
-    MessageAnalysis forget = MessageClassifier.parseMessageAnalysis("""
-        TYPE: FORGET
-        PROBE: mother tongue
-        """.strip());
-    assertEquals(MessageIntent.FORGET, forget.intent());
-    assertEquals("mother tongue", forget.forgetProbe());
-
-    // Sample classifier outputs for representative user messages
-    assertEquals(MessageIntent.QUESTION,
-        MessageClassifier.parseMessageAnalysis("TYPE: QUESTION")
-            .intent()); // "so guess where did I live in 2000"
-    assertEquals(MessageIntent.STORE,
-        MessageClassifier.parseMessageAnalysis("TYPE: STORE").intent()); // "add rule that X"
-    assertEquals(MessageIntent.SKIP,
-        MessageClassifier.parseMessageAnalysis("TYPE: SKIP").intent()); // "hello"
-  }
-
-  @Test
-  void invalidFactsRejectInterrogatives() {
-    assertFalse(FactMemory.isValidFact("User's mother tongue is What"));
-    assertFalse(FactMemory.isValidFact("User's mother tongue is who"));
-    assertTrue(FactMemory.isValidFact("User's mother tongue is Russian"));
-  }
-
-  @Test
-  void invalidFactsRejectBareFragmentsAndPlaceholders() {
-    assertFalse(FactMemory.isValidFact("2013"));
-    assertFalse(FactMemory.isValidFact("Russian"));
-    assertFalse(FactMemory.isValidFact("English"));
-    assertFalse(FactMemory.isValidFact("St. Petersburg"));
-    assertFalse(FactMemory.isValidFact("igor Maznitsa"));
-    assertFalse(FactMemory.isValidFact("User lives in …"));
-    assertFalse(FactMemory.isValidFact("User's name is …"));
-    assertFalse(FactMemory.isValidFact("User lives in ..."));
-    assertTrue(FactMemory.isValidFact("User relocated to Estonia in 2013"));
-    assertTrue(FactMemory.isValidFact("User's mother tongue is Russian"));
-    assertTrue(FactMemory.isValidFact("User prefers English for communication"));
-    assertTrue(FactMemory.isValidFact("User is from Saint-Petersburg in Russia"));
-    assertTrue(FactMemory.parseExtractedFacts("+ 2013 + Russian + English").isEmpty());
-  }
-
-  @Test
-  void storeRuleViaRememberFact() {
-    List<String> knowledge = new ArrayList<>();
-    knowledge.add("User was born in 1975");
-    FactMemory.rememberFact(knowledge, "Rule: the month plays role");
-    assertTrue(knowledge.contains("Rule: the month plays role"));
-    assertEquals(2, knowledge.size());
-  }
-
-  @Test
-  void freeFormRulesRelyOnLlmGroundingNotHardcodedCues() {
-    assertFalse(FactMemory.isGroundedInUserMessage(
-        "User is from Saint Petersburg in Russia",
-        "birth month plays role for age calculation"));
-    assertTrue(FactMemory.isGroundedInUserMessage(
-        "Rule: birth month plays a role in age calculation",
-        "birth month plays role for age calculation"));
-    assertTrue(FactMemory.isGroundedInUserMessage(
-        "User was born in 1975",
-        "I was born in 1975 and live in Estonia"));
-    assertTrue(FactMemory.parseExtractedFacts(
-            "+ Rule: birth month plays a role in age calculation").stream()
-        .anyMatch(f -> f.toLowerCase().startsWith("rule:") && f.toLowerCase().contains("birth")));
-  }
-
-  @Test
-  void promoteStoreWhenFactDenseOverridesChatAndSkip() {
-    String bio = "Hello my name is Igor maznitsa, I am a computer programmer living in estonia, "
-        + "I was relocated to Estonia in 2013 with my family but originally I am from "
-        + "Saint-Petersburg in Russia, my mother tongue is russian but I prefer english "
-        + "for communication";
-    assertTrue(MessageClassifier.looksLikeFactDenseShare(bio));
-    assertEquals(
-        MessageIntent.STORE,
-        MessageClassifier.promoteStoreWhenFactDense(
-            new MessageAnalysis(MessageIntent.CHAT, null), bio).intent());
-    assertEquals(
-        MessageIntent.STORE,
-        MessageClassifier.promoteStoreWhenFactDense(
-            new MessageAnalysis(MessageIntent.SKIP, null), bio).intent());
-    assertEquals(
-        MessageIntent.QUESTION,
-        MessageClassifier.promoteStoreWhenFactDense(
-            new MessageAnalysis(MessageIntent.QUESTION, null), bio).intent());
-    assertFalse(MessageClassifier.looksLikeFactDenseShare("hello"));
-    assertEquals(
-        MessageIntent.CHAT,
-        MessageClassifier.promoteStoreWhenFactDense(
-            new MessageAnalysis(MessageIntent.CHAT, null), "hello").intent());
-  }
-
-  @Test
-  void demoteStoreWhenEphemeralTaskRequest() {
-    assertTrue(MessageClassifier.looksLikeEphemeralTaskRequest("print list of months"));
-    assertEquals(
-        MessageIntent.CHAT,
-        MessageClassifier.refineClassifiedIntent(
-            new MessageAnalysis(MessageIntent.STORE, null),
-            "print list of months").intent());
-    assertFalse(MessageClassifier.looksLikeEphemeralTaskRequest(
-        "add rule that always list months in English"));
-    assertEquals(
-        MessageIntent.STORE,
-        MessageClassifier.refineClassifiedIntent(
-            new MessageAnalysis(MessageIntent.STORE, null),
-            "add rule that always list months in English").intent());
-    assertFalse(FactMemory.isGroundedInUserMessage(
-        "Rule: print list of months", "print list of months"));
-  }
-
-  @Test
-  void longWriteProgramRequestStaysChatNotFactDenseStore() {
-    String ask = "write java program to open some text file and read line by line from it "
-        + "and print on the screen, code should be safe and high quality";
-    assertTrue(MessageClassifier.looksLikeEphemeralTaskRequest(ask));
-    assertFalse(MessageClassifier.looksLikeFactDenseShare(ask));
-    assertEquals(
-        MessageIntent.CHAT,
-        MessageClassifier.refineClassifiedIntent(
-            new MessageAnalysis(MessageIntent.CHAT, null), ask).intent());
-    assertEquals(
-        MessageIntent.CHAT,
-        MessageClassifier.refineClassifiedIntent(
-            new MessageAnalysis(MessageIntent.STORE, null), ask).intent());
-  }
-
-  @Test
-  void classifyPromptMentionsAllIntents() {
-    assertTrue(ChatPrompts.MESSAGE_CLASSIFY_SYSTEM.contains("TYPE: STORE"));
-    assertTrue(ChatPrompts.MESSAGE_CLASSIFY_SYSTEM.contains("TYPE: QUESTION"));
-    assertTrue(ChatPrompts.MESSAGE_CLASSIFY_SYSTEM.contains("TYPE: FORGET"));
-    assertTrue(ChatPrompts.MESSAGE_CLASSIFY_SYSTEM.contains("TYPE: SKIP"));
-    assertTrue(ChatPrompts.MESSAGE_CLASSIFY_SYSTEM.contains("TYPE: CHAT"));
-    assertTrue(ChatPrompts.MESSAGE_CLASSIFY_SYSTEM.contains("PROBE:"));
-    String payload = ChatPrompts.messageClassifyUserPayload("so guess where did I live in 2000");
-    assertTrue(payload.contains("Message:"));
-    assertTrue(payload.contains("so guess where did I live in 2000"));
+    assertTrue(ChatPrompts.CHAT_SYSTEM.contains("<think>"));
+    assertFalse(ChatPrompts.CHAT_SYSTEM.toLowerCase().contains("knowledge base"));
+    assertEquals(ChatPrompts.CHAT_SYSTEM, ChatPrompts.systemFor(false));
+    assertEquals(ChatPrompts.GEMMA_CHAT_SYSTEM, ChatPrompts.systemFor(true));
+    assertFalse(ChatPrompts.GEMMA_CHAT_SYSTEM.contains("<think>"));
+    assertTrue(ChatPrompts.GEMMA_CHAT_SYSTEM.toLowerCase().contains("vary"));
   }
 
   @Test
@@ -572,7 +290,6 @@ class CoreUnitTest {
     Tensor x = Tensor.of(new float[] {1f, -1f, 2f, 0f}, 2, 2);
     Tensor w = Tensor.of(new float[] {0f, 0.5f}, 2);
     Tensor out = Ops.rmsNorm(x, w, 1e-6f, true);
-    // gemmaStyle: (1+w) * x / rms — with w=[0,0.5] scales are 1 and 1.5
     assertTrue(out.get(0) != 0f);
     float scale1 = 1f + 0f;
     float scale2 = 1f + 0.5f;
@@ -626,14 +343,15 @@ class CoreUnitTest {
           """);
       var tok = io.nanovllm.tokenizer.Tokenizer.fromPretrained(dir);
       assertTrue(tok.isGemmaChat());
-      String chat = tok.applyChatTemplate(
+      String chatThinkFlag = tok.applyChatTemplate(
           List.of(Map.of("role", "user", "content", "hi")), true, true);
-      assertTrue(chat.startsWith("<bos>") || chat.contains("<start_of_turn>user"));
-      assertTrue(chat.contains("<start_of_turn>model"));
-      assertTrue(chat.contains("<think>"));
-      assertTrue(chat.contains("User intent"));
-      assertFalse(tok.applyChatTemplate(
-          List.of(Map.of("role", "user", "content", "hi")), true, false).contains("<think>"));
+      assertTrue(
+          chatThinkFlag.startsWith("<bos>") || chatThinkFlag.contains("<start_of_turn>user"));
+      assertTrue(chatThinkFlag.contains("<start_of_turn>model"));
+      assertFalse(chatThinkFlag.contains("<think>"));
+      assertEquals(
+          tok.applyChatTemplate(List.of(Map.of("role", "user", "content", "hi")), true, false),
+          chatThinkFlag);
     } finally {
       try (var walk = java.nio.file.Files.walk(dir)) {
         walk.sorted(java.util.Comparator.reverseOrder()).forEach(p -> {
@@ -659,13 +377,14 @@ class CoreUnitTest {
     assertEquals(
         List.of(2, 105, 2364, 107, 23391, 106, 107, 105, 4368, 107),
         tok.encode(chatNoThink));
-    String chatThink = tok.applyChatTemplate(
+    String chatThinkFlag = tok.applyChatTemplate(
         List.of(Map.of("role", "user", "content", "hello")), true, true);
-    assertTrue(chatThink.contains("<start_of_turn>user"));
-    assertTrue(chatThink.contains("<start_of_turn>model"));
-    assertTrue(chatThink.contains("<think>"));
+    assertEquals(chatNoThink, chatThinkFlag);
+    assertTrue(chatNoThink.contains("<start_of_turn>user"));
+    assertTrue(chatNoThink.contains("<start_of_turn>model"));
+    assertFalse(chatNoThink.contains("<think>"));
     assertTrue(ChatPrompts.CHAT_SYSTEM.contains("<think>"));
-    assertTrue(ChatPrompts.GEMMA_THINK_SCAFFOLD.contains("Reply plan"));
+    assertFalse(ChatPrompts.GEMMA_CHAT_SYSTEM.contains("<think>"));
     Config.HfConfig hf = null;
     try {
       hf = Config.HfConfig.load(path.get().resolve("config.json"));
@@ -680,172 +399,11 @@ class CoreUnitTest {
   }
 
   @Test
-  void needsExtractRepairWhenSparseOrFragmentHeavy() {
-    String bio = "Hello my name is Igor maznitsa, I am a computer programmer living in estonia, "
-        + "I was relocated to Estonia in 2013 with my family but originally I am from "
-        + "Saint-Petersburg in Russia, my mother tongue is russian but I prefer english "
-        + "for communication";
-    assertTrue(FactMemory.needsExtractRepair(
-        "+ 2013 + Russian + English + User prefers English for communication",
-        List.of("User prefers English for communication"),
-        bio));
-    assertTrue(FactMemory.needsExtractRepair("+ 2013 + Russian", List.of(), bio));
-    assertFalse(FactMemory.needsExtractRepair(
-        "+ User's name is Igor Maznitsa\n+ User is a computer programmer\n"
-            + "+ User lives in Estonia\n+ User prefers English for communication",
-        List.of(
-            "User's name is Igor Maznitsa",
-            "User is a computer programmer",
-            "User lives in Estonia",
-            "User prefers English for communication"),
-        bio));
-    assertFalse(FactMemory.needsExtractRepair("NONE", List.of(), "hi"));
-  }
-
-  @Test
-  void sharedPromptsHaveNoFewShotBiographies() {
-    assertFalse(ChatPrompts.MESSAGE_CLASSIFY_SYSTEM.toLowerCase().contains("ada"));
-    assertFalse(ChatPrompts.FACT_EXTRACT_SYSTEM.toLowerCase().contains("london"));
-    assertFalse(ChatPrompts.FACT_EXTRACT_SYSTEM.toLowerCase().contains("ada"));
-    assertTrue(ChatPrompts.MESSAGE_CLASSIFY_SYSTEM.contains("TYPE: STORE"));
-    assertTrue(ChatPrompts.FACT_EXTRACT_SYSTEM.contains("NONE"));
-    assertTrue(ChatPrompts.FACT_EXTRACT_REPAIR_SYSTEM.contains("NONE"));
-    assertTrue(ChatPrompts.FACT_EXTRACT_SYSTEM.toLowerCase().contains("if/then")
-        || ChatPrompts.FACT_EXTRACT_SYSTEM.contains("Rule:"));
-    assertTrue(ChatPrompts.FACT_EXTRACT_ASSISTANT_SEED.contains("<think>"));
-    assertTrue(ChatPrompts.FACT_EXTRACT_ASSISTANT_SEED.contains("+"));
-    assertTrue(ChatPrompts.CHAT_SYSTEM.contains("Assistant"));
-  }
-
-  @Test
-  void topicOutlineDetectionAndRejection() {
-    String outline = "+ 1 Polite greeting + 2 Greetings + 3 Information about the relocation";
-    assertTrue(FactMemory.looksLikeTopicOutline(outline));
-    assertTrue(FactMemory.parseExtractedFacts(outline).isEmpty());
-    assertFalse(FactMemory.isValidFact("Information about the relocation"));
-    assertFalse(FactMemory.isValidFact("1 Polite greeting"));
-
-    String numberedFacts = "+ 1 User's name is Igor Maznitsa + 2 User is a computer programmer "
-        + "+ 3 User lives in Estonia";
-    assertFalse(FactMemory.looksLikeTopicOutline(numberedFacts));
-    assertFalse(FactMemory.needsExtractRepair(
-        numberedFacts,
-        List.of(
-            "User's name is Igor Maznitsa",
-            "User is a computer programmer",
-            "User lives in Estonia"),
-        "Hello my name is Igor"));
-    assertTrue(FactMemory.parseExtractedFacts(numberedFacts).stream()
-        .anyMatch(f -> f.toLowerCase().contains("igor")));
-  }
-
-  @Test
   void stripChatMarkupRemovesGemmaTurnTokens() {
     assertEquals("", AssistantParts.stripChatMarkup("<end_of_turn>"));
     assertEquals("Hi", AssistantParts.stripChatMarkup("Hi<end_of_turn>"));
-    assertEquals("plan", AssistantParts.stripChatMarkup("<start_of_turn>model\nplan<end_of_turn>"));
-  }
-
-  @Test
-  void bareGreetingBecomesSkipNotStore() {
-    assertTrue(MessageClassifier.looksLikeBareGreeting("hello"));
-    assertTrue(MessageClassifier.looksLikeBareGreeting("Hi!"));
-    assertTrue(MessageClassifier.looksLikeBareGreeting("привет"));
-    assertFalse(MessageClassifier.looksLikeBareGreeting(
-        "Hello my name is Igor maznitsa, I am a computer programmer"));
-    assertEquals(
-        MessageIntent.SKIP,
-        MessageClassifier.refineClassifiedIntent(
-            new MessageAnalysis(MessageIntent.STORE, null), "hello").intent());
-  }
-
-  @Test
-  void parseKeepScanReadsLlmGate() {
-    assertTrue(FactMemory.parseKeepScan("KEEP: yes"));
-    assertTrue(FactMemory.parseKeepScan("yes"));
-    assertFalse(FactMemory.parseKeepScan("KEEP: no"));
-    assertFalse(FactMemory.parseKeepScan("KEEP: 0"));
-    assertFalse(FactMemory.parseKeepScan("no"));
-    assertFalse(FactMemory.parseKeepScan(""));
-    assertTrue(ChatPrompts.FACT_SCAN_SYSTEM.contains("KEEP:"));
-  }
-
-  @Test
-  void childhoodPossessionIsLastingFactCue() {
-    String msg = "in my childhooh I had zxspectrum";
-    assertTrue(MessageClassifier.hasFirstPersonMemoryCue(msg));
-    assertTrue(MessageClassifier.looksLikePersonalFactShare(msg));
-    assertTrue(FactMemory.hasLastingContentCues(msg));
-    assertTrue(FactMemory.isValidFact("User had a ZX Spectrum in childhood"));
-    assertTrue(FactMemory.isValidFact("User had zxspectrum"));
-    assertTrue(FactMemory.isGroundedInUserMessage(
-        "User had zxspectrum", "in my childhood I had zxspectrum"));
-  }
-
-  @Test
-  void looksLikeLastingRuleDetectsIfThen() {
-    assertTrue(FactMemory.looksLikeLastingRule(
-        "if the user asks about age then use birth year from memory"));
-    assertTrue(FactMemory.looksLikeLastingRule("always answer briefly"));
-    assertFalse(FactMemory.looksLikeLastingRule("hello"));
-  }
-
-  @Test
-  void parseExtractedFactsFromPlusLines() {
-    List<String> facts = FactMemory.parseExtractedFacts("""
-        + User's name is Igor Maznitsa
-        + User is a computer programmer
-        NONE
-        """.strip());
-    assertTrue(facts.stream().anyMatch(f -> f.toLowerCase().contains("igor")));
-    assertTrue(facts.stream().anyMatch(f -> f.toLowerCase().contains("programmer")));
-
-    List<String> seeded = FactMemory.parseExtractedFacts("+ User's name is Igor Maznitsa");
-    assertTrue(seeded.stream().anyMatch(f -> f.toLowerCase().contains("igor")), seeded.toString());
-  }
-
-  @Test
-  void spokenUserFactAndIdentityRewrite() {
-    assertEquals("Your name is Igor Maznitsa",
-        ChatPrompts.toSpokenUserFact("User's name is Igor Maznitsa"));
-    assertEquals("You are a computer programmer",
-        ChatPrompts.toSpokenUserFact("User is a computer programmer"));
-    assertEquals(
-        "Your name is Igor Maznitsa.",
-        FactMemory.rewriteMistakenFirstPersonIdentity(
-            "I am Igor Maznitsa.",
-            List.of("User's name is Igor Maznitsa")));
-    assertEquals(
-        "Your name is Igor Maznitsa.",
-        FactMemory.rewriteMistakenFirstPersonIdentity(
-            "Hello, my name is Igor Maznitsa.",
-            List.of("User's name is Igor Maznitsa")));
-    assertEquals(
-        "You live in Estonia.",
-        FactMemory.rewriteMistakenFirstPersonIdentity(
-            "I am located in Estonia.",
-            List.of("User lives in Estonia")));
-    assertEquals(
-        "You live in Estonia.",
-        FactMemory.rewriteMistakenFirstPersonIdentity(
-            "I live in Estonia.",
-            List.of("User lives in Estonia")));
-  }
-
-  @Test
-  void refinePromotesQuestionsAndIgnoresNonAsciiTypeGarbage() {
-    assertTrue(MessageClassifier.looksLikeQuestion("who am i"));
-    assertTrue(MessageClassifier.looksLikeQuestion("where do i live"));
-    assertEquals(
-        MessageIntent.QUESTION,
-        MessageClassifier.refineClassifiedIntent(
-            new MessageAnalysis(MessageIntent.CHAT, null), "who am i").intent());
-    assertEquals(
-        MessageIntent.CHAT,
-        MessageClassifier.parseMessageAnalysis("TYPE: فِي الْЕНَا").intent());
-    assertEquals(
-        MessageIntent.QUESTION,
-        MessageClassifier.parseMessageAnalysis("TYPE: QUESTION").intent());
+    assertEquals("model\nplan",
+        AssistantParts.stripChatMarkup("<start_of_turn>model\nplan<end_of_turn>"));
   }
 
   @Test

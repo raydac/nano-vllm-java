@@ -28,7 +28,7 @@ public final class StreamPrinter {
       this.closeThinkLine();
     }
     if (!parts.thinkOpen()) {
-      this.emitAnswer(FactMemory.stripMemoryDirectives(parts.answer()));
+      this.emitAnswer(parts.answer());
     }
   }
 
@@ -55,11 +55,30 @@ public final class StreamPrinter {
       }
       this.thinkStarted = true;
     }
+    if (think.equals(this.shownThink)) {
+      return;
+    }
     if (think.length() > this.shownThink.length() && think.startsWith(this.shownThink)) {
       this.thinkOut.print(think.substring(this.shownThink.length()));
       this.thinkOut.flush();
       this.shownThink = think;
+      return;
     }
+    this.thinkOut.print("\rthinking> ");
+    if (this.color) {
+      this.thinkOut.print(ANSI_THINK);
+    }
+    this.thinkOut.print(think);
+    if (this.shownThink.length() > think.length()) {
+      this.thinkOut.print(" ".repeat(this.shownThink.length() - think.length()));
+      this.thinkOut.print("\rthinking> ");
+      if (this.color) {
+        this.thinkOut.print(ANSI_THINK);
+      }
+      this.thinkOut.print(think);
+    }
+    this.thinkOut.flush();
+    this.shownThink = think;
   }
 
   private void closeThinkLine() {
@@ -88,7 +107,6 @@ public final class StreamPrinter {
       this.shownAnswer = answer;
       return;
     }
-    // Corrected rewrite (e.g. "I am …" → "Your name is …"): replace the line.
     this.answerOut.print("\rassistant> ");
     this.answerOut.print(answer);
     if (this.shownAnswer.length() > answer.length()) {

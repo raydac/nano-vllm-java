@@ -517,88 +517,62 @@ public final class Tokenizer {
     return this.tokensToUtf8(sb.toString());
   }
 
-  private String decodeMetaspace(String tokenString) {
-    StringBuilder out = new StringBuilder();
+  /**
+   * Decode UTF-8 but drop a trailing incomplete multi-byte sequence.
+   * Needed for streamed token decode so Cyrillic (e.g. щ = D1 89) does not show as �.
+   */
+  public static String decodeUtf8Complete(byte[] bytes) {
+    if (bytes == null || bytes.length == 0) {
+      return "";
+    }
+    int complete = 0;
     int i = 0;
-    List<Byte> bytes = new ArrayList<>();
-    while (i < tokenString.length()) {
-      if (tokenString.startsWith("<0x", i) && i + 5 < tokenString.length() &&
-          tokenString.charAt(i + 5) == '>') {
-        try {
-          int b = Integer.parseInt(tokenString.substring(i + 3, i + 5), 16);
-          bytes.add((byte) b);
-          i += 6;
-          continue;
-        } catch (NumberFormatException ignored) {
-          // fall through
+    while (i < bytes.length) {
+      int need = utf8SequenceLength(bytes[i]);
+      if (need < 1 || i + need > bytes.length) {
+        break;
+      }
+      boolean ok = true;
+      for (int j = 1; j < need; j++) {
+        if ((bytes[i + j] & 0xC0) != 0x80) {
+          ok = false;
+          break;
         }
       }
-      if (!bytes.isEmpty()) {
-        byte[] arr = new byte[bytes.size()];
-        for (int j = 0; j < bytes.size(); j++) {
-          arr[j] = bytes.get(j);
-        }
-        out.append(new String(arr, UTF_8));
-        bytes.clear();
+      if (!ok) {
+        break;
       }
-      out.append(tokenString.charAt(i));
-      i++;
+      i += need;
+      complete = i;
     }
-    if (!bytes.isEmpty()) {
-      byte[] arr = new byte[bytes.size()];
-      for (int j = 0; j < bytes.size(); j++) {
-        arr[j] = bytes.get(j);
-      }
-      out.append(new String(arr, UTF_8));
-    }
-    return out.toString().replace(META_SPACE, " ");
+    return complete == 0 ? "" : new String(bytes, 0, complete, UTF_8);
   }
 
   public String applyChatTemplate(List<Map<String, String>> messages, boolean addGenerationPrompt) {
     return this.applyChatTemplate(messages, addGenerationPrompt, true);
   }
 
-  public String applyChatTemplate(List<Map<String, String>> messages, boolean addGenerationPrompt,
-                                  boolean enableThinking) {
-    if (this.gemmaChat ||
-        (this.chatTemplate != null && this.chatTemplate.contains("start_of_turn"))) {
-      return this.applyGemmaChat(messages, addGenerationPrompt, enableThinking);
+  private static int utf8SequenceLength(byte lead) {
+    int v = lead & 0xFF;
+    if (v < 0x80) {
+      return 1;
     }
-    if (this.chatTemplate != null && this.chatTemplate.contains("<|im_start|>")) {
-      StringBuilder sb = new StringBuilder();
-      for (Map<String, String> msg : messages) {
-        String role = msg.getOrDefault("role", "user");
-        String content = msg.getOrDefault("content", "");
-        sb.append("<|im_start|>").append(role).append('\n').append(content).append("<|im_end|>\n");
-      }
-      if (addGenerationPrompt) {
-        sb.append("<|im_start|>assistant\n");
-        if (!enableThinking) {
-          sb.append("<think>\n\n</think>\n\n");
-        }
-      }
-      return sb.toString();
+    if (v < 0xC2) {
+      return -1;
     }
-    StringBuilder sb = new StringBuilder();
-    for (Map<String, String> msg : messages) {
-      sb.append(msg.getOrDefault("role", "user")).append(": ")
-          .append(msg.getOrDefault("content", "")).append('\n');
+    if (v < 0xE0) {
+      return 2;
     }
-    if (addGenerationPrompt) {
-      sb.append("assistant: ");
+    if (v < 0xF0) {
+      return 3;
     }
-    return sb.toString();
+    if (v < 0xF5) {
+      return 4;
+    }
+    return -1;
   }
 
   private String applyGemmaChat(List<Map<String, String>> messages, boolean addGenerationPrompt) {
-    return this.applyGemmaChat(messages, addGenerationPrompt, false);
-  }
-
-  private String applyGemmaChat(
-      List<Map<String, String>> messages,
-      boolean addGenerationPrompt,
-      boolean enableThinking
-  ) {
     String system = null;
     List<Map<String, String>> turns = new ArrayList<>();
     for (Map<String, String> msg : messages) {
@@ -632,10 +606,6 @@ public final class Tokenizer {
     }
     if (addGenerationPrompt) {
       sb.append("<start_of_turn>model\n");
-      if (enableThinking) {
-        // Structured open scaffold; Example closes </think> in a second pass for Gemma.
-        sb.append(io.nanovllm.prompts.ChatPrompts.GEMMA_THINK_SCAFFOLD);
-      }
     }
     return sb.toString();
   }
@@ -656,6 +626,75 @@ public final class Tokenizer {
       tokens.add(BYTE_ENCODER[b & 0xFF]);
     }
     return tokens;
+  }
+
+  private String decodeMetaspace(String tokenString) {
+    StringBuilder out = new StringBuilder();
+    int i = 0;
+    List<Byte> bytes = new ArrayList<>();
+    while (i < tokenString.length()) {
+      if (tokenString.startsWith("<0x", i) && i + 5 < tokenString.length() &&
+          tokenString.charAt(i + 5) == '>') {
+        try {
+          int b = Integer.parseInt(tokenString.substring(i + 3, i + 5), 16);
+          bytes.add((byte) b);
+          i += 6;
+          continue;
+        } catch (NumberFormatException ignored) {
+          // fall through
+        }
+      }
+      if (!bytes.isEmpty()) {
+        byte[] arr = new byte[bytes.size()];
+        for (int j = 0; j < bytes.size(); j++) {
+          arr[j] = bytes.get(j);
+        }
+        out.append(decodeUtf8Complete(arr));
+        bytes.clear();
+      }
+      out.append(tokenString.charAt(i));
+      i++;
+    }
+    if (!bytes.isEmpty()) {
+      byte[] arr = new byte[bytes.size()];
+      for (int j = 0; j < bytes.size(); j++) {
+        arr[j] = bytes.get(j);
+      }
+      out.append(decodeUtf8Complete(arr));
+    }
+    return out.toString().replace(META_SPACE, " ");
+  }
+
+  public String applyChatTemplate(List<Map<String, String>> messages, boolean addGenerationPrompt,
+                                  boolean enableThinking) {
+    if (this.gemmaChat ||
+        (this.chatTemplate != null && this.chatTemplate.contains("start_of_turn"))) {
+      return this.applyGemmaChat(messages, addGenerationPrompt);
+    }
+    if (this.chatTemplate != null && this.chatTemplate.contains("<|im_start|>")) {
+      StringBuilder sb = new StringBuilder();
+      for (Map<String, String> msg : messages) {
+        String role = msg.getOrDefault("role", "user");
+        String content = msg.getOrDefault("content", "");
+        sb.append("<|im_start|>").append(role).append('\n').append(content).append("<|im_end|>\n");
+      }
+      if (addGenerationPrompt) {
+        sb.append("<|im_start|>assistant\n");
+        if (!enableThinking) {
+          sb.append("<think>\n\n</think>\n\n");
+        }
+      }
+      return sb.toString();
+    }
+    StringBuilder sb = new StringBuilder();
+    for (Map<String, String> msg : messages) {
+      sb.append(msg.getOrDefault("role", "user")).append(": ")
+          .append(msg.getOrDefault("content", "")).append('\n');
+    }
+    if (addGenerationPrompt) {
+      sb.append("assistant: ");
+    }
+    return sb.toString();
   }
 
   private String tokensToUtf8(String tokenString) {
@@ -688,7 +727,7 @@ public final class Tokenizer {
         for (int j = 0; j < bytes.size(); j++) {
           arr[j] = bytes.get(j);
         }
-        out.append(new String(arr, UTF_8));
+        out.append(decodeUtf8Complete(arr));
       } else {
         out.append(tokenString.charAt(i));
         i++;

@@ -77,4 +77,14 @@ public record AssistantParts(String thinking, String answer, boolean thinkOpen) 
   static String stripSpecialTokens(String raw) {
     return stripChatMarkup(raw);
   }
+
+  public static String cleanAssistantText(String raw) {
+    AssistantParts parts = parse(raw);
+    String answer = parts.answer();
+    return answer.isEmpty() ? parts.thinking().strip() : answer;
+  }
+
+  public static String streamDisplayText(String raw) {
+    return cleanAssistantText(raw);
+  }
 }
