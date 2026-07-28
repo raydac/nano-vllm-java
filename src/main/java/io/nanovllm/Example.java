@@ -172,8 +172,12 @@ public final class Example {
   ) {
     String answer = parts.answer().strip();
     if (answer.isBlank() && !parts.thinking().isBlank()) {
-      answer = salvageVisibleReply(parts.thinking());
-      System.err.println("(reply recovered from unclosed thinking)");
+      answer = AssistantParts.salvageFromThinking(parts.thinking());
+      if (parts.thinkOpen()) {
+        System.err.println("(reply recovered from unclosed thinking)");
+      } else {
+        System.err.println("(reply recovered from thinking; model omitted visible answer)");
+      }
     }
     if (answer.isBlank()) {
       answer = "Sorry — I couldn't form a reply. Please try again.";
@@ -185,24 +189,6 @@ public final class Example {
 
     System.out.println();
     history.add(ChatMessages.message("assistant", parts.answer()));
-  }
-
-  private static String salvageVisibleReply(String thinking) {
-    if (thinking == null || thinking.isBlank()) {
-      return "";
-    }
-    String[] lines = thinking.strip().split("\\R");
-    for (int i = lines.length - 1; i >= 0; i--) {
-      String line = lines[i].strip();
-      if (line.isEmpty() || line.startsWith("+")) {
-        continue;
-      }
-      if (line.length() >= 8) {
-        return line;
-      }
-    }
-    String one = thinking.replace('\n', ' ').strip();
-    return one.length() > 200 ? one.substring(0, 200).strip() + "…" : one;
   }
 
   private static boolean isExit(String user) {

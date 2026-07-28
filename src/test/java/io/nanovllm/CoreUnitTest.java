@@ -228,6 +228,47 @@ class CoreUnitTest {
   }
 
   @Test
+  void assistantPartsHoldsIncompleteThinkTag() {
+    AssistantParts partial = AssistantParts.parse("<think");
+    assertEquals("", partial.thinking());
+    assertEquals("", partial.answer());
+    assertEquals(false, partial.thinkOpen());
+
+    AssistantParts afterClose = AssistantParts.parse(
+        "<think>\nplan\n</think>\n<think");
+    assertEquals("plan", afterClose.thinking());
+    assertEquals("", afterClose.answer());
+    assertEquals(false, afterClose.thinkOpen());
+  }
+
+  @Test
+  void assistantPartsHandlesSecondThinkBlock() {
+    AssistantParts openSecond = AssistantParts.parse(
+        "<think>\nplan\n</think>\n\n<think>\nmore");
+    assertEquals("plan\nmore", openSecond.thinking());
+    assertEquals("", openSecond.answer());
+    assertEquals(true, openSecond.thinkOpen());
+
+    AssistantParts withAnswer = AssistantParts.parse(
+        "<think>\nplan\n</think>\n\n1\n<think>\nnoise</think>\n");
+    assertEquals("plan\nnoise", withAnswer.thinking());
+    assertEquals("1", withAnswer.answer());
+    assertEquals(false, withAnswer.thinkOpen());
+  }
+
+  @Test
+  void salvageFromThinkingPrefersStatedShortAnswer() {
+    assertEquals("1", AssistantParts.salvageFromThinking("""
+        Okay, the user wants a score.
+        Therefore, the answer should be 1.
+        """.stripIndent()));
+    assertEquals("1", AssistantParts.salvageFromThinking("""
+        some reasoning
+        1
+        """.stripIndent()));
+  }
+
+  @Test
   void assistantPartsSplitsThinkAndAnswer() {
     AssistantParts parts = AssistantParts.parse(
         "<think>\nplan\n</think>\n\nTere hommikust<|im_end|>");
