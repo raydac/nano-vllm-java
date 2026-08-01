@@ -9,7 +9,8 @@ You do not need to know Java, matrices, or “AI engineering.”
 If a term is unavoidable, it is explained the first time in everyday language.
 
 The project this book describes is a small program that can **load a ready-made language model** and use it to continue
-text or hold a short conversation — on an ordinary computer, without special graphics hardware.
+text or hold a short conversation — on an ordinary computer, without special graphics hardware. Java package / JPMS
+module: `com.igormaznitsa.nanollvm`.
 
 Where a topic has a standard paper or format guide, you will find a short **Further reading** note with links. Those
 links are optional depth — the story in this book stands alone.
@@ -1325,7 +1326,7 @@ Plan: answer with 4.
   1. Build chat history + system directions
   2. Apply chat template → one big prompt string
        (Gemma: thinking tags not relied on)
-       (Qwen-style: model invited to produce <think>… when enableThinking)
+       (Qwen-style: enableThinking=true + system text invite <think>…)
   3. Prefill + decode (pure Sense A) until the turn ends
   4. Decode tokens → raw assistant text
   5. AssistantParts.parse splits raw text into:
@@ -1338,19 +1339,20 @@ Plan: answer with 4.
         • finish the turn for history / UI
 ```
 
-Important: **the model does not call a Think () function.** It emits the characters `<`, `t`, `h`, … as ordinary tokens
+Important: **the model does not call a `Think()` function.** It emits the characters `<`, `t`, `h`, … as ordinary tokens
 if sampling chose them. Parsing happens **after** generation (and incrementally while streaming).
 
 #### Gemma vs Qwen organization in this project
 
-|                                         | Qwen-style chat     | Gemma chat here                                |
-|-----------------------------------------|---------------------|------------------------------------------------|
-| System directions about `<think>`       | Yes (default)       | No (empty system; avoids latching into filler) |
-| `enableThinking` when building template | On                  | Off                                            |
-| Reliable tagged scratchpad              | Encouraged          | Not relied on                                  |
-| Sense A (layers)                        | Same kind of engine | Same kind of engine                            |
+|                                         | Qwen-style chat                                                                                | Gemma chat here                                                                                            |
+|-----------------------------------------|------------------------------------------------------------------------------------------------|------------------------------------------------------------------------------------------------------------|
+| System directions about `<think>`       | Yes (default `CHAT_SYSTEM`)                                                                    | No (empty system; avoids latching into filler)                                                             |
+| `enableThinking` in `applyChatTemplate` | **true** — do **not** pre-insert an empty sealed `<think></think>`; the model may open its own | Flag is **false**, but Gemma uses its own turn template and ignores that im_start empty-think trick anyway |
+| Reliable tagged scratchpad              | Encouraged by system text                                                                      | Not relied on                                                                                              |
+| Sense A (layers)                        | Same kind of engine                                                                            | Same kind of engine                                                                                        |
 
 So “thinking UI” is a **chat convention** on top of the same model machinery — stronger on Qwen-style templates here.
+`enableThinking` is not a second brain switch; it only changes how the **prompt string** is wrapped before Sense A runs.
 
 #### Streaming organization
 
@@ -1394,13 +1396,15 @@ Imagine the user asks: “What is 2+2?”
 
 ### How “thinking” is organized across multi-turn chat
 
-- **History** carries prior turns as text in the next prompt.
-- Each new turn **rebuilds** a templated prompt and runs Sense A again (notebooks for that generate fill for that
+- **History** in this project’s `ChatSession` stores the **visible answer** for each assistant turn — not the
+  `<think>…</think>` scratchpad. The next prompt therefore normally **cannot** attend to prior Sense C notes unless you
+  put them into history yourself.
+- Within a **single** turn, note tokens still help: once emitted, later decode steps can attend to them before the turn
+  ends.
+- Each new turn **rebuilds** a templated prompt and runs Sense A again (KV notebooks for that generate fill for that
   request).
 - Prefix caching may reuse identical early pages when openings match — an optimization, not a persistent mind object.
 - There is **no** separate long-term thought log inside the weight shelves.
-- Written thinking from an earlier turn helps later turns **only if** that text is still present in the prompt the model
-  sees (and not trimmed away by length limits).
 
 ---
 
@@ -1502,17 +1506,23 @@ After scoring the vocabulary, the program must **pick** one token.
 
 Imagine a very large hat of slips of paper. Softmax writes how many copies of each slip go into the hat. Then:
 
-- **Top-k** — keep only the *k* most popular slips; throw the rest away; refill proportions.
-- **Top-p** — keep the smallest set of popular slips that together cover, say, 90% of the hat; discard the long tail of
-  oddities.
+- **Top-k** — keep only the *k* most popular slips; throw the rest away; refill proportions (`0` means “off”).
+- **Top-p** — keep the smallest set of popular slips that together cover a large share of the hat (often about 0.9–0.95
+  here); discard the long tail of oddities.
 
-Then one slip is drawn.
+Then one slip is drawn. This project’s sampler uses a **Gumbel-max–style** draw over the remaining probabilities (not a
+naive left-to-right walk of a cumulative table). Pure greedy decoding (temperature ≈ 0) is **rejected** by
+`SamplingParams` — use a small positive temperature instead.
+
+Default helpers (`SamplingDefaults`) use temperature `0.6` and top-p `0.95`; for Gemma chat they also set **top-k =
+64**, which matches common Gemma sampling advice.
 
 So the model is not forced to say the single most likely word every time. Controlled chance is why two answers to the
 same question can differ — and why “creativity” settings exist in chat products.
 
-You can ask for short or long answers by limiting **how many** tokens may be drawn before stopping. Special **end**
-tokens mean “the assistant considers this reply finished.”
+You can ask for short or long answers by limiting **how many** tokens may be drawn before stopping. Special **end** /
+stop token ids (from the tokenizer and optional `generation_config.json`) mean “the assistant considers this reply
+finished.”
 
 **Further reading:** nucleus (top-p) sampling —
 [Holtzman et al., *The Curious Case of Neural Text Degeneration*](https://arxiv.org/abs/1904.09751).
@@ -1730,8 +1740,8 @@ the finished stream for display (`thinking` vs `answer`).
 - Tokenizer decodes ids → raw assistant string.
 - Chat helper splits `<think>…</think>` from the visible answer when markers exist.
 - You may see notes on a “thinking” channel and `4` on the answer channel.
-- History keeps what the session stores for the next turn; the next prefill will attend across that history subject to
-  length limits.
+- `ChatSession` appends only the **visible answer** to history for the next turn (not the scratchpad). The next prefill
+  attends across that history subject to length limits.
 
 ### One picture of the whole turn
 
@@ -1771,7 +1781,8 @@ text. The *impression* of understanding is an effect of that chain, shaped by tr
 
 ## 16. If you later open the code
 
-You still do not need to. But if curiosity leads you there, these are the “rooms” of the program, named for humans:
+You still do not need to. But if curiosity leads you there, these are the “rooms” of the program, named for humans
+(under package `com.igormaznitsa.nanollvm`):
 
 | Human idea                     | Place in the project                       |
 |--------------------------------|--------------------------------------------|
@@ -1834,6 +1845,27 @@ ask it to **stop** from another thread if a reply is taking too long.
 
 ---
 
+## 18. Honest limits
+
+This project is a **teaching instrument**, not a production cloud service.
+
+- It runs on the ordinary processor and keeps numbers in a simple, memory-hungry form.
+- It is slower than GPU systems you meet in products.
+- Small models hallucinate, waffle, and latch onto polite filler — especially if prompts are vague.
+- “Understanding,” “knowing,” “thinking,” and “meaning” here are **metaphors** for statistical continuation and inner
+  arithmetic. A humanities reader is right to keep that distinction sharp.
+
+If this book did its job, you can now explain to another non-specialist:
+
+> Loading unpacks a fixed library of trained numbers. Attention is how each moment rereads allowed parts of the current
+> page — causally, often with shared notebooks (GQA), sometimes through a sliding window. Thinking is organized as a
+> loop: silent layer-walks for every next token, and optionally written notes (even tagged ones) that later attention
+> can reuse. Then the program repeatedly draws the next scrap of text until the reply ends.
+
+That is enough to understand what this Java program is doing — and what it is not.
+
+---
+
 ## 19. External reading index
 
 A single list of the links woven into earlier chapters. Prefer the in-chapter notes for context; use this as a bookmark
@@ -1861,22 +1893,3 @@ page.
 | Softmax                    | [Wikipedia](https://en.wikipedia.org/wiki/Softmax_function)                                                                        |
 
 ---
-
-## 18. Honest limits
-
-This project is a **teaching instrument**, not a production cloud service.
-
-- It runs on the ordinary processor and keeps numbers in a simple, memory-hungry form.
-- It is slower than GPU systems you meet in products.
-- Small models hallucinate, waffle, and latch onto polite filler — especially if prompts are vague.
-- “Understanding,” “knowing,” “thinking,” and “meaning” here are **metaphors** for statistical continuation and inner
-  arithmetic. A humanities reader is right to keep that distinction sharp.
-
-If this book did its job, you can now explain to another non-specialist:
-
-> Loading unpacks a fixed library of trained numbers. Attention is how each moment rereads allowed parts of the current
-> page — causally, often with shared notebooks (GQA), sometimes through a sliding window. Thinking is organized as a
-> loop: silent layer-walks for every next token, and optionally written notes (even tagged ones) that later attention
-> can reuse. Then the program repeatedly draws the next scrap of text until the reply ends.
-
-That is enough to understand what this Java program is doing — and what it is not.
