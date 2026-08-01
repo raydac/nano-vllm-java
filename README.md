@@ -20,13 +20,13 @@ inference engine.
 
 ## Maven coordinates
 
-|               |                                                                      |
-|---------------|----------------------------------------------------------------------|
-| GroupId       | `com.igormaznitsa`                                                   |
-| ArtifactId    | `nano-vllm-java`                                                     |
-| Version       | `0.2.0-SNAPSHOT`                                                     |
-| JPMS module   | `io.nanovllm`                                                        |
-| Java packages | `io.nanovllm` (public), plus `chat`, `tokenizer`, `prompts`, `utils` |
+|               |                                                                         |
+|---------------|-------------------------------------------------------------------------|
+| GroupId       | `com.igormaznitsa`                                                      |
+| ArtifactId    | `nano-vllm-java`                                                        |
+| Version       | `0.2.0-SNAPSHOT`                                                        |
+| JPMS module   | `com.igormaznitsa.nanollvm`                                             |
+| Java packages | `com.igormaznitsa.nanollvm` (+ `chat`, `tokenizer`, `prompts`, `utils`) |
 
 ```xml
 
@@ -40,7 +40,7 @@ inference engine.
 On the module path:
 
 ```text
-requires io.nanovllm;
+requires com.igormaznitsa.nanollvm;
 ```
 
 Optional Vector API (faster kernels): add `jdk.incubator.vector` / `--add-modules jdk.incubator.vector`. Scalar kernels
@@ -126,7 +126,7 @@ String raw = llm.complete("The capital of France is");
 ```bash
 # .mvn/jvm.config already adds jdk.incubator.vector for this project.
 # Extra heap for model load:
-MAVEN_OPTS="-Xmx8g" mvn -q exec:java -Dexec.mainClass=io.nanovllm.Example
+MAVEN_OPTS="-Xmx8g" mvn -q exec:java -Dexec.mainClass=com.igormaznitsa.nanollvm.Example
 ```
 
 Requires JDK 21+ with the Vector incubator module available. Surefire gets
@@ -146,7 +146,7 @@ inherits JVM flags from `.mvn/jvm.config` (it cannot take `<jvmArgs>` — that g
 ## Layout
 
 ```
-io.nanovllm          (~24 teaching-oriented sources)
+com.igormaznitsa.nanollvm          (~24 teaching-oriented sources)
 ├── LLM / EngineIo / SamplingParams / SamplingDefaults / Example / Bench
 ├── chat/       ChatSession, ChatMessage, ChatRole, StreamPrinter
 ├── engine/     Scheduler, Sequence, BlockManager, ModelRunner

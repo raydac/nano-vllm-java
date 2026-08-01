@@ -5,13 +5,13 @@
  * Consumers that use the Vector API path need {@code jdk.incubator.vector} on the module path
  * (optional at runtime — scalar kernels are used when it is absent).
  */
-module io.nanovllm {
+module com.igormaznitsa.nanollvm {
   requires com.google.gson;
   requires static jdk.incubator.vector;
 
-  exports io.nanovllm;
-  exports io.nanovllm.chat;
-  exports io.nanovllm.tokenizer;
-  exports io.nanovllm.prompts;
-  exports io.nanovllm.utils;
+  exports com.igormaznitsa.nanollvm;
+  exports com.igormaznitsa.nanollvm.chat;
+  exports com.igormaznitsa.nanollvm.tokenizer;
+  exports com.igormaznitsa.nanollvm.prompts;
+  exports com.igormaznitsa.nanollvm.utils;
 }
