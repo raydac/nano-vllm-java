@@ -11,6 +11,9 @@ If a term is unavoidable, it is explained the first time in everyday language.
 The project this book describes is a small program that can **load a ready-made language model** and use it to continue
 text or hold a short conversation — on an ordinary computer, without special graphics hardware.
 
+Where a topic has a standard paper or format guide, you will find a short **Further reading** note with links. Those
+links are optional depth — the story in this book stands alone.
+
 ---
 
 ## Table of contents
@@ -33,6 +36,7 @@ text or hold a short conversation — on an ordinary computer, without special g
 16. [If you later open the code](#16-if-you-later-open-the-code)
 17. [Word list](#17-word-list)
 18. [Honest limits](#18-honest-limits)
+19. [External reading index](#19-external-reading-index)
 
 ---
 
@@ -93,6 +97,10 @@ That choice becomes part of the text. Then it asks again. And again.
 **Inference** (using the finished model to produce new text) is what this project does — like performing a play from a
 finished script, not writing the script.
 
+**Further reading:** the modern stack grows from the Transformer architecture —
+[Vaswani et al., *Attention Is All You Need*](https://arxiv.org/abs/1706.03762); a line-by-line walkthrough
+is [The Annotated Transformer](https://nlp.seas.harvard.edu/annotated-transformer/).
+
 Two families of models are supported here (different “editions” of the book, same kind of reading process): **Qwen3**
 and **Gemma3**. You usually need not care which; the program detects which files you pointed it at.
 
@@ -118,6 +126,15 @@ A separate file, the **tokenizer**, holds that dictionary and the rules for chop
 **template**: stage directions such as “this line is the user,” “this line is the assistant,” so the model is not
 confused about who is speaking. Without those markers, a dialogue looks like an undifferentiated blob of prose.
 **Chapter 6** opens `tokenizer.json` field by field.
+
+**Further reading:** subword BPE was popularized for translation in
+[Sennrich et al., *Neural Machine Translation of Rare Words with Subword Units*](https://arxiv.org/abs/1508.07909);
+byte-level BPE is described with GPT-2 in OpenAI’s
+[*Language Models are Unsupervised Multitask
+Learners*](https://cdn.openai.com/better-language-models/language_models_are_unsupervised_multitask_learners.pdf). Chat
+wrapping is documented in Hugging Face’s
+[chat templating guide](https://huggingface.co/docs/transformers/chat_templating).
+
 
 ---
 
@@ -199,6 +216,11 @@ Think of a librarian preparing a reading desk:
 
 After this, the **learned shelves stay fixed**. Chat does not rewrite the model files. Only the notebooks and temporary
 worksheets change while answering.
+
+**Further reading:** Hub layout and `from_pretrained`-style folders are covered in Hugging Face
+[Transformers docs](https://huggingface.co/docs/transformers); this Java port is inspired
+by [nano-vllm](https://github.com/GeeeekExplorer/nano-vllm) and the serving ideas in
+[vLLM / PagedAttention](https://arxiv.org/abs/2309.06180).
 
 ```text
   disk crate                    memory after load
@@ -551,6 +573,11 @@ consult it.
 
 The blueprint says what the **model is**. The builder says how hard you ask your **machine** to run it.
 
+**Further reading:** configuration objects in the Python ecosystem —
+[Hugging Face `PretrainedConfig`](https://huggingface.co/docs/transformers/main/en/main_classes/configuration); model
+cards on the Hub usually ship the same `config.json` this chapter describes.
+
+
 ---
 
 ## 6. `tokenizer.json` — the dictionary file field by field
@@ -735,6 +762,11 @@ It is only the **bridge language ↔ numbers**.
 > **`tokenizer.json` stores the vocabulary, the merge recipe, and the text-cleanup pipeline so strings become the
 > integer ids the embedding table understands — and back again.**
 
+**Further reading:** the JSON pipeline (normalizer → pre-tokenizer → model → decoder) is the
+[Hugging Face Tokenizers](https://huggingface.co/docs/tokenizers/index) design; API overview of the `Tokenizer` class is
+[here](https://huggingface.co/docs/tokenizers/main/en/api/tokenizer).
+
+
 ---
 
 ## 7. `*.safetensors` — the weight crates: format and contents
@@ -865,6 +897,11 @@ RAM, expect roughly **~2×** that payload for resident weights alone — plus KV
 > **A `.safetensors` file is a labeled warehouse of matrices and vectors: a JSON index up front, raw numeric bytes
 > afterward, poured into the model’s shelves at load time (and widened to float32 in this port).**
 
+**Further reading:** format overview in the
+[Safetensors documentation](https://huggingface.co/docs/safetensors); binary layout notes in the
+[safetensors GitHub README](https://github.com/huggingface/safetensors).
+
+
 ---
 
 ## 8. Attention: kinds of looking-back, and how they work
@@ -901,6 +938,11 @@ So attention always means:
 > updated meaning.
 
 The *kinds* of attention differ mainly in the word **allowed**.
+
+**Further reading:** original multi-head attention —
+[Vaswani et al.](https://arxiv.org/abs/1706.03762); gentle annotated code —
+[The Annotated Transformer](https://nlp.seas.harvard.edu/annotated-transformer/).
+
 
 ---
 
@@ -986,6 +1028,11 @@ Keys and Values dominate memory during long chats (the “notebooks” of chapte
 **This project uses GQA** whenever the model config says there are fewer key/value heads than query heads (common in
 Qwen3 and Gemma3). Same looking-back idea; fewer duplicate notebooks; faster long answers on limited machines.
 
+**Further reading:** [Ainslie et al., *GQA*](https://arxiv.org/abs/2305.13245); extreme sharing was earlier called
+multi-query attention in
+[Shazeer, *Fast Transformer Decoding*](https://arxiv.org/abs/1911.02150).
+
+
 ---
 
 ### Kind 5 — Global vs sliding-window (local) attention
@@ -1018,6 +1065,10 @@ room.
 
 Local layers may also use a different RoPE “twist speed” than global ones — a detail of Gemma’s recipe so near and far
 looks do not fight each other.
+
+**Further reading:** rotary positions —
+[Su et al., *RoFormer* / RoPE](https://arxiv.org/abs/2104.09864).
+
 
 ---
 
@@ -1238,6 +1289,10 @@ glance can reuse.
 - Longer Sense B uses more tokens, more notebook pages, more time — and can wander.
 - Fluency of reasoning text ≠ truth. The model may imitate the *genre* of explanation while inventing steps.
 
+**Further reading:** prompting models to write steps —
+[Wei et al., *Chain-of-Thought Prompting Elicits Reasoning in Large Language Models*](https://arxiv.org/abs/2201.11903).
+
+
 ---
 
 ### Sense C — tagged scratchpad (how this project organizes visible thinking)
@@ -1434,6 +1489,11 @@ This project always keeps a little randomness; pure “always pick the single to
 None of this *is* understanding in the human sense. It is a procedure that, after training, often **imitates** fluent
 continuation well enough to be useful — and misleading.
 
+**Further reading:** [RMSNorm](https://arxiv.org/abs/1910.07467); gated MLP variants such
+as [SwiGLU](https://arxiv.org/abs/2002.05202); softmax background
+on [Wikipedia](https://en.wikipedia.org/wiki/Softmax_function).
+
+
 ---
 
 ## 11. Choosing a word: not always the most obvious one
@@ -1453,6 +1513,10 @@ same question can differ — and why “creativity” settings exist in chat pro
 
 You can ask for short or long answers by limiting **how many** tokens may be drawn before stopping. Special **end**
 tokens mean “the assistant considers this reply finished.”
+
+**Further reading:** nucleus (top-p) sampling —
+[Holtzman et al., *The Curious Case of Neural Text Degeneration*](https://arxiv.org/abs/1904.09751).
+
 
 ---
 
@@ -1480,6 +1544,12 @@ when two prompts start with the same long prefix (same opening paragraph → reu
 
 That is why the first pause can feel longer than each following word: the opening read is heavier than the continuation.
 
+**Further reading:** paged KV cache and high-throughput serving —
+[Kwon et al., *Efficient Memory Management for Large Language Model Serving with
+PagedAttention*](https://arxiv.org/abs/2309.06180)
+(vLLM).
+
+
 ---
 
 ## 13. Serving several conversations without chaos
@@ -1494,6 +1564,10 @@ and a **work floor**:
 You can think of a restaurant kitchen preparing several dishes in interleaved steps, not cooking one meal completely
 before lighting the next stove. That idea is called **continuous batching**. For a single chat on your laptop you may
 barely notice it; it matters when many requests share one model.
+
+**Further reading:** same vLLM paper above discusses iteration-level scheduling with paging; also see
+the [vLLM project](https://github.com/vllm-project/vllm).
+
 
 ---
 
@@ -1517,12 +1591,18 @@ better there.
 This program’s chat helper can also separate “thinking out loud” tags from the visible answer when the model uses them —
 Sense C from the thinking chapter: marked scratchpad versus fair copy.
 
+**Further reading:** [chat templating](https://huggingface.co/docs/transformers/chat_templating) in Transformers.
+
 ---
 
 ## 15. A full walk-through: “What is 2+2?”
 
 This chapter retells one question as a story, with **attention** and **thinking** named at each stage (see chapters 8
 and 9 for the full theory).
+
+**Further reading (optional depth):** Transformer + attention ([Vaswani et al.](https://arxiv.org/abs/1706.03762)),
+chain-of-thought prompting ([Wei et al.](https://arxiv.org/abs/2201.11903)), paged KV ideas
+([Kwon et al.](https://arxiv.org/abs/2309.06180)).
 
 ### You ask
 
@@ -1751,6 +1831,34 @@ ask it to **stop** from another thread if a reply is taking too long.
 | Temperature           | How strongly to favor the leading candidate                                     |
 | Context length        | How much past text fits on the desk at once                                     |
 | Weights               | The learned numbers on the shelves                                              |
+
+---
+
+## 19. External reading index
+
+A single list of the links woven into earlier chapters. Prefer the in-chapter notes for context; use this as a bookmark
+page.
+
+| Topic                      | Link                                                                                                                               |
+|----------------------------|------------------------------------------------------------------------------------------------------------------------------------|
+| Transformer / attention    | [Vaswani et al. (arXiv)](https://arxiv.org/abs/1706.03762)                                                                         |
+| Annotated Transformer      | [Harvard NLP notebook](https://nlp.seas.harvard.edu/annotated-transformer/)                                                        |
+| BPE subwords               | [Sennrich et al. (arXiv)](https://arxiv.org/abs/1508.07909)                                                                        |
+| Byte-level BPE / GPT-2     | [OpenAI GPT-2 report (PDF)](https://cdn.openai.com/better-language-models/language_models_are_unsupervised_multitask_learners.pdf) |
+| HF Tokenizers              | [Documentation](https://huggingface.co/docs/tokenizers/index)                                                                      |
+| Chat templates             | [Transformers guide](https://huggingface.co/docs/transformers/chat_templating)                                                     |
+| Model `config` class       | [PretrainedConfig](https://huggingface.co/docs/transformers/main/en/main_classes/configuration)                                    |
+| Safetensors                | [HF docs](https://huggingface.co/docs/safetensors) · [GitHub format notes](https://github.com/huggingface/safetensors)             |
+| RoPE                       | [Su et al. / RoFormer (arXiv)](https://arxiv.org/abs/2104.09864)                                                                   |
+| GQA                        | [Ainslie et al. (arXiv)](https://arxiv.org/abs/2305.13245)                                                                         |
+| Multi-query attention      | [Shazeer (arXiv)](https://arxiv.org/abs/1911.02150)                                                                                |
+| PagedAttention / vLLM      | [Kwon et al. (arXiv)](https://arxiv.org/abs/2309.06180) · [vLLM GitHub](https://github.com/vllm-project/vllm)                      |
+| nano-vllm (upstream idea)  | [GitHub](https://github.com/GeeeekExplorer/nano-vllm)                                                                              |
+| Chain-of-thought prompting | [Wei et al. (arXiv)](https://arxiv.org/abs/2201.11903)                                                                             |
+| RMSNorm                    | [Zhang & Sennrich (arXiv)](https://arxiv.org/abs/1910.07467)                                                                       |
+| SwiGLU                     | [Shazeer (arXiv)](https://arxiv.org/abs/2002.05202)                                                                                |
+| Nucleus (top-p) sampling   | [Holtzman et al. (arXiv)](https://arxiv.org/abs/1904.09751)                                                                        |
+| Softmax                    | [Wikipedia](https://en.wikipedia.org/wiki/Softmax_function)                                                                        |
 
 ---
 
