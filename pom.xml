@@ -71,10 +71,11 @@
                 <artifactId>exec-maven-plugin</artifactId>
                 <version>3.6.3</version>
                 <configuration>
+                    <!--
+                      exec:java runs in the Maven JVM (no fork), so <jvmArgs> is not supported
+                      in 3.6.x. Vector API flags live in .mvn/jvm.config and/or MAVEN_OPTS.
+                    -->
                     <mainClass>io.nanovllm.Example</mainClass>
-                    <jvmArgs>
-                        <jvmArg>${jvm.module.args}</jvmArg>
-                    </jvmArgs>
                 </configuration>
             </plugin>
         </plugins>

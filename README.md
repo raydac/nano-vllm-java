@@ -124,10 +124,14 @@ String raw = llm.complete("The capital of France is");
 `chat.timeout(Duration.ofSeconds(30))`; load failures throw `ModelLoadException`.
 
 ```bash
+# .mvn/jvm.config already adds jdk.incubator.vector for this project.
+# Extra heap for model load:
 MAVEN_OPTS="-Xmx8g" mvn -q exec:java -Dexec.mainClass=io.nanovllm.Example
 ```
 
-Requires `--add-modules jdk.incubator.vector` (already set in the POM for `test` / `exec:java`).
+Requires JDK 21+ with the Vector incubator module available. Surefire gets
+`--add-modules jdk.incubator.vector` via `jvm.module.args` in the POM; `exec:java`
+inherits JVM flags from `.mvn/jvm.config` (it cannot take `<jvmArgs>` — that goal is not forked).
 
 ## Differences from Python
 
