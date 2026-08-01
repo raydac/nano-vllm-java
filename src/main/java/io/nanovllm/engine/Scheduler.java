@@ -31,6 +31,21 @@ public final class Scheduler {
     return this.waiting.isEmpty() && this.running.isEmpty();
   }
 
+  public void clear() {
+    for (Sequence seq : this.running) {
+      this.blockManager.deallocate(seq);
+      seq.setStatus(Sequence.Status.FINISHED);
+    }
+    this.running.clear();
+    for (Sequence seq : this.waiting) {
+      if (!seq.blockTable().isEmpty()) {
+        this.blockManager.deallocate(seq);
+      }
+      seq.setStatus(Sequence.Status.FINISHED);
+    }
+    this.waiting.clear();
+  }
+
   public void add(Sequence seq) {
     this.waiting.addLast(seq);
   }

@@ -15,8 +15,36 @@ inference engine.
 ## Requirements
 
 * JDK 21+
-* Maven via `mvn` on this machine
+* Maven 3.9+ (`mvn` on `PATH`)
 * Gson (pulled by Maven)
+
+## Maven coordinates
+
+|               |                                                                      |
+|---------------|----------------------------------------------------------------------|
+| GroupId       | `com.igormaznitsa`                                                   |
+| ArtifactId    | `nano-vllm-java`                                                     |
+| Version       | `0.2.0-SNAPSHOT`                                                     |
+| JPMS module   | `io.nanovllm`                                                        |
+| Java packages | `io.nanovllm` (public), plus `chat`, `tokenizer`, `prompts`, `utils` |
+
+```xml
+
+<dependency>
+  <groupId>com.igormaznitsa</groupId>
+  <artifactId>nano-vllm-java</artifactId>
+  <version>0.2.0-SNAPSHOT</version>
+</dependency>
+```
+
+On the module path:
+
+```text
+requires io.nanovllm;
+```
+
+Optional Vector API (faster kernels): add `jdk.incubator.vector` / `--add-modules jdk.incubator.vector`. Scalar kernels
+are used when that module is absent.
 
 ## Build
 
@@ -69,25 +97,37 @@ assistant> ...
 ?> /exit
 ```
 
+Or in code (library — quiet by default):
+
+```java
+try(LLM llm = LLM.builder(BundledModels.resolveDefault())
+        .enforceEager(true)
+        .maxModelLen(2048)
+        .systemPrompt("Answer briefly and factually.") // optional
+        .build()){
+
+// Multi-turn chat (history + template + truncation)
+String reply = llm.chat(256).send("Hello, Nano-vLLM.").answer();
+
+// One-shot chat
+String once = llm.chatOnce("What is 2+2?");
+
+// Raw completion (no chat template)
+String raw = llm.complete("The capital of France is");
+}
+
+// CLI / tools that want load progress:
+// LLM.builder(path).withSystemIo().build()
+```
+
+**Library notes:** one `LLM` per concurrent generate; call `llm.cancel()` to abort; optional
+`chat.timeout(Duration.ofSeconds(30))`; load failures throw `ModelLoadException`.
+
 ```bash
 MAVEN_OPTS="-Xmx8g" mvn -q exec:java -Dexec.mainClass=io.nanovllm.Example
 ```
 
 Requires `--add-modules jdk.incubator.vector` (already set in the POM for `test` / `exec:java`).
-
-Or in code:
-
-```java
-try(LLM llm = new LLM(BundledModels.resolveDefault(), Map.of("enforce_eager", true))){
-SamplingParams sp = new SamplingParams(0.6f, 256);
-var outputs = llm.generate(List.of("Hello, Nano-vLLM."), sp);
-    System.out.
-
-println(outputs.get(0).
-
-text());
-    }
-```
 
 ## Differences from Python
 
@@ -103,10 +143,11 @@ text());
 
 ```
 io.nanovllm          (~24 teaching-oriented sources)
-├── LLM / SamplingParams / Config / Example / Bench
+├── LLM / EngineIo / SamplingParams / SamplingDefaults / Example / Bench
+├── chat/       ChatSession, ChatMessage, ChatRole, StreamPrinter
 ├── engine/     Scheduler, Sequence, BlockManager, ModelRunner
 ├── layers/     Attention, Linear(+Qkv/Merged/…), Norms, Sampler, Embedding
-├── models/     Qwen3ForCausalLM
+├── models/     Qwen3ForCausalLM, Gemma3ForCausalLM
 ├── tensor/     Tensor, Ops, VectorMath
 ├── tokenizer/  HuggingFace BPE
 └── utils/      Json, SafetensorsReader, ModelLoader, Context, BundledModels

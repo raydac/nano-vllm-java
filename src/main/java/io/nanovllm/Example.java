@@ -1,23 +1,16 @@
 package io.nanovllm;
 
-import io.nanovllm.chat.AssistantParts;
-import io.nanovllm.chat.ChatMessages;
-import io.nanovllm.chat.StreamPrinter;
-import io.nanovllm.prompts.ChatPrompts;
-import io.nanovllm.tokenizer.Tokenizer;
+import io.nanovllm.chat.ChatSession;
 import io.nanovllm.utils.BundledModels;
 
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
-import java.util.ArrayList;
-import java.util.List;
 import java.util.Locale;
-import java.util.Map;
 
 /**
- * Interactive chat using the system prompt plus rolling dialog history as context.
+ * Interactive chat using {@link ChatSession} over a loaded {@link LLM}.
  */
 public final class Example {
 
@@ -43,20 +36,16 @@ public final class Example {
       System.out.println();
 
       boolean color = useColor();
-      try (LLM llm = new LLM(path, Map.of(
-          "enforce_eager", true,
-          "tensor_parallel_size", 1,
-          "max_num_seqs", 4,
-          "max_model_len", 2048
-      ))) {
-        Tokenizer tokenizer = llm.tokenizer();
-        boolean gemmaChat = tokenizer.isGemmaChat();
-        int maxModelLen = llm.config().maxModelLen();
-        // Gemma generation_config: top_k=64, top_p=0.95
-        int topK = gemmaChat ? 64 : 0;
-        SamplingParams samplingParams =
-            new SamplingParams(0.6f, MAX_NEW_TOKENS, false, topK, 0.95f);
-        List<Map<String, String>> history = ChatMessages.newConversation(gemmaChat);
+      try (LLM llm = LLM.builder(path)
+          .enforceEager(true)
+          .tensorParallelSize(1)
+          .maxNumSeqs(4)
+          .maxModelLen(2048)
+          .withSystemIo()
+          .build()) {
+        ChatSession chat = llm.chat(MAX_NEW_TOKENS)
+            .streamTo(System.err, System.out, color)
+            .diagnostics(System.err::println);
 
         while (true) {
           System.out.print("?> ");
@@ -74,14 +63,13 @@ public final class Example {
             break;
           }
           if ("/clear".equalsIgnoreCase(user)) {
-            history = ChatMessages.newConversation(gemmaChat);
+            chat.clear();
             System.out.println("(conversation cleared)");
             continue;
           }
 
-          history.add(ChatMessages.message("user", user));
-          ChatMessages.truncateHistory(history, tokenizer, maxModelLen, samplingParams.maxTokens());
-          runChatTurn(llm, tokenizer, history, samplingParams, color, gemmaChat);
+          chat.send(user);
+          System.out.println();
         }
       }
     }
@@ -140,83 +128,6 @@ public final class Example {
         default -> System.out.println("Enter 1, 2, or 3.");
       }
     }
-  }
-
-  private static void runChatTurn(
-      LLM llm,
-      Tokenizer tokenizer,
-      List<Map<String, String>> history,
-      SamplingParams samplingParams,
-      boolean color,
-      boolean gemmaChat
-  ) {
-    boolean enableThinking = !gemmaChat;
-    StreamPrinter printer = new StreamPrinter(System.err, System.out, color);
-    AssistantParts parts = generateTurn(llm, tokenizer, history, samplingParams, printer, gemmaChat,
-        enableThinking);
-
-    if (gemmaChat && ChatPrompts.isSetupBoilerplate(parts.answer())) {
-      ChatMessages.scrubSetupBoilerplateTurns(history);
-      System.err.println("(setup boilerplate — retrying without filler history)");
-      printer = new StreamPrinter(System.err, System.out, color);
-      parts = generateTurn(llm, tokenizer, history, samplingParams, printer, gemmaChat,
-          enableThinking);
-      if (ChatPrompts.isSetupBoilerplate(parts.answer())) {
-        parts = new AssistantParts("", "Hello! What would you like to know?", false);
-        System.err.println("(setup boilerplate — used plain greeting fallback)");
-      }
-    }
-
-    finishChatTurn(parts, history, printer);
-  }
-
-  private static AssistantParts generateTurn(
-      LLM llm,
-      Tokenizer tokenizer,
-      List<Map<String, String>> history,
-      SamplingParams samplingParams,
-      StreamPrinter printer,
-      boolean gemmaChat,
-      boolean enableThinking
-  ) {
-    String prompt = tokenizer.applyChatTemplate(history, true, enableThinking);
-    List<Integer> streamedIds = new ArrayList<>();
-    List<LLM.GenerationOutput> outputs = llm.generate(
-        List.of(prompt),
-        samplingParams,
-        false,
-        tokenId -> {
-          streamedIds.add(tokenId);
-          printer.update(AssistantParts.parse(tokenizer.decode(streamedIds, gemmaChat)));
-        }
-    );
-    return AssistantParts.parse(tokenizer.decode(outputs.getFirst().tokenIds(), gemmaChat));
-  }
-
-  private static void finishChatTurn(
-      AssistantParts parts,
-      List<Map<String, String>> history,
-      StreamPrinter printer
-  ) {
-    String answer = parts.answer().strip();
-    if (answer.isBlank() && !parts.thinking().isBlank()) {
-      answer = AssistantParts.salvageFromThinking(parts.thinking());
-      if (parts.thinkOpen()) {
-        System.err.println("(reply recovered from unclosed thinking)");
-      } else {
-        System.err.println("(reply recovered from thinking; model omitted visible answer)");
-      }
-    }
-    if (answer.isBlank()) {
-      answer = "Sorry — I couldn't form a reply. Please try again.";
-      System.err.println("(empty reply — used fallback)");
-    }
-    parts = new AssistantParts(parts.thinking(), answer, false);
-    printer.update(parts);
-    printer.closeTurn();
-
-    System.out.println();
-    history.add(ChatMessages.message("assistant", parts.answer()));
   }
 
   private static boolean isExit(String user) {

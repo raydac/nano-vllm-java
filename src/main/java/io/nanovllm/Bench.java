@@ -5,7 +5,6 @@ import io.nanovllm.utils.BundledModels;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 import java.util.concurrent.ThreadLocalRandom;
 
 public final class Bench {
@@ -23,12 +22,13 @@ public final class Bench {
     System.out.println(
         "Architecture: auto from config.json (override -Dnanovllm.arch=qwen3|gemma3)");
     ThreadLocalRandom rnd = ThreadLocalRandom.current();
-    try (LLM llm = new LLM(path, Map.of(
-        "enforce_eager", true,
-        "max_model_len", 512,
-        "max_num_seqs", numSeqs,
-        "num_kvcache_blocks", 256
-    ))) {
+    try (LLM llm = LLM.builder(path)
+        .enforceEager(true)
+        .maxModelLen(512)
+        .maxNumSeqs(numSeqs)
+        .numKvcacheBlocks(256)
+        .withSystemIo()
+        .build()) {
       List<List<Integer>> prompts = new ArrayList<>();
       List<SamplingParams> params = new ArrayList<>();
       for (int i = 0; i < numSeqs; i++) {

@@ -1,6 +1,8 @@
 package io.nanovllm.engine;
 
 import io.nanovllm.Config;
+import io.nanovllm.EngineIo;
+import io.nanovllm.ModelLoadException;
 import io.nanovllm.layers.Attention;
 import io.nanovllm.layers.Sampler;
 import io.nanovllm.models.CausalLM;
@@ -17,37 +19,41 @@ import java.util.List;
 public final class ModelRunner implements AutoCloseable {
 
   private final Config config;
+  private final EngineIo io;
   private final int blockSize;
   private final CausalLM model;
   private final Sampler sampler = new Sampler();
 
   public ModelRunner(Config config) {
+    this(config, EngineIo.silent());
+  }
+
+  public ModelRunner(Config config, EngineIo io) {
     this.config = config;
+    this.io = io == null ? EngineIo.silent() : io;
     this.blockSize = config.kvcacheBlockSize();
 
     long t0 = System.nanoTime();
-    System.err.println("CPU backend: " + VectorMath.backendInfo());
+    this.io.info("CPU backend: " + VectorMath.backendInfo());
     String arch = CausalLMFactory.detect(config.hfConfig());
-    System.err.println("Building " + arch + " model graph…");
+    this.io.info("Building " + arch + " model graph…");
     this.model = CausalLMFactory.create(config.hfConfig());
-    System.err.printf(java.util.Locale.ROOT, "Model graph ready (%s) in %.1fs%n",
+    this.io.infof("Model graph ready (%s) in %.1fs%n",
         this.model.architectureName(), (System.nanoTime() - t0) / 1e9);
 
     try {
-      ModelLoader.loadModel(this.model, config.model());
+      ModelLoader.loadModel(this.model, config.model(), this.io);
     } catch (IOException e) {
-      throw new IllegalStateException("failed to load model weights from " + config.model(), e);
+      throw new ModelLoadException("failed to load model weights from " + config.model(), e);
     }
 
-    System.err.println("Allocating KV cache…");
+    this.io.info("Allocating KV cache…");
     long tKv = System.nanoTime();
     this.allocateKvCache();
-    System.err.printf(java.util.Locale.ROOT,
-        "KV cache ready: %d blocks (%.1fs)%n",
+    this.io.infof("KV cache ready: %d blocks (%.1fs)%n",
         this.config.numKvcacheBlocks(),
         (System.nanoTime() - tKv) / 1e9);
-    System.err.printf(java.util.Locale.ROOT, "Model runner ready in %.1fs%n",
-        (System.nanoTime() - t0) / 1e9);
+    this.io.infof("Model runner ready in %.1fs%n", (System.nanoTime() - t0) / 1e9);
   }
 
   private static Tensor toTensor1d(List<Integer> values) {

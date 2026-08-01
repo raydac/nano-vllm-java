@@ -1,11 +1,20 @@
 package io.nanovllm;
 
+import static java.nio.file.Files.createTempDirectory;
+import static java.nio.file.Files.createTempFile;
+import static java.nio.file.Files.deleteIfExists;
+import static java.nio.file.Files.isRegularFile;
+import static java.nio.file.Files.walk;
+import static java.nio.file.Files.writeString;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import io.nanovllm.chat.AssistantParts;
+import io.nanovllm.chat.ChatMessage;
 import io.nanovllm.chat.ChatMessages;
+import io.nanovllm.chat.ChatRole;
 import io.nanovllm.engine.BlockManager;
 import io.nanovllm.engine.Sequence;
 import io.nanovllm.prompts.ChatPrompts;
@@ -21,6 +30,39 @@ import java.util.Map;
 import org.junit.jupiter.api.Test;
 
 class CoreUnitTest {
+
+  @Test
+  void engineIoSilentAndSystem() {
+    assertTrue(EngineIo.silent().isSilent());
+    assertFalse(EngineIo.system().isSilent());
+    EngineIo.silent().info("must not reach the console");
+    EngineIo custom = EngineIo.of(System.out, System.err);
+    assertFalse(custom.isSilent());
+    assertEquals(System.out, custom.out());
+    assertEquals(System.err, custom.err());
+  }
+
+  @Test
+  void llmBuilderIsFluentAndDefaultsQuiet() {
+    LLM.Builder builder = LLM.builder(Path.of("models/Qwen3-0.6B"));
+    assertSame(builder, builder
+        .maxModelLen(512)
+        .maxNumSeqs(2)
+        .maxNumBatchedTokens(1024)
+        .kvcacheBlockSize(256)
+        .numKvcacheBlocks(32)
+        .gpuMemoryUtilization(0.5f)
+        .tensorParallelSize(1)
+        .enforceEager(true)
+        .skipWarmup()
+        .quiet()
+        .withSystemIo()
+        .io(EngineIo.silent())
+        .warmup(false)
+        .systemPrompt("Answer briefly.")
+        .noSystemPrompt()
+        .defaultSystemPrompt());
+  }
 
   @Test
   void jsonParsesObject() {
@@ -99,8 +141,8 @@ class CoreUnitTest {
   void bundledQwenModelIsPresent() {
     var path = io.nanovllm.utils.BundledModels.find(io.nanovllm.utils.BundledModels.QWEN3_0_6B);
     assertTrue(path.isPresent(), "run models/download-qwen3-0.6b.sh");
-    assertTrue(java.nio.file.Files.isRegularFile(path.get().resolve("config.json")));
-    assertTrue(java.nio.file.Files.isRegularFile(path.get().resolve("model.safetensors")));
+    assertTrue(isRegularFile(path.get().resolve("config.json")));
+    assertTrue(isRegularFile(path.get().resolve("model.safetensors")));
   }
 
   @Test
@@ -300,20 +342,35 @@ class CoreUnitTest {
     assertFalse(ChatPrompts.isSetupBoilerplate("The president of Estonia is Alar Karis."));
     assertTrue(ChatMessages.newConversation(true).isEmpty());
     assertFalse(ChatMessages.newConversation(false).isEmpty());
+    assertEquals(1, ChatMessages.newConversation("Be brief.").size());
+    assertTrue(ChatMessages.newConversation("").isEmpty());
+    assertTrue(ChatMessages.newConversation(null).isEmpty());
+    assertEquals(ChatRole.SYSTEM, ChatMessages.newConversation("Be brief.").getFirst().role());
+    assertEquals("hi", ChatMessage.user("hi").content());
+    assertEquals("user", ChatMessage.user("hi").toMap().get("role"));
+    assertEquals(ChatRole.ASSISTANT, ChatRole.fromWire("model"));
+  }
+
+  @Test
+  void samplingDefaultsPreferGemmaTopKWhenFlagged() {
+    SamplingParams plain = SamplingDefaults.forTokenizer(null, 100);
+    assertEquals(0, plain.topK());
+    assertEquals(100, plain.maxTokens());
+    assertEquals(0.95f, plain.topP(), 1e-6f);
   }
 
   @Test
   void causalLmFactoryDetectsArchFromConfig() throws Exception {
-    Path qwenCfg = java.nio.file.Files.createTempFile("qwen-cfg", ".json");
-    Path gemmaCfg = java.nio.file.Files.createTempFile("gemma-cfg", ".json");
+    Path qwenCfg = createTempFile("qwen-cfg", ".json");
+    Path gemmaCfg = createTempFile("gemma-cfg", ".json");
     try {
-      java.nio.file.Files.writeString(qwenCfg, """
+      writeString(qwenCfg, """
           {"model_type":"qwen3","architectures":["Qwen3ForCausalLM"],"hidden_size":64,
            "num_attention_heads":4,"num_key_value_heads":2,"head_dim":16,
            "vocab_size":100,"intermediate_size":128,"num_hidden_layers":1,
            "max_position_embeddings":128,"rms_norm_eps":1e-6,"hidden_act":"silu"}
           """);
-      java.nio.file.Files.writeString(gemmaCfg, """
+      writeString(gemmaCfg, """
           {"model_type":"gemma3_text","architectures":["Gemma3ForCausalLM"],"hidden_size":64,
            "num_attention_heads":4,"num_key_value_heads":1,"head_dim":16,
            "vocab_size":100,"intermediate_size":128,"num_hidden_layers":2,
@@ -331,8 +388,8 @@ class CoreUnitTest {
       assertEquals((float) Math.pow(16, -0.5), gemma.attentionScale(), 1e-6f);
       assertEquals("gelu_pytorch_tanh", gemma.effectiveActivation());
     } finally {
-      java.nio.file.Files.deleteIfExists(qwenCfg);
-      java.nio.file.Files.deleteIfExists(gemmaCfg);
+      deleteIfExists(qwenCfg);
+      deleteIfExists(gemmaCfg);
     }
   }
 
@@ -374,15 +431,15 @@ class CoreUnitTest {
                 List.of("Gemma3ForCausalLM"), "gelu_pytorch_tanh",
                 512, List.of("sliding_attention"), 10_000f, 256f)));
 
-    Path dir = java.nio.file.Files.createTempDirectory("gemma-tok");
+    Path dir = createTempDirectory("gemma-tok");
     try {
-      java.nio.file.Files.writeString(dir.resolve("config.json"),
+      writeString(dir.resolve("config.json"),
           "{\"model_type\":\"gemma3_text\",\"vocab_size\":32}");
-      java.nio.file.Files.writeString(dir.resolve("tokenizer_config.json"), """
+      writeString(dir.resolve("tokenizer_config.json"), """
           {"eos_token":"<eos>","pad_token":"<pad>",
            "chat_template":"{% for m in messages %}<start_of_turn>{{ m.role }}\\n{{ m.content }}<end_of_turn>\\n{% endfor %}"}
           """);
-      java.nio.file.Files.writeString(dir.resolve("tokenizer.json"), """
+      writeString(dir.resolve("tokenizer.json"), """
           {"model":{"type":"BPE","vocab":{"<bos>":0,"<eos>":1,"<pad>":2,"a":3,"▁":4},"merges":[]},
            "added_tokens":[
              {"id":0,"content":"<bos>","special":true},
@@ -404,10 +461,10 @@ class CoreUnitTest {
           tok.applyChatTemplate(List.of(Map.of("role", "user", "content", "hi")), true, false),
           chatThinkFlag);
     } finally {
-      try (var walk = java.nio.file.Files.walk(dir)) {
+      try (var walk = walk(dir)) {
         walk.sorted(java.util.Comparator.reverseOrder()).forEach(p -> {
           try {
-            java.nio.file.Files.deleteIfExists(p);
+            deleteIfExists(p);
           } catch (Exception ignored) {
           }
         });

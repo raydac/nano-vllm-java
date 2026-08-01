@@ -1,9 +1,11 @@
 package io.nanovllm.utils;
 
+import io.nanovllm.EngineIo;
 import io.nanovllm.models.CausalLM;
 import io.nanovllm.tensor.Tensor;
 
 import java.io.IOException;
+import java.io.PrintStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -17,6 +19,11 @@ public final class ModelLoader {
   }
 
   public static void loadModel(CausalLM model, Path modelDir) throws IOException {
+    loadModel(model, modelDir, EngineIo.silent());
+  }
+
+  public static void loadModel(CausalLM model, Path modelDir, EngineIo io) throws IOException {
+    EngineIo streams = io == null ? EngineIo.silent() : io;
     Map<String, Object[]> packed = model.packedModulesMapping();
     List<Path> files = SafetensorsReader.listSafetensors(modelDir);
     if (files.isEmpty()) {
@@ -27,7 +34,7 @@ public final class ModelLoader {
     for (Path file : files) {
       fileBytes += Files.size(file);
     }
-    System.err.printf(Locale.ROOT, "Loading weights from %s (%.2f GiB, %d file%s)%n",
+    streams.infof("Loading weights from %s (%.2f GiB, %d file%s)%n",
         modelDir,
         fileBytes / (1024.0 * 1024.0 * 1024.0),
         files.size(),
@@ -50,7 +57,7 @@ public final class ModelLoader {
       throw new IllegalStateException("no matching weight tensors found in " + modelDir);
     }
 
-    Progress progress = new Progress("Weights", plan.size());
+    Progress progress = new Progress("Weights", plan.size(), streams);
     long loadedBytes = 0L;
     Path currentFile = null;
     SafetensorsReader reader = null;
@@ -119,14 +126,18 @@ public final class ModelLoader {
   private static final class Progress {
     private final String label;
     private final int total;
+    private final PrintStream err;
+    private final boolean silent;
     private final long startNanos = System.nanoTime();
     private int current;
     private String detail = "";
     private boolean finished;
 
-    Progress(String label, int total) {
+    Progress(String label, int total, EngineIo io) {
       this.label = label;
       this.total = Math.max(1, total);
+      this.err = io.err();
+      this.silent = io.isSilent();
       this.render();
     }
 
@@ -148,14 +159,17 @@ public final class ModelLoader {
         return;
       }
       this.finished = true;
+      if (this.silent) {
+        return;
+      }
       double seconds = (System.nanoTime() - this.startNanos) / 1e9;
-      System.err.printf(Locale.ROOT, "\r%s: done in %.1fs%s%n",
+      this.err.printf(Locale.ROOT, "\r%s: done in %.1fs%s%n",
           this.label, seconds, message == null || message.isBlank() ? "" : " — " + message);
-      System.err.flush();
+      this.err.flush();
     }
 
     private void render() {
-      if (this.finished) {
+      if (this.finished || this.silent) {
         return;
       }
       double fraction = (double) this.current / this.total;
@@ -169,9 +183,9 @@ public final class ModelLoader {
       String shortDetail = this.detail.length() <= 48
           ? this.detail
           : "…" + this.detail.substring(this.detail.length() - 47);
-      System.err.printf(Locale.ROOT, "\r%s: [%s] %3.0f%% (%d/%d) ETA %s  %s   ",
+      this.err.printf(Locale.ROOT, "\r%s: [%s] %3.0f%% (%d/%d) ETA %s  %s   ",
           this.label, bar, fraction * 100.0, this.current, this.total, eta, shortDetail);
-      System.err.flush();
+      this.err.flush();
     }
   }
 }
