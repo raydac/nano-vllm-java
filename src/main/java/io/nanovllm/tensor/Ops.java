@@ -2,8 +2,6 @@ package io.nanovllm.tensor;
 
 import static java.util.Objects.requireNonNull;
 
-import java.util.stream.IntStream;
-
 public final class Ops {
 
   private Ops() {
@@ -152,8 +150,7 @@ public final class Ops {
     int xOff = x.offset();
     int wOff = weight.offset();
     float[] od = out.data();
-    IntStream range = rows >= 8 ? IntStream.range(0, rows).parallel() : IntStream.range(0, rows);
-    range.forEach(r -> {
+    for (int r = 0; r < rows; r++) {
       int xBase = xOff + r * last;
       int oBase = r * last;
       float var = VectorMath.sumSquares(xd, xBase, last) / last;
@@ -165,7 +162,7 @@ public final class Ops {
         }
         od[oBase + i] = xd[xBase + i] * inv * w;
       }
-    });
+    }
     return out;
   }
 
@@ -193,8 +190,7 @@ public final class Ops {
     int xOff = x.offset();
     int rOff = residual.offset();
     int wOff = weight.offset();
-    IntStream range = rows >= 8 ? IntStream.range(0, rows).parallel() : IntStream.range(0, rows);
-    range.forEach(r -> {
+    for (int r = 0; r < rows; r++) {
       int xBase = xOff + r * last;
       int rBase = rOff + r * last;
       int sBase = r * last;
@@ -212,7 +208,7 @@ public final class Ops {
         }
         od[sBase + i] = sd[sBase + i] * inv * w;
       }
-    });
+    }
     return new Tensor[] {out, summed};
   }
 

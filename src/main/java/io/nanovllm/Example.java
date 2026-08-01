@@ -3,6 +3,7 @@ package io.nanovllm;
 import io.nanovllm.chat.AssistantParts;
 import io.nanovllm.chat.ChatMessages;
 import io.nanovllm.chat.StreamPrinter;
+import io.nanovllm.prompts.ChatPrompts;
 import io.nanovllm.tokenizer.Tokenizer;
 import io.nanovllm.utils.BundledModels;
 
@@ -51,7 +52,10 @@ public final class Example {
         Tokenizer tokenizer = llm.tokenizer();
         boolean gemmaChat = tokenizer.isGemmaChat();
         int maxModelLen = llm.config().maxModelLen();
-        SamplingParams samplingParams = new SamplingParams(0.6f, MAX_NEW_TOKENS, false, 0, 0.95f);
+        // Gemma generation_config: top_k=64, top_p=0.95
+        int topK = gemmaChat ? 64 : 0;
+        SamplingParams samplingParams =
+            new SamplingParams(0.6f, MAX_NEW_TOKENS, false, topK, 0.95f);
         List<Map<String, String>> history = ChatMessages.newConversation(gemmaChat);
 
         while (true) {
@@ -77,7 +81,7 @@ public final class Example {
 
           history.add(ChatMessages.message("user", user));
           ChatMessages.truncateHistory(history, tokenizer, maxModelLen, samplingParams.maxTokens());
-          runChatTurn(llm, tokenizer, history, samplingParams, color);
+          runChatTurn(llm, tokenizer, history, samplingParams, color, gemmaChat);
         }
       }
     }
@@ -143,13 +147,40 @@ public final class Example {
       Tokenizer tokenizer,
       List<Map<String, String>> history,
       SamplingParams samplingParams,
-      boolean color
+      boolean color,
+      boolean gemmaChat
   ) {
-    boolean gemmaChat = tokenizer.isGemmaChat();
     boolean enableThinking = !gemmaChat;
+    StreamPrinter printer = new StreamPrinter(System.err, System.out, color);
+    AssistantParts parts = generateTurn(llm, tokenizer, history, samplingParams, printer, gemmaChat,
+        enableThinking);
+
+    if (gemmaChat && ChatPrompts.isSetupBoilerplate(parts.answer())) {
+      ChatMessages.scrubSetupBoilerplateTurns(history);
+      System.err.println("(setup boilerplate — retrying without filler history)");
+      printer = new StreamPrinter(System.err, System.out, color);
+      parts = generateTurn(llm, tokenizer, history, samplingParams, printer, gemmaChat,
+          enableThinking);
+      if (ChatPrompts.isSetupBoilerplate(parts.answer())) {
+        parts = new AssistantParts("", "Hello! What would you like to know?", false);
+        System.err.println("(setup boilerplate — used plain greeting fallback)");
+      }
+    }
+
+    finishChatTurn(parts, history, printer);
+  }
+
+  private static AssistantParts generateTurn(
+      LLM llm,
+      Tokenizer tokenizer,
+      List<Map<String, String>> history,
+      SamplingParams samplingParams,
+      StreamPrinter printer,
+      boolean gemmaChat,
+      boolean enableThinking
+  ) {
     String prompt = tokenizer.applyChatTemplate(history, true, enableThinking);
     List<Integer> streamedIds = new ArrayList<>();
-    StreamPrinter printer = new StreamPrinter(System.err, System.out, color);
     List<LLM.GenerationOutput> outputs = llm.generate(
         List.of(prompt),
         samplingParams,
@@ -159,10 +190,7 @@ public final class Example {
           printer.update(AssistantParts.parse(tokenizer.decode(streamedIds, gemmaChat)));
         }
     );
-
-    AssistantParts parts =
-        AssistantParts.parse(tokenizer.decode(outputs.getFirst().tokenIds(), gemmaChat));
-    finishChatTurn(parts, history, printer);
+    return AssistantParts.parse(tokenizer.decode(outputs.getFirst().tokenIds(), gemmaChat));
   }
 
   private static void finishChatTurn(

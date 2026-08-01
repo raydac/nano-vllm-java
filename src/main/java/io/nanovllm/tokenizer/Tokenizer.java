@@ -2,6 +2,7 @@ package io.nanovllm.tokenizer;
 
 import static java.nio.charset.StandardCharsets.UTF_8;
 
+import io.nanovllm.prompts.ChatPrompts;
 import io.nanovllm.utils.Json;
 
 import java.io.IOException;
@@ -595,10 +596,8 @@ public final class Tokenizer {
         role = "model";
       }
       String content = msg.getOrDefault("content", "");
-      if (firstUser && "user".equals(role) && system != null && !system.isBlank()) {
-        content = system + "\n\n" + content;
-        firstUser = false;
-      } else if ("user".equals(role)) {
+      if ("user".equals(role)) {
+        content = ChatPrompts.gemmaUserContent(system, content, firstUser);
         firstUser = false;
       }
       sb.append("<start_of_turn>").append(role).append('\n')

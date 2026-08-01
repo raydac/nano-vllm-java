@@ -24,7 +24,10 @@ public final class ChatMessages {
 
   public static List<Map<String, String>> newConversation(boolean gemmaChat) {
     List<Map<String, String>> history = new ArrayList<>();
-    history.add(message("system", ChatPrompts.systemFor(gemmaChat)));
+    String system = ChatPrompts.systemFor(gemmaChat);
+    if (system != null && !system.isBlank()) {
+      history.add(message("system", system));
+    }
     return history;
   }
 
@@ -36,14 +39,28 @@ public final class ChatMessages {
   ) {
     int budget = Math.max(64, maxModelLen - maxTokens - PROMPT_MARGIN);
     boolean enableThinking = !tokenizer.isGemmaChat();
-    while (history.size() > 2) {
+    int minKeep = !history.isEmpty() && "system".equals(history.getFirst().get("role")) ? 2 : 1;
+    while (history.size() > minKeep) {
       String prompt = tokenizer.applyChatTemplate(history, true, enableThinking);
       if (tokenizer.encode(prompt).size() <= budget) {
         return;
       }
-      history.remove(1);
-      if (history.size() > 1 && "assistant".equals(history.get(1).get("role"))) {
-        history.remove(1);
+      int dropAt = "system".equals(history.getFirst().get("role")) ? 1 : 0;
+      if (dropAt >= history.size()) {
+        return;
+      }
+      history.remove(dropAt);
+      if (dropAt < history.size() && "assistant".equals(history.get(dropAt).get("role"))) {
+        history.remove(dropAt);
+      }
+    }
+  }
+
+  public static void scrubSetupBoilerplateTurns(List<Map<String, String>> history) {
+    for (Map<String, String> msg : history) {
+      if ("assistant".equals(msg.get("role"))
+          && ChatPrompts.isSetupBoilerplate(msg.getOrDefault("content", ""))) {
+        msg.put("content", "Hello!");
       }
     }
   }

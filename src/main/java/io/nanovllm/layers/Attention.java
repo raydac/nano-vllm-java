@@ -4,8 +4,6 @@ import io.nanovllm.tensor.Tensor;
 import io.nanovllm.tensor.VectorMath;
 import io.nanovllm.utils.Context;
 
-import java.util.stream.IntStream;
-
 public final class Attention {
 
   private static final int KEY_TILE = 64;
@@ -149,8 +147,7 @@ public final class Attention {
   ) {
     int qLen = qEnd - qStart;
     int work = qLen * this.numHeads;
-    IntStream range = work >= 8 ? IntStream.range(0, work).parallel() : IntStream.range(0, work);
-    range.forEach(job -> {
+    for (int job = 0; job < work; job++) {
       int qi = job / this.numHeads;
       int h = job % this.numHeads;
       int qPos = qStart + qi;
@@ -202,6 +199,6 @@ public final class Attention {
       for (int d = 0; d < this.headDim; d++) {
         out.data()[oBase + d] = acc[d] * inv;
       }
-    });
+    }
   }
 }

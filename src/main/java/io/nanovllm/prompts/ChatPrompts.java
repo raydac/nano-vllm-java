@@ -1,5 +1,7 @@
 package io.nanovllm.prompts;
 
+import java.util.regex.Pattern;
+
 public final class ChatPrompts {
 
   public static final String CHAT_SYSTEM = """
@@ -21,17 +23,42 @@ public final class ChatPrompts {
       - Never put the final user-facing sentence only inside <think>.
       """.strip();
 
-  public static final String GEMMA_CHAT_SYSTEM = """
-      You are a helpful assistant. Answer the user's latest message clearly and briefly.
-      Use the conversation history when useful. Vary your wording each turn.
-      Do not use fillers like "Okay, I'm ready" or "Let's begin".
-      If you do not know, say you don't know.
-      """.strip();
+  /**
+   * Gemma IT has no system role. Long instructions glued onto the first user turn
+   * push 270M into setup-boilerplate ("Okay, I'm ready") that then latches multi-turn.
+   * Keep empty — put any guidance in the user text only when needed.
+   */
+  public static final String GEMMA_CHAT_SYSTEM = "";
+
+  private static final Pattern SETUP_BOILERPLATE = Pattern.compile(
+      "(?i).*\\b(i(?:'m| am) ready|let'?s begin|okay[,.]?\\s*i understand)\\b.*"
+  );
 
   private ChatPrompts() {
   }
 
   public static String systemFor(boolean gemmaChat) {
     return gemmaChat ? GEMMA_CHAT_SYSTEM : CHAT_SYSTEM;
+  }
+
+  public static String gemmaUserContent(String system, String userContent, boolean firstUser) {
+    if (userContent == null) {
+      userContent = "";
+    }
+    if (!firstUser || system == null || system.isBlank()) {
+      return userContent;
+    }
+    return system + "\n\n" + userContent;
+  }
+
+  public static boolean isSetupBoilerplate(String reply) {
+    if (reply == null || reply.isBlank()) {
+      return false;
+    }
+    String trimmed = reply.strip();
+    if (trimmed.length() > 120) {
+      return false;
+    }
+    return SETUP_BOILERPLATE.matcher(trimmed).matches();
   }
 }

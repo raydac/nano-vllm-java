@@ -3,7 +3,8 @@ package io.nanovllm.layers;
 import io.nanovllm.tensor.Ops;
 import io.nanovllm.tensor.Tensor;
 
-import java.util.concurrent.ConcurrentHashMap;
+import java.util.HashMap;
+import java.util.Map;
 
 public final class Norms {
 
@@ -43,8 +44,7 @@ public final class Norms {
   }
 
   public static final class RotaryEmbedding {
-    private static final ConcurrentHashMap<String, RotaryEmbedding> CACHE =
-        new ConcurrentHashMap<>();
+    private static final Map<String, RotaryEmbedding> CACHE = new HashMap<>();
 
     private final int headSize;
     private final Tensor cosSinCache;

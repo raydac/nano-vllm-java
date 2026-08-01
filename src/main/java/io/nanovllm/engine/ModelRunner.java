@@ -46,13 +46,7 @@ public final class ModelRunner implements AutoCloseable {
         "KV cache ready: %d blocks (%.1fs)%n",
         this.config.numKvcacheBlocks(),
         (System.nanoTime() - tKv) / 1e9);
-
-    System.err.println("Warming up model (short CPU pass)…");
-    long tWarm = System.nanoTime();
-    this.warmupModel();
-    System.err.printf(java.util.Locale.ROOT, "Warmup done in %.1fs%n",
-        (System.nanoTime() - tWarm) / 1e9);
-    System.err.printf(java.util.Locale.ROOT, "Engine ready in %.1fs total%n",
+    System.err.printf(java.util.Locale.ROOT, "Model runner ready in %.1fs%n",
         (System.nanoTime() - t0) / 1e9);
   }
 
@@ -129,17 +123,6 @@ public final class ModelRunner implements AutoCloseable {
           hf.headDim());
       attn.setCaches(k, v);
     }
-  }
-
-  private void warmupModel() {
-    int seqLen = 8;
-    List<Integer> tokens = new ArrayList<>(seqLen);
-    for (int t = 0; t < seqLen; t++) {
-      tokens.add(0);
-    }
-    Sequence seq = new Sequence(tokens, new io.nanovllm.SamplingParams());
-    seq.setNumScheduledTokens(seqLen);
-    this.run(List.of(seq), true);
   }
 
   private int[][] prepareBlockTables(List<Sequence> seqs) {

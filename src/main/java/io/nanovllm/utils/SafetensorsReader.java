@@ -15,7 +15,6 @@ import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.stream.IntStream;
 
 public final class SafetensorsReader implements AutoCloseable {
 
@@ -111,18 +110,16 @@ public final class SafetensorsReader implements AutoCloseable {
       case "F16" -> {
         short[] tmp = new short[numel];
         buf.asShortBuffer().get(tmp);
-        IntStream range = numel >= 65_536
-            ? IntStream.range(0, numel).parallel()
-            : IntStream.range(0, numel);
-        range.forEach(i -> data[i] = Float.float16ToFloat(tmp[i]));
+        for (int i = 0; i < numel; i++) {
+          data[i] = Float.float16ToFloat(tmp[i]);
+        }
       }
       case "BF16" -> {
         short[] tmp = new short[numel];
         buf.asShortBuffer().get(tmp);
-        IntStream range = numel >= 65_536
-            ? IntStream.range(0, numel).parallel()
-            : IntStream.range(0, numel);
-        range.forEach(i -> data[i] = bfloat16ToFloat(tmp[i] & 0xFFFF));
+        for (int i = 0; i < numel; i++) {
+          data[i] = bfloat16ToFloat(tmp[i] & 0xFFFF);
+        }
       }
       case "F64" -> {
         double[] tmp = new double[numel];

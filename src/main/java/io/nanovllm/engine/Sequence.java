@@ -4,11 +4,10 @@ import io.nanovllm.SamplingParams;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.atomic.AtomicInteger;
 
 public final class Sequence {
 
-  private static final AtomicInteger COUNTER = new AtomicInteger();
+  private static int nextSeqId;
   private static int blockSize = 256;
   private final int seqId;
   private final List<Integer> tokenIds;
@@ -30,7 +29,7 @@ public final class Sequence {
       throw new IllegalArgumentException("tokenIds must not be empty");
     }
     SamplingParams sp = samplingParams == null ? new SamplingParams() : samplingParams;
-    this.seqId = COUNTER.getAndIncrement();
+    this.seqId = nextSeqId++;
     this.status = Status.WAITING;
     this.tokenIds = new ArrayList<>(tokenIds);
     this.lastToken = tokenIds.get(tokenIds.size() - 1);

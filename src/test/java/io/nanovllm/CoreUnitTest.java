@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import io.nanovllm.chat.AssistantParts;
+import io.nanovllm.chat.ChatMessages;
 import io.nanovllm.engine.BlockManager;
 import io.nanovllm.engine.Sequence;
 import io.nanovllm.prompts.ChatPrompts;
@@ -288,8 +289,17 @@ class CoreUnitTest {
     assertFalse(ChatPrompts.CHAT_SYSTEM.toLowerCase().contains("knowledge base"));
     assertEquals(ChatPrompts.CHAT_SYSTEM, ChatPrompts.systemFor(false));
     assertEquals(ChatPrompts.GEMMA_CHAT_SYSTEM, ChatPrompts.systemFor(true));
-    assertFalse(ChatPrompts.GEMMA_CHAT_SYSTEM.contains("<think>"));
-    assertTrue(ChatPrompts.GEMMA_CHAT_SYSTEM.toLowerCase().contains("vary"));
+    assertTrue(ChatPrompts.GEMMA_CHAT_SYSTEM.isBlank());
+    assertTrue(ChatPrompts.gemmaUserContent("SYS", "hi", true).startsWith("SYS"));
+    assertEquals("hi", ChatPrompts.gemmaUserContent("SYS", "hi", false));
+    assertEquals("hi", ChatPrompts.gemmaUserContent(null, "hi", true));
+    assertEquals("hi", ChatPrompts.gemmaUserContent("", "hi", true));
+    assertTrue(ChatPrompts.isSetupBoilerplate("Okay, I'm ready."));
+    assertTrue(ChatPrompts.isSetupBoilerplate("Okay, I understand. Let's begin."));
+    assertFalse(ChatPrompts.isSetupBoilerplate("Hello! How can I help you today?"));
+    assertFalse(ChatPrompts.isSetupBoilerplate("The president of Estonia is Alar Karis."));
+    assertTrue(ChatMessages.newConversation(true).isEmpty());
+    assertFalse(ChatMessages.newConversation(false).isEmpty());
   }
 
   @Test

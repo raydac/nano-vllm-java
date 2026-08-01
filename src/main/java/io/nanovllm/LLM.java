@@ -13,6 +13,9 @@ import java.util.Map;
 
 public final class LLM implements AutoCloseable {
 
+  private static final int WARMUP_PREFILL_TOKENS = 64;
+  private static final int WARMUP_DECODE_TOKENS = 16;
+
   private final Config config;
   private final ModelRunner modelRunner;
   private final Tokenizer tokenizer;
@@ -47,6 +50,19 @@ public final class LLM implements AutoCloseable {
     }
     this.config.setStopTokenIds(this.tokenizer.stopTokenIds());
     this.scheduler = new Scheduler(this.config);
+    this.warmup();
+  }
+
+  private void warmup() {
+    System.err.println("Warming up (prefill + decode)…");
+    long t0 = System.nanoTime();
+    List<Integer> prompt = new ArrayList<>(WARMUP_PREFILL_TOKENS);
+    for (int i = 0; i < WARMUP_PREFILL_TOKENS; i++) {
+      prompt.add(1 + (i % 97));
+    }
+    this.generate(List.of(prompt), new SamplingParams(0.6f, WARMUP_DECODE_TOKENS, true), false);
+    System.err.printf(java.util.Locale.ROOT, "Warmup done in %.1fs%n",
+        (System.nanoTime() - t0) / 1e9);
   }
 
   private static void applyKwargs(Config.Builder builder, Map<String, Object> kwargs) {

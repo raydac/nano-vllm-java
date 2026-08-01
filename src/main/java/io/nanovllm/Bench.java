@@ -41,7 +41,6 @@ public final class Bench {
         params.add(new SamplingParams(0.6f, rnd.nextInt(8, maxOutputLen + 1), true));
       }
 
-      llm.generate(List.of(List.of(1, 2, 3)), new SamplingParams(0.6f, 4), false);
       long t0 = System.nanoTime();
       llm.generate(prompts, params, false);
       double seconds = (System.nanoTime() - t0) / 1e9;
