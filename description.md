@@ -297,22 +297,88 @@ You can override detection with `-Dnanovllm.arch=qwen3` or `gemma3` without edit
 
 ### Size of the dictionary and the stream
 
-| Field               | Means                                                            | Used for                                    | If missing                  |
-|---------------------|------------------------------------------------------------------|---------------------------------------------|-----------------------------|
-| `vocab_size`        | How many distinct token ids the model knows                      | Width of embedding table and LM head (rows) | Treated as 0 → broken model |
-| `hidden_size`       | Width of the residual “portrait” stream (often called *d_model*) | Almost every linear layer’s inner width     | 0 → broken                  |
-| `intermediate_size` | Width of the widened MLP inside each layer                       | Size of gate/up and down projections        | 0 → broken                  |
+| Field               | Means (short)                                                             | Used for                                                  | If missing                  |
+|---------------------|---------------------------------------------------------------------------|-----------------------------------------------------------|-----------------------------|
+| `vocab_size`        | How many distinct token ids the model knows                               | Width of embedding table and LM head (rows)               | Treated as 0 → broken model |
+| `hidden_size`       | How many numbers describe **each token’s ongoing state** inside the stack | The main “working page width” for attention and residuals | 0 → broken                  |
+| `intermediate_size` | How wide the **temporary expansion** is inside each layer’s MLP rewrite   | Gate/up and down projection sizes                         | 0 → broken                  |
 
-**Intuition:** `vocab_size` is how big the dictionary is; `hidden_size` is how rich each token’s portrait is;  
-`intermediate_size` is how wide the private rewrite desk is (usually several times `hidden_size`).
+### What `hidden_size` really is
+
+Imagine each token, while it travels through the model, carries a **fixed-length dossier** — not one score, but a long
+list of numbers (a vector). That list’s length is `hidden_size`.
+
+- After the embedding lookup, token id `42` becomes a dossier of length `hidden_size`.
+- Attention mixes dossiers, but each position still leaves with a dossier of the **same** length.
+- Residuals add edits onto that same-width stream.
+- At the very end, that dossier is compared against every vocabulary row to score the next token.
+
+So `hidden_size` is the **width of the model’s internal working page** — how many slots of “description” each place in
+the text keeps from layer to layer. Papers sometimes call it *d_model* or *model dimension*.
+
+It is **not**:
+
+- the number of layers (that is `num_hidden_layers`);
+- the dictionary size (that is `vocab_size`);
+- how many tokens of context you may use (that is `max_position_embeddings` / your `maxModelLen`).
+
+```text
+  token "cat"  →  [ n₁, n₂, n₃, … , n_H ]
+                   ◄────── hidden_size H ──────►
+
+  same width after attention, after MLP, after every layer
+```
+
+Larger `hidden_size` → richer dossiers → usually more capacity and more memory/compute per token. Smaller → leaner.
+
+### What `intermediate_size` really is
+
+Inside **each** layer, after attention, there is a private rewrite block (the MLP / feed-forward net). That block does
+**not** stay at width `hidden_size` the whole time. It typically:
+
+1. **Expands** the dossier from `hidden_size` to `intermediate_size` (often about 2×–4× wider),
+2. Applies a nonlinearity / gate (SiLU, GELU, …),
+3. **Shrinks** back to `hidden_size` before joining the residual stream again.
+
+So `intermediate_size` is the width of that **temporary wide workshop** used only inside the MLP. The main hallway of
+the model stays `hidden_size`; the side workshop is `intermediate_size`.
+
+```text
+  dossier (hidden_size H)
+        │
+        ▼
+  expand to intermediate_size I   ◄── wide workshop (temporary)
+        │
+     gate / activate
+        │
+  shrink back to H
+        │
+        ▼
+  add onto residual (still width H)
+```
+
+Why expand? A wider workshop gives the layer more room to recombine features before returning to the shared stream. Most
+of a decoder layer’s **weight bulk** often sits in these expand/shrink matrices — that is why
+`intermediate_size` matters so much for file size and RAM.
+
+### How the two fit together
+
+|                            | `hidden_size` (H)                                              | `intermediate_size` (I)                                  |
+|----------------------------|----------------------------------------------------------------|----------------------------------------------------------|
+| Lives where?               | Everywhere: embeddings, attention mixes, residuals, final norm | Only inside each layer’s MLP                             |
+| Stays for the whole stack? | Yes — same H from first embed to last layer                    | No — temporary per layer                                 |
+| Everyday metaphor          | Width of the manuscript page you keep rewriting                | Width of the blotter you use while editing one paragraph |
+| Typical relation           | Baseline                                                       | Often roughly 2×–4× H (a design choice, not a law)       |
 
 **Real values**
 
-|                     | Qwen3-0.6B | Gemma3-270M |
-|---------------------|------------|-------------|
-| `vocab_size`        | 151936     | 262144      |
-| `hidden_size`       | 1024       | 640         |
-| `intermediate_size` | 3072       | 2048        |
+|                         | Qwen3-0.6B       | Gemma3-270M        |
+|-------------------------|------------------|--------------------|
+| `vocab_size`            | 151936           | 262144             |
+| `hidden_size` (H)       | **1024**         | **640**            |
+| `intermediate_size` (I) | **3072** (= 3×H) | **2048** (≈ 3.2×H) |
+
+So Qwen’s “page” is wider (1024 vs 640), and both use an MLP workshop about three times as wide as the page.
 
 Gemma’s larger vocabulary and smaller hidden size are different design trade-offs — not “more intelligence” by
 themselves.
@@ -461,13 +527,15 @@ consult it.
 
 #### Qwen3-0.6B (compressed reading)
 
-> Family qwen3; 28 rooms; portraits width 1024; MLP widens to 3072; vocabulary ~152k; 16 Query heads with 8 KV groups
+> Family qwen3; 28 rooms; each token keeps a **1024**-wide dossier (`hidden_size`); each MLP briefly widens to
+> **3072** (`intermediate_size`, 3×); vocabulary ~152k; 16 Query heads with 8 KV groups
 > (GQA); head size 128; SiLU MLP; embeddings tied to LM head; RoPE base 1e6; context claim up to 40960; weights stored
 > as BF16 on disk, run as float32 here.
 
 #### Gemma3-270M (compressed reading)
 
-> Family gemma3_text; 18 rooms; portraits width 640; MLP widens to 2048 with GELU-tanh gate; vocabulary ~262k; 4 Query
+> Family gemma3_text; 18 rooms; dossier width **640**; MLP workshop **2048** (~3.2×) with GELU-tanh gate; vocabulary ~
+> 262k; 4 Query
 > heads sharing 1 KV head; head size 256; attention scaled by `query_pre_attn_scalar` 256; many layers only look back
 > 512 tokens, every sixth layer looks globally; local RoPE base 10k, global 1e6; expect tied embeddings.
 
@@ -1522,43 +1590,44 @@ ask it to **stop** from another thread if a reply is taking too long.
 
 ## 17. Word list
 
-| Term you may meet     | Plain meaning                                                                |
-|-----------------------|------------------------------------------------------------------------------|
-| Model                 | The finished “book” of learned numbers plus its dictionary and blueprint     |
-| Loading               | Reading blueprint + dictionary + weights into memory and wiring them         |
-| `config.json`         | Blueprint of sizes and recipe (not the learned weights)                      |
-| `tokenizer.json`      | Vocab, BPE merges, and text pipeline (string ↔ token ids)                    |
-| `.safetensors`        | Catalogued raw weight tensors (matrices/vectors) on disk                     |
-| BPE                   | Byte-Pair Encoding: merge frequent pieces using an ordered merge list        |
-| `data_offsets`        | Byte range of one tensor inside a safetensors payload                        |
-| `hidden_size`         | Width of each token’s numerical portrait stream                              |
-| `num_hidden_layers`   | How many stacked attention+MLP rooms                                         |
-| GQA heads fields      | `num_attention_heads` vs `num_key_value_heads` (sharing of KV notebooks)     |
-| Inference             | Using the book to produce text (not training it)                             |
-| Token                 | A scrap of text with a number in the dictionary                              |
-| Vocabulary            | All scraps the model is allowed to emit                                      |
-| Logits                | Raw preference scores for each vocabulary scrap, before turning into chances |
-| Softmax               | Turn raw scores into portions that add to 100%                               |
-| Attention             | Weighted reread of allowed places (Query matches Keys, mixes Values)         |
-| Self-attention        | Looking within the same text (not at a second document)                      |
-| Causal                | May only look at the past and present, not the future                        |
-| Multi-head (MHA)      | Several parallel glances; each may have its own KV notebooks                 |
-| GQA                   | Grouped-query: several Query heads share one Key/Value group                 |
-| MQA                   | Multi-query: all Query heads share a single Key/Value pair                   |
-| Sliding window        | May look back only a fixed recent stretch, not the whole past                |
-| Global attention      | May look back over the whole allowed past                                    |
-| Query / Key / Value   | Search / label / content notes used by attention                             |
-| Inner work (Sense A)  | Invisible stack of attention + rewrites for each next token                  |
-| Chain of thought (B)  | Reasoning written as ordinary tokens in the reply                            |
-| Tagged scratchpad (C) | Written reasoning inside `<think>…</think>` for UI splitting                 |
-| ChatReply             | Parsed pair of thinking text + visible answer after a turn                   |
-| KV cache / notebook   | Stored Keys and Values, reused while continuing                              |
-| Prefill               | First heavy read of the prompt                                               |
-| Decode                | Step-by-step production of later tokens                                      |
-| Sampling              | Drawing the next token according to chances and filters                      |
-| Temperature           | How strongly to favor the leading candidate                                  |
-| Context length        | How much past text fits on the desk at once                                  |
-| Weights               | The learned numbers on the shelves                                           |
+| Term you may meet     | Plain meaning                                                                   |
+|-----------------------|---------------------------------------------------------------------------------|
+| Model                 | The finished “book” of learned numbers plus its dictionary and blueprint        |
+| Loading               | Reading blueprint + dictionary + weights into memory and wiring them            |
+| `config.json`         | Blueprint of sizes and recipe (not the learned weights)                         |
+| `tokenizer.json`      | Vocab, BPE merges, and text pipeline (string ↔ token ids)                       |
+| `.safetensors`        | Catalogued raw weight tensors (matrices/vectors) on disk                        |
+| BPE                   | Byte-Pair Encoding: merge frequent pieces using an ordered merge list           |
+| `data_offsets`        | Byte range of one tensor inside a safetensors payload                           |
+| `hidden_size`         | Length of each token’s internal dossier (main working width through all layers) |
+| `intermediate_size`   | Temporary wider width inside each layer’s MLP expand→shrink step                |
+| `num_hidden_layers`   | How many stacked attention+MLP rooms                                            |
+| GQA heads fields      | `num_attention_heads` vs `num_key_value_heads` (sharing of KV notebooks)        |
+| Inference             | Using the book to produce text (not training it)                                |
+| Token                 | A scrap of text with a number in the dictionary                                 |
+| Vocabulary            | All scraps the model is allowed to emit                                         |
+| Logits                | Raw preference scores for each vocabulary scrap, before turning into chances    |
+| Softmax               | Turn raw scores into portions that add to 100%                                  |
+| Attention             | Weighted reread of allowed places (Query matches Keys, mixes Values)            |
+| Self-attention        | Looking within the same text (not at a second document)                         |
+| Causal                | May only look at the past and present, not the future                           |
+| Multi-head (MHA)      | Several parallel glances; each may have its own KV notebooks                    |
+| GQA                   | Grouped-query: several Query heads share one Key/Value group                    |
+| MQA                   | Multi-query: all Query heads share a single Key/Value pair                      |
+| Sliding window        | May look back only a fixed recent stretch, not the whole past                   |
+| Global attention      | May look back over the whole allowed past                                       |
+| Query / Key / Value   | Search / label / content notes used by attention                                |
+| Inner work (Sense A)  | Invisible stack of attention + rewrites for each next token                     |
+| Chain of thought (B)  | Reasoning written as ordinary tokens in the reply                               |
+| Tagged scratchpad (C) | Written reasoning inside `<think>…</think>` for UI splitting                    |
+| ChatReply             | Parsed pair of thinking text + visible answer after a turn                      |
+| KV cache / notebook   | Stored Keys and Values, reused while continuing                                 |
+| Prefill               | First heavy read of the prompt                                                  |
+| Decode                | Step-by-step production of later tokens                                         |
+| Sampling              | Drawing the next token according to chances and filters                         |
+| Temperature           | How strongly to favor the leading candidate                                     |
+| Context length        | How much past text fits on the desk at once                                     |
+| Weights               | The learned numbers on the shelves                                              |
 
 ---
 
