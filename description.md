@@ -1521,45 +1521,168 @@ Sense C from the thinking chapter: marked scratchpad versus fair copy.
 
 ## 15. A full walk-through: “What is 2+2?”
 
+This chapter retells one question as a story, with **attention** and **thinking** named at each stage (see chapters 8
+and 9 for the full theory).
+
 ### You ask
 
 A few lines of Java (or the example app) open the model folder and say, in effect: *chat with me; keep answers short.*
 
 ### Loading (once)
 
-- Blueprint read → empty rooms built to the right sizes.
+- Blueprint read → empty rooms built to the right sizes (`hidden_size`, layers, heads, …).
 - Each weight name in the crates poured onto the matching shelf (Query/Key/Value packs merged where needed).
 - Dictionary opened at the door.
 - Blank Key/Value notebooks laid out for this session’s text.
 - Learned shelves will not change; notebooks will.
 
+**Attention’s role at load time:** none yet — only empty notebooks waiting.  
+**Thinking’s role at load time:** none — no Sense A until a prompt runs.
+
 ### Your sentence becomes numbers
 
-The chat template wraps your question with “user” / “assistant” markers. The tokenizer turns that into a list of token
-numbers.
+The chat template wraps your question with “user” / “assistant” markers (and, on Qwen-style chat, system directions that
+may *invite* a `<think>` scratchpad). The tokenizer turns that into a list of token numbers.
 
-### Prefill (Sense A on the whole prompt)
+Illustrative shape (markers depend on the model):
 
-Portraits walk through every reading room. In each room, attention looks back through the prompt; the MLP rewrites. Keys
-and Values are written into the notebooks. At the end, vocabulary scores appear; one first assistant token is drawn.
+```text
+[system … maybe “use <think> for notes” …]
+[user] What is 2+2?
+[assistant]          ← generation starts here
+```
 
-### Decode (Sense A, one scrap at a time — maybe including “thinking” text)
+Those ids are just a line of dictionary numbers. No attention has run yet.
+
+### Prefill — Sense A on the whole prompt (attention’s first big job)
+
+Portraits for every prompt token walk through **every** reading room.
+
+**Where attention works in prefill**
+
+At each layer, for each position in the prompt (for example the token `2`, the token `+`, the later `2`, the `?`):
+
+1. Build Query / Key / Value from that position’s dossier.
+2. Compare this Query with Keys of **earlier** positions only (causal — no peeking at the future).
+3. Mix Values from the strong matches into an updated dossier.
+4. **Write** this position’s Key and Value into the KV notebooks for later decode.
+
+So when the model is still “reading” `What is 2+2?`, attention is already linking pieces: the second `2` can glance at
+the first `2` and at `+`; the end of the user line can glance at the whole question. Multi-head glances (and GQA
+sharing) run in parallel; Gemma may restrict some layers to a sliding window of recent tokens.
+
+**Where thinking works in prefill**
+
+This is pure **Sense A** (silent inner work): stacked attention + MLP through all layers. You see no English “reasoning”
+yet. Prefill ends by scoring the vocabulary at the last prompt position and **sampling the first assistant token** —
+which might be `<`, or `4`, or `The`, depending on style and chance.
+
+```text
+  prompt tokens ──► layer 1 (attend + rewrite) ──► … ──► layer N
+       │                      │
+       │                      └── fill KV notebooks
+       ▼
+  first next-token scores → sample token₁
+```
+
+### Decode — one new scrap at a time (attention + optional written thinking)
 
 Each further step:
 
-1. take only the newest token through the rooms;
-2. attention looks back using the notebooks (and writes a new line into them);
-3. score the vocabulary;
-4. draw one more token;
-5. stop on an end marker or a length limit.
+1. take only the **newest** token through the rooms;
+2. **attention** looks back over past Keys/Values in the notebooks (and writes a new notebook line);
+3. MLP rewrites;
+4. score the vocabulary;
+5. draw one more token;
+6. stop on an end marker or a length limit.
 
-On Qwen-style chat, some of those tokens may be a tagged scratchpad (`<think>…</think>`) before the visible answer —
-still ordinary generation (chapter 9, Senses B/C), then split by the chat helper for display.
+**Attention’s role in decode (for this sum)**
 
-### Back to language
+The new token’s Query asks: “given everything so far, what should influence me?” Keys/Values already stored for
+`What`, `is`, `2`, `+`, `2`, `?`, and any assistant tokens already emitted, are the library it searches. It does **not**
+re-read the prompt from scratch as raw text; it reuses notebook notes. That is why decode feels lighter than prefill.
 
-The answer tokens are looked up in the dictionary and shown to you as text: `4` or `The answer is 4.` Thinking notes, if
-any, may appear on a separate channel.
+Concrete (illustrative) glances:
+
+| While producing… | Attention may lean on…                                    | Why it matters                             |
+|------------------|-----------------------------------------------------------|--------------------------------------------|
+| Early note words | User tokens `2`, `+`, `2`                                 | Bind the question’s parts                  |
+| Later note words | Earlier note words already emitted                        | Written scratchpad becomes rereadable past |
+| The visible `4`  | Question tokens and/or note tokens that mentioned the sum | Final answer conditioned on that past      |
+
+Attention never “knows arithmetic” as a separate calculator. It **routes** trained patterns toward the current place
+using similarity of Keys and Queries. If training left useful habits for digit sums, those habits fire when the right
+places attend to each other.
+
+**Thinking’s three roles in this same decode loop**
+
+| Sense                     | What happens on “What is 2+2?”                                                                                                   |
+|---------------------------|----------------------------------------------------------------------------------------------------------------------------------|
+| **A — silent**            | Every decode step is a full layer-walk (attention + MLP + sample). Always on, never shown as text.                               |
+| **B — written reasoning** | The model may emit ordinary words like “add” or “four” as intermediate text. Those words join the past.                          |
+| **C — tagged scratchpad** | On Qwen-style chat it may emit `<think> … </think>` then the answer. Same Sense A underneath; markers let the UI split channels. |
+
+Example timeline (one possible Qwen-style path — not guaranteed wording):
+
+```text
+  decode → "<think>"           Sense A; attention sees only the prompt so far
+  decode → "User" "asks" …     Sense A; attention can also see prior think tokens
+  decode → "2+2" "→" "4"       notes cite the question; attention binds them
+  decode → "</think>"
+  decode → "4"                 Sense A; attention may weigh notes + original "2" "+" "2"
+  decode → end-of-turn
+```
+
+If there is **no** scratchpad (typical Gemma path here), Sense A still runs the same way; you only see the final answer
+tokens. There is no missing “thinker” — only missing **visible** Sense B/C text.
+
+**How written thinking helps attention (and how it can fail)**
+
+Once note tokens exist, later attention can look at them (causal self-attention over the growing reply). That is the
+whole mechanism: **thinking-as-text becomes more past for attention to mix.**
+
+It can help a multi-step question by parking intermediate results on the page. It can also produce fluent wrong notes;
+attention will happily attend to those too. Tags do not create a second brain — `AssistantParts.parse` only **splits**
+the finished stream for display (`thinking` vs `answer`).
+
+### After the turn — parse and show
+
+- Tokenizer decodes ids → raw assistant string.
+- Chat helper splits `<think>…</think>` from the visible answer when markers exist.
+- You may see notes on a “thinking” channel and `4` on the answer channel.
+- History keeps what the session stores for the next turn; the next prefill will attend across that history subject to
+  length limits.
+
+### One picture of the whole turn
+
+```text
+  LOAD weights + empty KV notebooks
+           │
+           ▼
+  TEMPLATE + TOKENIZE  "What is 2+2?"
+           │
+           ▼
+  PREFILL (Sense A)
+      attention: every prompt place looks back; notebooks fill
+      thinking: silent only
+           │
+           ▼
+  DECODE LOOP (Sense A each step)
+      attention: new token queries notebooks (prompt + reply so far)
+      thinking: optional <think> notes (B/C) become more notebook past
+           │
+           ▼
+  SAMPLE "4" … STOP
+           │
+           ▼
+  PARSE / DISPLAY  thinking channel + answer "4"
+```
+
+### What this walk-through should leave you with
+
+- **Attention** is the glance that mixes allowed past into the present — heavy at prefill, notebook-backed at decode.
+- **Thinking** is either that silent stack (always) or extra generated text (sometimes) that attention can later reuse.
+- **“2+2→4”** is not a separate arithmetic module; it is trained continuation steered by those glances and draws.
 
 Nothing mystical happened — unpacking a crate, then a long chain of rereads, rewrites, and draws among likely scraps of
 text. The *impression* of understanding is an effect of that chain, shaped by training you do not see.
