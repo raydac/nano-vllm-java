@@ -19,17 +19,20 @@ text or hold a short conversation — on an ordinary computer, without special g
 2. [The one trick: guessing the next piece of text](#2-the-one-trick-guessing-the-next-piece-of-text)
 3. [Cutting language into pieces the machine can count](#3-cutting-language-into-pieces-the-machine-can-count)
 4. [Loading a model: opening the library box](#4-loading-a-model-opening-the-library-box)
-5. [Attention: how the model looks back while it writes](#5-attention-how-the-model-looks-back-while-it-writes)
-6. [What “thinking” means inside a model](#6-what-thinking-means-inside-a-model)
-7. [The math, said gently](#7-the-math-said-gently)
-8. [Choosing a word: not always the most obvious one](#8-choosing-a-word-not-always-the-most-obvious-one)
-9. [Why the program keeps a notebook of the past](#9-why-the-program-keeps-a-notebook-of-the-past)
-10. [Serving several conversations without chaos](#10-serving-several-conversations-without-chaos)
-11. [Chat versus finishing a sentence](#11-chat-versus-finishing-a-sentence)
-12. [A full walk-through: “What is 2+2?”](#12-a-full-walk-through-what-is-22)
-13. [If you later open the code](#13-if-you-later-open-the-code)
-14. [Word list](#14-word-list)
-15. [Honest limits](#15-honest-limits)
+5. [`config.json` — the blueprint field by field](#5-configjson--the-blueprint-field-by-field)
+6. [`tokenizer.json` — the dictionary file field by field](#6-tokenizerjson--the-dictionary-file-field-by-field)
+7. [`*.safetensors` — the weight crates: format and contents](#7-safetensors--the-weight-crates-format-and-contents)
+8. [Attention: kinds of looking-back, and how they work](#8-attention-kinds-of-looking-back-and-how-they-work)
+9. [The thinking process: how it is organized and how it works with the model](#9-the-thinking-process-how-it-is-organized-and-how-it-works-with-the-model)
+10. [The math, said gently](#10-the-math-said-gently)
+11. [Choosing a word: not always the most obvious one](#11-choosing-a-word-not-always-the-most-obvious-one)
+12. [Why the program keeps a notebook of the past](#12-why-the-program-keeps-a-notebook-of-the-past)
+13. [Serving several conversations without chaos](#13-serving-several-conversations-without-chaos)
+14. [Chat versus finishing a sentence](#14-chat-versus-finishing-a-sentence)
+15. [A full walk-through: “What is 2+2?”](#15-a-full-walk-through-what-is-22)
+16. [If you later open the code](#16-if-you-later-open-the-code)
+17. [Word list](#17-word-list)
+18. [Honest limits](#18-honest-limits)
 
 ---
 
@@ -114,6 +117,7 @@ human language and that arithmetic.
 A separate file, the **tokenizer**, holds that dictionary and the rules for chopping text. Chat models also store a
 **template**: stage directions such as “this line is the user,” “this line is the assistant,” so the model is not
 confused about who is speaking. Without those markers, a dialogue looks like an undifferentiated blob of prose.
+**Chapter 6** opens `tokenizer.json` field by field.
 
 ---
 
@@ -145,15 +149,17 @@ A list of measurements: how many stacked “reading rooms” (layers), how wide 
 attention heads, how long a passage may be, which recipe (Qwen vs Gemma), and similar.
 
 This is like an architect’s plan. It does **not** contain opinions about France or arithmetic. It only tells the program
-how large the furniture must be.
+how large the furniture must be. **Chapter 5** explains every field this project reads, with real Qwen and Gemma
+examples.
 
 **2. The dictionary (`tokenizer.json` and friends)**  
 How human text becomes token numbers and back, plus special markers for “user” and “assistant.”  
-This is the spelling system and the stage-direction language — still not the “knowledge.”
+This is the spelling system and the stage-direction language — still not the “knowledge.” **Chapter 6** details
+`tokenizer.json` (and friends such as `tokenizer_config.json`).
 
 **3. The learned numbers (`*.safetensors`)**  
 The big cargo. Millions or billions of numbers shaped by training. These are what make one model sound different from
-another.
+another. **Chapter 7** explains the binary layout, dtypes, and tensor names.
 
 On disk they are often stored in a compact form (half-precision). This Java program **converts them into ordinary
 decimal floating numbers in RAM** so the calculations stay simple to follow. Easy to teach; hungry for memory.
@@ -227,49 +233,624 @@ That cost is paid **at open time**, not on every word (the notebooks exist preci
 
 ---
 
-## 5. Attention: how the model looks back while it writes
+## 5. `config.json` — the blueprint field by field
+
+The file `config.json` sits in the model folder. It is ordinary JSON: named fields and values. It does **not** store the
+learned knowledge. It stores the **measurements and recipe** so this program can build empty furniture of the right size
+and choose Qwen-like vs Gemma-like behaviour.
+
+This chapter explains the fields **this project actually reads** (via `Config.HfConfig`), what they mean in plain
+language, and how they show up in real models such as Qwen3-0.6B and Gemma3-270M. Extra keys that appear in hub files
+but are ignored here are listed at the end.
+
+### What the file looks like (tiny sketch)
+
+```json
+{
+   "model_type": "qwen3",
+   "architectures": [
+      "Qwen3ForCausalLM"
+   ],
+   "vocab_size": 151936,
+   "hidden_size": 1024,
+   "num_hidden_layers": 28,
+   "num_attention_heads": 16,
+   "num_key_value_heads": 8,
+   "head_dim": 128,
+   "intermediate_size": 3072,
+   "max_position_embeddings": 40960,
+   "rms_norm_eps": 1e-06,
+   "hidden_act": "silu",
+   "tie_word_embeddings": true,
+   "rope_theta": 1000000,
+   "torch_dtype": "bfloat16"
+}
+```
+
+A Gemma file adds things like `layer_types`, `sliding_window`, `hidden_activation`, `query_pre_attn_scalar`, and
+`rope_local_base_freq`.
+
+### How to read the tables below
+
+- **Field** — the JSON key as written on disk (snake_case).
+- **Means** — everyday meaning.
+- **Used for** — what this Java engine does with it.
+- **If missing** — the default or fallback this loader applies.
+
+---
+
+### Identity: which building plan is this?
+
+| Field           | Means                                                                                 | Used for                                              | If missing                                         |
+|-----------------|---------------------------------------------------------------------------------------|-------------------------------------------------------|----------------------------------------------------|
+| `model_type`    | Short family name (`qwen3`, `gemma3_text`, …)                                         | Auto-detect Qwen3 vs Gemma3 graph (`CausalLMFactory`) | Fall through to `architectures`, else assume Qwen3 |
+| `architectures` | List of class-style names from Hugging Face (`Qwen3ForCausalLM`, `Gemma3ForCausalLM`) | Same detection if `model_type` is unclear             | Optional                                           |
+
+You can override detection with `-Dnanovllm.arch=qwen3` or `gemma3` without editing the file.
+
+**Examples from real folders**
+
+- Qwen3-0.6B: `"model_type": "qwen3"`, `"architectures": ["Qwen3ForCausalLM"]`
+- Gemma3-270M: `"model_type": "gemma3_text"`, `"architectures": ["Gemma3ForCausalLM"]`
+
+---
+
+### Size of the dictionary and the stream
+
+| Field               | Means                                                            | Used for                                    | If missing                  |
+|---------------------|------------------------------------------------------------------|---------------------------------------------|-----------------------------|
+| `vocab_size`        | How many distinct token ids the model knows                      | Width of embedding table and LM head (rows) | Treated as 0 → broken model |
+| `hidden_size`       | Width of the residual “portrait” stream (often called *d_model*) | Almost every linear layer’s inner width     | 0 → broken                  |
+| `intermediate_size` | Width of the widened MLP inside each layer                       | Size of gate/up and down projections        | 0 → broken                  |
+
+**Intuition:** `vocab_size` is how big the dictionary is; `hidden_size` is how rich each token’s portrait is;  
+`intermediate_size` is how wide the private rewrite desk is (usually several times `hidden_size`).
+
+**Real values**
+
+|                     | Qwen3-0.6B | Gemma3-270M |
+|---------------------|------------|-------------|
+| `vocab_size`        | 151936     | 262144      |
+| `hidden_size`       | 1024       | 640         |
+| `intermediate_size` | 3072       | 2048        |
+
+Gemma’s larger vocabulary and smaller hidden size are different design trade-offs — not “more intelligence” by
+themselves.
+
+---
+
+### Depth and attention geometry
+
+| Field                 | Means                                   | Used for                                                           | If missing                                     |
+|-----------------------|-----------------------------------------|--------------------------------------------------------------------|------------------------------------------------|
+| `num_hidden_layers`   | How many stacked reading rooms (layers) | Loop that builds layer 0 … N−1                                     | 0 → empty stack                                |
+| `num_attention_heads` | How many Query glances run in parallel  | Multi-head attention width                                         | 0 → broken                                     |
+| `num_key_value_heads` | How many Key/Value notebook groups      | GQA: Queries share KV groups when this is smaller than Query heads | Defaults to `num_attention_heads` (full MHA)   |
+| `head_dim`            | Length of one head’s vector             | Attention math; QKV slice sizes                                    | If absent: `hidden_size / num_attention_heads` |
+
+**GQA check:** if `num_key_value_heads` < `num_attention_heads`, several Query heads share one KV group  
+(chapter 8).
+
+**Real values**
+
+|                       | Qwen3-0.6B | Gemma3-270M |
+|-----------------------|------------|-------------|
+| `num_hidden_layers`   | 28         | 18          |
+| `num_attention_heads` | 16         | 4           |
+| `num_key_value_heads` | 8          | 1           |
+| `head_dim`            | 128        | 256         |
+
+Qwen here: 16 Queries / 8 KV → groups of 2. Gemma here: 4 Queries / 1 KV → extreme sharing (MQA-like GQA).
+
+---
+
+### How long a passage may be
+
+| Field                     | Means                                             | Used for                                                                                                | If missing                      |
+|---------------------------|---------------------------------------------------|---------------------------------------------------------------------------------------------------------|---------------------------------|
+| `max_position_embeddings` | Official maximum context length the recipe claims | Caps RoPE tables; also caps this engine’s `maxModelLen` (the smaller of builder setting and this value) | Default **32768** in the loader |
+
+**Real values:** Qwen3-0.6B → 40960; Gemma3-270M → 32768.
+
+Your machine may not afford the full length in RAM; the builder’s `maxModelLen` can choose a smaller desk.
+
+---
+
+### Normalization and activations
+
+| Field               | Means                                                                    | Used for                                                           | If missing       |
+|---------------------|--------------------------------------------------------------------------|--------------------------------------------------------------------|------------------|
+| `rms_norm_eps`      | Tiny ε added under the square root in RMSNorm so division never explodes | Every RMSNorm                                                      | Default `1e-6`   |
+| `hidden_act`        | Name of MLP gate activation (older / Qwen-style key)                     | Qwen expects `silu`                                                | Default `"silu"` |
+| `hidden_activation` | Alternate activation name (Gemma-style key)                              | Preferred over `hidden_act` when present (`effectiveActivation()`) | Optional         |
+
+**Effective rule in this project:** use `hidden_activation` if set; else `hidden_act`; else SiLU.
+
+**Real values:** Qwen uses `"hidden_act": "silu"`. Gemma uses `"hidden_activation": "gelu_pytorch_tanh"` (a smooth
+GELU-like curve in the MLP gate).
+
+---
+
+### Sharing the card index with the final scorer
+
+| Field                 | Means                                                           | Used for                                                     | If missing                                                    |
+|-----------------------|-----------------------------------------------------------------|--------------------------------------------------------------|---------------------------------------------------------------|
+| `tie_word_embeddings` | If true, embedding table and LM head **share** the same numbers | Saves a huge matrix; load path may skip a separate `lm_head` | For Gemma `model_type`, default **true**; otherwise **false** |
+
+**Real values:** Qwen3-0.6B sets `true`. Gemma often omits a separate LM-head tensor on disk; the loader’s Gemma default
+matches that habit.
+
+---
+
+### Attention extras
+
+| Field                   | Means                                         | Used for                                                                | If missing                  |
+|-------------------------|-----------------------------------------------|-------------------------------------------------------------------------|-----------------------------|
+| `attention_bias`        | Whether QKV projections add a bias vector     | Qwen path: if false, uses Q/K RMSNorm instead of bias                   | Default `false`             |
+| `query_pre_attn_scalar` | Number used to scale attention scores (Gemma) | `attentionScale = 1 / sqrt(scalar)` (or `head_dim` if scalar absent/≤0) | 0 → fall back to `head_dim` |
+
+**Real values:** both sample models set `attention_bias` false. Gemma3-270M sets `query_pre_attn_scalar` to 256 (same as
+its `head_dim` here).
+
+---
+
+### RoPE — the position twist
+
+| Field                  | Means                                                            | Used for                                                                  | If missing               |
+|------------------------|------------------------------------------------------------------|---------------------------------------------------------------------------|--------------------------|
+| `rope_theta`           | Base frequency for rotary position embeddings (global / default) | Build cos/sin tables for RoPE on Q and K                                  | Default `1000000`        |
+| `rope_local_base_freq` | Separate base for **local / sliding** layers (Gemma)             | Sliding layers use this instead of `rope_theta`                           | Default `10000`          |
+| `rope_scaling`         | Optional object describing long-context RoPE tricks              | If it contains `rope_theta`, that value can override the base (Qwen path) | `null` / absent → ignore |
+
+Larger `rope_theta` is often used for longer contexts. Local layers with a smaller base keep nearby positions distinct
+when the window is short.
+
+**Real values:** both use `rope_theta` ≈ 1 000 000; Gemma also sets `rope_local_base_freq` to 10000; `rope_scaling` is
+null in both samples.
+
+---
+
+### Sliding window and mixed layer types (Gemma)
+
+| Field            | Means                                                            | Used for                                             | If missing                                                                                                       |
+|------------------|------------------------------------------------------------------|------------------------------------------------------|------------------------------------------------------------------------------------------------------------------|
+| `sliding_window` | How many recent tokens a local layer may look back               | Window width for sliding attention                   | `0` or null → no windowing unless layer types say otherwise                                                      |
+| `layer_types`    | Per-layer list: e.g. `"sliding_attention"` vs `"full_attention"` | `isSlidingLayer(i)` decides window + which RoPE base | If absent but `sliding_window` > 0: Gemma-style default — full attention every 6th layer (1-based), else sliding |
+
+**Real Gemma3-270M:** `sliding_window` 512; `layer_types` alternates five sliding layers then one full, repeating across
+18 layers.
+
+**Real Qwen3-0.6B:** `sliding_window` null / unused here; `use_sliding_window` false — treated as global causal
+attention in this port.
+
+---
+
+### Storage hint on disk
+
+| Field         | Means                                                            | Used for                                                                        | If missing                 |
+|---------------|------------------------------------------------------------------|---------------------------------------------------------------------------------|----------------------------|
+| `torch_dtype` | Preferred training/storage dtype name (`bfloat16`, `float16`, …) | Informational in this port; tensors are still converted to Java float32 on load | Default `"float16"` string |
+
+It does **not** keep this engine in BF16 math. It only describes how the hub file was typically stored.
+
+---
+
+### Fields you may see but this project does not drive inference with
+
+Hub `config.json` files often contain more keys. Examples from the sample models that are **not** structural inputs to
+the Java forward pass here:
+
+| Field                                                | Typical meaning elsewhere            | Here                                                                                         |
+|------------------------------------------------------|--------------------------------------|----------------------------------------------------------------------------------------------|
+| `bos_token_id` / `eos_token_id` / `pad_token_id`     | Special token ids                    | EOS/stop come mainly from the **tokenizer**; these config ids are not the engine’s stop list |
+| `attention_dropout`                                  | Training dropout                     | Ignored at inference                                                                         |
+| `initializer_range`                                  | Weight init scale for training       | Ignored (weights come from safetensors)                                                      |
+| `use_cache`                                          | Hint to cache KV in other frameworks | This engine always uses its own paged KV                                                     |
+| `transformers_version`                               | Which library wrote the file         | Ignored                                                                                      |
+| `use_sliding_window` / `max_window_layers`           | Alternate sliding metadata           | Logic uses `sliding_window` + `layer_types` (and Gemma fallback)                             |
+| `attn_logit_softcapping` / `final_logit_softcapping` | Score capping in some Gemma variants | Not applied in this port                                                                     |
+| `use_bidirectional_attention`                        | Non-causal mode                      | Must stay false for generation; not a supported mode here                                    |
+| `_sliding_window_pattern`                            | Documentation of the 6-layer pattern | Fallback uses modulo 6 if `layer_types` missing                                              |
+
+If a field is absent from the tables above, assume: **safe to leave as the hub shipped it**; this loader simply does not
+consult it.
+
+---
+
+### Two worked readings
+
+#### Qwen3-0.6B (compressed reading)
+
+> Family qwen3; 28 rooms; portraits width 1024; MLP widens to 3072; vocabulary ~152k; 16 Query heads with 8 KV groups
+> (GQA); head size 128; SiLU MLP; embeddings tied to LM head; RoPE base 1e6; context claim up to 40960; weights stored
+> as BF16 on disk, run as float32 here.
+
+#### Gemma3-270M (compressed reading)
+
+> Family gemma3_text; 18 rooms; portraits width 640; MLP widens to 2048 with GELU-tanh gate; vocabulary ~262k; 4 Query
+> heads sharing 1 KV head; head size 256; attention scaled by `query_pre_attn_scalar` 256; many layers only look back
+> 512 tokens, every sixth layer looks globally; local RoPE base 10k, global 1e6; expect tied embeddings.
+
+---
+
+### Blueprint vs engine knobs (do not confuse)
+
+| Comes from `config.json`                  | Comes from this program’s builder / runtime                                         |
+|-------------------------------------------|-------------------------------------------------------------------------------------|
+| Layer count, widths, heads, RoPE, windows | `maxModelLen` (capped by blueprint), KV page size, number of KV pages, batch limits |
+| Which recipe (Qwen/Gemma)                 | `-Dnanovllm.arch=…` override                                                        |
+| `torch_dtype` hint                        | Always float32 compute after load                                                   |
+
+The blueprint says what the **model is**. The builder says how hard you ask your **machine** to run it.
+
+---
+
+## 6. `tokenizer.json` — the dictionary file field by field
+
+If `config.json` is the architect’s plan for the neural building, **`tokenizer.json`** is the **spelling book**: how
+human text becomes token numbers and back. It is also JSON, but its job is linguistic plumbing, not layer widths.
+
+This project loads it in `Tokenizer.fromPretrained`. Companion files often sit beside it:
+
+| File                     | Role here                                                                  |
+|--------------------------|----------------------------------------------------------------------------|
+| `tokenizer.json`         | Vocab, merges, normalizer / pre-tokenizer / decoder pipeline, added tokens |
+| `tokenizer_config.json`  | Often holds `chat_template`, `eos_token`, `pad_token` names                |
+| `generation_config.json` | May list extra `eos_token_id` values used as stop ids                      |
+
+Without a usable tokenizer, the model cannot turn your sentence into the ids the embedding table expects.
+
+### Top-level shape
+
+A Hugging Face / 🤗 Tokenizers export typically looks like:
+
+```json
+{
+   "version": "1.0",
+   "truncation": null,
+   "padding": null,
+   "added_tokens": [
+      {
+         "id":
+         …,
+         "content": "…",
+         "special": true
+         …
+      }
+      …
+   ],
+   "normalizer": {
+      "type": "…"
+      …
+   },
+   "pre_tokenizer": {
+      "type": "…"
+      …
+   },
+   "post_processor": {
+      "type": "…"
+      …
+   },
+   "decoder": {
+      "type": "…"
+      …
+   },
+   "model": {
+      "type": "BPE",
+      "vocab": {
+         "token-string": id
+         …
+      },
+      "merges": [
+         "a b",
+         "c d"
+         …
+      ],
+      "byte_fallback": true/false,
+      "unk_token": "…"
+      …
+   }
+}
+```
+
+### Top-level fields
+
+| Field            | Means                                                           | Used in this project?                                                  |
+|------------------|-----------------------------------------------------------------|------------------------------------------------------------------------|
+| `version`        | Format version of the tokenizer export                          | Informational                                                          |
+| `truncation`     | Optional max-length truncation policy                           | Not applied as a separate engine policy here                           |
+| `padding`        | Optional pad-to-length policy                                   | Not a generate-time padder here                                        |
+| `added_tokens`   | Extra tokens beyond the base vocab (chat markers, `<think>`, …) | **Yes** — merged into vocab; specials noted                            |
+| `normalizer`     | Text cleanup before splitting (Unicode form, replace rules, …)  | Inspected to detect style (e.g. Gemma Replace)                         |
+| `pre_tokenizer`  | How raw text is first split into pieces                         | Detect Metaspace vs byte-level; drives encode path                     |
+| `post_processor` | Template wrapping for encode in some setups                     | Present in file; chat wrapping here mostly uses `chat_template` / code |
+| `decoder`        | How token strings become final text                             | Style detection; decode path (byte-level vs metaspace/`▁`)             |
+| `model`          | The core BPE (or other) model: vocab + merges                   | **Central** — vocab map and merge ranks                                |
+
+### `added_tokens[]` — special and extra scraps
+
+Each entry is usually an object:
+
+| Subfield                                           | Means                                                                   |
+|----------------------------------------------------|-------------------------------------------------------------------------|
+| `id`                                               | Integer id in the vocabulary                                            |
+| `content`                                          | Exact string form (e.g. `<\|im_start\|>`, `<think>`, `<start_of_turn>`) |
+| `special`                                          | If true, treated as a control token more than ordinary text             |
+| `lstrip` / `rstrip` / `single_word` / `normalized` | Fine behaviour flags from the Tokenizers library                        |
+
+**This loader:** copies `content` → `id` into the live vocab; marks many specials (including `<think>` /
+`</think>`, Gemma turn markers, bos/eos) so they can be handled carefully when decoding.
+
+**Scale:** Qwen3-0.6B sample has on the order of **tens** of added tokens; Gemma3-270M may list **thousands**
+(including many special / multimodal leftovers even in a text build).
+
+### `model` — the BPE heart
+
+| Subfield                                                  | Means                                                | Role                                                          |
+|-----------------------------------------------------------|------------------------------------------------------|---------------------------------------------------------------|
+| `type`                                                    | Almost always `"BPE"` here                           | Byte-Pair Encoding family                                     |
+| `vocab`                                                   | Map **token string → integer id**                    | Encode lookup and decode reverse map                          |
+| `merges`                                                  | Ordered list of pair merges (`"a b"` or `["a","b"]`) | Rank: earlier merge = higher priority when compressing pieces |
+| `byte_fallback`                                           | If unknown pieces fall back to byte tokens           | Affects robustness on odd characters                          |
+| `unk_token`                                               | String for unknown (if used)                         | Style-dependent                                               |
+| `dropout`, `fuse_unk`, `ignore_merges`, prefixes/suffixes | Training / advanced BPE options                      | Mostly unused at simple inference                             |
+
+**Sizes in the sample models**
+
+|                                | Qwen3-0.6B | Gemma3-270M |
+|--------------------------------|------------|-------------|
+| Vocab entries in `model.vocab` | ~151 643   | ~262 144    |
+| Merges                         | ~151 387   | ~514 906    |
+
+Note: `config.json`’s `vocab_size` can be slightly larger than the tokenizer vocab (padding / reserved ids). The
+**embedding matrix** follows `config.json`; the **tokenizer** follows `tokenizer.json`.
+
+### Two encoding styles this project supports
+
+#### A. GPT-2-style byte-level BPE (typical Qwen)
+
+Everyday story:
+
+1. Optionally normalize (e.g. Unicode NFC).
+2. Split text with a GPT-2-like regex into rough chunks.
+3. Map each byte to a printable stand-in character (byte encoder).
+4. Repeatedly merge adjacent pairs according to `merges` ranks until nothing cheaper remains.
+5. Look up each final piece in `vocab` → ids.
+
+Decode reverses the map and turns byte stand-ins back into UTF-8 text. The `decoder` is often `"ByteLevel"`.
+
+#### B. Metaspace / `▁` BPE (typical Gemma)
+
+Everyday story:
+
+1. Normalizer may **replace** spaces with a special mark `▁` (U+2581), or a Metaspace pre-tokenizer may prepend `▁`.
+2. Split into pieces; run BPE merges.
+3. Decode turns `▁` back into spaces / word boundaries.
+
+The loader chooses **METASPACE_BPE** vs **GPT2_BYTE_BPE** by inspecting pre-tokenizer/decoder nodes and vocab clues
+(Gemma chat markers, etc.).
+
+### How encode / decode use the file (organization)
+
+```text
+  your string
+      │
+      ▼
+  normalizer / pre-tokenizer rules (from JSON)
+      │
+      ▼
+  BPE merges (ordered list in model.merges)
+      │
+      ▼
+  vocab lookup → list of ids  ──►  model embeddings
+      │
+      ▼
+  … generation …
+      │
+      ▼
+  ids → vocab reverse → decoder rules → readable string
+```
+
+Chat templates (often from `tokenizer_config.json`) wrap roles **before** encode, so the model sees the markers it was
+trained with (`<|im_start|>`, `<start_of_turn>`, …).
+
+### What is *not* inside `tokenizer.json`
+
+- Learned attention / MLP weights (those are `.safetensors`).
+- Layer counts and head geometry (those are `config.json`).
+- Runtime KV notebooks.
+
+It is only the **bridge language ↔ numbers**.
+
+### A fair one-sentence summary
+
+> **`tokenizer.json` stores the vocabulary, the merge recipe, and the text-cleanup pipeline so strings become the
+> integer ids the embedding table understands — and back again.**
+
+---
+
+## 7. `*.safetensors` — the weight crates: format and contents
+
+The large files named `model.safetensors` or `model-00001-of-00003.safetensors` hold the **learned numbers**. This
+project reads them with `SafetensorsReader` and pours them into the empty shelves built from `config.json`.
+
+### Why this format exists
+
+Older workflows used opaque pickles. **Safetensors** is a simple, mmap-friendly layout:
+
+1. A small binary length prefix.
+2. A JSON **catalog** naming every tensor.
+3. A raw **payload** of little-endian numeric bytes.
+
+No hidden code execution — only data.
+
+### On-disk layout (byte by byte)
+
+```text
+  offset 0        8 bytes     header length N  (uint64 little-endian; this reader uses the low 32 bits)
+  offset 8        N bytes     UTF-8 JSON header (catalog)
+  offset 8+N      …           raw tensor bytes (payload)
+```
+
+The JSON header maps **tensor name → descriptor**. Optional key `"__metadata__"` holds free-form strings (e.g.
+`{"format":"pt"}`) and is skipped when loading weights.
+
+### Each tensor’s catalog entry
+
+Example from a real Qwen file:
+
+```json
+"model.layers.0.mlp.gate_proj.weight": {
+   "dtype": "BF16",
+   "shape": [
+      3072,
+      1024
+   ],
+   "data_offsets": [
+      628623360,
+      634914816
+   ]
+}
+```
+
+| Field               | Means                                                                                       |
+|---------------------|---------------------------------------------------------------------------------------------|
+| **name** (JSON key) | Hugging Face parameter path — must match what the model graph expects (or a packed rewrite) |
+| `dtype`             | Element type on disk: `F32`, `F16`, `BF16`, `F64` (this reader)                             |
+| `shape`             | List of dimensions, e.g. `[out, in]` for a weight matrix                                    |
+| `data_offsets`      | `[start, end)` **relative to the start of the payload** (not including the 8+N header)      |
+
+Byte length of one tensor ≈ `end - start`. For BF16, that is roughly `2 × product(shape)` bytes.
+
+### Dtypes: what the letters mean
+
+| `dtype` | On disk      | What this Java port does                   |
+|---------|--------------|--------------------------------------------|
+| `F32`   | 32-bit float | Copy into `float[]`                        |
+| `F16`   | 16-bit float | Expand each value to Java `float`          |
+| `BF16`  | bfloat16     | Expand to Java `float` (shift/expand bits) |
+| `F64`   | 64-bit float | Narrow to Java `float`                     |
+
+**Important:** after load, compute is **float32** in this teaching engine. A BF16 file still becomes a large F32
+resident image in RAM.
+
+**Samples:** both Qwen3-0.6B and Gemma3-270M ship **all** listed tensors as `BF16` in the inspected files.
+
+### What the contents *are* (names and roles)
+
+Tensors are not mysterious blobs; their **names** say which shelf they fill. Typical patterns:
+
+| Name pattern                                                                  | Content                                                                         |
+|-------------------------------------------------------------------------------|---------------------------------------------------------------------------------|
+| `model.embed_tokens.weight`                                                   | Embedding table `[vocab_size, hidden_size]` — one portrait per token id         |
+| `model.layers.i.input_layernorm.weight`                                       | RMSNorm scales for layer *i* (before attention)                                 |
+| `model.layers.i.self_attn.q_proj.weight`                                      | Query projection (HF may store Q/K/V separately)                                |
+| `model.layers.i.self_attn.k_proj.weight`                                      | Key projection                                                                  |
+| `model.layers.i.self_attn.v_proj.weight`                                      | Value projection                                                                |
+| `model.layers.i.self_attn.o_proj.weight`                                      | Output mix after attention                                                      |
+| `model.layers.i.self_attn.q_norm.weight` / `k_norm.weight`                    | Optional per-head Q/K norms                                                     |
+| `model.layers.i.post_attention_layernorm.weight`                              | Norm before MLP                                                                 |
+| `model.layers.i.mlp.gate_proj.weight` / `up_proj.weight` / `down_proj.weight` | Gated MLP pieces                                                                |
+| `model.layers.i.pre_feedforward_layernorm.weight` / `post_…`                  | Extra Gemma norms                                                               |
+| `model.norm.weight`                                                           | Final norm before scoring                                                       |
+| `lm_head.weight`                                                              | Vocab scorer `[vocab_size, hidden_size]` — may be absent if embeddings are tied |
+
+**Counts in samples:** Qwen3-0.6B ≈ **311** tensors in one file; Gemma3-270M ≈ **236** (tied head → often no separate
+`lm_head` tensor).
+
+### Shards (several files)
+
+Large models may split weights across `model-00001-of-0000N.safetensors`. The loader **lists all `*.safetensors`**,
+opens them in sorted order, and plans every matching tensor. Each file has its **own** header + payload; names must not
+collide across shards for the same parameter.
+
+### How this project uses a tensor at load time
+
+```text
+  1. Read header → know names, dtypes, shapes, byte ranges
+  2. Match name → WeightSlot on the live Java graph
+       (rewrite q_proj/k_proj/v_proj → fused qkv_proj, etc.)
+  3. mmap / read payload slice → convert to float[] Tensor
+  4. slot.load(tensor) → copy into the layer’s weight storage
+```
+
+Unknown names are skipped. Missing **required** names leave empty shelves and break inference.
+
+### What is *not* in `.safetensors`
+
+- Tokenizer strings and merges.
+- Chat templates.
+- KV cache / attention notebooks (created empty at runtime).
+- RoPE cos/sin tables (computed from `rope_theta` in config).
+
+Only **trained parameters** (and sometimes buffers stored as tensors).
+
+### Size intuition
+
+Rough payload size ≈ sum over tensors of `bytes_per_element × numel`.
+
+Example: one BF16 embedding `[151936, 1024]` is already hundreds of megabytes before layers. After expansion to F32 in
+RAM, expect roughly **~2×** that payload for resident weights alone — plus KV pages and activations.
+
+### A fair one-sentence summary
+
+> **A `.safetensors` file is a labeled warehouse of matrices and vectors: a JSON index up front, raw numeric bytes
+> afterward, poured into the model’s shelves at load time (and widened to float32 in this port).**
+
+---
+
+## 8. Attention: kinds of looking-back, and how they work
 
 Attention is the part people mean when they say the model “pays attention” to something you wrote earlier. It is not a
-spotlight of consciousness. It is a **rule for mixing the past into the present**.
+spotlight of consciousness. It is a **rule for mixing other places in the text into this place**.
 
-### A small story
+There is not only one kind. Models differ in *who may look at whom*, *how many separate glances run in parallel*, and
+*how thriftily they store the notebooks*. This chapter walks those kinds in plain language, then says which ones this
+project actually uses.
+
+### The shared recipe (every kind below starts here)
 
 Suppose the text so far is:
 
 > Mary gave Susan a book because she
 
-When the model is about to continue after *she*, a human reader wonders: Mary or Susan? The model does not “wonder” in
-our sense. At the position of *she*, it builds a **Query** (“what am I trying to link?”) and compares it with **Keys**
-attached to earlier words (*Mary*, *Susan*, *book*, …). Whichever earlier places match strongly contribute more of their
-**Values** into the new portrait for *she*.
+At *she*, the model builds three notes from that position’s portrait:
 
-If training taught useful patterns, *Mary* or *Susan* may light up appropriately. If not, the model may guess like a
-distracted reader.
+| Note      | Everyday question                                      |
+|-----------|--------------------------------------------------------|
+| **Query** | What am I looking for *from here*?                     |
+| **Key**   | How should *this* place advertise itself to searchers? |
+| **Value** | If someone chooses me, what content should they take?  |
 
-So attention is:
+It compares **this Query** with the **Keys** of allowed other places. Strong matches contribute more of their
+**Values**. The blend updates the portrait for *she*.
 
-> For this place in the text, **how much should each earlier place influence me?** Then take that blended influence as
-> part of my updated meaning.
+Library metaphor: Query = catalog search; Key = spine card; Value = the book you pull when the card matches.
 
-### The three notes (Query, Key, Value)
+So attention always means:
 
-For every token position, from the same portrait, the model builds three derived notes:
+> For this place, **how much should each allowed other place influence me?** Then take that blend as part of my
+> updated meaning.
 
-| Note      | Everyday question                                              |
-|-----------|----------------------------------------------------------------|
-| **Query** | What am I looking for *from here*?                             |
-| **Key**   | How should *this* place advertise itself to searchers?         |
-| **Value** | If someone chooses me, what content should they actually take? |
+The *kinds* of attention differ mainly in the word **allowed**.
 
-Comparison is between **this Query** and **other Keys**. The Values of the winners are mixed into the result.
+---
 
-A library metaphor: Query is your catalog search; Key is the card on the spine; Value is the book you pull off the shelf
-when the card matches.
+### Kind 1 — Self-attention (look within the same text)
 
-### Only the past (the causal rule)
+**Self-attention** means Queries, Keys, and Values all come from **the same passage** you are processing. The sentence
+attends to itself. That is what chat and completion models do for your prompt and reply.
 
-When writing forward, a position may look at itself and what came **before**, never at the future. That rule is what
-“causal” means here. Without it, the model could cheat by reading the answer it has not yet written.
+**Cross-attention** (mentioned only for contrast) would let one text attend to *another* text — e.g. a translator’s
+decoder looking at the source sentence. Classic encoder–decoder machines used that. **This project’s Qwen3 / Gemma3
+paths are self-attention only** — one stream, looking at itself.
+
+---
+
+### Kind 2 — Causal (masked) attention — “no peeking ahead”
+
+When the job is to **write the next word**, a position may look at itself and what came **before**, never at the future.
+That restriction is **causal** (or *causal masked*) attention.
 
 ```text
   positions:  1    2    3    4    5
@@ -279,109 +860,465 @@ When writing forward, a position may look at itself and what came **before**, ne
                          not at words that do not exist yet
 ```
 
-### Many glances at once (heads)
+Without this mask, the model could “cheat” by reading the answer it has not written. Bidirectional models (like the old
+BERT-style readers) allow looking left *and* right because their job was understanding a finished sentence, not
+continuing it. **Language models that generate text use causal self-attention.** This project does too.
 
-Instead of one comparison, the model runs **several attentions in parallel** (“heads”). One head may specialize in
-nearby grammar; another in names; another in punctuation patterns — not because someone labeled them that way, but
-because training pushed different heads toward different habits.
+---
 
-Afterwards the glances are **merged** back into one portrait.
+### Kind 3 — Multi-head attention — several glances at once
 
-Some models use a thrifty variant: many Queries share fewer Key/Value notebooks (grouped-query attention). Same idea,
-less duplicate memory.
+Instead of one comparison, the model runs **several attentions in parallel**. Each is a **head**.
 
-### Order matters (a twist called RoPE)
+Think of several readers of the same paragraph: one watches grammar, one watches names, one watches tone. Nobody assigns
+those jobs by hand; training pushes heads toward different habits. Afterwards the glances are **merged** into one
+portrait.
 
-Without position, “dog bites man” and “man bites dog” could look too similar. Before comparing Query and Key, the model
-applies a **position-dependent twist** (RoPE) so that *where* something stood in the sentence affects the match.
-Sequence is not a footnote; it is baked into the comparison.
+```text
+  same passage
+      │
+      ├── head 1  ──► glance A
+      ├── head 2  ──► glance B
+      ├── head 3  ──► glance C
+      └── …
+      │
+      ▼
+   merge → updated portrait
+```
+
+**Full multi-head attention (MHA)** gives every head its **own** Key and Value notebooks. Rich, but memory-heavy when
+texts grow long.
+
+---
+
+### Kind 4 — Sharing notebooks: MQA and GQA (thrift)
+
+Keys and Values dominate memory during long chats (the “notebooks” of chapter 12). Designers invented thriftier layouts:
+
+| Name                    | Idea                                          | Everyday picture                       |
+|-------------------------|-----------------------------------------------|----------------------------------------|
+| **MHA** (multi-head)    | Each head has its own Keys and Values         | Every reader brings a private notebook |
+| **MQA** (multi-query)   | All Query heads share **one** Key/Value pair  | Many searchers, one shared catalog     |
+| **GQA** (grouped-query) | Several Query heads share one Key/Value group | Small reading groups share a notebook  |
+
+```text
+  MHA:   Q Q Q Q     each with its own K V
+         K K K K
+         V V V V
+
+  GQA:   Q Q Q Q     two Queries share each K V
+         K   K
+         V   V
+
+  MQA:   Q Q Q Q     all Queries share one K V
+         K
+         V
+```
+
+**This project uses GQA** whenever the model config says there are fewer key/value heads than query heads (common in
+Qwen3 and Gemma3). Same looking-back idea; fewer duplicate notebooks; faster long answers on limited machines.
+
+---
+
+### Kind 5 — Global vs sliding-window (local) attention
+
+Even with the causal rule, a position might still look back over a **very long** past — the whole prompt. That is
+**global causal** attention (within the past).
+
+**Sliding-window** (local) attention narrows the view: each position may look back only about *W* tokens (a window), not
+the entire history.
+
+```text
+  Global causal (past only):
+
+  … 1 2 3 4 5 6 7 8 9 …
+                  ↑ position 9 may see 1…9
+
+  Sliding window of width 4:
+
+  … 1 2 3 4 5 6 7 8 9 …
+                  ↑ position 9 may see only 6…9
+```
+
+Why bother? Long global attention is expensive (every new word glances at everything). Local windows are cheaper and
+still capture nearby grammar and recent facts. Distant facts must be carried forward in the portraits from earlier
+layers — or refreshed by occasional **global** layers.
+
+**Gemma3 in this project** often **mixes** layer types: some reading rooms use a sliding window; others stay global. The
+blueprint (`layer_types`, `sliding_window`) decides per room. **Qwen3** here is typically global causal GQA in every
+room.
+
+Local layers may also use a different RoPE “twist speed” than global ones — a detail of Gemma’s recipe so near and far
+looks do not fight each other.
+
+---
+
+### Kind 6 — Prefill attention vs decode attention (same rule, different workload)
+
+The *rule* (causal, heads, GQA, window) stays the same; the *shape of the work* changes:
+
+| Phase       | What attention does                                                               | Everyday picture                                     |
+|-------------|-----------------------------------------------------------------------------------|------------------------------------------------------|
+| **Prefill** | Many positions at once; each looks back over the prompt (and fills notebooks)     | Read the whole letter carefully once                 |
+| **Decode**  | Usually **one** new position; it looks over past Keys/Values already in notebooks | Write the next sentence using notes you already took |
+
+So “types” of attention in engineering talk sometimes means this **phase**, not a different philosophy. This engine
+implements both; chapter 12 explains why notebooks make decode cheaper.
+
+---
+
+### Order still matters (RoPE) for all these kinds
+
+Before Query and Key are compared, a **position-dependent twist** (RoPE) is applied so order counts: “dog bites man” is
+not treated like “man bites dog.” Global and local Gemma layers may use different twist bases; the idea is the same —
+sequence is baked into the match.
+
+---
+
+### Map: what this Java project actually runs
+
+| Feature                                   | In this project?                                  |
+|-------------------------------------------|---------------------------------------------------|
+| Self-attention                            | Yes                                               |
+| Causal (no future)                        | Yes                                               |
+| Multi-head Queries                        | Yes                                               |
+| GQA (shared KV groups)                    | Yes, when the model config says so                |
+| MQA (extreme sharing)                     | Only if a model’s config collapses to one KV head |
+| Sliding-window / local layers             | Yes, for Gemma layers marked as such              |
+| Global layers                             | Yes (Qwen; some Gemma layers)                     |
+| Cross-attention to a second text          | No                                                |
+| Bidirectional BERT-style                  | No                                                |
+| Fancy GPU kernels (flash-attention, etc.) | No — plain educational CPU math                   |
+
+---
 
 ### Attention is not yet “the answer”
 
-Attention updates **inner portraits** of the current text. It does not directly print words. Words come later, when the
-final portrait is scored against the vocabulary and one token is drawn. Attention is the **inward rereading**; speaking
-aloud is a later stage.
+Attention updates **inner portraits**. It does not print words. Words come later, when the final portrait is scored
+against the vocabulary and one token is drawn. Attention is **inward rereading**; speaking aloud is a later stage.
 
 ### After attention: the private rewrite
 
-Each reading room also contains a large feed-forward block (MLP). Rough picture:
+Each reading room also contains a large feed-forward block (MLP):
 
-1. Attention — *consult the current passage.*
-2. MLP — *rewrite this position using trained habits that are not a simple glance at neighbors.*
+1. Attention — *consult allowed places in the current passage.*
+2. MLP — *rewrite this position using trained habits beyond a simple glance.*
 
-Both happen in **every** room, stacked many times. Early rooms tend to handle local pattern; later rooms work with
-richer mixtures — again as a tendency, not a guaranteed map of “where facts live.”
+Both happen in **every** room, stacked many times.
 
+### One sentence to keep
+
+> All generating models here use **causal self-attention**; they usually run it as **many heads with shared KV
+> notebooks (GQA)**; Gemma may **alternate local windows and global views**; the same rule is heavy at **prefill** and
+> lighter at **decode** thanks to notebooks.
 ---
 
-## 6. What “thinking” means inside a model
+## 9. The thinking process: how it is organized and how it works with the model
 
-People say models “think.” That word covers at least **three different things**. Keeping them apart prevents
-disappointment and mysticism.
+People say models “think.” That single English word hides several different mechanisms. This chapter separates them,
+shows how they are **organized in time**, and explains how they **use** the loaded model (weights, attention,
+notebooks) — including what this Java chat path does with visible “thinking” text.
 
-### Sense A — Silent inner work (always on)
+### First distinction: three senses of “thinking”
 
-Every time the model produces even one token, the text’s portraits walk through **all** the reading rooms: many rounds
-of attention + rewrite. That whole journey *is* the computation. There is no separate little person inside.
+| Sense | Name in this book                    | What it really is                                                                              | Visible as text?        |
+|-------|--------------------------------------|------------------------------------------------------------------------------------------------|-------------------------|
+| **A** | Silent inner work                    | The full stack of attention + rewrites for every next-token step                               | No                      |
+| **B** | Written reasoning (chain of thought) | Extra tokens that *narrate* steps, then become part of the past                                | Yes, in the reply       |
+| **C** | Tagged scratchpad                    | Sense B wrapped in markers like `<think>…</think>` so software can split “notes” from “answer” | Yes, if the UI shows it |
 
-Call this **inner work**. It is mandatory, invisible as text, and happens for “Hi” as much as for a proof in geometry.
-You do not see it; you only see the tokens that come out afterward.
+Sense A **always** runs. Senses B and C are optional styles of *output*. They are not a second engine. They are more
+language produced by the same engine — language that later attention can reread.
 
 ```text
-  your prompt (as tokens)
-        │
-        │  inner work: room 1 → room 2 → … → room N
-        │  (attention looks back; MLP rewrites; again and again)
-        ▼
-  scores for every possible next scrap
-        │
-        ▼
-  pick one scrap → show it (or keep it for the next round)
+  ALWAYS (Sense A)                    SOMETIMES (B / C)
+  ────────────────                    ─────────────────
+  numbers walk the layers             model also emits words
+  → scores → pick one token           that look like “reasoning”
+                                      those words join the past
+                                      → help later Sense A steps
 ```
-
-### Sense B — Thinking *as writing* (chain of thought)
-
-Sometimes the model is trained or prompted to **write intermediate reasoning into the reply** (“First I note that…
-Therefore…”). That is not a second brain. It is still next-token guessing — but the guessed tokens are *about
-reasoning*, and those tokens then sit in the passage so later attention can look back at them.
-
-In other words: **writing a draft of an argument can help the same machine continue better**, because attention can
-reread that draft. The “thinking” became part of the text on the desk.
-
-This can help on multi-step questions. It can also produce fluent nonsense that *looks* careful. The form of reasoning
-is easier to imitate than the discipline of truth.
-
-### Sense C — Tagged scratchpad in chat (what this project may show)
-
-Some chat setups ask the assistant to put private notes between markers such as `<think> … </think>` and then give the
-user-facing answer. This project’s chat helper can **split** those: show or hide the scratchpad, keep the clean answer.
-
-Again: the scratchpad is **more generated text**, not a window into Sense A. Sense A already ran to create each token of
-the scratchpad.
-
-| Sense                | What it is                              | Can you read it?         |
-|----------------------|-----------------------------------------|--------------------------|
-| A. Inner work        | Stacked attention + rewrites on numbers | No — only effects        |
-| B. Written reasoning | Ordinary tokens that narrate steps      | Yes — it’s in the reply  |
-| C. Tagged scratchpad | Specially marked written reasoning      | Yes — if the UI shows it |
-
-### What thinking is *not*
-
-- Not a search of the internet (unless some other tool is added — this project does not).
-- Not a guarantee of truth or self-knowledge.
-- Not “the model paused to reflect” as a human does; it predicted tokens, including tokens that *sound like* reflection.
-- Not stored as a diary inside the weight shelves; shelves are fixed at load time.
-
-### A fair humanities summary
-
-> **Loading** gives you a fixed library of trained habits.  
-> **Attention** is how each new moment of that library rereads the current page.  
-> **Thinking**, in the everyday chat sense, is either invisible arithmetic (Sense A) or more language about reasoning
-> (Senses B and C) that attention can later use — never a ghost in the machine.
 
 ---
 
-## 7. The math, said gently
+### Sense A in detail — silent inner work, organized as a pipeline
+
+There is no separate “thinking module” beside the model. **Using the model once to propose the next token** *is* the
+thinking step. Organization is a fixed pipeline:
+
+#### Step A1 — Text is already numbers
+
+The prompt (and any reply so far) exists as token ids. Each id has a portrait from the embedding shelf loaded in chapter
+4.
+
+#### Step A2 — Prefill or decode chooses the workload
+
+- **Prefill:** process the whole current prompt; fill Key/Value notebooks; produce the first new token.
+- **Decode:** process mostly the newest token; reread notebooks; produce the next token.
+
+Every later unit of Sense A is another decode step unless a new long prompt arrives.
+
+#### Step A3 — Walk every reading room (layer), in order
+
+For the token positions being computed, portraits enter **layer 1**, then **layer 2**, … up to **layer N** (N comes from
+the blueprint — often dozens of rooms).
+
+Inside **each** room, in order:
+
+1. **Normalize** the stream (RMSNorm — volume control).
+2. **Build Query / Key / Value** from the loaded projection shelves.
+3. **Twist by position** (RoPE) so order matters.
+4. **Attend** with the rules from chapter 8 (causal; GQA; maybe sliding window).
+   - Write new Keys/Values into notebooks for positions being computed.
+   - Mix past Values into the present according to match strengths.
+5. **Mix heads** back to one stream; **add** onto the residual draft.
+6. **Normalize** again.
+7. **MLP rewrite** using the large feed-forward shelves; **add** onto the residual again.
+
+Then the portrait enters the next room and repeats.
+
+```text
+  token portraits
+       │
+       ▼
+  ┌─ layer i ─────────────────────────────┐
+  │  norm → Q,K,V → RoPE → attention      │
+  │       → + residual                    │
+  │  norm → MLP → + residual              │
+  └───────────────┬───────────────────────┘
+                  ▼
+             layer i+1 …
+                  │
+                  ▼
+             final norm
+                  │
+                  ▼
+             score all vocabulary scraps (LM head)
+                  │
+                  ▼
+             sample one next token
+```
+
+That whole walk for **one** next token is one unit of Sense A. A ten-token answer is roughly ten such units after
+prefill (plus the prefill itself).
+
+#### Step A4 — Verdict and choice
+
+After the last room, the final portrait is compared to every vocabulary scrap (the LM-head shelf). Sampling (chapter 11)
+draws one token. That token is appended. Organization loops to A2/A3 until stop.
+
+#### What Sense A can and cannot do
+
+- It can **recombine** patterns stored in the fixed weights with the current page (via attention).
+- It cannot **fetch** fresh world facts from outside this process.
+- It does not “know that it is thinking”; it only transforms numbers.
+- Depth of “thought” in Sense A means **more layers and more tokens of context**, not a wiser little person inside.
+
+---
+
+### How Sense A works *with* the loaded model
+
+The loaded shelves are the **only** long-term habits. Organization of use:
+
+| Loaded piece                     | Role in one Sense A step                                              |
+|----------------------------------|-----------------------------------------------------------------------|
+| Embedding table                  | Start portraits for token ids                                         |
+| Per-layer Q/K/V and output mixes | Build and merge attention                                             |
+| Per-layer MLP weights            | Private rewrite after attention                                       |
+| Norm scales                      | Keep signals usable                                                   |
+| Final LM head (or tied embed)    | Turn last portrait into next-token scores                             |
+| Tokenizer / template             | Not inside Sense A math — they only prepare ids and later decode text |
+
+Runtime notebooks (KV cache) are **not** loaded knowledge; they are the short-term memory of *this* page so Sense A need
+not rebuild every past Key/Value each time.
+
+So: **weights = long-term habits; notebooks = short-term notes for this conversation; Sense A = the procedure that
+combines them every step.**
+
+---
+
+### Sense B — thinking as writing (chain of thought)
+
+Sometimes the model is trained or prompted to emit tokens like:
+
+> First, the user asks for a sum. Two plus two is four. So I should answer “4”.
+
+That narration is **still Sense A**, token by token. The difference is *content*: the tokens describe reasoning.
+
+#### Why writing can help later steps
+
+Once those tokens exist on the page, later attention (still Sense A) may look back at them. The model has given itself a
+**scratch manuscript**. Multi-step questions often benefit because intermediate results become ordinary text the causal
+glance can reuse.
+
+```text
+  time →
+
+  Sense A produces: “First,”
+  Sense A produces: “ add”
+  Sense A produces: “ 2”
+  …
+  (those words are now in the past)
+  Sense A at the end can attend to “2” and “2” and “add”
+  Sense A produces: “4”
+```
+
+#### How Sense B is organized (and how it is not)
+
+- There is **no** internal checklist engine unless the *text itself* lists checks.
+- Style comes from **training** and from **prompt / system directions**.
+- Longer Sense B uses more tokens, more notebook pages, more time — and can wander.
+- Fluency of reasoning text ≠ truth. The model may imitate the *genre* of explanation while inventing steps.
+
+---
+
+### Sense C — tagged scratchpad (how this project organizes visible thinking)
+
+Sense C is Sense B with **stage directions** so software can separate “notes for the assistant” from “lines for the
+human.”
+
+#### The format this chat path expects (Qwen-style chat)
+
+For non-Gemma chat, the default system stage directions ask roughly:
+
+1. Open with `<think>` … `</think>` for short private notes (intent, useful history, plan).
+2. **Close** the tag before the user-visible answer.
+3. Do not hide the only real answer inside the think block.
+
+Example shape of one assistant turn:
+
+```text
+<think>
+User wants a sum.
+History has no conflicting numbers.
+Plan: answer with 4.
+</think>
+4
+```
+
+#### How the program organizes Sense C around the model
+
+```text
+  1. Build chat history + system directions
+  2. Apply chat template → one big prompt string
+       (Gemma: thinking tags not relied on)
+       (Qwen-style: model invited to produce <think>… when enableThinking)
+  3. Prefill + decode (pure Sense A) until the turn ends
+  4. Decode tokens → raw assistant text
+  5. AssistantParts.parse splits raw text into:
+        thinking  = inside <think>…</think>
+        answer    = after the closed tag
+        thinkOpen = tag never closed (incomplete)
+  6. ChatSession may:
+        • stream thinking to one output, answer to another
+        • salvage an answer from thinking if the visible part is empty
+        • finish the turn for history / UI
+```
+
+Important: **the model does not call a Think () function.** It emits the characters `<`, `t`, `h`, … as ordinary tokens
+if sampling chose them. Parsing happens **after** generation (and incrementally while streaming).
+
+#### Gemma vs Qwen organization in this project
+
+|                                         | Qwen-style chat     | Gemma chat here                                |
+|-----------------------------------------|---------------------|------------------------------------------------|
+| System directions about `<think>`       | Yes (default)       | No (empty system; avoids latching into filler) |
+| `enableThinking` when building template | On                  | Off                                            |
+| Reliable tagged scratchpad              | Encouraged          | Not relied on                                  |
+| Sense A (layers)                        | Same kind of engine | Same kind of engine                            |
+
+So “thinking UI” is a **chat convention** on top of the same model machinery — stronger on Qwen-style templates here.
+
+#### Streaming organization
+
+While tokens arrive, the printer updates:
+
+- text still inside an open `<think>` → thinking channel;
+- after `</think>` → answer channel;
+- if the tag never closes, the session may recover a visible answer from the notes (`salvageFromThinking`).
+
+That is bookkeeping for humans. The model only ever produced one token stream.
+
+---
+
+### One turn, all senses together (organization in time)
+
+Imagine the user asks: “What is 2+2?”
+
+1. **Load** already happened earlier (fixed shelves).
+2. **Template** wraps roles; system may invite Sense C.
+3. **Prefill (Sense A)** reads the prompt through all layers; notebooks fill.
+4. **Decode loop (Sense A):**
+   - maybe emits `<think>` and note tokens (Sense C text appearing);
+   - notebooks now include those note tokens; later steps can attend to them (B/C helping A);
+   - emits `</think>` then `4`.
+5. **Parse** splits notes vs answer for the UI.
+6. Next user message rebuilds a templated prompt; Sense A runs again on that new page.
+
+```text
+  [system + history + user]  --prefill-->  notebooks filled
+           │
+           ▼
+     decode token …  (Sense A)  → maybe “<think>…” notes
+     decode token …  (Sense A)  → “</think>”
+     decode token …  (Sense A)  → “4”
+           │
+           ▼
+     parse → ChatReply(thinking, answer)
+```
+
+---
+
+### How “thinking” is organized across multi-turn chat
+
+- **History** carries prior turns as text in the next prompt.
+- Each new turn **rebuilds** a templated prompt and runs Sense A again (notebooks for that generate fill for that
+  request).
+- Prefix caching may reuse identical early pages when openings match — an optimization, not a persistent mind object.
+- There is **no** separate long-term thought log inside the weight shelves.
+- Written thinking from an earlier turn helps later turns **only if** that text is still present in the prompt the model
+  sees (and not trimmed away by length limits).
+
+---
+
+### Thinking and attention — how they cooperate
+
+| Mechanism        | Relationship to thinking                                                    |
+|------------------|-----------------------------------------------------------------------------|
+| Causal attention | Lets each new token (including note tokens) look only at the past           |
+| GQA / windows    | Same thinking pipeline; different cost and reach of the glance              |
+| Notebooks (KV)   | Remember Keys/Values of prompt **and** of written notes already emitted     |
+| MLP              | Rewrites portraits with trained habits during every Sense A step            |
+| Sampling         | Chooses whether the next visible scrap is a note word, a tag, or the answer |
+
+Written thinking helps **because** attention can reread it — not because a second thinker appears.
+
+---
+
+### What thinking is *not* (keep these sharp)
+
+- Not a search of the internet (this project has no tools).
+- Not guaranteed truth or self-knowledge.
+- Not a human pause for reflection — only repeated next-token procedures.
+- Not a diary written into the model files at load time.
+- Not something you can open inside a layer to read English propositions; layers hold numbers.
+- Sense C tags are not magic: if the model omits them, there is nothing to parse.
+
+---
+
+### A fair humanities summary of this chapter
+
+> **Silent thinking (A)** is the organized walk through every loaded layer — attention plus rewrite — once per next
+> token, using fixed weights and short-term notebooks.
+> **Written thinking (B/C)** is more language produced by that same walk; once written, it becomes part of the page
+> that later attention can use.
+> This project’s chat layer **invites and parses** tagged scratchpads for Qwen-style dialogs; Gemma relies on silent
+> work without that ceremony.
+> Nowhere is there a ghost that thinks *beside* the model — only the model, used in a loop.
+
+---
+
+## 10. The math, said gently
 
 You can skip this chapter and still understand the story. It exists for readers who want the *shape* of the arithmetic
 without a textbook.
@@ -431,7 +1368,7 @@ continuation well enough to be useful — and misleading.
 
 ---
 
-## 8. Choosing a word: not always the most obvious one
+## 11. Choosing a word: not always the most obvious one
 
 After scoring the vocabulary, the program must **pick** one token.
 
@@ -451,7 +1388,7 @@ tokens mean “the assistant considers this reply finished.”
 
 ---
 
-## 9. Why the program keeps a notebook of the past
+## 12. Why the program keeps a notebook of the past
 
 Attention needs the Key and Value notes for **everything already seen**. Recomputing them from scratch for the whole
 prompt on every single new word would be like rereading an entire novel each time you write the next sentence.
@@ -477,7 +1414,7 @@ That is why the first pause can feel longer than each following word: the openin
 
 ---
 
-## 10. Serving several conversations without chaos
+## 13. Serving several conversations without chaos
 
 A naïve program would finish Alice’s entire answer before Bob gets a turn. This engine instead keeps a **waiting room**
 and a **work floor**:
@@ -492,7 +1429,7 @@ barely notice it; it matters when many requests share one model.
 
 ---
 
-## 11. Chat versus finishing a sentence
+## 14. Chat versus finishing a sentence
 
 Two different manners of use:
 
@@ -514,7 +1451,7 @@ Sense C from the thinking chapter: marked scratchpad versus fair copy.
 
 ---
 
-## 12. A full walk-through: “What is 2+2?”
+## 15. A full walk-through: “What is 2+2?”
 
 ### You ask
 
@@ -533,12 +1470,12 @@ A few lines of Java (or the example app) open the model folder and say, in effec
 The chat template wraps your question with “user” / “assistant” markers. The tokenizer turns that into a list of token
 numbers.
 
-### Prefill (inner work on the whole prompt)
+### Prefill (Sense A on the whole prompt)
 
 Portraits walk through every reading room. In each room, attention looks back through the prompt; the MLP rewrites. Keys
-and Values are written into the notebooks. At the end, vocabulary scores appear; one first answer token is drawn.
+and Values are written into the notebooks. At the end, vocabulary scores appear; one first assistant token is drawn.
 
-### Decode (inner work, one scrap at a time)
+### Decode (Sense A, one scrap at a time — maybe including “thinking” text)
 
 Each further step:
 
@@ -548,67 +1485,84 @@ Each further step:
 4. draw one more token;
 5. stop on an end marker or a length limit.
 
-If the reply contains a tagged scratchpad, that text was also produced this way — token by token — not retrieved from a
-hidden diary.
+On Qwen-style chat, some of those tokens may be a tagged scratchpad (`<think>…</think>`) before the visible answer —
+still ordinary generation (chapter 9, Senses B/C), then split by the chat helper for display.
 
 ### Back to language
 
-The answer tokens are looked up in the dictionary and shown to you as text: `4` or `The answer is 4.`
+The answer tokens are looked up in the dictionary and shown to you as text: `4` or `The answer is 4.` Thinking notes, if
+any, may appear on a separate channel.
 
 Nothing mystical happened — unpacking a crate, then a long chain of rereads, rewrites, and draws among likely scraps of
 text. The *impression* of understanding is an effect of that chain, shaped by training you do not see.
 
 ---
 
-## 13. If you later open the code
+## 16. If you later open the code
 
 You still do not need to. But if curiosity leads you there, these are the “rooms” of the program, named for humans:
 
-| Human idea                   | Place in the project                    |
-|------------------------------|-----------------------------------------|
-| Front door                   | `LLM` — open a model, chat, or complete |
-| Conversation manners         | `chat.ChatSession`                      |
-| Dictionary                   | `tokenizer.Tokenizer`                   |
-| Blueprint                    | `Config` / Hugging Face config fields   |
-| Filling the shelves          | `ModelLoader`, `SafetensorsReader`      |
-| Kitchen tick (schedule work) | `Scheduler`, `Sequence`, `BlockManager` |
-| Run the reading rooms        | `ModelRunner` + `Qwen3…` / `Gemma3…`    |
-| The glance backward          | `Attention`                             |
-| Draw from the hat            | `Sampler`                               |
-| Arithmetic worksheets        | `tensor.Ops`, `Tensor`                  |
+| Human idea                     | Place in the project                       |
+|--------------------------------|--------------------------------------------|
+| Front door                     | `LLM` — open a model, chat, or complete    |
+| Conversation manners           | `chat.ChatSession`                         |
+| Dictionary (`tokenizer.json`)  | `tokenizer.Tokenizer` (see ch. 6)          |
+| Blueprint (`config.json`)      | `Config.HfConfig` field guide in ch. 5     |
+| Weight crates (`.safetensors`) | `ModelLoader`, `SafetensorsReader` (ch. 7) |
+| Kitchen tick (schedule work)   | `Scheduler`, `Sequence`, `BlockManager`    |
+| Run the reading rooms          | `ModelRunner` + `Qwen3…` / `Gemma3…`       |
+| The glance backward            | `Attention`                                |
+| Draw from the hat              | `Sampler`                                  |
+| Arithmetic worksheets          | `tensor.Ops`, `Tensor`                     |
 
 One `LLM` instance is like **one desk**: do not ask it to write two full answers at once from different threads. You may
 ask it to **stop** from another thread if a reply is taking too long.
 
 ---
 
-## 14. Word list
+## 17. Word list
 
-| Term you may meet   | Plain meaning                                                                |
-|---------------------|------------------------------------------------------------------------------|
-| Model               | The finished “book” of learned numbers plus its dictionary and blueprint     |
-| Loading             | Reading blueprint + dictionary + weights into memory and wiring them         |
-| Inference           | Using the book to produce text (not training it)                             |
-| Token               | A scrap of text with a number in the dictionary                              |
-| Vocabulary          | All scraps the model is allowed to emit                                      |
-| Logits              | Raw preference scores for each vocabulary scrap, before turning into chances |
-| Softmax             | Turn raw scores into portions that add to 100%                               |
-| Attention           | Weighted reread of the text so far (Query matches Keys, mixes Values)        |
-| Query / Key / Value | Search / label / content notes used by attention                             |
-| Inner work          | Invisible stack of attention + rewrites for each step                        |
-| Chain of thought    | Reasoning written as ordinary tokens in the reply                            |
-| KV cache / notebook | Stored Keys and Values, reused while continuing                              |
-| Prefill             | First heavy read of the prompt                                               |
-| Decode              | Step-by-step production of later tokens                                      |
-| Sampling            | Drawing the next token according to chances and filters                      |
-| Temperature         | How strongly to favor the leading candidate                                  |
-| Context length      | How much past text fits on the desk at once                                  |
-| Weights             | The learned numbers on the shelves                                           |
-| Causal              | May only look at the past, not the future                                    |
+| Term you may meet     | Plain meaning                                                                |
+|-----------------------|------------------------------------------------------------------------------|
+| Model                 | The finished “book” of learned numbers plus its dictionary and blueprint     |
+| Loading               | Reading blueprint + dictionary + weights into memory and wiring them         |
+| `config.json`         | Blueprint of sizes and recipe (not the learned weights)                      |
+| `tokenizer.json`      | Vocab, BPE merges, and text pipeline (string ↔ token ids)                    |
+| `.safetensors`        | Catalogued raw weight tensors (matrices/vectors) on disk                     |
+| BPE                   | Byte-Pair Encoding: merge frequent pieces using an ordered merge list        |
+| `data_offsets`        | Byte range of one tensor inside a safetensors payload                        |
+| `hidden_size`         | Width of each token’s numerical portrait stream                              |
+| `num_hidden_layers`   | How many stacked attention+MLP rooms                                         |
+| GQA heads fields      | `num_attention_heads` vs `num_key_value_heads` (sharing of KV notebooks)     |
+| Inference             | Using the book to produce text (not training it)                             |
+| Token                 | A scrap of text with a number in the dictionary                              |
+| Vocabulary            | All scraps the model is allowed to emit                                      |
+| Logits                | Raw preference scores for each vocabulary scrap, before turning into chances |
+| Softmax               | Turn raw scores into portions that add to 100%                               |
+| Attention             | Weighted reread of allowed places (Query matches Keys, mixes Values)         |
+| Self-attention        | Looking within the same text (not at a second document)                      |
+| Causal                | May only look at the past and present, not the future                        |
+| Multi-head (MHA)      | Several parallel glances; each may have its own KV notebooks                 |
+| GQA                   | Grouped-query: several Query heads share one Key/Value group                 |
+| MQA                   | Multi-query: all Query heads share a single Key/Value pair                   |
+| Sliding window        | May look back only a fixed recent stretch, not the whole past                |
+| Global attention      | May look back over the whole allowed past                                    |
+| Query / Key / Value   | Search / label / content notes used by attention                             |
+| Inner work (Sense A)  | Invisible stack of attention + rewrites for each next token                  |
+| Chain of thought (B)  | Reasoning written as ordinary tokens in the reply                            |
+| Tagged scratchpad (C) | Written reasoning inside `<think>…</think>` for UI splitting                 |
+| ChatReply             | Parsed pair of thinking text + visible answer after a turn                   |
+| KV cache / notebook   | Stored Keys and Values, reused while continuing                              |
+| Prefill               | First heavy read of the prompt                                               |
+| Decode                | Step-by-step production of later tokens                                      |
+| Sampling              | Drawing the next token according to chances and filters                      |
+| Temperature           | How strongly to favor the leading candidate                                  |
+| Context length        | How much past text fits on the desk at once                                  |
+| Weights               | The learned numbers on the shelves                                           |
 
 ---
 
-## 15. Honest limits
+## 18. Honest limits
 
 This project is a **teaching instrument**, not a production cloud service.
 
@@ -620,8 +1574,9 @@ This project is a **teaching instrument**, not a production cloud service.
 
 If this book did its job, you can now explain to another non-specialist:
 
-> Loading unpacks a fixed library of trained numbers. Attention is how each moment rereads the current page. What we
-> call thinking is either that silent stacked work, or more language about reasoning that the same attention can later
-> use. Then the program repeatedly draws the next scrap of text until the reply ends.
+> Loading unpacks a fixed library of trained numbers. Attention is how each moment rereads allowed parts of the current
+> page — causally, often with shared notebooks (GQA), sometimes through a sliding window. Thinking is organized as a
+> loop: silent layer-walks for every next token, and optionally written notes (even tagged ones) that later attention
+> can reuse. Then the program repeatedly draws the next scrap of text until the reply ends.
 
 That is enough to understand what this Java program is doing — and what it is not.
