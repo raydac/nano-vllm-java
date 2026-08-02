@@ -1668,19 +1668,78 @@ Sense C from the thinking chapter: marked scratchpad versus fair copy.
 
 ## 15. A full walk-through: “What is 2+2?”
 
-This chapter retells one question as a story, with **attention** and **thinking** named at each stage (see chapters 8
-and 9 for the full theory).
+This chapter retells one question as a story **and** as a call chain through this library. For each stage you get:
+
+1. what happens in plain language;
+2. **where** it lives as `Class#method` (and how those methods call each other).
+
+Notation: `ChatSession#send` means method `send` on class `ChatSession`. Package root is
+`com.igormaznitsa.nanollvm`. See chapter 16 for samples and the full file tree.
 
 **Further reading (optional depth):** Transformer + attention ([Vaswani et al.](https://arxiv.org/abs/1706.03762)),
 chain-of-thought prompting ([Wei et al.](https://arxiv.org/abs/2201.11903)), paged KV ideas
 ([Kwon et al.](https://arxiv.org/abs/2309.06180)).
 
+### Master call chain (keep this picture)
+
+When you write something like `llm.chat(256).send("What is 2+2?")`, the library walks this path once for the **open**,
+then this path for the **turn**:
+
+```text
+OPEN (once)
+  LLM#builder → LLM.Builder#build → LLM.<init>
+      → ModelRunner.<init>
+          → CausalLMFactory#detect / #create
+          → ModelLoader#loadModel          (+ SafetensorsReader per tensor)
+          → ModelRunner#allocateKvCache    (empty notebooks on each Attention)
+      → Tokenizer#fromPretrained
+      → Scheduler.<init>                   (owns BlockManager)
+      → LLM#warmup                         (optional tiny generate)
+
+ONE TURN
+  LLM#chat(maxTokens) → ChatSession#open → ChatSession#send("What is 2+2?")
+      → ChatMessage#user / history.add
+      → ChatMessages#truncateHistory
+      → ChatSession#generateTurn
+          → Tokenizer#applyChatTemplate
+          → LLM#generate
+              → LLM#addRequest → Tokenizer#encode → Scheduler#add (new Sequence)
+              → loop while !LLM#isFinished:
+                    LLM#step
+                      → Scheduler#schedule          (BlockManager#allocate / #mayAppend)
+                      → ModelRunner#run             (via ModelRunner#call("run", …))
+                          → preparePrefill | prepareDecode
+                          → CausalLM#forward        (Qwen3ForCausalLM or Gemma3ForCausalLM)
+                          → CausalLM#computeLogits
+                          → Sampler#forward
+                      → Scheduler#postprocess       (append token / finish on stop)
+                    onToken → AssistantParts#parse(Tokenizer#decode(partial))
+          → AssistantParts#parse(Tokenizer#decode(final ids))
+      → ChatSession#finishTurn
+          → maybe AssistantParts#salvageFromThinking
+          → ChatMessage#assistant(answer only) into history
+```
+
+That is the whole “2+2” turn in library terms. The subsections below zoom each box.
+
 ### You ask
 
 A few lines of Java (or the example app) open the model folder and say, in effect: *chat with me; keep answers short.*
 
-**In the code:** `LLM.builder(…).build()` then `llm.chat(maxTokens).send(…)` — or `Example.main` for the CLI (chapter
-16, Sample A).
+```java
+try(LLM llm = LLM.builder(modelDir).maxModelLen(2048).build()){
+ChatReply reply = llm.chat(256).send("What is 2+2?");
+// reply.thinking() / reply.answer()
+}
+```
+
+| Step            | Call                                 | Role                                              |
+|-----------------|--------------------------------------|---------------------------------------------------|
+| Start builder   | `LLM#builder`                        | Fluent open of a model directory                  |
+| Finish open     | `LLM.Builder#build` → `LLM.<init>`   | Load + wire engine                                |
+| Start session   | `LLM#chat(int)` → `ChatSession#open` | History + `SamplingDefaults#forTokenizer`         |
+| Ask             | `ChatSession#send`                   | One user turn through template → generate → parse |
+| CLI alternative | `Example#main`                       | Same ideas with `streamTo` on stderr/stdout       |
 
 ### Loading (once)
 
@@ -1693,8 +1752,15 @@ A few lines of Java (or the example app) open the model folder and say, in effec
 **Attention’s role at load time:** none yet — only empty notebooks waiting.  
 **Thinking’s role at load time:** none — no Sense A until a prompt runs.
 
-**In the code:** same load path as chapter 4 — `ModelLoader`, `Tokenizer.fromPretrained`, `allocateKvCache`
-(chapter 16, Sample D).
+| Step            | Call                                                                                 | Role                                                      |
+|-----------------|--------------------------------------------------------------------------------------|-----------------------------------------------------------|
+| Blueprint       | `Config.HfConfig#load` (via `Config` / builder)                                      | Read `config.json`                                        |
+| Empty graph     | `CausalLMFactory#detect` → `#create`                                                 | `Qwen3ForCausalLM` or `Gemma3ForCausalLM`                 |
+| Pour weights    | `ModelLoader#loadModel` → `SafetensorsReader#getTensor` → `CausalLM.WeightSlot#load` | Fill shelves                                              |
+| Dictionary      | `Tokenizer#fromPretrained`                                                           | `tokenizer.json` + chat template / stop ids               |
+| Blank notebooks | `ModelRunner#allocateKvCache`                                                        | Attach `kCache`/`vCache` on each `Attention`              |
+| Waiting room    | `Scheduler.<init>` → `BlockManager.<init>`                                           | Page pool for later allocate                              |
+| Optional        | `LLM#warmup`                                                                         | Tiny generate so first real answer is not also cold-start |
 
 ### Your sentence becomes numbers
 
@@ -1711,7 +1777,14 @@ Illustrative shape (markers depend on the model):
 
 Those ids are just a line of dictionary numbers. No attention has run yet.
 
-**In the code:** `ChatSession` → `Tokenizer.applyChatTemplate` → `encode` (chapter 16, Sample E).
+| Step             | Call                                                                    | Role                                             |
+|------------------|-------------------------------------------------------------------------|--------------------------------------------------|
+| Record user      | `ChatSession#send` → `ChatMessage#user`                                 | Append to history                                |
+| Fit desk         | `ChatMessages#truncateHistory`                                          | Drop old turns if context is tight               |
+| Stage directions | `Tokenizer#applyChatTemplate(…, enableThinking)`                        | Role markers; thinking invitation when not Gemma |
+| To ids           | inside `LLM#generate` → `LLM#addRequest(String,…)` → `Tokenizer#encode` | Prompt string → token ids → `Sequence`           |
+
+`ChatSession#generateTurn` is the private brick that calls `applyChatTemplate` then `LLM#generate`.
 
 ### Prefill — Sense A on the whole prompt (attention’s first big job)
 
@@ -1744,8 +1817,47 @@ which might be `<`, or `4`, or `The`, depending on style and chance.
   first next-token scores → sample token₁
 ```
 
-**In the code:** prefill batch from `Scheduler.schedule` → `ModelRunner.preparePrefill` / `run` →
-`Attention` store path (chapter 16, Samples B–C).
+**How it is called (prefill tick)**
+
+```text
+LLM#generate
+  └─ LLM#step                         // first tick is usually prefill
+       ├─ Scheduler#schedule          // BlockManager#canAllocate / #allocate; prefill=true
+       ├─ ModelRunner#run(seqs, true)
+       │    ├─ ModelRunner#preparePrefill   // ids, positions, Context slot maps / block tables
+       │    ├─ CausalLM#forward             // e.g. Qwen3ForCausalLM#forward
+       │    │    └─ per layer: … → Qwen3Attention#forward → Attention#forward
+       │    │         ├─ Attention#storeKvCache
+       │    │         └─ Attention#prefillWithCache | #prefillDense → #attendRange
+       │    │    └─ per layer MLP: Qwen3MLP#forward → Ops#siluAndMul   (Gemma: gelu…)
+       │    ├─ CausalLM#computeLogits
+       │    └─ Sampler#forward
+       └─ Scheduler#postprocess       // append first new token to Sequence
+```
+
+| Brick        | Call                                           | Role for “2+2?”                         |
+|--------------|------------------------------------------------|-----------------------------------------|
+| Pick work    | `Scheduler#schedule`                           | Prefill batch for this `Sequence`       |
+| Pages        | `BlockManager#allocate`                        | Give the prompt notebook pages          |
+| Pack tensors | `ModelRunner#preparePrefill`                   | Build input ids / positions / `Context` |
+| Walk rooms   | `Qwen3ForCausalLM#forward` (or Gemma)          | Embedding → N layers → norm             |
+| One glance   | `Qwen3Attention#forward` → `Attention#forward` | QKV, RoPE, store KV, causal attend      |
+| Rewrite      | `Qwen3MLP#forward`                             | Gated feed-forward after attention      |
+| Score & draw | `CausalLM#computeLogits` → `Sampler#forward`   | First assistant token                   |
+
+Inside one attention brick (Qwen-shaped; Gemma is analogous in `Gemma3Attention#forward`):
+
+```text
+Qwen3Attention#forward
+  → Linear.Qkv#forward          // build packed Q/K/V
+  → Ops#splitLast
+  → optional RMSNorm#forward on Q/K heads
+  → RotaryEmbedding#forward     // position twist
+  → Attention#forward
+       → Attention#storeKvCache
+       → Attention#prefill… → #attendRange
+  → Linear.Row#forward          // o_proj
+```
 
 ### Decode — one new scrap at a time (attention + optional written thinking)
 
@@ -1776,16 +1888,30 @@ Attention never “knows arithmetic” as a separate calculator. It **routes** t
 using similarity of Keys and Queries. If training left useful habits for digit sums, those habits fire when the right
 places attend to each other.
 
-**In the code:** decode path `ModelRunner.prepareDecode` → `Attention.decode` / `attendRange` → `Sampler.forward`
-(chapter 16).
+**How it is called (each decode tick)** — same outer loop as prefill; only the middle changes:
+
+```text
+LLM#step
+  ├─ Scheduler#schedule              // prefill=false; BlockManager#mayAppend
+  ├─ ModelRunner#run(seqs, false)
+  │    ├─ ModelRunner#prepareDecode  // mostly the newest token + block tables
+  │    ├─ CausalLM#forward
+  │    │    └─ Attention#forward → #storeKvCache → #decode → #attendRange
+  │    ├─ CausalLM#computeLogits
+  │    └─ Sampler#forward
+  └─ Scheduler#postprocess           // stop if eos / stop ids / maxTokens
+```
+
+`LLM#generate` keeps calling `LLM#step` until `Scheduler#isFinished` (via `LLM#isFinished`). Each appended token may
+fire the `onToken` callback that `ChatSession#generateTurn` registered.
 
 **Thinking’s three roles in this same decode loop**
 
-| Sense                     | What happens on “What is 2+2?”                                                                                                   |
-|---------------------------|----------------------------------------------------------------------------------------------------------------------------------|
-| **A — silent**            | Every decode step is a full layer-walk (attention + MLP + sample). Always on, never shown as text.                               |
-| **B — written reasoning** | The model may emit ordinary words like “add” or “four” as intermediate text. Those words join the past.                          |
-| **C — tagged scratchpad** | On Qwen-style chat it may emit `<think> … </think>` then the answer. Same Sense A underneath; markers let the UI split channels. |
+| Sense                     | What happens on “What is 2+2?”                                                                                                   | Library home                                                                |
+|---------------------------|----------------------------------------------------------------------------------------------------------------------------------|-----------------------------------------------------------------------------|
+| **A — silent**            | Every decode step is a full layer-walk (attention + MLP + sample). Always on, never shown as text.                               | `ModelRunner#run` → model `#forward` / `#computeLogits` → `Sampler#forward` |
+| **B — written reasoning** | The model may emit ordinary words like “add” or “four” as intermediate text. Those words join the past.                          | Same loop; tokens land in `Sequence` via `Scheduler#postprocess`            |
+| **C — tagged scratchpad** | On Qwen-style chat it may emit `<think> … </think>` then the answer. Same Sense A underneath; markers let the UI split channels. | `AssistantParts#parse` on decode/`finishTurn`                               |
 
 Example timeline (one possible Qwen-style path — not guaranteed wording):
 
@@ -1799,7 +1925,8 @@ Example timeline (one possible Qwen-style path — not guaranteed wording):
 ```
 
 If there is **no** scratchpad (typical Gemma path here), Sense A still runs the same way; you only see the final answer
-tokens. There is no missing “thinker” — only missing **visible** Sense B/C text.
+tokens. There is no missing “thinker” — only missing **visible** Sense B/C text. Gemma disables the thinking invitation
+in `ChatSession#generateTurn` (`enableThinking = !tokenizer.isGemmaChat()`).
 
 **How written thinking helps attention (and how it can fail)**
 
@@ -1807,7 +1934,7 @@ Once note tokens exist, later attention can look at them (causal self-attention 
 whole mechanism: **thinking-as-text becomes more past for attention to mix.**
 
 It can help a multi-step question by parking intermediate results on the page. It can also produce fluent wrong notes;
-attention will happily attend to those too. Tags do not create a second brain — `AssistantParts.parse` only **splits**
+attention will happily attend to those too. Tags do not create a second brain — `AssistantParts#parse` only **splits**
 the finished stream for display (`thinking` vs `answer`).
 
 ### After the turn — parse and show
@@ -1818,38 +1945,59 @@ the finished stream for display (`thinking` vs `answer`).
 - `ChatSession` appends only the **visible answer** to history for the next turn (not the scratchpad). The next prefill
   attends across that history subject to length limits.
 
-**In the code:** `AssistantParts.parse` → `ChatReply`; `ChatSession.finishTurn` stores **answer only** in history
-(chapter 16, Sample E).
+| Step               | Call                                                                             | Role                                 |
+|--------------------|----------------------------------------------------------------------------------|--------------------------------------|
+| Live UI (optional) | `onToken` → `Tokenizer#decode` → `AssistantParts#parse` → `StreamPrinter#update` | Split channels while tokens arrive   |
+| Final split        | `AssistantParts#parse` → `ChatReply#from`                                        | `thinking` + `answer` + `thinkOpen`  |
+| Recover            | `AssistantParts#salvageFromThinking`                                             | If answer blank but notes exist      |
+| Commit history     | `ChatSession#finishTurn` → `ChatMessage#assistant(answer)`                       | **Answer only** stored for next turn |
+| Close stream       | `StreamPrinter#closeTurn`                                                        | End of CLI printing for this reply   |
 
-### One picture of the whole turn
+### One picture of the whole turn (story + calls)
 
 ```text
-  LOAD weights + empty KV notebooks
+  LLM.<init> / ModelRunner.<init>     LOAD weights + empty KV notebooks
            │
            ▼
-  TEMPLATE + TOKENIZE  "What is 2+2?"
+  Tokenizer#applyChatTemplate
+  + Tokenizer#encode                  TEMPLATE + TOKENIZE  "What is 2+2?"
            │
            ▼
-  PREFILL (Sense A)
-      attention: every prompt place looks back; notebooks fill
-      thinking: silent only
+  LLM#step (prefill)                  PREFILL (Sense A)
+  Scheduler#schedule
+  ModelRunner#run → CausalLM#forward
+  Attention#storeKvCache / prefill…      attention: every prompt place looks back; notebooks fill
+  Sampler#forward                        thinking: silent only
            │
            ▼
-  DECODE LOOP (Sense A each step)
-      attention: new token queries notebooks (prompt + reply so far)
-      thinking: optional <think> notes (B/C) become more notebook past
+  LLM#step (decode) × N               DECODE LOOP (Sense A each step)
+  Attention#decode / #attendRange        attention: new token queries notebooks
+  Sampler#forward                        thinking: optional <think> tokens (B/C)
+  Scheduler#postprocess
            │
            ▼
-  SAMPLE "4" … STOP
+  stop ids / maxTokens                SAMPLE "4" … STOP
            │
            ▼
-  PARSE / DISPLAY  thinking channel + answer "4"
+  AssistantParts#parse
+  ChatSession#finishTurn              PARSE / DISPLAY  thinking + answer "4"
 ```
 
 ### What this walk-through should leave you with
 
-See **chapter 16** for the matching classes (`LLM`, `ChatSession`, `ModelRunner`, `Attention`, `AssistantParts`) and
-copy-shaped samples.
+You should be able to point at **both** the story and the library:
+
+| Story piece            | Primary `Class#method` homes                                                  |
+|------------------------|-------------------------------------------------------------------------------|
+| Open model             | `LLM#builder` / `LLM.<init>` → `ModelRunner.<init>` → `ModelLoader#loadModel` |
+| Chat ask               | `ChatSession#send` → `#generateTurn` → `#finishTurn`                          |
+| Template / ids         | `Tokenizer#applyChatTemplate` / `#encode` / `#decode`                         |
+| Engine loop            | `LLM#generate` → `#step` → `Scheduler#schedule` / `#postprocess`              |
+| One forward+sample     | `ModelRunner#run` → `CausalLM#forward` / `#computeLogits` → `Sampler#forward` |
+| Attention + notebooks  | `Attention#forward` / `#storeKvCache` / `#decode` / `#attendRange`            |
+| Visible thinking split | `AssistantParts#parse` (history keeps answer via `finishTurn`)                |
+
+Chapter 16 repeats these as tables and copy-shaped samples.
 
 - **Attention** is the glance that mixes allowed past into the present — heavy at prefill, notebook-backed at decode.
 - **Thinking** is either that silent stack (always) or extra generated text (sometimes) that attention can later reuse.
