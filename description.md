@@ -15,6 +15,10 @@ module: `com.igormaznitsa.nanollvm`.
 Where a topic has a standard paper or format guide, you will find a short **Further reading** note with links. Those
 links are optional depth — the story in this book stands alone.
 
+Where a topic has a home in this library, you will also find a short **In the code** note naming the Java types and
+methods that implement it (package `com.igormaznitsa.nanollvm`). Those notes are signposts — **chapter 16** collects the
+full map, samples, and file paths.
+
 ---
 
 ## Table of contents
@@ -34,7 +38,7 @@ links are optional depth — the story in this book stands alone.
 13. [Serving several conversations without chaos](#13-serving-several-conversations-without-chaos)
 14. [Chat versus finishing a sentence](#14-chat-versus-finishing-a-sentence)
 15. [A full walk-through: “What is 2+2?”](#15-a-full-walk-through-what-is-22)
-16. [If you later open the code](#16-if-you-later-open-the-code)
+16. [Where it lives in the code (classes, methods, samples)](#16-where-it-lives-in-the-code-classes-methods-samples)
 17. [Word list](#17-word-list)
 18. [Honest limits](#18-honest-limits)
 19. [External reading index](#19-external-reading-index)
@@ -57,6 +61,8 @@ In one sentence:
 > **You give it text; it repeatedly chooses a plausible next scrap of text until the answer feels finished.**
 
 The rest of this book unpacks that sentence without assuming a technical background.
+
+**In the code:** front door is `LLM` / `LLM.Builder`; interactive demo is `Example` (chapter 16).
 
 ---
 
@@ -105,6 +111,10 @@ is [The Annotated Transformer](https://nlp.seas.harvard.edu/annotated-transforme
 Two families of models are supported here (different “editions” of the book, same kind of reading process): **Qwen3**
 and **Gemma3**. You usually need not care which; the program detects which files you pointed it at.
 
+**In the code:** architecture pick is `CausalLMFactory.detect` / `create` → `Qwen3ForCausalLM` or
+`Gemma3ForCausalLM`; one next-token step is `ModelRunner.run` → `CausalLM.forward` / `computeLogits` → `Sampler.forward`
+(chapter 16).
+
 ---
 
 ## 3. Cutting language into pieces the machine can count
@@ -127,6 +137,8 @@ A separate file, the **tokenizer**, holds that dictionary and the rules for chop
 **template**: stage directions such as “this line is the user,” “this line is the assistant,” so the model is not
 confused about who is speaking. Without those markers, a dialogue looks like an undifferentiated blob of prose.
 **Chapter 6** opens `tokenizer.json` field by field.
+
+**In the code:** `tokenizer.Tokenizer` — `fromPretrained`, `encode`, `decode`, `applyChatTemplate` (chapter 16).
 
 **Further reading:** subword BPE was popularized for translation in
 [Sennrich et al., *Neural Machine Translation of Rare Words with Subword Units*](https://arxiv.org/abs/1508.07909);
@@ -218,6 +230,9 @@ Think of a librarian preparing a reading desk:
 After this, the **learned shelves stay fixed**. Chat does not rewrite the model files. Only the notebooks and temporary
 worksheets change while answering.
 
+**In the code:** `LLM` / `ModelRunner` construction runs `ModelLoader.loadModel`, `Tokenizer.fromPretrained`, and
+`allocateKvCache` (chapter 16).
+
 **Further reading:** Hub layout and `from_pretrained`-style folders are covered in Hugging Face
 [Transformers docs](https://huggingface.co/docs/transformers); this Java port is inspired
 by [nano-vllm](https://github.com/GeeeekExplorer/nano-vllm) and the serving ideas in
@@ -245,6 +260,9 @@ by [nano-vllm](https://github.com/GeeeekExplorer/nano-vllm) and the serving idea
 
 If loading failed halfway, you would have a building with missing furniture: some rooms empty, answers nonsense or
 crashes. A successful load means: **every expected shelf has its numbers**, dictionary ready, notebooks allocated.
+
+**In the code (shelves):** `CausalLM.getParameter` / `WeightSlot.load`; notebooks via
+`ModelRunner.allocateKvCache` on each `Attention` (chapter 16).
 
 ### Why the first load feels slow and heavy
 
@@ -574,6 +592,9 @@ consult it.
 
 The blueprint says what the **model is**. The builder says how hard you ask your **machine** to run it.
 
+**In the code:** `Config.HfConfig.load` fills the blueprint; `LLM.Builder` / `Config` set runtime knobs such as
+`maxModelLen`, KV pages, and batch limits (chapter 16).
+
 **Further reading:** configuration objects in the Python ecosystem —
 [Hugging Face `PretrainedConfig`](https://huggingface.co/docs/transformers/main/en/main_classes/configuration); model
 cards on the Hub usually ship the same `config.json` this chapter describes.
@@ -763,6 +784,9 @@ It is only the **bridge language ↔ numbers**.
 > **`tokenizer.json` stores the vocabulary, the merge recipe, and the text-cleanup pipeline so strings become the
 > integer ids the embedding table understands — and back again.**
 
+**In the code:** `Tokenizer.fromPretrained` reads `tokenizer.json` (+ `tokenizer_config.json` chat template and stop
+ids); encode/decode and `applyChatTemplate` live on `Tokenizer` (chapter 16).
+
 **Further reading:** the JSON pipeline (normalizer → pre-tokenizer → model → decoder) is the
 [Hugging Face Tokenizers](https://huggingface.co/docs/tokenizers/index) design; API overview of the `Tokenizer` class is
 [here](https://huggingface.co/docs/tokenizers/main/en/api/tokenizer).
@@ -897,6 +921,9 @@ RAM, expect roughly **~2×** that payload for resident weights alone — plus KV
 
 > **A `.safetensors` file is a labeled warehouse of matrices and vectors: a JSON index up front, raw numeric bytes
 > afterward, poured into the model’s shelves at load time (and widened to float32 in this port).**
+
+**In the code:** `utils.SafetensorsReader` parses the file; `utils.ModelLoader.loadModel` matches names (including
+packed `q_proj`/`k_proj`/`v_proj` → `qkv_proj`) and calls `WeightSlot.load` (chapter 16).
 
 **Further reading:** format overview in the
 [Safetensors documentation](https://huggingface.co/docs/safetensors); binary layout notes in the
@@ -1112,6 +1139,12 @@ sequence is baked into the match.
 
 ---
 
+**In the code (kinds this port runs):** causal self-attention + GQA/MQA geometry in `layers.Attention`; Gemma sliding
+window / global via model config in `Gemma3ForCausalLM`; RoPE in `Norms.RotaryEmbedding`; prefill vs decode branches
+inside `Attention.forward` (chapter 16).
+
+---
+
 ### Attention is not yet “the answer”
 
 Attention updates **inner portraits**. It does not print words. Words come later, when the final portrait is scored
@@ -1125,6 +1158,9 @@ Each reading room also contains a large feed-forward block (MLP):
 2. MLP — *rewrite this position using trained habits beyond a simple glance.*
 
 Both happen in **every** room, stacked many times.
+
+**In the code:** `Attention.forward`, `storeKvCache`, `attendRange`; model path `Qwen3Attention.forward` /
+`Gemma3Attention.forward` (chapter 16).
 
 ### One sentence to keep
 
@@ -1255,6 +1291,9 @@ not rebuild every past Key/Value each time.
 So: **weights = long-term habits; notebooks = short-term notes for this conversation; Sense A = the procedure that
 combines them every step.**
 
+**In the code (Sense A):** `LLM.generate` / `step` → `Scheduler.schedule` → `ModelRunner.run` → layer
+`forward` stacks on `Qwen3ForCausalLM` / `Gemma3ForCausalLM` (chapter 16).
+
 ---
 
 ### Sense B — thinking as writing (chain of thought)
@@ -1293,6 +1332,8 @@ glance can reuse.
 **Further reading:** prompting models to write steps —
 [Wei et al., *Chain-of-Thought Prompting Elicits Reasoning in Large Language Models*](https://arxiv.org/abs/2201.11903).
 
+**In the code (Sense B):** no separate class — written reasoning is ordinary tokens from the same `Sampler` /
+`generate` loop; later steps reread them via the KV notebooks like any other past text (chapter 16).
 
 ---
 
@@ -1433,6 +1474,9 @@ Written thinking helps **because** attention can reread it — not because a sec
 
 ---
 
+**In the code:** `ChatSession.send` → `applyChatTemplate` → `LLM.generate` → `AssistantParts.parse` → history keeps
+`answer` only (chapter 16).
+
 ### A fair humanities summary of this chapter
 
 > **Silent thinking (A)** is the organized walk through every loaded layer — attention plus rewrite — once per next
@@ -1493,6 +1537,10 @@ This project always keeps a little randomness; pure “always pick the single to
 None of this *is* understanding in the human sense. It is a procedure that, after training, often **imitates** fluent
 continuation well enough to be useful — and misleading.
 
+**In the code:** portraits and tables are `tensor.Tensor`; mix/lookup/activate live in `Ops` (`linear`, `embedding`,
+`rmsNorm`, `siluAndMul` / `geluPytorchTanhAndMul`); SIMD helpers in `VectorMath`; softmax / temperature / draw in
+`layers.Sampler` (chapter 16).
+
 **Further reading:** [RMSNorm](https://arxiv.org/abs/1910.07467); gated MLP variants such
 as [SwiGLU](https://arxiv.org/abs/2002.05202); softmax background
 on [Wikipedia](https://en.wikipedia.org/wiki/Softmax_function).
@@ -1527,6 +1575,9 @@ finished.”
 **Further reading:** nucleus (top-p) sampling —
 [Holtzman et al., *The Curious Case of Neural Text Degeneration*](https://arxiv.org/abs/1904.09751).
 
+**In the code:** `SamplingParams` / `SamplingDefaults.forTokenizer`; draw in `Sampler.forward` (Gumbel-max style); stop
+ids and `maxTokens` enforced in `Scheduler.postprocess` (chapter 16).
+
 
 ---
 
@@ -1554,6 +1605,9 @@ when two prompts start with the same long prefix (same opening paragraph → reu
 
 That is why the first pause can feel longer than each following word: the opening read is heavier than the continuation.
 
+**In the code:** KV pages in `engine.BlockManager` (`allocate`, `hashBlocks`, prefix reuse); prefill/decode scheduling
+in `Scheduler`; cache write/read in `Attention.storeKvCache` / decode path (chapter 16).
+
 **Further reading:** paged KV cache and high-throughput serving —
 [Kwon et al., *Efficient Memory Management for Large Language Model Serving with
 PagedAttention*](https://arxiv.org/abs/2309.06180)
@@ -1577,6 +1631,9 @@ barely notice it; it matters when many requests share one model.
 
 **Further reading:** same vLLM paper above discusses iteration-level scheduling with paging; also see
 the [vLLM project](https://github.com/vllm-project/vllm).
+
+**In the code:** waiting room and work floor are `Scheduler` (`schedule`, `postprocess`, `clear` on cancel); each
+in-flight reply is a `Sequence` (chapter 16).
 
 
 ---
@@ -1603,6 +1660,10 @@ Sense C from the thinking chapter: marked scratchpad versus fair copy.
 
 **Further reading:** [chat templating](https://huggingface.co/docs/transformers/chat_templating) in Transformers.
 
+**In the code:** chat is `ChatSession` (`send`, `streamTo`, history as `ChatMessage`); completion is
+`LLM.complete` / raw `generate`; templates via `Tokenizer.applyChatTemplate`; defaults in `ChatPrompts.systemFor`
+(chapter 16).
+
 ---
 
 ## 15. A full walk-through: “What is 2+2?”
@@ -1618,6 +1679,9 @@ chain-of-thought prompting ([Wei et al.](https://arxiv.org/abs/2201.11903)), pag
 
 A few lines of Java (or the example app) open the model folder and say, in effect: *chat with me; keep answers short.*
 
+**In the code:** `LLM.builder(…).build()` then `llm.chat(maxTokens).send(…)` — or `Example.main` for the CLI (chapter
+16, Sample A).
+
 ### Loading (once)
 
 - Blueprint read → empty rooms built to the right sizes (`hidden_size`, layers, heads, …).
@@ -1628,6 +1692,9 @@ A few lines of Java (or the example app) open the model folder and say, in effec
 
 **Attention’s role at load time:** none yet — only empty notebooks waiting.  
 **Thinking’s role at load time:** none — no Sense A until a prompt runs.
+
+**In the code:** same load path as chapter 4 — `ModelLoader`, `Tokenizer.fromPretrained`, `allocateKvCache`
+(chapter 16, Sample D).
 
 ### Your sentence becomes numbers
 
@@ -1643,6 +1710,8 @@ Illustrative shape (markers depend on the model):
 ```
 
 Those ids are just a line of dictionary numbers. No attention has run yet.
+
+**In the code:** `ChatSession` → `Tokenizer.applyChatTemplate` → `encode` (chapter 16, Sample E).
 
 ### Prefill — Sense A on the whole prompt (attention’s first big job)
 
@@ -1675,6 +1744,9 @@ which might be `<`, or `4`, or `The`, depending on style and chance.
   first next-token scores → sample token₁
 ```
 
+**In the code:** prefill batch from `Scheduler.schedule` → `ModelRunner.preparePrefill` / `run` →
+`Attention` store path (chapter 16, Samples B–C).
+
 ### Decode — one new scrap at a time (attention + optional written thinking)
 
 Each further step:
@@ -1703,6 +1775,9 @@ Concrete (illustrative) glances:
 Attention never “knows arithmetic” as a separate calculator. It **routes** trained patterns toward the current place
 using similarity of Keys and Queries. If training left useful habits for digit sums, those habits fire when the right
 places attend to each other.
+
+**In the code:** decode path `ModelRunner.prepareDecode` → `Attention.decode` / `attendRange` → `Sampler.forward`
+(chapter 16).
 
 **Thinking’s three roles in this same decode loop**
 
@@ -1743,6 +1818,9 @@ the finished stream for display (`thinking` vs `answer`).
 - `ChatSession` appends only the **visible answer** to history for the next turn (not the scratchpad). The next prefill
   attends across that history subject to length limits.
 
+**In the code:** `AssistantParts.parse` → `ChatReply`; `ChatSession.finishTurn` stores **answer only** in history
+(chapter 16, Sample E).
+
 ### One picture of the whole turn
 
 ```text
@@ -1770,6 +1848,9 @@ the finished stream for display (`thinking` vs `answer`).
 
 ### What this walk-through should leave you with
 
+See **chapter 16** for the matching classes (`LLM`, `ChatSession`, `ModelRunner`, `Attention`, `AssistantParts`) and
+copy-shaped samples.
+
 - **Attention** is the glance that mixes allowed past into the present — heavy at prefill, notebook-backed at decode.
 - **Thinking** is either that silent stack (always) or extra generated text (sometimes) that attention can later reuse.
 - **“2+2→4”** is not a separate arithmetic module; it is trained continuation steered by those glances and draws.
@@ -1779,30 +1860,189 @@ text. The *impression* of understanding is an effect of that chain, shaped by tr
 
 ---
 
-## 16. If you later open the code
+## 16. Where it lives in the code (classes, methods, samples)
 
-You still do not need to. But if curiosity leads you there, these are the “rooms” of the program, named for humans
-(under package `com.igormaznitsa.nanollvm`):
+The earlier chapters tell the story. This one is the **map to the source**: which Java types and methods implement each
+idea, plus short samples you can recognize in the tree under
+`src/main/java/com/igormaznitsa/nanollvm/`.
 
-| Human idea                     | Place in the project                       |
-|--------------------------------|--------------------------------------------|
-| Front door                     | `LLM` — open a model, chat, or complete    |
-| Conversation manners           | `chat.ChatSession`                         |
-| Dictionary (`tokenizer.json`)  | `tokenizer.Tokenizer` (see ch. 6)          |
-| Blueprint (`config.json`)      | `Config.HfConfig` field guide in ch. 5     |
-| Weight crates (`.safetensors`) | `ModelLoader`, `SafetensorsReader` (ch. 7) |
-| Kitchen tick (schedule work)   | `Scheduler`, `Sequence`, `BlockManager`    |
-| Run the reading rooms          | `ModelRunner` + `Qwen3…` / `Gemma3…`       |
-| The glance backward            | `Attention`                                |
-| Draw from the hat              | `Sampler`                                  |
-| Arithmetic worksheets          | `tensor.Ops`, `Tensor`                     |
+Every earlier chapter’s **In the code** note points here. Use this chapter when you want methods, samples, and paths in
+one place.
 
-One `LLM` instance is like **one desk**: do not ask it to write two full answers at once from different threads. You may
-ask it to **stop** from another thread if a reply is taking too long.
+You do not need to read every file. Use the tables to jump, then skim the named methods.
+
+### Package layout (folders ↔ ideas)
+
+| Folder / type                                                                          | Role in the story                                  |
+|----------------------------------------------------------------------------------------|----------------------------------------------------|
+| `LLM`, `LLM.Builder`, `EngineIo`, `SamplingParams`, `SamplingDefaults`                 | Front door, options, quiet vs CLI I/O              |
+| `chat/` — `ChatSession`, `ChatMessage`, `ChatReply`, `AssistantParts`, `StreamPrinter` | Dialog, history, `<think>` split, streaming        |
+| `tokenizer/Tokenizer`                                                                  | `tokenizer.json` → encode / decode / chat template |
+| `Config`, `Config.HfConfig`                                                            | `config.json` blueprint                            |
+| `utils/ModelLoader`, `utils/SafetensorsReader`, `utils/BundledModels`                  | Load weights; find default model dir               |
+| `engine/Scheduler`, `Sequence`, `BlockManager`, `ModelRunner`                          | Prefill/decode loop, pages, one forward+sample     |
+| `models/CausalLM`, `CausalLMFactory`, `Qwen3ForCausalLM`, `Gemma3ForCausalLM`          | Architecture graph                                 |
+| `layers/Attention`, `Sampler`, `Linear`, `Norms`, …                                    | Attention, sampling, projections, RMSNorm/RoPE     |
+| `tensor/Tensor`, `Ops`, `VectorMath`                                                   | Arrays and kernels                                 |
+| `prompts/ChatPrompts`                                                                  | Default system text (Qwen vs empty Gemma)          |
+| `Example`, `Bench`                                                                     | Runnable demos                                     |
+
+### Concept → class → methods
+
+| Story idea           | Primary type                           | Methods / entry points to open                                                    |
+|----------------------|----------------------------------------|-----------------------------------------------------------------------------------|
+| Open a model         | `LLM`, `LLM.Builder`                   | `LLM.builder(path)`, `.systemPrompt(…)`, `.withSystemIo()`, `.build()`            |
+| Chat turn            | `ChatSession`                          | `llm.chat(maxTokens)`, `.send(user)`, `.streamTo(…)`, `.clear()`                  |
+| One-shot / raw text  | `LLM`                                  | `chatOnce(…)`, `complete(…)`, `generate(…)`                                       |
+| Cancel / timeout     | `LLM`                                  | `cancel()`; `generate(…, timeout, onToken)`                                       |
+| Tokenize             | `Tokenizer`                            | `fromPretrained(dir)`, `encode`, `decode`, `applyChatTemplate(…, enableThinking)` |
+| Blueprint            | `Config.HfConfig`                      | `HfConfig.load(config.json)`; `CausalLMFactory.detect/create`                     |
+| Pour weights         | `ModelLoader`, `SafetensorsReader`     | `ModelLoader.loadModel`; `getTensor(name)`; `CausalLM.WeightSlot.load`            |
+| One engine tick      | `LLM.step`, `Scheduler`, `ModelRunner` | `schedule` → `ModelRunner.run` → `postprocess`                                    |
+| Forward + sample     | `ModelRunner`, `CausalLM`, `Sampler`   | `model.forward` → `computeLogits` → `sampler.forward`                             |
+| Attention + KV write | `Attention`, `utils.Context`           | `Attention.forward`; `storeKvCache`; prefill/decode helpers                       |
+| Pages / prefix reuse | `BlockManager`                         | `canAllocate`, `allocate`, `hashBlocks`, `mayAppend`                              |
+| Split thinking UI    | `AssistantParts`, `ChatReply`          | `AssistantParts.parse`, `salvageFromThinking`                                     |
+| Math bricks          | `Ops`                                  | `linear`, `embedding`, `rmsNorm`, `siluAndMul` / `geluPytorchTanhAndMul`          |
+
+### Sample A — library use (what most apps call)
+
+```java
+import com.igormaznitsa.nanollvm.LLM;
+import com.igormaznitsa.nanollvm.utils.BundledModels;
+
+try(LLM llm = LLM.builder(BundledModels.resolveDefault())
+        .maxModelLen(2048)
+        .systemPrompt("Answer briefly and factually.")  // Qwen-style; Gemma often empty
+        .build()){
+
+// Multi-turn (history + template + optional <think> parse)
+String reply = llm.chat(256).send("What is 2+2?").answer();
+
+// One-shot chat
+String once = llm.chatOnce("What is 2+2?");
+
+// Raw continuation (no chat template)
+String raw = llm.complete("The capital of France is");
+}
+```
+
+Interactive CLI wiring lives in `Example.main`: `LLM.builder(…).withSystemIo().build()`, then
+`llm.chat(…).streamTo(System.err, System.out, color)` and `chat.send(user)`.
+
+### Sample B — one generate tick (Sense A loop)
+
+`LLM.generate` repeatedly calls `step()` until the scheduler is idle. Each `step()` is:
+
+```text
+Scheduler.schedule()          // pick prefill or decode batch
+    → ModelRunner.run(seqs, prefill)
+        preparePrefill / prepareDecode  (+ Context.set slot maps, block tables)
+        CausalLM.forward(inputIds, positions)
+        CausalLM.computeLogits(hidden)
+        Sampler.forward(logits, temperature, topK, topP)
+    → Scheduler.postprocess(…)   // append token, finish on stop / maxTokens
+```
+
+Compressed from `LLM.step` / `ModelRunner.run`:
+
+```java
+// conceptual — names match the real methods
+ScheduleResult scheduled = scheduler.schedule();
+List<Integer> tokenIds = modelRunner.run(scheduled.sequences(), scheduled.prefill());
+scheduler.
+
+postprocess(scheduled.sequences(),tokenIds,scheduled.
+
+prefill(),appendedOut);
+```
+
+Inside `ModelRunner.run`:
+
+```java
+Tensor logits = model.computeLogits(model.forward(inputIds, positions));
+int[] tokenIds = sampler.forward(logits, temperatures, topKs, topPs);
+```
+
+### Sample C — attention stores and reads the notebook
+
+`layers.Attention.forward(q, k, v)`:
+
+1. If slot mapping is set, `storeKvCache` copies K/V into paged `kCache` / `vCache`.
+2. Prefill → `prefillWithCache` or `prefillDense`.
+3. Decode → `decode` (gather past K/V via `blockTables`, then `attendRange`).
+
+That is the code behind “write notebooks at prefill; reread them at decode.”
+
+### Sample D — loading shelves
+
+```text
+Config loads HfConfig from config.json
+CausalLMFactory.create(hf) builds empty Qwen3ForCausalLM or Gemma3ForCausalLM
+ModelLoader.loadModel(model, dir):
+    for each *.safetensors name
+        resolve packed q_proj/k_proj/… → qkv_proj (WeightSlot.qkv / merged)
+        SafetensorsReader.getTensor(name)  // BF16/F16 → float[]
+        model.getParameter(paramName).load(tensor, shardId)
+ModelRunner.allocateKvCache() attaches empty K/V pages to each Attention
+Tokenizer.fromPretrained(dir) loads tokenizer.json (+ tokenizer_config chat_template)
+```
+
+### Sample E — chat thinking path (Sense C)
+
+```text
+ChatSession.send(user)
+  history.add(user message)
+  truncateHistory(…)
+  Tokenizer.applyChatTemplate(history, addGenerationPrompt=true, enableThinking=…)
+  LLM.generate(prompt, sampling, onToken → AssistantParts.parse(partial decode))
+  AssistantParts.parse(full decode) → ChatReply(thinking, answer, thinkOpen)
+  finishTurn: maybe salvageFromThinking; history.add(assistant(answer only))
+```
+
+Key types: `ChatSession.send` / `generateTurn` / `finishTurn`, `AssistantParts.parse`, `ChatPrompts.systemFor`,
+`SamplingDefaults.forTokenizer` (Gemma top-k 64).
+
+### Sample F — where “2+2” meets attention in the model graph
+
+For Qwen, one layer’s attention path is roughly
+`Qwen3ForCausalLM.Qwen3Attention.forward`:
+
+```text
+hidden → qkvProj → split Q,K,V → optional qNorm/kNorm
+      → RotaryEmbedding.forward(positions, q, k)
+      → Attention.forward(q, k, v)
+      → oProj
+```
+
+MLP: `gateUpProj` → `Ops.siluAndMul` → `downProj` (Gemma uses `geluPytorchTanhAndMul`).
+
+### How to read the tree on disk
+
+```text
+src/main/java/com/igormaznitsa/nanollvm/
+  LLM.java                 ← start here for API
+  Example.java             ← start here for CLI chat
+  chat/ChatSession.java    ← dialog + thinking split
+  engine/ModelRunner.java  ← forward + sample
+  engine/Scheduler.java    ← prefill/decode batches
+  layers/Attention.java    ← QKV cache + attendRange
+  models/Qwen3ForCausalLM.java / Gemma3ForCausalLM.java
+  tokenizer/Tokenizer.java
+  utils/ModelLoader.java / SafetensorsReader.java
+```
+
+### Threading reminder (API contract)
+
+One `LLM` must not run concurrent `generate` / chat calls. `LLM.cancel()` is safe from another thread and clears
+in-flight work via the scheduler.
 
 ---
 
 ## 17. Word list
+
+Short glossary. For the Java home of each idea, prefer the **In the code** notes in earlier chapters and the map in
+**chapter 16**.
 
 | Term you may meet     | Plain meaning                                                                   |
 |-----------------------|---------------------------------------------------------------------------------|
@@ -1864,12 +2104,17 @@ If this book did its job, you can now explain to another non-specialist:
 
 That is enough to understand what this Java program is doing — and what it is not.
 
+**In the code (limits mirrored by design):** CPU kernels in `Ops` / `VectorMath`; no GPU path; one `LLM` is not safe for
+concurrent `generate` — use `cancel()` from another thread only to abort (chapter 16).
+
 ---
 
 ## 19. External reading index
 
 A single list of the links woven into earlier chapters. Prefer the in-chapter notes for context; use this as a bookmark
 page.
+
+Implementation homes stay in the **In the code** notes and **chapter 16**; this index is papers and format docs only.
 
 | Topic                      | Link                                                                                                                               |
 |----------------------------|------------------------------------------------------------------------------------------------------------------------------------|
