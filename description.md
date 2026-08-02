@@ -502,16 +502,43 @@ its `head_dim` here).
 
 ---
 
-### RoPE — the position twist
+### RoPE — rotary positional embedding (how order enters attention)
 
-| Field                  | Means                                                            | Used for                                                                  | If missing               |
-|------------------------|------------------------------------------------------------------|---------------------------------------------------------------------------|--------------------------|
-| `rope_theta`           | Base frequency for rotary position embeddings (global / default) | Build cos/sin tables for RoPE on Q and K                                  | Default `1000000`        |
-| `rope_local_base_freq` | Separate base for **local / sliding** layers (Gemma)             | Sliding layers use this instead of `rope_theta`                           | Default `10000`          |
-| `rope_scaling`         | Optional object describing long-context RoPE tricks              | If it contains `rope_theta`, that value can override the base (Qwen path) | `null` / absent → ignore |
+**Name note:** RoPE stands for *Rotary Position Embedding*. It does **not** “rotate a position index.” It **rotates
+pairs of numbers inside the Query and Key vectors**, using an angle that depends on each token’s position
+(`0, 1, 2, …`). After that rotation, attention scores between two tokens depend on their **relative** distance as well
+as their content.
 
-Larger `rope_theta` is often used for longer contexts. Local layers with a smaller base keep nearby positions distinct
-when the window is short.
+Without some positional signal, “dog bites man” and “man bites dog” would look too alike to the match of Query against
+Key. Older models often **added** a learned vector per position to the token embedding. RoPE instead leaves the token
+embedding alone and twists Q and K inside each attention layer.
+
+```text
+  token at position p
+       │
+       ▼
+  build Q, K, V from hidden state     (linear projections)
+       │
+       ▼
+  RoPE: rotate Q and K by angle(p)    (V usually unchanged)
+       │
+       ▼
+  attention scores ← Q · Kᵀ / scale   (relative positions now matter)
+```
+
+| Field                  | Means                                                     | Used for                                                                  | If missing               |
+|------------------------|-----------------------------------------------------------|---------------------------------------------------------------------------|--------------------------|
+| `rope_theta`           | Base frequency for the rotation angles (global / default) | Build cos/sin tables for RoPE on Q and K                                  | Default `1000000`        |
+| `rope_local_base_freq` | Separate base for **local / sliding** layers (Gemma)      | Sliding layers use this instead of `rope_theta`                           | Default `10000`          |
+| `rope_scaling`         | Optional object describing long-context RoPE tricks       | If it contains `rope_theta`, that value can override the base (Qwen path) | `null` / absent → ignore |
+
+Larger `rope_theta` is often used for longer contexts (slower angle growth with distance). Local Gemma layers with a
+smaller base keep nearby positions distinct when the sliding window is short.
+
+**In this library:** `Norms.RotaryEmbedding` precomputes a cos/sin cache of shape roughly
+`[max_position_embeddings, head_dim]` from `rope_theta` (or the local base). Each attention block calls
+`RotaryEmbedding#forward(positions, q, k)` **before** `Attention#forward`. See also chapter 8 and the embeddings section
+in chapter 10.
 
 **Real values:** both use `rope_theta` ≈ 1 000 000; Gemma also sets `rope_local_base_freq` to 10000; `rope_scaling` is
 null in both samples.
@@ -1101,11 +1128,8 @@ layers — or refreshed by occasional **global** layers.
 blueprint (`layer_types`, `sliding_window`) decides per room. **Qwen3** here is typically global causal GQA in every
 room.
 
-Local layers may also use a different RoPE “twist speed” than global ones — a detail of Gemma’s recipe so near and far
-looks do not fight each other.
-
-**Further reading:** rotary positions —
-[Su et al., *RoFormer* / RoPE](https://arxiv.org/abs/2104.09864).
+Local layers may also use a different RoPE base (`rope_local_base_freq`) than global ones — a Gemma detail so near and
+far matching do not fight each other (chapter 5 / RoPE section below).
 
 
 ---
@@ -1126,9 +1150,31 @@ implements both; chapter 12 explains why notebooks make decode cheaper.
 
 ### Order still matters (RoPE) for all these kinds
 
-Before Query and Key are compared, a **position-dependent twist** (RoPE) is applied so order counts: “dog bites man” is
-not treated like “man bites dog.” Global and local Gemma layers may use different twist bases; the idea is the same —
-sequence is baked into the match.
+Before Query and Key are compared, **RoPE** (*Rotary Position Embedding*) is applied.
+
+**What is rotated?** Not the position number itself. For each token at index `p`, RoPE takes the Query (and Key) vector
+of every head, splits each head vector into pairs of components, and **rotates those 2-D pairs** by an angle that grows
+with `p` (angles come from frequencies derived from `rope_theta`). Value is left as produced by the linear projection in
+this port.
+
+**Why bother?** After rotation, the dot-product that scores “how well does this Query match that Key” depends on both
+*what* the tokens are and *how far apart* they sit. “dog bites man” is no longer interchangeable with “man bites dog”
+for the matcher. Relative distance is encoded in the geometry of Q and K, without adding a separate learned position
+table to the token embedding.
+
+```text
+  Q_p, K_p  --RoPE(p)-->  Q'_p, K'_p
+  score(i, j) uses Q'_i and K'_j   // sensitive to (i − j) as well as content
+```
+
+**Where:** built once in `Norms.RotaryEmbedding` (cos/sin cache); applied each layer in
+`Qwen3Attention#forward` / `Gemma3Attention#forward` via `rotaryEmb.forward(positions, q, k)` before
+`Attention#forward`. Gemma may use a different `rope_theta` / `rope_local_base_freq` for sliding vs global layers; the
+idea is the same.
+
+Config fields: chapter 5 (`rope_theta`, …). Contrast with **token embedding**: chapter 10.
+
+**Further reading:** [Su et al., *RoFormer* / RoPE](https://arxiv.org/abs/2104.09864).
 
 ---
 
@@ -1554,18 +1600,19 @@ Example scale: BF16 table `[151936, 1024]` is already hundreds of megabytes befo
 
 #### Kinds of “embedding” you will meet (and which this port uses)
 
-| Kind                                   | Meaning                                                                       | In this Java project?                                                                      |
-|----------------------------------------|-------------------------------------------------------------------------------|--------------------------------------------------------------------------------------------|
-| **Token embedding** (`embed_tokens`)   | Learned row per vocabulary id; starts the forward pass                        | **Yes** — main input path                                                                  |
-| **Tied embedding / LM head**           | Same weight matrix used to *score* next-token logits (transpose-style linear) | **Yes** when `tie_word_embeddings` (Qwen if set; Gemma3-270M always ties here)             |
-| **Separate LM head**                   | Distinct `lm_head.weight` for scoring                                         | **Yes** when not tied — still a linear map from hidden → vocab, not a second “input embed” |
-| **RoPE** (rotary positional embedding) | Position-dependent **rotation** of Query/Key vectors; no vocab table          | **Yes** — `Norms.RotaryEmbedding`; cos/sin built from `rope_theta` / local base            |
-| Absolute learned position embedding    | Extra learned vector per position index added to tokens (older GPT-2 style)   | **No**                                                                                     |
-| Segment / token-type embedding         | BERT-style A/B sentence markers                                               | **No**                                                                                     |
-| Multimodal / image patch embedding     | Vision or other modality towers                                               | **No** — text causal LM only                                                               |
+| Kind                                   | Meaning                                                                                                | In this Java project?                                                                      |
+|----------------------------------------|--------------------------------------------------------------------------------------------------------|--------------------------------------------------------------------------------------------|
+| **Token embedding** (`embed_tokens`)   | Learned row per vocabulary id; starts the forward pass                                                 | **Yes** — main input path                                                                  |
+| **Tied embedding / LM head**           | Same weight matrix used to *score* next-token logits (transpose-style linear)                          | **Yes** when `tie_word_embeddings` (Qwen if set; Gemma3-270M always ties here)             |
+| **Separate LM head**                   | Distinct `lm_head.weight` for scoring                                                                  | **Yes** when not tied — still a linear map from hidden → vocab, not a second “input embed” |
+| **RoPE** (rotary positional embedding) | Position-dependent **rotation of Q/K vector components** (not a vocab table; not “rotating the index”) | **Yes** — `Norms.RotaryEmbedding`; cos/sin from `rope_theta` / local base                  |
+| Absolute learned position embedding    | Extra learned vector per position index added to tokens (older GPT-2 style)                            | **No**                                                                                     |
+| Segment / token-type embedding         | BERT-style A/B sentence markers                                                                        | **No**                                                                                     |
+| Multimodal / image patch embedding     | Vision or other modality towers                                                                        | **No** — text causal LM only                                                               |
 
 So: everyday “the embedding” in chat LMs usually means the **token** table. **RoPE** is also called an embedding in
-papers, but it is a **positional transform** of Q and K inside attention, not another vocab lookup.
+papers, but it is a **positional transform of Q and K** inside attention — rotating pairs of features by an angle that
+depends on position — not another vocab lookup and not a rotation of the position index itself.
 
 #### Where it is calculated in this library
 
@@ -1994,7 +2041,7 @@ Qwen3Attention#forward
   → Linear.Qkv#forward          // build packed Q/K/V
   → Ops#splitLast
   → optional RMSNorm#forward on Q/K heads
-  → RotaryEmbedding#forward     // position twist
+  → RotaryEmbedding#forward     // rotate Q,K by position angle (RoPE)
   → Attention#forward
        → Attention#storeKvCache
        → Attention#prefill… → #attendRange
@@ -2335,49 +2382,49 @@ in-flight work via the scheduler.
 Short glossary. For the Java home of each idea, prefer the **In the code** notes in earlier chapters and the map in
 **chapter 16**.
 
-| Term you may meet     | Plain meaning                                                                   |
-|-----------------------|---------------------------------------------------------------------------------|
-| Model                 | The finished “book” of learned numbers plus its dictionary and blueprint        |
-| Loading               | Reading blueprint + dictionary + weights into memory and wiring them            |
-| `config.json`         | Blueprint of sizes and recipe (not the learned weights)                         |
-| `tokenizer.json`      | Vocab, BPE merges, and text pipeline (string ↔ token ids)                       |
-| `.safetensors`        | Catalogued raw weight tensors (matrices/vectors) on disk                        |
-| BPE                   | Byte-Pair Encoding: merge frequent pieces using an ordered merge list           |
-| `data_offsets`        | Byte range of one tensor inside a safetensors payload                           |
-| `hidden_size`         | Length of each token’s internal dossier (main working width through all layers) |
-| `intermediate_size`   | Temporary wider width inside each layer’s MLP expand→shrink step                |
-| `num_hidden_layers`   | How many stacked attention+MLP rooms                                            |
-| GQA heads fields      | `num_attention_heads` vs `num_key_value_heads` (sharing of KV notebooks)        |
-| Inference             | Using the book to produce text (not training it)                                |
-| Token                 | A scrap of text with a number in the dictionary                                 |
-| Embedding (token)     | Learned vector per token id; lookup starts the forward pass (`embed_tokens`)    |
-| RoPE                  | Rotary positional embedding: rotate Q/K by position (not a vocab table)         |
-| Tied embeddings       | Same matrix for input lookup and LM-head scoring (`tie_word_embeddings`)        |
-| Vocabulary            | All scraps the model is allowed to emit                                         |
-| Logits                | Raw preference scores for each vocabulary scrap, before turning into chances    |
-| Softmax               | Turn raw scores into portions that add to 100%                                  |
-| Attention             | Weighted reread of allowed places (Query matches Keys, mixes Values)            |
-| Self-attention        | Looking within the same text (not at a second document)                         |
-| Causal                | May only look at the past and present, not the future                           |
-| Multi-head (MHA)      | Several parallel glances; each may have its own KV notebooks                    |
-| GQA                   | Grouped-query: several Query heads share one Key/Value group                    |
-| MQA                   | Multi-query: all Query heads share a single Key/Value pair                      |
-| Sliding window        | May look back only a fixed recent stretch, not the whole past                   |
-| Global attention      | May look back over the whole allowed past                                       |
-| Query / Key / Value   | Search / label / content notes used by attention                                |
-| Inner work (Sense A)  | Invisible stack of attention + rewrites for each next token                     |
-| Chain of thought (B)  | Reasoning written as ordinary tokens in the reply                               |
-| Tagged scratchpad (C) | Written reasoning inside `<think>…</think>` for UI splitting                    |
-| ChatReply             | Parsed pair of thinking text + visible answer after a turn                      |
-| KV cache / notebook   | Stored Keys and Values, reused while continuing                                 |
-| Prefill               | First heavy read of the prompt                                                  |
-| Decode                | Step-by-step production of later tokens                                         |
-| Sampling              | Drawing the next token according to chances and filters                         |
-| Temperature           | How strongly to favor the leading candidate                                     |
-| Context length        | How much past text fits on the desk at once                                     |
-| Context window        | Hard token budget for one forward (`maxModelLen` / `max_position_embeddings`)   |
-| Chat history          | `ChatSession` message list re-fed each turn; may be truncated                   |
-| Weights               | The learned numbers on the shelves                                              |
+| Term you may meet     | Plain meaning                                                                                    |
+|-----------------------|--------------------------------------------------------------------------------------------------|
+| Model                 | The finished “book” of learned numbers plus its dictionary and blueprint                         |
+| Loading               | Reading blueprint + dictionary + weights into memory and wiring them                             |
+| `config.json`         | Blueprint of sizes and recipe (not the learned weights)                                          |
+| `tokenizer.json`      | Vocab, BPE merges, and text pipeline (string ↔ token ids)                                        |
+| `.safetensors`        | Catalogued raw weight tensors (matrices/vectors) on disk                                         |
+| BPE                   | Byte-Pair Encoding: merge frequent pieces using an ordered merge list                            |
+| `data_offsets`        | Byte range of one tensor inside a safetensors payload                                            |
+| `hidden_size`         | Length of each token’s internal dossier (main working width through all layers)                  |
+| `intermediate_size`   | Temporary wider width inside each layer’s MLP expand→shrink step                                 |
+| `num_hidden_layers`   | How many stacked attention+MLP rooms                                                             |
+| GQA heads fields      | `num_attention_heads` vs `num_key_value_heads` (sharing of KV notebooks)                         |
+| Inference             | Using the book to produce text (not training it)                                                 |
+| Token                 | A scrap of text with a number in the dictionary                                                  |
+| Embedding (token)     | Learned vector per token id; lookup starts the forward pass (`embed_tokens`)                     |
+| RoPE                  | Rotary Position Embedding: rotate pairs inside Q/K by angle(position); encodes relative distance |
+| Tied embeddings       | Same matrix for input lookup and LM-head scoring (`tie_word_embeddings`)                         |
+| Vocabulary            | All scraps the model is allowed to emit                                                          |
+| Logits                | Raw preference scores for each vocabulary scrap, before turning into chances                     |
+| Softmax               | Turn raw scores into portions that add to 100%                                                   |
+| Attention             | Weighted reread of allowed places (Query matches Keys, mixes Values)                             |
+| Self-attention        | Looking within the same text (not at a second document)                                          |
+| Causal                | May only look at the past and present, not the future                                            |
+| Multi-head (MHA)      | Several parallel glances; each may have its own KV notebooks                                     |
+| GQA                   | Grouped-query: several Query heads share one Key/Value group                                     |
+| MQA                   | Multi-query: all Query heads share a single Key/Value pair                                       |
+| Sliding window        | May look back only a fixed recent stretch, not the whole past                                    |
+| Global attention      | May look back over the whole allowed past                                                        |
+| Query / Key / Value   | Search / label / content notes used by attention                                                 |
+| Inner work (Sense A)  | Invisible stack of attention + rewrites for each next token                                      |
+| Chain of thought (B)  | Reasoning written as ordinary tokens in the reply                                                |
+| Tagged scratchpad (C) | Written reasoning inside `<think>…</think>` for UI splitting                                     |
+| ChatReply             | Parsed pair of thinking text + visible answer after a turn                                       |
+| KV cache / notebook   | Stored Keys and Values, reused while continuing                                                  |
+| Prefill               | First heavy read of the prompt                                                                   |
+| Decode                | Step-by-step production of later tokens                                                          |
+| Sampling              | Drawing the next token according to chances and filters                                          |
+| Temperature           | How strongly to favor the leading candidate                                                      |
+| Context length        | How much past text fits on the desk at once                                                      |
+| Context window        | Hard token budget for one forward (`maxModelLen` / `max_position_embeddings`)                    |
+| Chat history          | `ChatSession` message list re-fed each turn; may be truncated                                    |
+| Weights               | The learned numbers on the shelves                                                               |
 
 ---
 

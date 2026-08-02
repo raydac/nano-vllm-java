@@ -10,8 +10,7 @@
 - Educational walkthrough: `description.md` + Russian `description_rus.md` (audited vs code: history=answer-only, sampling defaults, enableThinking)
 - `description.md`: every narrative chapter has **In the code** class/method signposts; §16 is the full map + Samples A–F
 - `description.md` §15 (“2+2”): master call chain + per-stage `Class#method` tables (send → generate → step → Attention → parse)
-- `description.md` / `description_rus.md` ch.12: context window vs chat history vs KV cache; truncateHistory; when the thread is lost
-- Fixed RU phrasing around embeddings (no «полезно складывать»)
+- `description_rus.md` terminology pass: Sense A/B/C (not «толкование»); keep English ML terms; fix calques (RoPE, sliding window, «ком прозы», «разливает», …)
 
 
 ## 2. Architecture & Technical Discoveries
