@@ -1,0 +1,51 @@
+## 1. Implementation Progress
+- Single-threaded CPU kernels; SIMD Vector API kept
+- CausalLM: Qwen3 + Gemma3; tokenizer GPT-2 BPE / Metaspace; downloads under models/
+- **Library API:** `LLM.Builder`, `EngineIo` (quiet default), `.systemPrompt()`, `ChatSession`, typed `ChatMessage`/`ChatRole`/`ChatReply`
+- Helpers: `llm.chat()`, `chatOnce()`, `complete()`, `SamplingDefaults`, `cancel()` / generate timeout
+- Errors: `ModelLoadException`, `GenerationCancelledException`, `GenerationTimeoutException`
+- Example uses `ChatSession` with streamTo; Gemma empty system + boilerplate scrub inside session
+- package-info documents public vs internal surface; **LLM** has library JavaDoc; **module-info.java** (`com.igormaznitsa.nanollvm`)
+- Root Java package + JPMS module: `com.igormaznitsa.nanollvm` (was `io.nanovllm`)
+- Educational walkthrough: `description.md` + Russian `description_rus.md` (audited vs code: history=answer-only, sampling defaults, enableThinking)
+- `description.md`: every narrative chapter has **In the code** class/method signposts; §16 is the full map + Samples A–F
+- `description.md` §15 (“2+2”): master call chain + per-stage `Class#method` tables (send → generate → step → Attention → parse)
+- `description_rus.md`: full Russian translation of `description.md` (code identifiers kept)
+
+## 2. Architecture & Technical Discoveries
+- Engine status via `EngineIo`; chat UI via `StreamPrinter` / session `streamTo`
+- Gemma: no system role by default; long system+hello latches setup boilerplate
+- Scheduler.`clear()` aborts in-flight seqs on cancel/timeout
+- One LLM instance is not concurrent-safe for generate; `cancel()` is cross-thread
+
+## 3. Technical Debt & Refactoring
+- Attention O(n²); no float16 / TP / CUDA graphs
+- Metaspace BPE simplified; optional chat_template.jinja in download
+- Optional repetition penalty for tiny IT models
+
+## 4. Current Work In Progress
+- Russian educational translation: `_rus_part1.md` (title–ch.7), `_rus_part2.md` (chs 8–14) from `description.md`
+- Russian educational translation part 3 written to `_rus_part3.md` (chs 15–19 from `description.md`)
+
+## 5. Known Issues & Limitations
+- CPU-only; large float32 heap; weights not in git
+- Gemma3-270M weak knowledge / paraphrase; first chat turn can be slow
+
+## 6. Open Questions & Pending Decisions
+- Whether to fold Sampler into ModelRunner next
+
+## 7. Useful References
+- How it works: `description.md` / `description_rus.md` (**In the code** notes; §16 map/samples; §19 reading index)
+- Maven: `com.igormaznitsa:nano-vllm-java:0.2.0-SNAPSHOT`; JPMS module `com.igormaznitsa.nanollvm`
+- Build: `mvn -q test` / `MAVEN_OPTS="-Xmx8g" mvn -q exec:java -Dexec.mainClass=com.igormaznitsa.nanollvm.Example`
+- Library: `LLM.builder(path).systemPrompt(…).build()` then `llm.chat().send(…)` / `chatOnce` / `complete`
+- CLI progress: `.withSystemIo()`
+- Plugins (pom): compiler 3.15.0, surefire 3.5.5, jar 3.5.0, exec 3.6.3; JUnit 6.0.2; Gson 2.13.2
+- `module-info`: exports `com.igormaznitsa.nanollvm`, `chat`, `tokenizer`, `prompts`, `utils`; requires `com.google.gson`, `requires static jdk.incubator.vector`
+- Vector flags: `.mvn/jvm.config` for Maven/`exec:java`; surefire uses `jvm.module.args` (exec:java has no `jvmArgs` in 3.6.x)
+
+## 8. User Advice and Recommendations
+- Document Maven as `mvn` (portable); on this machine the agent may invoke `mvn22`
+- Prefer `ChatSession` for dialog; keep raw `generate` for completions
+- Do not stack long Gemma system prompts — latch risk
+- Keep I/O out of Config
