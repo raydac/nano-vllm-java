@@ -27,6 +27,7 @@ JPMS-модуль:
 
 ## Оглавление
 
+
 1. [Предмет рассмотрения](#1-предмет-рассмотрения)
 2. [Базовый механизм: предсказание следующего токена](#2-базовый-механизм-предсказание-следующего-токена)
 3. [Токенизация: представление текста числами](#3-токенизация-представление-текста-числами)
@@ -37,7 +38,7 @@ JPMS-модуль:
 7. [`*.safetensors` — формат и содержимое файлов весов](#7-safetensors-формат-и-содержимое-файлов-весов)
 8. [Внимание (attention): виды обращения к предшествующему контексту](#8-внимание-attention-виды-обращения-к-предшествующему-контексту)
 9. [Процесс «мышления»: как он устроен и как работает с моделью](#9-процесс-мышления-как-он-устроен-и-как-работает-с-моделью)
-10. [Математика в упрощённом изложении](#10-математика-в-упрощённом-изложении)
+10. [Математика в упрощённом изложении (включая embeddings)](#10-математика-в-упрощённом-изложении-включая-embeddings)
 11. [Выбор следующего токена: не всегда наиболее вероятный](#11-выбор-следующего-токена-не-всегда-наиболее-вероятный)
 12. [Зачем программе нужен кэш прошлого (KV cache)](#12-зачем-программе-нужен-кэш-прошлого-kv-cache)
 13. [Обслуживание нескольких диалогов без взаимных помех](#13-обслуживание-нескольких-диалогов-без-взаимных-помех)
@@ -141,7 +142,8 @@ the», …) она оценивает, *насколько правдоподо�
 ```
 
 Зачем так? Потому что вся внутренняя жизнь модели — это **арифметика над списками чисел**. Токены — мост между
-человеческим языком и этой арифметикой.
+человеческим языком и этой арифметикой. Следующий мост после id — таблица **embedding**: каждый id становится вектором
+длины `hidden_size` (глава 10).
 
 Отдельный файл, **токенизатор** (tokenizer), хранит этот словарь и правила нарезки текста. Чат-модели также хранят
 **шаблон** (template): служебные маркеры вроде «эта строка — пользователь», «эта строка — ассистент», чтобы модель не
@@ -1555,7 +1557,7 @@ Plan: answer with 4.
 
 ---
 
-## 10. Математика в упрощённом изложении
+## 10. Математика в упрощённом изложении (включая embeddings)
 
 Эту главу можно пропустить и всё равно понять общую картину. Она для читателей, которым нужна *форма* арифметики без
 учебника.
@@ -1576,10 +1578,87 @@ MLP, оценка словаря.
 
 ### Embedding
 
-Не смешивание — **поиск в таблице**. Токен номер 42 → скопировать векторное представление номер 42 из таблицы
-эмбеддингов.
+Не смешивание — **поиск в таблице** (lookup). Токен с номером 42 → скопировать строку 42 из таблицы embedding в вектор
+длины `hidden_size`. Этот вектор — начальное скрытое состояние токена до прохождения слоёв трансформера.
 
-### Softmax — превращение оценок в доли внимания (или вероятности)
+### Embeddings подробнее — виды, представление и эта библиотека
+
+Словом **embedding** называют несколько связанных идей. В этом проекте лишь часть из них существует как большие
+обученные таблицы.
+
+#### Что такое token embedding
+
+Токенизатор даёт **целочисленные id**. Над «голыми» целыми числами модель не может выполнять содержательные операции
+(например attention): сначала каждый id нужно превратить в вектор — **token embedding**. Таблица **token embedding** —
+обученная матрица с одной строкой на каждый id словаря. Поиск id `k` копирует эту строку:
+плотный вектор длины `hidden_size` (например 1024 у Qwen3-0.6B, 640 у Gemma3-270M). Числа заданы при обучении; эта
+программа только читает их.
+
+```text
+  token id  →  lookup строки в embed_tokens  →  вектор [hidden_size]
+       42   →  weight[42, :]                 →  начальное hidden state
+```
+
+Это **не** база определений. Близкие векторы могут коррелировать со сходным употреблением в обучающем тексте, но движку
+нужен только lookup и последующие слои.
+
+#### Как это представлено в памяти
+
+| Свойство       | В этой библиотеке                                                                   |
+|----------------|-------------------------------------------------------------------------------------|
+| Форма          | `[vocab_size, hidden_size]` — строки = id из `config.json`, столбцы = `hidden_size` |
+| На диске       | Обычно `model.embed_tokens.weight` в `*.safetensors` (часто BF16)                   |
+| После загрузки | `tensor.Tensor` в **float32** (учебный CPU-порт расширяет dtype)                    |
+| Операция       | Копирование строки — `Ops.embedding(ids, weight)` — не матричное умножение          |
+
+Пример масштаба: таблица BF16 `[151936, 1024]` уже занимает сотни мегабайт до остальных слоёв.
+
+#### Виды «embedding», которые вы встретите (и что использует этот порт)
+
+| Вид                                    | Смысл                                                                           | В этом Java-проекте?                                                                    |
+|----------------------------------------|---------------------------------------------------------------------------------|-----------------------------------------------------------------------------------------|
+| **Token embedding** (`embed_tokens`)   | Обученная строка на id словаря; начинает forward                                | **Да** — основной входной путь                                                          |
+| **Tied embedding / LM head**           | Та же матрица весов используется для *оценки* logits следующего токена (linear) | **Да**, если `tie_word_embeddings` (у Qwen — по флагу; у Gemma3-270M здесь всегда tied) |
+| **Separate LM head**                   | Отдельный `lm_head.weight` для scoring                                          | **Да**, если не tied — это linear hidden → vocab, не второй «входной embed»             |
+| **RoPE** (rotary positional embedding) | Зависящий от позиции **поворот** векторов Query/Key; без таблицы словаря        | **Да** — `Norms.RotaryEmbedding`; cos/sin из `rope_theta` / local base                  |
+| Absolute learned position embedding    | Дополнительный обученный вектор на индекс позиции (стиль старого GPT-2)         | **Нет**                                                                                 |
+| Segment / token-type embedding         | Маркеры предложений A/B в стиле BERT                                            | **Нет**                                                                                 |
+| Multimodal / image patch embedding     | Башни зрения и других модальностей                                              | **Нет** — только текстовая causal LM                                                    |
+
+Итого: в разговорных LM «embedding» обычно означает таблицу **token**. **RoPE** в статьях тоже называют embedding, но
+это **позиционное преобразование** Q и K внутри attention, а не ещё один lookup по словарю.
+
+#### Где это считается в библиотеке
+
+```text
+CausalLM#forward (Qwen3ForCausalLM / Gemma3ForCausalLM)
+  → VocabParallelEmbedding#forward(inputIds)
+       → Ops#embedding          // копирование строк из embed_tokens.weight
+  → (только Gemma) умножение на √hidden_size
+  → слои трансформера…
+       → внутри attention: RotaryEmbedding#forward(positions, q, k)
+  → …
+CausalLM#computeLogits
+  → ParallelLMHead#forward(hidden)
+       → Ops#linear с весом lm_head  // та же матрица, если tied
+```
+
+| Шаг                      | Class#method                                                 | Роль                                              |
+|--------------------------|--------------------------------------------------------------|---------------------------------------------------|
+| Выделить пустую таблицу  | `VocabParallelEmbedding.<init>(vocabSize, hiddenSize)`       | Нули `[V, H]` до загрузки                         |
+| Загрузить веса           | `ModelLoader` → `WeightSlot` для `model.embed_tokens.weight` | Заполнить таблицу                                 |
+| Lookup                   | `VocabParallelEmbedding#forward` → `Ops#embedding`           | ids → hidden states                               |
+| Масштаб Gemma            | `Gemma3Model#scaleEmbed`                                     | Умножить на `√hidden_size` после lookup           |
+| Tied или отдельный head  | конструктор `Qwen3ForCausalLM` / `Gemma3ForCausalLM`         | `lmHead.setWeight(embedTokens.weight())` при tied |
+| Позиция (RoPE)           | `Norms.RotaryEmbedding#get` / `#forward`                     | Кэш cos/sin; поворот Q и K по позиции             |
+| Оценки следующего токена | `VocabParallelEmbedding.ParallelLMHead#forward`              | Hidden → logits по словарю                        |
+
+Имена в файле весов: `model.embed_tokens.weight`; необязательный `lm_head.weight`, если не tied (глава 7).
+
+**В коде:** см. `layers.VocabParallelEmbedding`, `tensor.Ops.embedding`, `Norms.RotaryEmbedding` и вызов
+`embedTokens.forward` в начале forward у `Qwen3ForCausalLM` / `Gemma3ForCausalLM` (глава 16).
+
+### Softmax — превращение оценок в доли attention (или вероятности)
 
 Если три кандидата набрали 10, 3 и 1, softmax превращает это в доли, которые **в сумме дают 100%**, причём победитель
 получает большую часть, но не обязательно всё. Технический приём сначала вычитает наибольшую оценку, чтобы экспоненты не
@@ -1615,7 +1694,8 @@ MLP, оценка словаря.
 
 **Дополнительное чтение:** [RMSNorm](https://arxiv.org/abs/1910.07467); варианты gated MLP вроде
 [SwiGLU](https://arxiv.org/abs/2002.05202); фон по softmax
-на [Wikipedia](https://en.wikipedia.org/wiki/Softmax_function).
+на [Wikipedia](https://en.wikipedia.org/wiki/Softmax_function); позиционные повороты
+[RoFormer / RoPE](https://arxiv.org/abs/2104.09864).
 
 
 ---
@@ -1683,8 +1763,60 @@ Keys/Values).
 
 Вот почему первая пауза может казаться длиннее каждого следующего слова: начальное чтение тяжелее продолжения.
 
+### Окно контекста, история чата и как не «потерять нить»
+
+Три разных «прошлых» легко перепутать. Только вместе они объясняют, как диалог остаётся связным — и когда модель
+**теряет нить**.
+
+| Уровень            | Что хранит                                                                          | Время жизни                                                     | Роль                                            |
+|--------------------|-------------------------------------------------------------------------------------|-----------------------------------------------------------------|-------------------------------------------------|
+| **Context window** | Id токенов, помещающиеся в один forward (`maxModelLen` ≤ `max_position_embeddings`) | Один вызов `generate`                                           | Жёсткий лимит длины для attention и таблиц RoPE |
+| **История чата**   | `List<ChatMessage>` в `ChatSession` (роли + текст)                                  | Между ходами, пока не вызван `clear()`                          | Память приложения о диалоге                     |
+| **KV cache**       | Тензоры Key/Value для уже обработанных позиций                                      | Внутри одного `generate` (затем сбрасывается / строится заново) | Ускоряет decode; не постоянный дневник          |
+
+**Внутри одного ответа** модель «помнит» более ранние токены, потому что attention читает **KV cache** (и растущий
+список токенов в `Sequence`). Она **не** вспоминает ходы, которые вы не вернули в следующий промпт.
+
+**Между ответами** эта библиотека сохраняет связность так:
+
+```text
+  история ChatSession  (system + прежние user/assistant)
+        │
+        ▼
+  ChatMessages#truncateHistory   // отбросить самые старые ходы, если бюджет превышен
+        │
+        ▼
+  Tokenizer#applyChatTemplate → encode → LLM#generate
+        │                         │
+        │                         └── prefill заполняет KV только для ЭТОГО промпта
+        ▼
+  finishTurn → history.add(assistant(только answer))
+```
+
+Бюджет на шаблонизированный промпт (до генерации новых токенов):
+
+> `budget ≈ max(64, maxModelLen − maxTokens − 16)`  
+> (`ChatMessages#truncateHistory`; запас оставляют под ответ.)
+
+Если закодированный промпт всё ещё слишком длинный, удаляются самые старые ходы без system (иногда вместе с парным
+assistant), пока длина не уложится — либо останется только минимальный набор сообщений.
+
+#### Как модель удерживает историю — и как может её потерять
+
+| Механизм                    | Удерживает нить за счёт…                                            | Нить теряется, когда…                                                                           |
+|-----------------------------|---------------------------------------------------------------------|-------------------------------------------------------------------------------------------------|
+| История чата + template     | Повторной подачи прежних ходов текстом на каждый `send`             | `truncateHistory` выбрасывает ранние факты, которые ещё нужны                                   |
+| История только с answer     | Сохранения видимого ответа, не заметок `<think>`                    | Важные детали жили только внутри thinking-тегов                                                 |
+| KV cache                    | Attention по всем токенам промпта+ответа **внутри** одного generate | **Новый** ход заново собирает промпт; старый KV прошлого generate — не долговременное хранилище |
+| Sliding-window слои (Gemma) | Локальные слои видят только последние *W* токенов                   | Далёкие токены того же промпта невидимы для этих слоёв (global-слои видят дальше)               |
+| Короткий `maxModelLen`      | Укладки на вашу машину                                              | Длинный диалог вынужден «забыть» начало                                                         |
+
+Отдельного модуля долговременной памяти **нет** — только веса модели и то, что вы держите в истории `ChatSession` (и что
+умещается в context window следующего prefill).
+
 **В коде:** KV-страницы в `engine.BlockManager` (`allocate`, `hashBlocks`, переиспользование префикса); планирование
-prefill/decode в `Scheduler`; запись/чтение кэша в `Attention.storeKvCache` / путь decode (глава 16).
+prefill/decode в `Scheduler`; запись/чтение кэша в `Attention.storeKvCache` / путь decode; память диалога в
+`ChatSession` / `ChatMessages#truncateHistory` (глава 16).
 
 **Дополнительное чтение:** постраничный KV cache и высокопроизводительный serving —
 [Kwon et al., *Efficient Memory Management for Large Language Model Serving with
@@ -1726,8 +1858,11 @@ PagedAttention*](https://arxiv.org/abs/2309.06180)
 | **Completion** | Продолжить сырой текст как есть         | Дописать этот абзац…            |
 | **Chat**       | Сообщения с ролями, историей, шаблонами | Диалог с явными маркерами ролей |
 
-Чат хранит **историю** ходов, оборачивает их в ожидаемые маркеры модели и может обрезать старые ходы, если контекстное
-окно (длина контекста) заполнено — как сокращение, когда в папке помещается лишь столько страниц.
+Чат хранит **историю** ходов, оборачивает их в ожидаемые маркеры модели и может обрезать старые ходы, если окно
+контекста переполнено (глава 12 — `ChatMessages#truncateHistory`). Именно история удерживает многоходовой чат **в
+теме**:
+каждый `send` заново собирает промпт из оставшихся сообщений, затем снова идут prefill+decode с новым KV cache для этого
+промпта.
 
 **System prompts** («отвечай кратко и по делу») — инструкции для ассистента (system prompt). У некоторых моделей (в
 частности Gemma
@@ -2133,21 +2268,22 @@ sampling
 
 ### Идея → класс → методы
 
-| Идея                                  | Основной тип                           | Методы / точки входа                                                              |
-|---------------------------------------|----------------------------------------|-----------------------------------------------------------------------------------|
-| Открыть модель                        | `LLM`, `LLM.Builder`                   | `LLM.builder(path)`, `.systemPrompt(…)`, `.withSystemIo()`, `.build()`            |
-| Ход чата                              | `ChatSession`                          | `llm.chat(maxTokens)`, `.send(user)`, `.streamTo(…)`, `.clear()`                  |
-| Разовый / сырой текст                 | `LLM`                                  | `chatOnce(…)`, `complete(…)`, `generate(…)`                                       |
-| Отмена / таймаут                      | `LLM`                                  | `cancel()`; `generate(…, timeout, onToken)`                                       |
-| Токенизация                           | `Tokenizer`                            | `fromPretrained(dir)`, `encode`, `decode`, `applyChatTemplate(…, enableThinking)` |
-| Конфигурация                          | `Config.HfConfig`                      | `HfConfig.load(config.json)`; `CausalLMFactory.detect/create`                     |
-| Загрузить веса                        | `ModelLoader`, `SafetensorsReader`     | `ModelLoader.loadModel`; `getTensor(name)`; `CausalLM.WeightSlot.load`            |
-| Один тик движка                       | `LLM.step`, `Scheduler`, `ModelRunner` | `schedule` → `ModelRunner.run` → `postprocess`                                    |
-| Forward + sampling                    | `ModelRunner`, `CausalLM`, `Sampler`   | `model.forward` → `computeLogits` → `sampler.forward`                             |
-| Внимание + запись KV                  | `Attention`, `utils.Context`           | `Attention.forward`; `storeKvCache`; помощники prefill/decode                     |
-| Страницы / переиспользование префикса | `BlockManager`                         | `canAllocate`, `allocate`, `hashBlocks`, `mayAppend`                              |
-| Разделение UI мышления                | `AssistantParts`, `ChatReply`          | `AssistantParts.parse`, `salvageFromThinking`                                     |
-| Математические операции               | `Ops`                                  | `linear`, `embedding`, `rmsNorm`, `siluAndMul` / `geluPytorchTanhAndMul`          |
+| Идея                                  | Основной тип                                                         | Методы / точки входа                                                                                            |
+|---------------------------------------|----------------------------------------------------------------------|-----------------------------------------------------------------------------------------------------------------|
+| Открыть модель                        | `LLM`, `LLM.Builder`                                                 | `LLM.builder(path)`, `.systemPrompt(…)`, `.withSystemIo()`, `.build()`                                          |
+| Ход чата                              | `ChatSession`                                                        | `llm.chat(maxTokens)`, `.send(user)`, `.streamTo(…)`, `.clear()`                                                |
+| Разовый / сырой текст                 | `LLM`                                                                | `chatOnce(…)`, `complete(…)`, `generate(…)`                                                                     |
+| Отмена / таймаут                      | `LLM`                                                                | `cancel()`; `generate(…, timeout, onToken)`                                                                     |
+| Токенизация                           | `Tokenizer`                                                          | `fromPretrained(dir)`, `encode`, `decode`, `applyChatTemplate(…, enableThinking)`                               |
+| Token embedding / RoPE / LM head      | `VocabParallelEmbedding`, `Ops`, `RotaryEmbedding`, `ParallelLMHead` | `embedTokens.forward` → `Ops.embedding`; Gemma `scaleEmbed`; `RotaryEmbedding.forward`; tied или отдельный head |
+| Конфигурация                          | `Config.HfConfig`                                                    | `HfConfig.load(config.json)`; `CausalLMFactory.detect/create`                                                   |
+| Загрузить веса                        | `ModelLoader`, `SafetensorsReader`                                   | `ModelLoader.loadModel`; `getTensor(name)`; `CausalLM.WeightSlot.load`                                          |
+| Один тик движка                       | `LLM.step`, `Scheduler`, `ModelRunner`                               | `schedule` → `ModelRunner.run` → `postprocess`                                                                  |
+| Forward + sampling                    | `ModelRunner`, `CausalLM`, `Sampler`                                 | `model.forward` → `computeLogits` → `sampler.forward`                                                           |
+| Внимание + запись KV                  | `Attention`, `utils.Context`                                         | `Attention.forward`; `storeKvCache`; помощники prefill/decode                                                   |
+| Страницы / переиспользование префикса | `BlockManager`                                                       | `canAllocate`, `allocate`, `hashBlocks`, `mayAppend`                                                            |
+| Разделение UI мышления                | `AssistantParts`, `ChatReply`                                        | `AssistantParts.parse`, `salvageFromThinking`                                                                   |
+| Математические операции               | `Ops`                                                                | `linear`, `embedding`, `rmsNorm`, `siluAndMul` / `geluPytorchTanhAndMul`                                        |
 
 ### Образец A — использование библиотеки (что вызывают большинство приложений)
 
@@ -2298,6 +2434,9 @@ src/main/java/com/igormaznitsa.nanollvm/
 | Поля heads (GQA)                 | `num_attention_heads` vs `num_key_value_heads` (разделение кэша KV между heads)           |
 | Инференс                         | Применение модели для генерации текста (не обучение)                                      |
 | Токен                            | Фрагмент текста с номером в словаре                                                       |
+| Embedding (token)                | Обученный вектор на id токена; lookup начинает forward (`embed_tokens`)                   |
+| RoPE                             | Rotary positional embedding: поворот Q/K по позиции (не таблица словаря)                  |
+| Tied embeddings                  | Одна матрица для входного lookup и scoring LM head (`tie_word_embeddings`)                |
 | Словарь (vocabulary)             | Множество всех фрагментов, которые модели разрешено выдавать                              |
 | Logits                           | Сырые оценки предпочтения для каждого элемента словаря до нормализации в вероятности      |
 | Softmax                          | Преобразование сырых оценок в доли, суммирующиеся к 1 (или 100%)                          |
@@ -2320,6 +2459,8 @@ src/main/java/com/igormaznitsa.nanollvm/
 | Выборка (Sampling)               | Вероятностный выбор следующего токена по распределению и фильтрам                         |
 | Температура                      | Степень сглаживания распределения: насколько сильнее предпочитается лидирующий кандидат   |
 | Длина контекста                  | Сколько прошлого текста помещается в рабочее окно одновременно                            |
+| Context window                   | Жёсткий бюджет токенов на один forward (`maxModelLen` / `max_position_embeddings`)        |
+| История чата                     | Список сообщений `ChatSession`, подаваемый на каждый ход; может усекаться                 |
 | Веса (параметры)                 | Обученные числовые тензоры модели                                                         |
 
 ---
@@ -2371,6 +2512,7 @@ src/main/java/com/igormaznitsa.nanollvm/
 | Класс `config` модели      | [PretrainedConfig](https://huggingface.co/docs/transformers/main/en/main_classes/configuration)                                    |
 | Safetensors                | [HF docs](https://huggingface.co/docs/safetensors) · [GitHub format notes](https://github.com/huggingface/safetensors)             |
 | RoPE                       | [Su et al. / RoFormer (arXiv)](https://arxiv.org/abs/2104.09864)                                                                   |
+| Token / positional embeds  | (эта глава 10; статья RoPE выше)                                                                                                   |
 | GQA                        | [Ainslie et al. (arXiv)](https://arxiv.org/abs/2305.13245)                                                                         |
 | Multi-query attention      | [Shazeer (arXiv)](https://arxiv.org/abs/1911.02150)                                                                                |
 | PagedAttention / vLLM      | [Kwon et al. (arXiv)](https://arxiv.org/abs/2309.06180) · [vLLM GitHub](https://github.com/vllm-project/vllm)                      |

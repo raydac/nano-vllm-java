@@ -32,7 +32,7 @@ full map, samples, and file paths.
 7. [`*.safetensors` — the weight crates: format and contents](#7-safetensors--the-weight-crates-format-and-contents)
 8. [Attention: kinds of looking-back, and how they work](#8-attention-kinds-of-looking-back-and-how-they-work)
 9. [The thinking process: how it is organized and how it works with the model](#9-the-thinking-process-how-it-is-organized-and-how-it-works-with-the-model)
-10. [The math, said gently](#10-the-math-said-gently)
+10. [The math, said gently (including embeddings)](#10-the-math-said-gently-including-embeddings)
 11. [Choosing a word: not always the most obvious one](#11-choosing-a-word-not-always-the-most-obvious-one)
 12. [Why the program keeps a notebook of the past](#12-why-the-program-keeps-a-notebook-of-the-past)
 13. [Serving several conversations without chaos](#13-serving-several-conversations-without-chaos)
@@ -131,7 +131,8 @@ of those scraps). Decoding means: turn the numbers back into readable text.
 ```
 
 Why bother? Because the model’s entire inner life is **arithmetic on lists of numbers**. Tokens are the bridge between
-human language and that arithmetic.
+human language and that arithmetic. The next bridge after ids is the **embedding** table: each id becomes a vector of
+length `hidden_size` (chapter 10).
 
 A separate file, the **tokenizer**, holds that dictionary and the rules for chopping text. Chat models also store a
 **template**: stage directions such as “this line is the user,” “this line is the assistant,” so the model is not
@@ -1498,7 +1499,7 @@ Written thinking helps **because** attention can reread it — not because a sec
 
 ---
 
-## 10. The math, said gently
+## 10. The math, said gently (including embeddings)
 
 You can skip this chapter and still understand the story. It exists for readers who want the *shape* of the arithmetic
 without a textbook.
@@ -1517,7 +1518,84 @@ MLP, scoring the vocabulary.
 
 ### Embedding
 
-Not mixing — **looking up**. Token number 42 → copy portrait number 42 from the card index.
+Not mixing — **looking up**. Token number 42 → copy row 42 from the embedding table into a vector of length
+`hidden_size`. That vector is the starting hidden state for that token before any transformer layer runs.
+
+### Embeddings in depth — kinds, representation, and this library
+
+“Embedding” is used for several related ideas. In this project only some of them appear as large learned tables.
+
+#### What a token embedding is
+
+The tokenizer gives **integer ids**. The model cannot run meaningful operations such as attention on bare integers. Each
+id must first become a vector — the **token embedding** table is a learned matrix with one row per vocabulary id.
+Looking up id `k` copies that row: a dense vector of length
+`hidden_size` (for example 1024 for Qwen3-0.6B, 640 for Gemma3-270M). Those numbers were set during training; this
+program only reads them.
+
+```text
+  token id  →  row lookup in embed_tokens  →  vector [hidden_size]
+       42   →  weight[42, :]               →  starting hidden state
+```
+
+That is **not** a database of definitions. Nearby vectors may correlate with similar usage in training text, but the
+engine only needs the lookup + later layers.
+
+#### How it is represented in memory
+
+| Property   | In this library                                                                            |
+|------------|--------------------------------------------------------------------------------------------|
+| Shape      | `[vocab_size, hidden_size]` — rows = token ids from `config.json`, columns = `hidden_size` |
+| On disk    | Usually `model.embed_tokens.weight` in `*.safetensors` (often BF16)                        |
+| After load | `tensor.Tensor` of **float32** (this educational CPU port widens dtypes)                   |
+| Operation  | Row copy — `Ops.embedding(ids, weight)` — not a matrix multiply                            |
+
+Example scale: BF16 table `[151936, 1024]` is already hundreds of megabytes before the rest of the model.
+
+#### Kinds of “embedding” you will meet (and which this port uses)
+
+| Kind                                   | Meaning                                                                       | In this Java project?                                                                      |
+|----------------------------------------|-------------------------------------------------------------------------------|--------------------------------------------------------------------------------------------|
+| **Token embedding** (`embed_tokens`)   | Learned row per vocabulary id; starts the forward pass                        | **Yes** — main input path                                                                  |
+| **Tied embedding / LM head**           | Same weight matrix used to *score* next-token logits (transpose-style linear) | **Yes** when `tie_word_embeddings` (Qwen if set; Gemma3-270M always ties here)             |
+| **Separate LM head**                   | Distinct `lm_head.weight` for scoring                                         | **Yes** when not tied — still a linear map from hidden → vocab, not a second “input embed” |
+| **RoPE** (rotary positional embedding) | Position-dependent **rotation** of Query/Key vectors; no vocab table          | **Yes** — `Norms.RotaryEmbedding`; cos/sin built from `rope_theta` / local base            |
+| Absolute learned position embedding    | Extra learned vector per position index added to tokens (older GPT-2 style)   | **No**                                                                                     |
+| Segment / token-type embedding         | BERT-style A/B sentence markers                                               | **No**                                                                                     |
+| Multimodal / image patch embedding     | Vision or other modality towers                                               | **No** — text causal LM only                                                               |
+
+So: everyday “the embedding” in chat LMs usually means the **token** table. **RoPE** is also called an embedding in
+papers, but it is a **positional transform** of Q and K inside attention, not another vocab lookup.
+
+#### Where it is calculated in this library
+
+```text
+CausalLM#forward (Qwen3ForCausalLM / Gemma3ForCausalLM)
+  → VocabParallelEmbedding#forward(inputIds)
+       → Ops#embedding          // copy rows from embed_tokens.weight
+  → (Gemma only) scale by √hidden_size
+  → transformer layers…
+       → inside attention: RotaryEmbedding#forward(positions, q, k)
+  → …
+CausalLM#computeLogits
+  → ParallelLMHead#forward(hidden)
+       → Ops#linear with lm_head weight  // same matrix if tied
+```
+
+| Step                 | Class#method                                                 | Role                                               |
+|----------------------|--------------------------------------------------------------|----------------------------------------------------|
+| Allocate empty table | `VocabParallelEmbedding.<init>(vocabSize, hiddenSize)`       | Zeros `[V, H]` until load                          |
+| Load weights         | `ModelLoader` → `WeightSlot` for `model.embed_tokens.weight` | Fill the table                                     |
+| Lookup               | `VocabParallelEmbedding#forward` → `Ops#embedding`           | ids → hidden states                                |
+| Gemma scale          | `Gemma3Model#scaleEmbed`                                     | Multiply by `√hidden_size` after lookup            |
+| Tie or separate head | `Qwen3ForCausalLM` / `Gemma3ForCausalLM` constructor         | `lmHead.setWeight(embedTokens.weight())` when tied |
+| Position (RoPE)      | `Norms.RotaryEmbedding#get` / `#forward`                     | Cos/sin cache; rotate Q and K per position         |
+| Next-token scores    | `VocabParallelEmbedding.ParallelLMHead#forward`              | Hidden → logits over vocab                         |
+
+Weight file names: `model.embed_tokens.weight`; optional `lm_head.weight` when not tied (chapter 7).
+
+**In the code:** start at `layers.VocabParallelEmbedding`, `tensor.Ops.embedding`, `Norms.RotaryEmbedding`, and the
+`embedTokens.forward` call at the top of `Qwen3ForCausalLM` / `Gemma3ForCausalLM` model forward (chapter 16).
 
 ### Softmax — turning scores into shares of attention (or probability)
 
@@ -1552,7 +1630,8 @@ continuation well enough to be useful — and misleading.
 
 **Further reading:** [RMSNorm](https://arxiv.org/abs/1910.07467); gated MLP variants such
 as [SwiGLU](https://arxiv.org/abs/2002.05202); softmax background
-on [Wikipedia](https://en.wikipedia.org/wiki/Softmax_function).
+on [Wikipedia](https://en.wikipedia.org/wiki/Softmax_function); rotary positions
+[RoFormer / RoPE](https://arxiv.org/abs/2104.09864).
 
 
 ---
@@ -1614,8 +1693,60 @@ when two prompts start with the same long prefix (same opening paragraph → reu
 
 That is why the first pause can feel longer than each following word: the opening read is heavier than the continuation.
 
+### Context window, chat history, and not losing the thread
+
+Three different “pasts” are easy to confuse. Only together do they explain how a chat stays coherent — and when it
+**loses the thread**.
+
+| Layer              | What it stores                                                                          | Lifetime                                   | Role                                           |
+|--------------------|-----------------------------------------------------------------------------------------|--------------------------------------------|------------------------------------------------|
+| **Context window** | Token ids that fit in one forward (capped by `maxModelLen` ≤ `max_position_embeddings`) | One `generate` call                        | Hard length budget for attention + RoPE tables |
+| **Chat history**   | `List<ChatMessage>` in `ChatSession` (roles + text)                                     | Across turns until `clear()`               | Application memory of the dialogue             |
+| **KV cache**       | Key/Value tensors for positions already processed                                       | Inside one `generate` (then freed/rebuilt) | Speeds decode; not a permanent diary           |
+
+**Within one reply** the model “remembers” earlier tokens because attention reads the **KV cache** (and the growing
+token list in the `Sequence`). It does **not** magically recall turns you never put back into the next prompt.
+
+**Across replies** this library keeps track like this:
+
+```text
+  ChatSession history  (system + prior user/assistant text)
+        │
+        ▼
+  ChatMessages#truncateHistory   // drop oldest turns if over budget
+        │
+        ▼
+  Tokenizer#applyChatTemplate → encode → LLM#generate
+        │                         │
+        │                         └── prefill fills KV for THIS prompt only
+        ▼
+  finishTurn → history.add(assistant(answer only))
+```
+
+Budget for the templated prompt (before generating new tokens):
+
+> `budget ≈ max(64, maxModelLen − maxTokens − 16)`  
+> (`ChatMessages#truncateHistory`; margin leaves room for the reply.)
+
+If the encoded prompt is still too long, the oldest non-system turns are removed (and a following assistant turn may be
+removed with its user turn) until it fits — or only the minimum kept messages remain.
+
+#### How the model keeps history — and how it can lose track
+
+| Mechanism                     | Keeps the thread by…                                         | You can lose track when…                                                                          |
+|-------------------------------|--------------------------------------------------------------|---------------------------------------------------------------------------------------------------|
+| Chat history + template       | Re-feeding prior turns as text each `send`                   | `truncateHistory` drops early facts you still need                                                |
+| Answer-only history           | Storing the visible answer, not `<think>` notes              | Important details lived only inside thinking tags                                                 |
+| KV cache                      | Attending to all prompt+reply tokens **inside** one generate | A **new** turn rebuilds the prompt; old KV from the previous generate is not the long-term store  |
+| Sliding-window layers (Gemma) | Local layers see only the last *W* tokens                    | Distant tokens in the same prompt are invisible to those layers (global layers still see farther) |
+| Short `maxModelLen`           | Fitting on your machine                                      | Long dialogues must forget the beginning                                                          |
+
+There is **no** separate long-term memory module beyond weights + whatever you keep in `ChatSession` history (and
+whatever fits in the context window of the next prefill).
+
 **In the code:** KV pages in `engine.BlockManager` (`allocate`, `hashBlocks`, prefix reuse); prefill/decode scheduling
-in `Scheduler`; cache write/read in `Attention.storeKvCache` / decode path (chapter 16).
+in `Scheduler`; cache write/read in `Attention.storeKvCache` / decode path; dialogue memory in `ChatSession` /
+`ChatMessages#truncateHistory` (chapter 16).
 
 **Further reading:** paged KV cache and high-throughput serving —
 [Kwon et al., *Efficient Memory Management for Large Language Model Serving with
@@ -1656,8 +1787,10 @@ Two different manners of use:
 | **Completion** | Continue raw text as-is                 | Finish this paragraph…                    |
 | **Chat**       | Messages with roles, history, templates | A scripted dialogue with stage directions |
 
-Chat keeps a **history** of turns, wraps them in the model’s expected markers, and may trim old turns if the desk
-(context length) is full — like abridgment when the binder only holds so many pages.
+Chat keeps a **history** of turns, wraps them in the model’s expected markers, and may trim old turns if the context
+window is full (chapter 12 — `ChatMessages#truncateHistory`). That history is how multi-turn chat **stays on topic**:
+each `send` rebuilds a prompt from remaining messages, then prefill+decode run again with a fresh KV cache for that
+prompt.
 
 **System prompts** (“answer briefly and factually”) are stage directions to the assistant. Some models (notably Gemma in
 this project’s default) do **not** have a proper “system” role; stuffing a long lecture into the first user line can
@@ -2046,21 +2179,22 @@ You do not need to read every file. Use the tables to jump, then skim the named 
 
 ### Concept → class → methods
 
-| Story idea           | Primary type                           | Methods / entry points to open                                                    |
-|----------------------|----------------------------------------|-----------------------------------------------------------------------------------|
-| Open a model         | `LLM`, `LLM.Builder`                   | `LLM.builder(path)`, `.systemPrompt(…)`, `.withSystemIo()`, `.build()`            |
-| Chat turn            | `ChatSession`                          | `llm.chat(maxTokens)`, `.send(user)`, `.streamTo(…)`, `.clear()`                  |
-| One-shot / raw text  | `LLM`                                  | `chatOnce(…)`, `complete(…)`, `generate(…)`                                       |
-| Cancel / timeout     | `LLM`                                  | `cancel()`; `generate(…, timeout, onToken)`                                       |
-| Tokenize             | `Tokenizer`                            | `fromPretrained(dir)`, `encode`, `decode`, `applyChatTemplate(…, enableThinking)` |
-| Blueprint            | `Config.HfConfig`                      | `HfConfig.load(config.json)`; `CausalLMFactory.detect/create`                     |
-| Pour weights         | `ModelLoader`, `SafetensorsReader`     | `ModelLoader.loadModel`; `getTensor(name)`; `CausalLM.WeightSlot.load`            |
-| One engine tick      | `LLM.step`, `Scheduler`, `ModelRunner` | `schedule` → `ModelRunner.run` → `postprocess`                                    |
-| Forward + sample     | `ModelRunner`, `CausalLM`, `Sampler`   | `model.forward` → `computeLogits` → `sampler.forward`                             |
-| Attention + KV write | `Attention`, `utils.Context`           | `Attention.forward`; `storeKvCache`; prefill/decode helpers                       |
-| Pages / prefix reuse | `BlockManager`                         | `canAllocate`, `allocate`, `hashBlocks`, `mayAppend`                              |
-| Split thinking UI    | `AssistantParts`, `ChatReply`          | `AssistantParts.parse`, `salvageFromThinking`                                     |
-| Math bricks          | `Ops`                                  | `linear`, `embedding`, `rmsNorm`, `siluAndMul` / `geluPytorchTanhAndMul`          |
+| Story idea                       | Primary type                                                         | Methods / entry points to open                                                                                |
+|----------------------------------|----------------------------------------------------------------------|---------------------------------------------------------------------------------------------------------------|
+| Open a model                     | `LLM`, `LLM.Builder`                                                 | `LLM.builder(path)`, `.systemPrompt(…)`, `.withSystemIo()`, `.build()`                                        |
+| Chat turn                        | `ChatSession`                                                        | `llm.chat(maxTokens)`, `.send(user)`, `.streamTo(…)`, `.clear()`                                              |
+| One-shot / raw text              | `LLM`                                                                | `chatOnce(…)`, `complete(…)`, `generate(…)`                                                                   |
+| Cancel / timeout                 | `LLM`                                                                | `cancel()`; `generate(…, timeout, onToken)`                                                                   |
+| Tokenize                         | `Tokenizer`                                                          | `fromPretrained(dir)`, `encode`, `decode`, `applyChatTemplate(…, enableThinking)`                             |
+| Token embedding / RoPE / LM head | `VocabParallelEmbedding`, `Ops`, `RotaryEmbedding`, `ParallelLMHead` | `embedTokens.forward` → `Ops.embedding`; Gemma `scaleEmbed`; `RotaryEmbedding.forward`; tied or separate head |
+| Blueprint                        | `Config.HfConfig`                                                    | `HfConfig.load(config.json)`; `CausalLMFactory.detect/create`                                                 |
+| Pour weights                     | `ModelLoader`, `SafetensorsReader`                                   | `ModelLoader.loadModel`; `getTensor(name)`; `CausalLM.WeightSlot.load`                                        |
+| One engine tick                  | `LLM.step`, `Scheduler`, `ModelRunner`                               | `schedule` → `ModelRunner.run` → `postprocess`                                                                |
+| Forward + sample                 | `ModelRunner`, `CausalLM`, `Sampler`                                 | `model.forward` → `computeLogits` → `sampler.forward`                                                         |
+| Attention + KV write             | `Attention`, `utils.Context`                                         | `Attention.forward`; `storeKvCache`; prefill/decode helpers                                                   |
+| Pages / prefix reuse             | `BlockManager`                                                       | `canAllocate`, `allocate`, `hashBlocks`, `mayAppend`                                                          |
+| Split thinking UI                | `AssistantParts`, `ChatReply`                                        | `AssistantParts.parse`, `salvageFromThinking`                                                                 |
+| Math bricks                      | `Ops`                                                                | `linear`, `embedding`, `rmsNorm`, `siluAndMul` / `geluPytorchTanhAndMul`                                      |
 
 ### Sample A — library use (what most apps call)
 
@@ -2216,6 +2350,9 @@ Short glossary. For the Java home of each idea, prefer the **In the code** notes
 | GQA heads fields      | `num_attention_heads` vs `num_key_value_heads` (sharing of KV notebooks)        |
 | Inference             | Using the book to produce text (not training it)                                |
 | Token                 | A scrap of text with a number in the dictionary                                 |
+| Embedding (token)     | Learned vector per token id; lookup starts the forward pass (`embed_tokens`)    |
+| RoPE                  | Rotary positional embedding: rotate Q/K by position (not a vocab table)         |
+| Tied embeddings       | Same matrix for input lookup and LM-head scoring (`tie_word_embeddings`)        |
 | Vocabulary            | All scraps the model is allowed to emit                                         |
 | Logits                | Raw preference scores for each vocabulary scrap, before turning into chances    |
 | Softmax               | Turn raw scores into portions that add to 100%                                  |
@@ -2238,6 +2375,8 @@ Short glossary. For the Java home of each idea, prefer the **In the code** notes
 | Sampling              | Drawing the next token according to chances and filters                         |
 | Temperature           | How strongly to favor the leading candidate                                     |
 | Context length        | How much past text fits on the desk at once                                     |
+| Context window        | Hard token budget for one forward (`maxModelLen` / `max_position_embeddings`)   |
+| Chat history          | `ChatSession` message list re-fed each turn; may be truncated                   |
 | Weights               | The learned numbers on the shelves                                              |
 
 ---
@@ -2284,6 +2423,7 @@ Implementation homes stay in the **In the code** notes and **chapter 16**; this 
 | Model `config` class       | [PretrainedConfig](https://huggingface.co/docs/transformers/main/en/main_classes/configuration)                                    |
 | Safetensors                | [HF docs](https://huggingface.co/docs/safetensors) · [GitHub format notes](https://github.com/huggingface/safetensors)             |
 | RoPE                       | [Su et al. / RoFormer (arXiv)](https://arxiv.org/abs/2104.09864)                                                                   |
+| Token / positional embeds  | (this guide ch. 10; RoPE paper above)                                                                                              |
 | GQA                        | [Ainslie et al. (arXiv)](https://arxiv.org/abs/2305.13245)                                                                         |
 | Multi-query attention      | [Shazeer (arXiv)](https://arxiv.org/abs/1911.02150)                                                                                |
 | PagedAttention / vLLM      | [Kwon et al. (arXiv)](https://arxiv.org/abs/2309.06180) · [vLLM GitHub](https://github.com/vllm-project/vllm)                      |
