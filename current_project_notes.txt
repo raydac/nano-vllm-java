@@ -10,7 +10,7 @@
 - Educational walkthrough: `description.md` + Russian `description_rus.md` (audited vs code: history=answer-only, sampling defaults, enableThinking)
 - `description.md`: every narrative chapter has **In the code** class/method signposts; §16 is the full map + Samples A–F
 - `description.md` §15 (“2+2”): master call chain + per-stage `Class#method` tables (send → generate → step → Attention → parse)
-- `description_rus.md`: full Russian translation of `description.md` (code identifiers kept)
+- `description_rus.md`: academic Russian for beginning students (not schoolbook); terms: токен, слой, кэш KV, толкование A/B/C
 
 ## 2. Architecture & Technical Discoveries
 - Engine status via `EngineIo`; chat UI via `StreamPrinter` / session `streamTo`
@@ -24,8 +24,8 @@
 - Optional repetition penalty for tiny IT models
 
 ## 4. Current Work In Progress
-- Russian educational translation: `_rus_part1.md` (title–ch.7), `_rus_part2.md` (chs 8–14) from `description.md`
-- Russian educational translation part 3 written to `_rus_part3.md` (chs 15–19 from `description.md`)
+- Academic Russian rewrite: `_rus_acad_1.md` (title–ch.7), `_rus_acad_2.md` (chs 8–14), `_rus_acad_3.md` (chs 15–19)
+- Prior drafts: `_rus_part1/2/3.md` from `description.md` (superseded by acad series when complete)
 
 ## 5. Known Issues & Limitations
 - CPU-only; large float32 heap; weights not in git
