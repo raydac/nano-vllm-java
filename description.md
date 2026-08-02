@@ -411,7 +411,7 @@ of a decoder layer’s **weight bulk** often sits in these expand/shrink matrice
 | Everyday metaphor          | Width of the manuscript page you keep rewriting                | Width of the blotter you use while editing one paragraph |
 | Typical relation           | Baseline                                                       | Often roughly 2×–4× H (a design choice, not a law)       |
 
-**Real values**
+**Real values** (from the example model folders this project documents — not quality rankings):
 
 |                         | Qwen3-0.6B       | Gemma3-270M        |
 |-------------------------|------------------|--------------------|
@@ -712,15 +712,24 @@ Each entry is usually an object:
 | `unk_token`                                               | String for unknown (if used)                         | Style-dependent                                               |
 | `dropout`, `fuse_unk`, `ignore_merges`, prefixes/suffixes | Training / advanced BPE options                      | Mostly unused at simple inference                             |
 
-**Sizes in the sample models**
+**How large are the vocab and merge lists? (example models in this project)**
 
-|                                | Qwen3-0.6B | Gemma3-270M |
-|--------------------------------|------------|-------------|
-| Vocab entries in `model.vocab` | ~151 643   | ~262 144    |
-| Merges                         | ~151 387   | ~514 906    |
+The tables above name fields; the numbers below show **scale** for the two model directories this guide uses as running
+examples — Qwen3-0.6B and Gemma3-270M under `models/`. They are not “quality scores.” They answer: *how many distinct
+token strings does the tokenizer know, and how many BPE merge rules does it apply when compressing text into those
+tokens?*
 
-Note: `config.json`’s `vocab_size` can be slightly larger than the tokenizer vocab (padding / reserved ids). The
-**embedding matrix** follows `config.json`; the **tokenizer** follows `tokenizer.json`.
+| What you are counting     | Why it matters                                                               | Qwen3-0.6B | Gemma3-270M |
+|---------------------------|------------------------------------------------------------------------------|------------|-------------|
+| Entries in `model.vocab`  | Size of the string↔id dictionary used by encode/decode                       | ~151 643   | ~262 144    |
+| Entries in `model.merges` | Number of ordered pair-merge rules (earlier = higher priority when encoding) | ~151 387   | ~514 906    |
+
+Gemma’s larger vocab and much longer merge list mean a finer-grained dictionary (more special/reserved strings as well
+as ordinary pieces). Qwen’s lists are smaller but still on the order of 10⁵ entries — typical for modern chat models.
+
+**Do not confuse these with `config.json`:** `vocab_size` there can be **slightly larger** than `model.vocab` (padding /
+reserved embedding rows). The **embedding matrix** is sized from `config.json`; the **tokenizer’s** live dictionary
+comes from `tokenizer.json`. If those disagree badly, encode/decode and the LM head no longer line up.
 
 ### Two encoding styles this project supports
 
