@@ -12,7 +12,7 @@
 - §15 (“2+2”): master call chain + per-stage `Class#method` tables (send → generate → step → Attention → parse)
 - Ch.7 opens with tensor definition (rank/shape/weights vs activations) then safetensors format
 - Ch.10 rewritten: tensors (notation + `tensor.Tensor`), embeddings ($E\in\mathbb{R}^{V\times H}$, gather, tied head, RoPE kinds), linear/softmax
-- Glossary: Tensor, Shape/numel, Activations; embedding/`hidden_size` phrased formally
+- Prefer Stream API for filter/map/collect transforms in LLM/engine helpers; keep stateful schedule/prefill and tensor kernels imperative
 
 
 ## 2. Architecture & Technical Discoveries
@@ -27,7 +27,8 @@
 - Optional repetition penalty for tiny IT models
 
 ## 4. Current Work In Progress
-- Educational docs: maintain academic-accessible English `description.md` (tensors/embeddings strengthened)
+- Educational docs: maintain academic-accessible English `description.md`
+- Engine readability: LLM / ModelRunner / Scheduler DSL pass done
 
 ## 5. Known Issues & Limitations
 - CPU-only; large float32 heap; weights not in git
@@ -52,3 +53,5 @@
 - Do not stack long Gemma system prompts — latch risk
 - Keep I/O out of Config
 - Educational guide: English `description.md` only — do not revive a Russian translation
+- Prefer Stream API for declarative filter/map/collect; keep stateful scheduler/prefill and numeric kernels as loops
+- User preference (global Java senior rule): Stream-first for collection work when a clear pipeline exists

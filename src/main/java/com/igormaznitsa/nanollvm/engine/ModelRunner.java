@@ -3,7 +3,6 @@ package com.igormaznitsa.nanollvm.engine;
 import com.igormaznitsa.nanollvm.Config;
 import com.igormaznitsa.nanollvm.EngineIo;
 import com.igormaznitsa.nanollvm.ModelLoadException;
-import com.igormaznitsa.nanollvm.layers.Attention;
 import com.igormaznitsa.nanollvm.layers.Sampler;
 import com.igormaznitsa.nanollvm.models.CausalLM;
 import com.igormaznitsa.nanollvm.models.CausalLMFactory;
@@ -11,9 +10,9 @@ import com.igormaznitsa.nanollvm.tensor.Tensor;
 import com.igormaznitsa.nanollvm.tensor.VectorMath;
 import com.igormaznitsa.nanollvm.utils.Context;
 import com.igormaznitsa.nanollvm.utils.ModelLoader;
-
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 
 public final class ModelRunner implements AutoCloseable {
@@ -65,7 +64,23 @@ public final class ModelRunner implements AutoCloseable {
   }
 
   public List<Integer> run(List<Sequence> seqs, boolean isPrefill) {
-    PreparedInputs prepared = isPrefill ? this.preparePrefill(seqs) : this.prepareDecode(seqs);
+    PreparedInputs prepared = this.prepareInputs(seqs, isPrefill);
+    SamplingControls sampling = this.collectSamplingControls(seqs);
+
+    Tensor hidden = this.model.forward(prepared.inputIds(), prepared.positions());
+    Tensor logits = this.model.computeLogits(hidden);
+    int[] sampledIds = this.sampler.forward(
+        logits, sampling.temperatures(), sampling.topKs(), sampling.topPs());
+
+    Context.reset();
+    return this.toTokenIdList(sampledIds);
+  }
+
+  private PreparedInputs prepareInputs(List<Sequence> seqs, boolean isPrefill) {
+    return isPrefill ? this.preparePrefill(seqs) : this.prepareDecode(seqs);
+  }
+
+  private SamplingControls collectSamplingControls(List<Sequence> seqs) {
     float[] temperatures = new float[seqs.size()];
     int[] topKs = new int[seqs.size()];
     float[] topPs = new float[seqs.size()];
@@ -75,31 +90,11 @@ public final class ModelRunner implements AutoCloseable {
       topKs[i] = seq.topK();
       topPs[i] = seq.topP();
     }
-    Tensor logits =
-        this.model.computeLogits(this.model.forward(prepared.inputIds(), prepared.positions()));
-    int[] tokenIds = this.sampler.forward(logits, temperatures, topKs, topPs);
-    Context.reset();
-    List<Integer> out = new ArrayList<>(tokenIds.length);
-    for (int id : tokenIds) {
-      out.add(id);
-    }
-    return out;
+    return new SamplingControls(temperatures, topKs, topPs);
   }
 
-  public Object call(String methodName, Object... args) {
-    return switch (methodName) {
-      case "run" -> {
-        @SuppressWarnings("unchecked")
-        List<Sequence> seqs = (List<Sequence>) args[0];
-        boolean isPrefill = (Boolean) args[1];
-        yield this.run(seqs, isPrefill);
-      }
-      case "exit" -> {
-        this.close();
-        yield null;
-      }
-      default -> throw new IllegalArgumentException("unknown method: " + methodName);
-    };
+  private List<Integer> toTokenIdList(int[] tokenIds) {
+    return Arrays.stream(tokenIds).boxed().toList();
   }
 
   @Override
@@ -121,21 +116,17 @@ public final class ModelRunner implements AutoCloseable {
     if (this.config.numKvcacheBlocks() <= 0) {
       throw new IllegalStateException("numKvcacheBlocks must be > 0");
     }
-    List<Attention> attentions = this.model.attentionLayers();
-    for (Attention attn : attentions) {
+    this.model.attentionLayers().forEach(attn -> {
       Tensor k = Tensor.zeros(this.config.numKvcacheBlocks(), this.blockSize, hf.numKeyValueHeads(),
           hf.headDim());
       Tensor v = Tensor.zeros(this.config.numKvcacheBlocks(), this.blockSize, hf.numKeyValueHeads(),
           hf.headDim());
       attn.setCaches(k, v);
-    }
+    });
   }
 
   private int[][] prepareBlockTables(List<Sequence> seqs) {
-    int maxLen = 0;
-    for (Sequence seq : seqs) {
-      maxLen = Math.max(maxLen, seq.blockTable().size());
-    }
+    int maxLen = seqs.stream().mapToInt(seq -> seq.blockTable().size()).max().orElse(0);
     int[][] tables = new int[seqs.size()][maxLen];
     for (int i = 0; i < seqs.size(); i++) {
       List<Integer> table = seqs.get(i).blockTable();
@@ -232,5 +223,8 @@ public final class ModelRunner implements AutoCloseable {
   }
 
   private record PreparedInputs(Tensor inputIds, Tensor positions) {
+  }
+
+  private record SamplingControls(float[] temperatures, int[] topKs, float[] topPs) {
   }
 }

@@ -6,6 +6,7 @@ import com.igormaznitsa.nanollvm.tokenizer.Tokenizer;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.IntStream;
 
 public final class ChatMessages {
 
@@ -56,11 +57,9 @@ public final class ChatMessages {
   }
 
   public static void scrubSetupBoilerplateTurns(List<ChatMessage> history) {
-    for (int i = 0; i < history.size(); i++) {
-      ChatMessage msg = history.get(i);
-      if (msg.role() == ChatRole.ASSISTANT && ChatPrompts.isSetupBoilerplate(msg.content())) {
-        history.set(i, ChatMessage.assistant("Hello!"));
-      }
-    }
+    IntStream.range(0, history.size())
+        .filter(i -> history.get(i).role() == ChatRole.ASSISTANT
+            && ChatPrompts.isSetupBoilerplate(history.get(i).content()))
+        .forEach(i -> history.set(i, ChatMessage.assistant("Hello!")));
   }
 }

@@ -19,6 +19,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.stream.IntStream;
 
 /**
  * Loaded causal LM for offline inference and embedding in applications.
@@ -98,10 +99,7 @@ public final class LLM implements AutoCloseable {
       Sequence.setBlockSize(this.config.kvcacheBlockSize());
       this.modelRunner = new ModelRunner(this.config, this.io);
       this.tokenizer = Tokenizer.fromPretrained(this.config.model());
-      if (this.config.eos() < 0) {
-        this.config.setEos(this.tokenizer.eosTokenId());
-      }
-      this.config.setStopTokenIds(this.tokenizer.stopTokenIds());
+      this.applyTokenizerStopTokens();
       this.scheduler = new Scheduler(this.config);
     } catch (ModelLoadException e) {
       throw e;
@@ -111,6 +109,13 @@ public final class LLM implements AutoCloseable {
     if (builder.warmup) {
       this.warmup();
     }
+  }
+
+  private void applyTokenizerStopTokens() {
+    if (this.config.eos() < 0) {
+      this.config.setEos(this.tokenizer.eosTokenId());
+    }
+    this.config.setStopTokenIds(this.tokenizer.stopTokenIds());
   }
 
   /**
@@ -133,13 +138,19 @@ public final class LLM implements AutoCloseable {
 
   private void warmup() {
     this.io.info("Warming up (prefill + decode)…");
-    long t0 = System.nanoTime();
-    List<Integer> prompt = new ArrayList<>(WARMUP_PREFILL_TOKENS);
-    for (int i = 0; i < WARMUP_PREFILL_TOKENS; i++) {
-      prompt.add(1 + (i % 97));
-    }
-    this.generate(List.of(prompt), new SamplingParams(0.6f, WARMUP_DECODE_TOKENS, true), false);
-    this.io.infof("Warmup done in %.1fs%n", (System.nanoTime() - t0) / 1e9);
+    long startedAtNanos = System.nanoTime();
+    this.generate(
+        List.of(this.syntheticWarmupPrompt()),
+        new SamplingParams(0.6f, WARMUP_DECODE_TOKENS, true),
+        false);
+    this.io.infof("Warmup done in %.1fs%n", (System.nanoTime() - startedAtNanos) / 1e9);
+  }
+
+  private List<Integer> syntheticWarmupPrompt() {
+    return IntStream.range(0, WARMUP_PREFILL_TOKENS)
+        .map(i -> 1 + (i % 97))
+        .boxed()
+        .toList();
   }
 
   /**
@@ -158,29 +169,51 @@ public final class LLM implements AutoCloseable {
   }
 
   /**
-   * Runs one scheduler step (prefill or decode). Used by {@link #generate}; rarely needed directly.
+   * One engine tick: schedule → forward+sample → postprocess.
+   * Used by {@link #generate}; rarely needed directly.
    */
   public StepResult step() {
     Scheduler.ScheduleResult scheduled = this.scheduler.schedule();
-    int numTokens = scheduled.prefill()
+    List<Integer> nextTokenIds = this.runForwardAndSample(scheduled);
+    List<int[]> appendedTokens = this.applySchedulerPostprocess(scheduled, nextTokenIds);
+
+    return new StepResult(
+        this.collectFinishedOutputs(scheduled.sequences()),
+        this.toTokenEvents(appendedTokens),
+        this.measureStepWorkload(scheduled));
+  }
+
+  private List<Integer> runForwardAndSample(Scheduler.ScheduleResult scheduled) {
+    return this.modelRunner.run(scheduled.sequences(), scheduled.prefill());
+  }
+
+  private List<int[]> applySchedulerPostprocess(
+      Scheduler.ScheduleResult scheduled,
+      List<Integer> nextTokenIds
+  ) {
+    List<int[]> appendedTokens = new ArrayList<>();
+    this.scheduler.postprocess(
+        scheduled.sequences(), nextTokenIds, scheduled.prefill(), appendedTokens);
+    return appendedTokens;
+  }
+
+  private List<FinishedOutput> collectFinishedOutputs(List<Sequence> sequences) {
+    return sequences.stream()
+        .filter(Sequence::isFinished)
+        .map(seq -> new FinishedOutput(seq.seqId(), seq.completionTokenIds()))
+        .toList();
+  }
+
+  private List<TokenEvent> toTokenEvents(List<int[]> appendedTokens) {
+    return appendedTokens.stream()
+        .map(pair -> new TokenEvent(pair[0], pair[1]))
+        .toList();
+  }
+
+  private int measureStepWorkload(Scheduler.ScheduleResult scheduled) {
+    return scheduled.prefill()
         ? scheduled.sequences().stream().mapToInt(Sequence::numScheduledTokens).sum()
         : -scheduled.sequences().size();
-    @SuppressWarnings("unchecked")
-    List<Integer> tokenIds =
-        (List<Integer>) this.modelRunner.call("run", scheduled.sequences(), scheduled.prefill());
-    List<int[]> appended = new ArrayList<>();
-    this.scheduler.postprocess(scheduled.sequences(), tokenIds, scheduled.prefill(), appended);
-    List<FinishedOutput> outputs = new ArrayList<>();
-    for (Sequence seq : scheduled.sequences()) {
-      if (seq.isFinished()) {
-        outputs.add(new FinishedOutput(seq.seqId(), seq.completionTokenIds()));
-      }
-    }
-    List<TokenEvent> events = new ArrayList<>(appended.size());
-    for (int[] pair : appended) {
-      events.add(new TokenEvent(pair[0], pair[1]));
-    }
-    return new StepResult(outputs, events, numTokens);
   }
 
   /**
@@ -229,7 +262,7 @@ public final class LLM implements AutoCloseable {
   }
 
   /**
-   * Full generate entry: batch prompts, optional progress, timeout, and token callback.
+   * Full generate entry: enqueue → drive ticks until idle → decode completions.
    *
    * @param prompts        each element is a {@link String} or {@code List<Integer>} token ids
    * @param samplingParams a {@link SamplingParams} or {@code List<SamplingParams>} (one per prompt)
@@ -248,84 +281,184 @@ public final class LLM implements AutoCloseable {
       java.util.function.IntConsumer onToken
   ) {
     synchronized (this.generateLock) {
-      this.cancelRequested.set(false);
-      List<SamplingParams> params = this.resolveParams(prompts, samplingParams);
+      this.beginGeneration();
 
-      for (int i = 0; i < prompts.size(); i++) {
-        Object prompt = prompts.get(i);
-        if (prompt instanceof String s) {
-          this.addRequest(s, params.get(i));
-        } else if (prompt instanceof List<?> ids) {
-          List<Integer> tokenIds = new ArrayList<>(ids.size());
-          for (Object id : ids) {
-            tokenIds.add(((Number) id).intValue());
-          }
-          this.addRequest(tokenIds, params.get(i));
-        } else {
-          throw new IllegalArgumentException("prompt must be String or List<Integer>");
-        }
-      }
+      List<SamplingParams> params = this.resolveSamplingParams(prompts, samplingParams);
+      this.enqueueAllPrompts(prompts, params);
 
-      Map<Integer, List<Integer>> outputs = new HashMap<>();
-      long t0 = System.nanoTime();
-      long deadlineNanos = timeout == null || timeout.isZero() || timeout.isNegative()
-          ? Long.MAX_VALUE
-          : t0 + timeout.toNanos();
-      int completed = 0;
-      boolean showProgress = useTqdm && !this.io.isSilent();
+      long startedAtNanos = System.nanoTime();
+      long deadlineNanos = this.resolveDeadlineNanos(timeout, startedAtNanos);
+      boolean showProgress = this.shouldShowProgress(useTqdm);
+      Map<Integer, List<Integer>> outputsBySeqId = new HashMap<>();
+
       try {
-        while (!this.isFinished()) {
-          if (this.cancelRequested.get()) {
-            throw new GenerationCancelledException();
-          }
-          if (System.nanoTime() > deadlineNanos) {
-            throw new GenerationTimeoutException(timeout);
-          }
-          StepResult step = this.step();
-          if (onToken != null) {
-            for (TokenEvent ev : step.tokenEvents()) {
-              onToken.accept(ev.tokenId());
-            }
-          }
-          for (FinishedOutput fo : step.outputs()) {
-            outputs.put(fo.seqId(), fo.tokenIds());
-            completed++;
-            if (showProgress) {
-              double elapsed = (System.nanoTime() - t0) / 1e9;
-              this.io.progressf("\rGenerating %d/%d (%.1fs)", completed, prompts.size(), elapsed);
-            }
-          }
-        }
+        this.driveUntilSchedulerIdle(
+            timeout,
+            deadlineNanos,
+            onToken,
+            showProgress,
+            prompts.size(),
+            startedAtNanos,
+            outputsBySeqId);
       } finally {
-        if (!this.isFinished()) {
-          this.scheduler.clear();
-        }
-        this.cancelRequested.set(false);
-      }
-      if (showProgress) {
-        this.io.out().println();
+        this.finishGeneration();
       }
 
-      List<GenerationOutput> result = new ArrayList<>(prompts.size());
-      List<Integer> sortedIds = outputs.keySet().stream().sorted().toList();
-      for (int seqId : sortedIds) {
-        List<Integer> tokenIds = outputs.get(seqId);
-        result.add(new GenerationOutput(this.tokenizer.decode(tokenIds, true), tokenIds));
-      }
-      return result;
+      this.finishProgressLine(showProgress);
+      return this.decodeCompletedOutputs(outputsBySeqId);
     }
   }
 
-  private List<SamplingParams> resolveParams(List<?> prompts, Object samplingParams) {
-    if (samplingParams instanceof SamplingParams sp) {
-      return java.util.Collections.nCopies(prompts.size(), sp);
+  private void beginGeneration() {
+    this.cancelRequested.set(false);
+  }
+
+  private void finishGeneration() {
+    if (!this.isFinished()) {
+      this.scheduler.clear();
+    }
+    this.cancelRequested.set(false);
+  }
+
+  private void enqueueAllPrompts(List<?> prompts, List<SamplingParams> params) {
+    IntStream.range(0, prompts.size())
+        .forEach(i -> this.enqueuePrompt(prompts.get(i), params.get(i)));
+  }
+
+  private void enqueuePrompt(Object prompt, SamplingParams samplingParams) {
+    if (prompt instanceof String text) {
+      this.addRequest(text, samplingParams);
+      return;
+    }
+    if (prompt instanceof List<?> ids) {
+      this.addRequest(this.toTokenIdList(ids), samplingParams);
+      return;
+    }
+    throw new IllegalArgumentException("prompt must be String or List<Integer>");
+  }
+
+  private List<Integer> toTokenIdList(List<?> ids) {
+    return ids.stream()
+        .map(id -> ((Number) id).intValue())
+        .toList();
+  }
+
+  private void driveUntilSchedulerIdle(
+      Duration timeout,
+      long deadlineNanos,
+      java.util.function.IntConsumer onToken,
+      boolean showProgress,
+      int totalPrompts,
+      long startedAtNanos,
+      Map<Integer, List<Integer>> outputsBySeqId
+  ) {
+    int completed = 0;
+    while (!this.isFinished()) {
+      this.requireGenerationAllowed(timeout, deadlineNanos);
+      StepResult step = this.step();
+      this.dispatchTokenEvents(step, onToken);
+      completed = this.recordFinishedOutputs(
+          step, outputsBySeqId, completed, showProgress, totalPrompts, startedAtNanos);
+    }
+  }
+
+  private void requireGenerationAllowed(Duration timeout, long deadlineNanos) {
+    this.requireNotCancelled();
+    this.requireWithinDeadline(timeout, deadlineNanos);
+  }
+
+  private void requireNotCancelled() {
+    if (this.cancelRequested.get()) {
+      throw new GenerationCancelledException();
+    }
+  }
+
+  private void requireWithinDeadline(Duration timeout, long deadlineNanos) {
+    if (System.nanoTime() > deadlineNanos) {
+      throw new GenerationTimeoutException(timeout);
+    }
+  }
+
+  private void dispatchTokenEvents(StepResult step, java.util.function.IntConsumer onToken) {
+    if (onToken == null) {
+      return;
+    }
+    step.tokenEvents().stream()
+        .mapToInt(TokenEvent::tokenId)
+        .forEach(onToken);
+  }
+
+  private int recordFinishedOutputs(
+      StepResult step,
+      Map<Integer, List<Integer>> outputsBySeqId,
+      int completed,
+      boolean showProgress,
+      int totalPrompts,
+      long startedAtNanos
+  ) {
+    int nextCompleted = completed;
+    for (FinishedOutput finished : step.outputs()) {
+      outputsBySeqId.put(finished.seqId(), finished.tokenIds());
+      nextCompleted++;
+      this.reportProgressIfNeeded(showProgress, nextCompleted, totalPrompts, startedAtNanos);
+    }
+    return nextCompleted;
+  }
+
+  private void reportProgressIfNeeded(
+      boolean showProgress,
+      int completed,
+      int totalPrompts,
+      long startedAtNanos
+  ) {
+    if (!showProgress) {
+      return;
+    }
+    double elapsedSeconds = (System.nanoTime() - startedAtNanos) / 1e9;
+    this.io.progressf("\rGenerating %d/%d (%.1fs)", completed, totalPrompts, elapsedSeconds);
+  }
+
+  private void finishProgressLine(boolean showProgress) {
+    if (showProgress) {
+      this.io.out().println();
+    }
+  }
+
+  private long resolveDeadlineNanos(Duration timeout, long startedAtNanos) {
+    if (timeout == null || timeout.isZero() || timeout.isNegative()) {
+      return Long.MAX_VALUE;
+    }
+    return startedAtNanos + timeout.toNanos();
+  }
+
+  private boolean shouldShowProgress(boolean useTqdm) {
+    return useTqdm && !this.io.isSilent();
+  }
+
+  private List<GenerationOutput> decodeCompletedOutputs(
+      Map<Integer, List<Integer>> outputsBySeqId) {
+    return outputsBySeqId.keySet().stream()
+        .sorted()
+        .map(seqId -> {
+          List<Integer> tokenIds = outputsBySeqId.get(seqId);
+          return new GenerationOutput(this.tokenizer.decode(tokenIds, true), tokenIds);
+        })
+        .toList();
+  }
+
+  private List<SamplingParams> resolveSamplingParams(List<?> prompts, Object samplingParams) {
+    if (samplingParams instanceof SamplingParams shared) {
+      return java.util.Collections.nCopies(prompts.size(), shared);
     }
     if (samplingParams instanceof List<?> list) {
-      List<SamplingParams> params = new ArrayList<>();
-      for (Object o : list) {
-        params.add((SamplingParams) o);
+      if (list.size() != prompts.size()) {
+        throw new IllegalArgumentException(
+            "samplingParams list size %d must match prompts size %d"
+                .formatted(list.size(), prompts.size()));
       }
-      return params;
+      return list.stream()
+          .map(SamplingParams.class::cast)
+          .toList();
     }
     throw new IllegalArgumentException(
         "samplingParams must be SamplingParams or List<SamplingParams>");
@@ -446,7 +579,7 @@ public final class LLM implements AutoCloseable {
   public void close() {
     this.cancel();
     synchronized (this.generateLock) {
-      this.modelRunner.call("exit");
+      this.modelRunner.close();
     }
   }
 

@@ -60,11 +60,9 @@ public final class Qwen3ForCausalLM implements CausalLM {
 
   @Override
   public List<Attention> attentionLayers() {
-    List<Attention> list = new ArrayList<>();
-    for (Qwen3DecoderLayer layer : this.model.layers) {
-      list.add(layer.selfAttn.attn);
-    }
-    return list;
+    return this.model.layers.stream()
+        .map(layer -> layer.selfAttn.attn)
+        .toList();
   }
 
   @Override
