@@ -7,7 +7,16 @@ import java.util.Locale;
 
 /**
  * Builds a {@link FloatKernels} backend: Vector API when available, otherwise scalar.
- * Override with {@code -Dnanovllm.kernels=auto|vector|scalar}.
+ *
+ * <p>Default selection honors {@code -Dnanovllm.kernels}:
+ * <ul>
+ *   <li>{@code auto} (default) — {@link #createBestAvailable()}</li>
+ *   <li>{@code vector} / {@code simd} — require incubator Vector API or fail</li>
+ *   <li>{@code scalar} / {@code plain} — force portable loops</li>
+ * </ul>
+ * {@link FloatKernels#get()} calls {@link #create()} once at class init.
+ *
+ * @see FloatKernels
  */
 public final class FloatKernelsFactory {
 

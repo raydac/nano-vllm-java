@@ -6,15 +6,50 @@ import jdk.incubator.vector.FloatVector;
 import jdk.incubator.vector.VectorOperators;
 import jdk.incubator.vector.VectorSpecies;
 
+/**
+ * SIMD {@link FloatKernels} backend using the JDK incubator Vector API.
+ *
+ * <h2>Hard part — species, main loop, scalar tail</h2>
+ * {@link FloatVector#SPECIES_PREFERRED} picks a lane width for the current CPU (e.g. 8 floats on
+ * 256-bit AVX). Each kernel:
+ * <ol>
+ *   <li>Advances {@code i} by {@code SPECIES.length()} while {@code i < SPECIES.loopBound(n)}</li>
+ *   <li>Loads vectors with {@link FloatVector#fromArray} at {@code offset + i}</li>
+ *   <li>Finishes {@code i .. n-1} with a scalar loop (the <em>tail</em>)</li>
+ * </ol>
+ * Without the tail, the last {@code n % laneCount} elements would be skipped. Without correct
+ * offsets, Vector loads would read from the wrong place in a {@link com.igormaznitsa.nanollvm.tensor.Tensor}
+ * view’s backing array.
+ *
+ * <p>Requires {@code --add-modules jdk.incubator.vector} (see {@code .mvn/jvm.config} /
+ * surefire {@code jvm.module.args}). Constructed via {@link com.igormaznitsa.nanollvm.tensor.FloatKernelsFactory}
+ * when the module and this class are loadable.
+ *
+ * <p>FMA and reduction order can make results differ slightly from {@code ScalarFloatKernels};
+ * that is expected.
+ *
+ * @see com.igormaznitsa.nanollvm.tensor.FloatKernelsFactory
+ */
 public final class VectorFloatKernels extends FloatKernels {
 
   private static final VectorSpecies<Float> SPECIES = FloatVector.SPECIES_PREFERRED;
 
+  /**
+   * {@inheritDoc}
+   *
+   * @return species identity and lane count, e.g. {@code Vector API … (len=8)}
+   */
   @Override
   public String name() {
     return "Vector API %s (len=%d)".formatted(SPECIES, SPECIES.length());
   }
 
+  /**
+   * {@inheritDoc}
+   *
+   * <p><strong>SIMD:</strong> accumulate {@code va.fma(vb, acc)} over full vectors, then
+   * {@code reduceLanes(ADD)}, then scalar multiply-add for the tail.
+   */
   @Override
   public float dot(float[] a, int aOffset, float[] b, int bOffset, int n) {
     int i = 0;
@@ -32,6 +67,12 @@ public final class VectorFloatKernels extends FloatKernels {
     return sum;
   }
 
+  /**
+   * {@inheritDoc}
+   *
+   * <p><strong>SIMD:</strong> {@code v.fma(v, acc)} squares each lane in-register; scalar tail
+   * mirrors the scalar backend.
+   */
   @Override
   public float sumSquares(float[] a, int offset, int n) {
     int i = 0;
@@ -49,6 +90,14 @@ public final class VectorFloatKernels extends FloatKernels {
     return sum;
   }
 
+  /**
+   * {@inheritDoc}
+   *
+   * <p><strong>SIMD:</strong> broadcast {@code scale} once; store
+   * {@code (src * scale) * weight} lanes into {@code dst}; scalar tail for the remainder.
+   * Destination may alias neither or both sources; overlapping partially is undefined for SIMD
+   * stores (callers use distinct buffers in this engine).
+   */
   @Override
   public void scaleAdd(
       float[] src, int srcOff, float[] weight, int wOff, float scale, float[] dst, int dstOff, int n

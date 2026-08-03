@@ -14,6 +14,10 @@
 - Ch.10 rewritten: tensors (notation + `tensor.Tensor`), embeddings ($E\in\mathbb{R}^{V\times H}$, gather, tied head, RoPE kinds), linear/softmax
 - Prefer Stream API for filter/map/collect transforms in LLM/engine helpers; keep stateful schedule/prefill and tensor kernels imperative
 - `LLM` business methods (`generate`, `step`, drive loop, load/close) carry `//` stage comments for algorithm readability
+- `tensor.Tensor` has full class/method JavaDoc (shape, offset/view, reshape sharing, data vs toFloatArray)
+- `FloatKernels` (+ scalar/vector backends, factory) JavaDoc: slice contract, SIMD main loop + scalar tail
+- `Ops` JavaDoc: layout conventions, linear/embedding/gates/softmax/RMSNorm/addRmsNorm/splitLast hard parts
+- `VectorMath` JavaDoc: FloatKernels facade + tiled linear (TILE_N/TILE_K) loop order
 
 
 ## 2. Architecture & Technical Discoveries
