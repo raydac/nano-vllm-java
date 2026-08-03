@@ -32,7 +32,8 @@ file paths.
 7. [Tensors and `*.safetensors` — parameters on disk](#7-tensors-and-safetensors--parameters-on-disk)
 8. [Attention: kinds of looking-back, and how they work](#8-attention-kinds-of-looking-back-and-how-they-work)
 9. [The thinking process: how it is organized and how it works with the model](#9-the-thinking-process-how-it-is-organized-and-how-it-works-with-the-model)
-10. [Tensors, embeddings, and the arithmetic of inference](#10-tensors-embeddings-and-the-arithmetic-of-inference)
+10. [Tensors, embeddings, and the arithmetic of inference](#10-tensors-embeddings-and-the-arithmetic-of-inference) —
+    **math catalog** (linear, RMSNorm, attention, RoPE, MLP, sampling)
 11. [Choosing a word: not always the most obvious one](#11-choosing-a-word-not-always-the-most-obvious-one)
 12. [Why the program keeps a notebook of the past](#12-why-the-program-keeps-a-notebook-of-the-past)
 13. [Serving several conversations without chaos](#13-serving-several-conversations-without-chaos)
@@ -1205,7 +1206,8 @@ table to the token embedding.
 `Attention#forward`. Gemma may use a different `rope_theta` / `rope_local_base_freq` for sliding vs global layers; the
 idea is the same.
 
-Config fields: chapter 5 (`rope_theta`, …). Contrast with **token embedding**: chapter 10.
+Config fields: chapter 5 (`rope_theta`, …). Formal RoPE and attention scoring: **chapter 10**. Contrast with **token
+embedding**: also chapter 10.
 
 **Further reading:** [Su et al., *RoFormer* / RoPE](https://arxiv.org/abs/2104.09864).
 
@@ -1580,12 +1582,35 @@ Written thinking helps **because** attention can reread it — not because a sec
 
 ## 10. Tensors, embeddings, and the arithmetic of inference
 
-Earlier chapters describe *what* the engine does. This chapter fixes the **data objects and operations** that make those
-steps precise: tensors as the universal container, embeddings as the map from discrete token ids into continuous space,
-and the few algebraic patterns that recur everywhere else (linear maps, softmax, gated MLP).
+Earlier chapters describe *what* the engine does. This chapter is the **math catalog** for this port: the data objects,
+then each algebraic brick used in a decoder layer, with formulas that match the Java implementation (`tensor.Ops`,
+`VectorMath`, `FloatKernels`, `Attention`, `Sampler`, `Norms`).
 
-You can skim the formal notation and still follow later chapters; the definitions are here so “shape,” “lookup,” and
-“hidden size” stop being vague slogans.
+You can skim the notation and still follow later chapters; the point is that “linear,” “attention,” and “norm” stop
+being slogans and become named equations with a home in the code.
+
+### Map of a decoder layer (equations first)
+
+One transformer block (after token embeddings) is approximately:
+
+$$
+\begin{aligned} \mathbf{h}' &= \mathrm{Attention} (\mathrm{RMSNorm} (\mathbf{h})) + \mathbf{h}, \\ \mathbf{h}'' &= \mathrm{MLP} (\mathrm{RMSNorm} (\mathbf{h}')) + \mathbf{h}'. \end{aligned}
+$$
+
+In this codebase the residual add is often **fused** with the next RMSNorm (`Ops.addRmsNorm` returns both the normalized
+tensor and the updated residual stream). Prefill/decode and KV paging change *which* Keys/Values are visible, not these
+formulas.
+
+| Brick            | Role                                    | Primary code                          |
+|------------------|-----------------------------------------|---------------------------------------|
+| Embedding lookup | id → $\mathbf{x} \in \mathbb{R}^{H}$    | `Ops.embedding`                       |
+| Linear / GEMM    | $W\mathbf{x}(+b)$                       | `Ops.linear` → `VectorMath.linear`    |
+| RMSNorm          | scale by inverse RMS                    | `Ops.rmsNorm` / `addRmsNorm`          |
+| RoPE             | rotate Q/K by position                  | `Norms.RotaryEmbedding`               |
+| Attention        | softmax-weighted Values                 | `layers.Attention`                    |
+| Gated MLP        | SiLU or GELU-tanh gate × up             | `Ops.siluAndMul` / `geluPytorchTanh…` |
+| Softmax          | scores → probabilities                  | `Ops.softmaxLastDim`; also in Sampler |
+| Sampling         | temperature, top-k/p, Gumbel-style draw | `layers.Sampler`                      |
 
 ### Tensors — definition and notation
 
@@ -1614,57 +1639,50 @@ last axis changes fastest. For a matrix of shape `[V, H]`, the element at row $t
 **Reshape** changes the shape tuple without changing $\mathrm{numel}$ or (usually) the underlying buffer. It does not
 create new learned parameters.
 
-**Weights vs activations (again).**
+**Weights vs activations.**
 
 | Kind       | Lifetime                          | Examples                                            |
 |------------|-----------------------------------|-----------------------------------------------------|
 | Weight     | Loaded once; reused every request | `embed_tokens`, `q_proj`, RMSNorm scales, `lm_head` |
 | Activation | Ephemeral per forward step        | Token hidden states, attention scores, logits       |
 
-Both are `Tensor` instances in this library; only weights are filled from `.safetensors` (chapter 7).
+Both are `Tensor` instances; only weights come from `.safetensors` (chapter 7).
 
 #### How `tensor.Tensor` represents this in Java
 
-| Property         | Meaning in `com.igormaznitsa.nanollvm.tensor.Tensor`  |
+| Property         | Meaning                                               |
 |------------------|-------------------------------------------------------|
 | `data`           | Underlying `float[]` (float32 after load)             |
 | `shape`          | `int[]` of axis lengths                               |
-| `offset`         | Start index into `data` (supports views)              |
+| `offset`         | Start index into `data` (views)                       |
 | `numel` / `size` | Number of logical elements                            |
 | `reshape`        | New shape, same buffer and offset, if `numel` matches |
 
-Factories: `Tensor.zeros(shape…)`, `Tensor.of(float[], shape…)`. Kernels live in `Ops` and often allocate a new output
-tensor rather than mutating weights in place.
+Kernels in `Ops` often allocate a **new** output tensor rather than mutating weights in place.
 
 ```text
-  conceptual layout of embed_tokens (weight)
-
-       columns →  j = 0 … H−1   (H = hidden_size)
-  rows
-    t = 0      [  e00  e01  …  e0,H−1 ]
-    t = 1      [  e10  e11  …  e1,H−1 ]
-    …
-    t = V−1    [  …               …   ]
-
-  flat index of E[t, j]  =  t * H + j
+  flat index of E[t, j]  =  t * H + j     for shape [V, H]
 ```
 
-**In the code:** `tensor.Tensor`, `tensor.Ops`, SIMD helpers in `tensor.VectorMath` (chapter 16).
+**In the code:** `tensor.Tensor`, `Ops`, `VectorMath`, `FloatKernels` (chapter 16).
 
-### Linear layers
+### Linear maps (matrix–vector / batched GEMM)
 
-A **linear** (affine) map takes an input vector $\mathbf{x} \in \mathbb{R}^{n}$ and a weight matrix
-$W \in \mathbb{R}^{m \times n}$, optionally a bias $\mathbf{b}$:
+A **linear** (affine) map takes $\mathbf{x} \in \mathbb{R}^{n}$ and $W \in \mathbb{R}^{m \times n}$, optionally
+$\mathbf{b} \in \mathbb{R}^{m}$:
 
 $$
-\mathbf{y} = W\mathbf{x} + \mathbf{b} \quad\text{ (or without bias).}
+\mathbf{y} = W\mathbf{x} + \mathbf{b} \quad\text{ (bias omitted when absent).}
 $$
 
-In batched form the same matrix multiplies every row of an activation matrix. This single pattern builds Query / Key /
-Value, mixes attention heads, expands and contracts the MLP, and scores the vocabulary when the LM head is a separate
-matrix.
+**Layout in this port.** Weights are stored as `[out, in]` = $[m, n]$: row $o$ is the weight vector for output channel
+$o$. For one input row, output channel $o$ is the **dot product** of $\mathbf{x}$ with that row (plus bias). Batched
+over `rows`, `VectorMath.linear` tiles over output channels (`TILE_N`) and input features (`TILE_K`), calling
+`FloatKernels.dot` for each partial product — same math, cache-friendlier loops.
 
-**In the code:** `Ops.linear`, wrappers in `layers.Linear`.
+This pattern builds **Q / K / V**, the attention **output projection**, MLP **up / gate / down**, and the **LM head**.
+
+**In the code:** `Ops.linear` → `VectorMath.linear` → `FloatKernels.dot`; wrappers in `layers.Linear`.
 
 ### Embeddings — from discrete ids to vectors
 
@@ -1676,145 +1694,187 @@ $$
 \mathrm{emb} : \{0,1,\ldots,V-1\} \rightarrow \mathbb{R}^{H},
 $$
 
-implemented as a matrix $E \in \mathbb{R}^{V \times H}$ (**lookup table**). For token id $t$,
+implemented as $E \in \mathbb{R}^{V \times H}$. For token id $t$,
 
 $$
 \mathbf{x} = E_{t,:} \in \mathbb{R}^{H}.
 $$
 
-Equivalently, if $\mathbf{e}_t$ is a one-hot vector of length $V$, then $\mathbf{x} = E^{\mathsf{T}}\mathbf{e}_t$
-(or $\mathbf{e}_t^{\mathsf{T}} E$, depending on layout). The engine does **not** form the one-hot explicitly: it
-**copies row $t$** out of $E$. That is a gather, not a matrix multiply.
+Equivalently $\mathbf{x} = E^{\mathsf{T}}\mathbf{e}_t$ for a one-hot $\mathbf{e}_t$, but the engine **copies row $t$**
+(`Ops.embedding`) — a gather, not a matmul.
 
-$H$ is `hidden_size` from `config.json`. Examples: Qwen3-0.6B uses $H = 1024$; Gemma3-270M uses $H = 640$.
-$V$ is `vocab_size` (rows of $E$ and of the LM head when present).
+$H$ = `hidden_size` (e.g. 1024 for Qwen3-0.6B, 640 for Gemma3-270M). $V$ = `vocab_size`.
 
-```text
-  token id t  →  row lookup  →  vector x ∈ R^H
-       42     →  E[42, :]    →  starting hidden state at that position
-```
+#### Gemma embedding scale
 
-The table is **not** a dictionary of verbal definitions. Geometry in $\mathbb{R}^{H}$ may correlate with usage in the
-training corpus; inference only needs the numeric row and the subsequent layers.
+After lookup, Gemma multiplies by $\sqrt{H}$ (`scaleEmbed`). Fixed from config; not a learned tensor.
 
-#### Representation in this library
+#### Tied LM head
 
-| Property   | Value                                                                                   |
-|------------|-----------------------------------------------------------------------------------------|
-| Shape      | `[vocab_size, hidden_size]` = `[V, H]`                                                  |
-| On disk    | Usually `model.embed_tokens.weight` in `*.safetensors` (often BF16)                     |
-| After load | `Tensor` of float32                                                                     |
-| Operation  | `Ops.embedding(ids, weight)` — for each id, `System.arraycopy` of one row of length $H$ |
+Logits $\boldsymbol{\ell} \in \mathbb{R}^{V}$ from last hidden $\mathbf{h}$:
 
-Scale: a BF16 table `[151936, 1024]` is already on the order of $V \cdot H \cdot 2$ bytes on disk (hundreds of MB)
-before any transformer layer.
+| Arrangement | Idea                                                                                |
+|-------------|-------------------------------------------------------------------------------------|
+| Tied        | Reuse $E$: conceptually $\boldsymbol{\ell} = E\mathbf{h}$ (via `Ops.linear` layout) |
+| Untied      | Separate $W_{\mathrm{lm}} \in \mathbb{R}^{V \times H}$                              |
 
-#### Gemma scaling
+#### RoPE vs token embedding
 
-After lookup, Gemma multiplies embeddings by $\sqrt{H}$ (`scaleEmbed`). That is a fixed constant from config, not a
-learned tensor. Qwen’s path in this port does not apply that scale.
+**RoPE** is *not* another vocab table. It rotates pairs of coordinates inside **Q and K** by an angle that depends on
+token position (section below). Absolute learned position embeddings (GPT-2 style) are **not** used here.
 
-#### Tied embeddings and the LM head
-
-At the end of the stack, the last hidden vector $\mathbf{h} \in \mathbb{R}^{H}$ must become **logits**
-$\boldsymbol{\ell} \in \mathbb{R}^{V}$ (one score per vocabulary id). Two arrangements:
-
-| Arrangement | Mechanism                                                                                                                          | Config / disk                                               |
-|-------------|------------------------------------------------------------------------------------------------------------------------------------|-------------------------------------------------------------|
-| **Tied**    | Same matrix $E$ used as LM head: conceptually $\boldsymbol{\ell} = E \mathbf{h}$ (layout-dependent transpose in the linear kernel) | `tie_word_embeddings: true`; often no `lm_head.weight` file |
-| **Untied**  | Separate matrix $W_{\mathrm{lm}} \in \mathbb{R}^{V \times H}$                                                                      | Distinct `lm_head.weight`                                   |
-
-Sharing $E$ saves a large parameter block ($V \cdot H$ floats). Qwen3-0.6B sets tying in config; Gemma3-270M is treated
-as tied in this loader.
-
-#### Kinds of “embedding” in the literature (and this port)
-
-| Kind                                   | Mathematical idea                                                                     | In this Java project?             |
-|----------------------------------------|---------------------------------------------------------------------------------------|-----------------------------------|
-| **Token embedding** (`embed_tokens`)   | $E \in \mathbb{R}^{V \times H}$; row lookup                                           | **Yes** — input path              |
-| **Tied embedding / LM head**           | Reuse $E$ for scoring                                                                 | **Yes** when tied                 |
-| **Separate LM head**                   | Distinct $W_{\mathrm{lm}}$                                                            | **Yes** when not tied             |
-| **RoPE** (rotary positional embedding) | Rotate pairs of Q/K features by an angle that depends on position; **no** vocab table | **Yes** — `Norms.RotaryEmbedding` |
-| Absolute learned position embedding    | Add a learned vector per position index to the token vector (older GPT-2 style)       | **No**                            |
-| Segment / token-type embedding         | BERT-style segment markers                                                            | **No**                            |
-| Multimodal / patch embedding           | Vision or other modalities                                                            | **No** — text causal LM only      |
-
-Everyday speech (“the embedding”) almost always means the **token** table $E$. RoPE is also called an embedding in
-papers, but it is a **positional transform of Query and Key**, not another vocabulary lookup and not a rotation of the
-position index itself.
-
-#### Where embedding runs in this library
+#### Where embedding runs
 
 ```text
-CausalLM#forward (Qwen3ForCausalLM / Gemma3ForCausalLM)
-  → VocabParallelEmbedding#forward(inputIds)
-       → Ops#embedding          // copy rows from embed_tokens.weight
-  → (Gemma only) scale by √hidden_size
-  → transformer layers…
-       → inside attention: RotaryEmbedding#forward(positions, q, k)
-  → …
+CausalLM#forward
+  → VocabParallelEmbedding#forward → Ops#embedding
+  → (Gemma) × √H
+  → layers… (RoPE inside attention)
 CausalLM#computeLogits
-  → ParallelLMHead#forward(hidden)
-       → Ops#linear with lm_head weight  // same matrix if tied
+  → ParallelLMHead#forward → Ops#linear   // tied or separate weights
 ```
 
-| Step                 | Class#method                                                 | Role                                                          |
-|----------------------|--------------------------------------------------------------|---------------------------------------------------------------|
-| Allocate empty table | `VocabParallelEmbedding.<init>(vocabSize, hiddenSize)`       | Zeros `[V, H]` until load                                     |
-| Load weights         | `ModelLoader` → `WeightSlot` for `model.embed_tokens.weight` | Fill $E$                                                      |
-| Lookup               | `VocabParallelEmbedding#forward` → `Ops#embedding`           | ids → hidden states `[n, H]`                                  |
-| Gemma scale          | `Gemma3Model#scaleEmbed`                                     | Multiply by $\sqrt{H}$ after lookup                           |
-| Tie or separate head | `Qwen3ForCausalLM` / `Gemma3ForCausalLM` constructor         | `lmHead.setWeight(embedTokens.weight())` when tied            |
-| Position (RoPE)      | `Norms.RotaryEmbedding#get` / `#forward`                     | Cos/sin cache; rotate Q and K per position                    |
-| Next-token scores    | `VocabParallelEmbedding.ParallelLMHead#forward`              | $\mathbf{h} \rightarrow \boldsymbol{\ell} \in \mathbb{R}^{V}$ |
+**In the code:** `VocabParallelEmbedding`, `Ops.embedding`, `Norms.RotaryEmbedding` (chapter 16).
 
-Weight file names: `model.embed_tokens.weight`; optional `lm_head.weight` when not tied (chapter 7).
+### RMSNorm
 
-**In the code:** `layers.VocabParallelEmbedding`, `tensor.Ops.embedding`, `Norms.RotaryEmbedding`, and
-`embedTokens.forward`
-at the top of each causal LM’s model forward (chapter 16).
+For a vector $\mathbf{x} \in \mathbb{R}^{H}$ and learned scale $\mathbf{g} \in \mathbb{R}^{H}$:
 
-### Softmax
+$$
+\mathrm{RMS} (\mathbf{x}) = \sqrt{\frac{1}{H}\sum_{i=1}^{H} x_i^2 + \varepsilon}, \qquad \mathrm{RMSNorm} (\mathbf{x}) = \frac{\mathbf{x}}{\mathrm{RMS} (\mathbf{x})} \odot \mathbf{g}'.
+$$
 
-Given raw scores $z_1,\ldots,z_k$, softmax produces a probability vector:
+Here $\varepsilon$ is `rms_norm_eps`. The energy $\sum x_i^2$ is `VectorMath.sumSquares`.
+
+**Gemma style:** stored weight $g_i$ is applied as $g'_i = 1 + g_i$ (HF convention). Otherwise $g' = g$.
+
+**Fused residual:** `Ops.addRmsNorm` computes $\mathbf{s} = \mathbf{x} + \mathbf{r}$, then
+$\mathrm{RMSNorm} (\mathbf{s})$, and returns `{normed, s}` so the residual stream stays correct.
+
+**In the code:** `Ops.rmsNorm`, `Ops.addRmsNorm`, `Norms.RMSNorm`.
+
+### Softmax and temperature
 
 $$
 p_i = \frac{e^{z_i}}{\sum_j e^{z_j}}.
 $$
 
-Numerically, implementations subtract $\max_j z_j$ before the exponentials (same $p_i$, fewer overflows). Softmax
-appears in **attention** (weights over past positions) and in **sampling** (distribution over the vocabulary).
+**Numerics:** compute $e^{z_i - \max_j z_j}$ then renormalize (`Ops.softmaxLastDim`, and inside `Sampler`).
 
-### Temperature
+**Temperature** $\tau > 0$ for sampling: use $z_i / \tau$ before softmax. Small $\tau$ → peaked; large $\tau$ → flatter.
+This port rejects $\tau \rightarrow 0$ (pure greedy) in `SamplingParams`.
 
-Before softmax for sampling, scores are divided by a **temperature** $\tau > 0$:
+### Causal self-attention (the scoring math)
 
-- small $\tau$ → mass concentrates on the argmax (more deterministic);
-- large $\tau$ → flatter distribution (more diverse draws).
+For one head, with Queries, Keys, Values $\mathbf{q}_t, \mathbf{k}_j, \mathbf{v}_j \in \mathbb{R}^{d}$
+($d$ = `head_dim`):
 
-This project always keeps a positive temperature; pure greedy decoding ($\tau \rightarrow 0$) is rejected by
-`SamplingParams`.
+$$
+\alpha_{tj} = \frac{\exp\!\big (\langle \mathbf{q}_t, \mathbf{k}_j \rangle / s\big)} {\sum_{j' \in \mathcal{A} (t)} \exp\!\big (\langle \mathbf{q}_t, \mathbf{k}_{j'} \rangle / s\big)}, \qquad \mathbf{o}_t = \sum_{j \in \mathcal{A} (t)} \alpha_{tj}\, \mathbf{v}_j.
+$$
 
-### Attention in one line
+- $\langle\cdot,\cdot\rangle$ is a **dot product** (`VectorMath.dot`).
+- Scale $s$: typically $\sqrt{d}$; Gemma may use $\sqrt{\texttt{query\_pre\_attn\_scalar}}$ from config.
+- Allowed set $\mathcal{A} (t)$: **causal** $j \le t$, optionally intersected with a **sliding window** of width $W$
+  (Gemma local layers).
+- **Multi-head:** several heads in parallel; outputs concatenated and mixed by $W_O$ (`o_proj`).
+- **GQA / MQA:** several Query heads share one Key/Value group (`num_key_value_heads` ≤ `num_attention_heads`); this
+  port sets `repeats = numHeads / numKvHeads`.
 
-> Form Query, Key, and Value; score Query against Keys; softmax; take the weighted sum of Values.
+Q, K, V themselves come from linear maps of the (normalized) hidden state. Chapter 8 describes *kinds* of attention;
+this section is the shared algebra.
 
-### The gated MLP in one line
+**In the code:** `layers.Attention` (scores via `VectorMath.dot` × `scale`, then softmax-like normalization in the
+attend loop); projections in the model’s attention module.
 
-> Expand $\mathbf{h}$ from width $H$ to width related to `intermediate_size`; split into gate and up branches;
-> activate the gate (SiLU or GELU-tanh); multiply by the up branch; project back to $H$.
+### RoPE — rotary positions on Q and K
 
-None of these operations *is* understanding in the human sense. After training they implement a procedure that often
-**imitates** fluent continuation well enough to be useful — and easy to over-interpret.
+For even head dimension $d$, split channels into $d/2$ pairs. At position $p$, pair $i$ is rotated by angle
+$\theta_{p,i} = p \cdot \omega_i$ with
 
-**In the code:** tensors in `tensor.Tensor`; mix / lookup / activate in `Ops` (`linear`, `embedding`, `rmsNorm`,
-`siluAndMul` / `geluPytorchTanhAndMul`); SIMD in `VectorMath`; softmax / temperature / draw in `layers.Sampler`
-(chapter 16).
+$$
+\omega_i = \mathrm{base}^{-2i/d} \quad\text{ (}\mathrm{base} = \texttt{rope\_theta}\text{ or a local base).}
+$$
 
-**Further reading:** [RMSNorm](https://arxiv.org/abs/1910.07467); gated MLP variants such
-as [SwiGLU](https://arxiv.org/abs/2002.05202); softmax
-on [Wikipedia](https://en.wikipedia.org/wiki/Softmax_function); rotary positions
-[RoFormer / RoPE](https://arxiv.org/abs/2104.09864).
+If $(x_1, x_2)$ is one pair:
+
+$$
+\begin{pmatrix} x_1' \\ x_2' \end{pmatrix} = \begin{pmatrix} \cos\theta & -\sin\theta \\ \sin\theta & \cos\theta \end{pmatrix} \begin{pmatrix} x_1 \\ x_2 \end{pmatrix}.
+$$
+
+Applied to **Q and K only** (not V, not the token embedding). Cos/sin are cached in
+`Norms.RotaryEmbedding` as `[max_position, head_dim]`. Relative distance then influences attention scores without an
+additive position table.
+
+**In the code:** `Norms.RotaryEmbedding#forward(positions, q, k)` before `Attention#forward`.
+
+### Gated MLP (SwiGLU / Gemma GELU-tanh)
+
+After attention + residual, the feed-forward block expands features. This port uses a **gated** form:
+
+1. Linear map to width related to `intermediate_size`, often producing a packed vector
+   $[\mathbf{g}; \mathbf{u}] \in \mathbb{R}^{2h}$ (gate and up halves).
+2. Activate the gate; multiply by up elementwise; project back to $H$.
+
+**Qwen (SiLU / SwiGLU-style):**
+
+$$
+\mathrm{SiLU} (z) = \frac{z}{1 + e^{-z}}, \qquad \mathrm{MLP} (\mathbf{x}) = W_{\mathrm{down}}\big (\mathrm{SiLU} (\mathbf{g}) \odot \mathbf{u}\big).
+$$
+
+**Gemma (tanh GELU approx):**
+
+$$
+\mathrm{GELU}_{\mathrm{tanh}} (z) = \tfrac12 z \big (1 + \tanh\big (\sqrt{2/\pi}\, (z + 0.044715\, z^3)\big)\big),
+$$
+
+then $\mathrm{GELU}_{\mathrm{tanh}} (\mathbf{g}) \odot \mathbf{u}$, then down-project.
+
+`Ops.siluAndMul` / `Ops.geluPytorchTanhAndMul` implement the activate×multiply on the packed last dimension (must be
+even).
+
+**In the code:** model MLP modules → those `Ops` methods → `down_proj` via `Ops.linear`.
+
+### Sampling math (after logits)
+
+Given logits $\boldsymbol{\ell} \in \mathbb{R}^{V}$:
+
+1. **Temperature:** $z_i = \ell_i / \tau$.
+2. **Softmax** → probabilities $p_i$.
+3. **Top-k** (optional): zero all but the $k$ largest $p_i$; renormalize.
+4. **Top-p** (nucleus, optional): keep the smallest prefix of sorted mass whose cumulative probability ≥ $p$; zero the
+   rest; renormalize.
+5. **Draw:** this port uses a **Gumbel-max–style** score $p_i / (-\log U_i)$ with $U_i \sim \mathrm{Uniform} (0,1)$
+   and picks the argmax (equivalent in spirit to sampling from categorical $p$; see `Sampler`).
+
+Stop token ids / `maxTokens` end the sequence in the scheduler, not in the sampler.
+
+**In the code:** `layers.Sampler`; defaults in `SamplingDefaults`. Narrative: chapter 11.
+
+### Dot product and SIMD
+
+Everywhere “score” or “linear partial sum” appears, the primitive is
+
+$$
+\mathrm{dot} (\mathbf{a},\mathbf{b}) = \sum_{i=0}^{n-1} a_i b_i
+$$
+
+on float slices (`FloatKernels.dot`), with an optional Vector API (SIMD) main loop plus scalar tail. That is the numeric
+heart under attention scores and `VectorMath.linear`.
+
+### What this math is *not*
+
+None of these maps *is* human understanding. After training they implement a deterministic (up to sampling noise)
+procedure that often **imitates** fluent continuation. Keeping that distinction sharp is part of reading this project
+honestly.
+
+**In the code (full stack):** `tensor.Tensor` → `Ops` / `VectorMath` / `FloatKernels` → `Attention` / `Norms` /
+`Sampler` (chapter 16).
+
+**Further reading:** [Vaswani et al.](https://arxiv.org/abs/1706.03762); [RMSNorm](https://arxiv.org/abs/1910.07467);
+[SwiGLU](https://arxiv.org/abs/2002.05202); [RoPE / RoFormer](https://arxiv.org/abs/2104.09864);
+[nucleus sampling](https://arxiv.org/abs/1904.09751);
+[softmax](https://en.wikipedia.org/wiki/Softmax_function).
 
 
 ---
@@ -2610,6 +2670,7 @@ Implementation homes stay in the **In the code** notes and **chapter 16**; this 
 | Safetensors                | [HF docs](https://huggingface.co/docs/safetensors) · [GitHub format notes](https://github.com/huggingface/safetensors)             |
 | RoPE                       | [Su et al. / RoFormer (arXiv)](https://arxiv.org/abs/2104.09864)                                                                   |
 | Token / positional embeds  | (this guide ch. 10; RoPE paper above)                                                                                              |
+| Math catalog (formulas)    | (this guide ch. 10 — layer map, linear, RMSNorm, attention, RoPE, gated MLP, sampling, SIMD dots)                                  |
 | Tensors / shapes           | (this guide ch. 7–10; `tensor.Tensor` in source)                                                                                   |
 | GQA                        | [Ainslie et al. (arXiv)](https://arxiv.org/abs/2305.13245)                                                                         |
 | Multi-query attention      | [Shazeer (arXiv)](https://arxiv.org/abs/1911.02150)                                                                                |

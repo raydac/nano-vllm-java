@@ -12,6 +12,7 @@
 - §15 (“2+2”): master call chain + per-stage `Class#method` tables (send → generate → step → Attention → parse)
 - Ch.7 opens with tensor definition (rank/shape/weights vs activations) then safetensors format
 - Ch.10 rewritten: tensors (notation + `tensor.Tensor`), embeddings ($E\in\mathbb{R}^{V\times H}$, gather, tied head, RoPE kinds), linear/softmax
+- Ch.10 expanded to full **math catalog**: decoder-layer map, RMSNorm, causal attention scores, RoPE rotation, SiLU/GELU-tanh MLP, sampling (top-k/p, Gumbel-style), SIMD dots — matched to `Ops` / `Attention` / `Sampler`
 - Prefer Stream API for filter/map/collect transforms in LLM/engine helpers; keep stateful schedule/prefill and tensor kernels imperative
 - `LLM` business methods (`generate`, `step`, drive loop, load/close) carry `//` stage comments for algorithm readability
 - `tensor.Tensor` has full class/method JavaDoc (shape, offset/view, reshape sharing, data vs toFloatArray)
@@ -43,7 +44,7 @@
 - Whether to fold Sampler into ModelRunner next
 
 ## 7. Useful References
-- How it works: `description.md` (academic-accessible; ch.7–10 tensors/embeddings; §16 map/samples; §19 reading index)
+- How it works: `description.md` (academic-accessible; ch.10 math catalog; ch.7–10 tensors; §16 map/samples; §19 reading index)
 - Maven: `com.igormaznitsa:nano-vllm-java:0.2.0-SNAPSHOT`; JPMS module `com.igormaznitsa.nanollvm`
 - Build: `mvn -q test` / `MAVEN_OPTS="-Xmx8g" mvn -q exec:java -Dexec.mainClass=com.igormaznitsa.nanollvm.Example`
 - Library: `LLM.builder(path).systemPrompt(…).build()` then `llm.chat().send(…)` / `chatOnce` / `complete`
