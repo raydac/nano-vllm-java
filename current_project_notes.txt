@@ -7,10 +7,12 @@
 - Example uses `ChatSession` with streamTo; Gemma empty system + boilerplate scrub inside session
 - package-info documents public vs internal surface; **LLM** has library JavaDoc; **module-info.java** (`com.igormaznitsa.nanollvm`)
 - Root Java package + JPMS module: `com.igormaznitsa.nanollvm` (was `io.nanovllm`)
-- Educational walkthrough: `description.md` + Russian `description_rus.md` (audited vs code: history=answer-only, sampling defaults, enableThinking)
-- `description.md`: every narrative chapter has **In the code** class/method signposts; §16 is the full map + Samples A–F
-- `description.md` §15 (“2+2”): master call chain + per-stage `Class#method` tables (send → generate → step → Attention → parse)
-- `description_rus.md` terminology pass: Sense A/B/C (not «толкование»); keep English ML terms; fix calques (RoPE, sliding window, «ком прозы», «разливает», …)
+- Educational walkthrough: `description.md` (English; academic-accessible tone)
+- Every narrative chapter has **In the code** class/method signposts; §16 is the full map + Samples A–F
+- §15 (“2+2”): master call chain + per-stage `Class#method` tables (send → generate → step → Attention → parse)
+- Ch.7 opens with tensor definition (rank/shape/weights vs activations) then safetensors format
+- Ch.10 rewritten: tensors (notation + `tensor.Tensor`), embeddings ($E\in\mathbb{R}^{V\times H}$, gather, tied head, RoPE kinds), linear/softmax
+- Glossary: Tensor, Shape/numel, Activations; embedding/`hidden_size` phrased formally
 
 
 ## 2. Architecture & Technical Discoveries
@@ -25,8 +27,7 @@
 - Optional repetition penalty for tiny IT models
 
 ## 4. Current Work In Progress
-- Academic Russian rewrite: `_rus_acad_1.md` (title–ch.7), `_rus_acad_2.md` (chs 8–14), `_rus_acad_3.md` (chs 15–19)
-- Prior drafts: `_rus_part1/2/3.md` from `description.md` (superseded by acad series when complete)
+- Educational docs: maintain academic-accessible English `description.md` (tensors/embeddings strengthened)
 
 ## 5. Known Issues & Limitations
 - CPU-only; large float32 heap; weights not in git
@@ -36,7 +37,7 @@
 - Whether to fold Sampler into ModelRunner next
 
 ## 7. Useful References
-- How it works: `description.md` / `description_rus.md` (**In the code** notes; §16 map/samples; §19 reading index)
+- How it works: `description.md` (academic-accessible; ch.7–10 tensors/embeddings; §16 map/samples; §19 reading index)
 - Maven: `com.igormaznitsa:nano-vllm-java:0.2.0-SNAPSHOT`; JPMS module `com.igormaznitsa.nanollvm`
 - Build: `mvn -q test` / `MAVEN_OPTS="-Xmx8g" mvn -q exec:java -Dexec.mainClass=com.igormaznitsa.nanollvm.Example`
 - Library: `LLM.builder(path).systemPrompt(…).build()` then `llm.chat().send(…)` / `chatOnce` / `complete`
@@ -50,3 +51,4 @@
 - Prefer `ChatSession` for dialog; keep raw `generate` for completions
 - Do not stack long Gemma system prompts — latch risk
 - Keep I/O out of Config
+- Educational guide: English `description.md` only — do not revive a Russian translation

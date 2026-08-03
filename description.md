@@ -1,23 +1,23 @@
 # How a Language Model Works
 
-### A plain-language guide to this Java project (Nano-vLLM)
+### An introductory guide to this Java inference engine (Nano-vLLM)
 
-This little book is written for a curious reader who is comfortable with ideas, stories, and careful argument — **not**
-for someone who already thinks in code or equations.
+This guide is written for a reader with general academic habits — careful definitions, structured argument, and a
+willingness to learn technical vocabulary — but **without** assuming prior machine-learning or systems coursework.
 
-You do not need to know Java, matrices, or “AI engineering.”  
-If a term is unavoidable, it is explained the first time in everyday language.
+You do not need fluency in Java. Linear algebra appears where it clarifies structure (vectors, matrices, shapes); each
+term is defined on first use. Occasional metaphors remain only as scaffolding, never as substitutes for the concepts.
 
-The project this book describes is a small program that can **load a ready-made language model** and use it to continue
-text or hold a short conversation — on an ordinary computer, without special graphics hardware. Java package / JPMS
-module: `com.igormaznitsa.nanollvm`.
+The subject is a small program that **loads a pretrained causal language model** and runs **inference**: continuing text
+or conducting a short chat on an ordinary CPU, without CUDA or other native backends. Java package / JPMS module:
+`com.igormaznitsa.nanollvm`.
 
-Where a topic has a standard paper or format guide, you will find a short **Further reading** note with links. Those
-links are optional depth — the story in this book stands alone.
+Where a topic has a standard paper or format specification, a short **Further reading** note lists links. Those are
+optional depth; the exposition here is self-contained.
 
-Where a topic has a home in this library, you will also find a short **In the code** note naming the Java types and
-methods that implement it (package `com.igormaznitsa.nanollvm`). Those notes are signposts — **chapter 16** collects the
-full map, samples, and file paths.
+Where a topic has a home in this library, an **In the code** note names the Java types and methods that implement it
+(package `com.igormaznitsa.nanollvm`). Those notes are signposts — **chapter 16** collects the full map, samples, and
+file paths.
 
 ---
 
@@ -29,10 +29,10 @@ full map, samples, and file paths.
 4. [Loading a model: opening the library box](#4-loading-a-model-opening-the-library-box)
 5. [`config.json` — the blueprint field by field](#5-configjson--the-blueprint-field-by-field)
 6. [`tokenizer.json` — the dictionary file field by field](#6-tokenizerjson--the-dictionary-file-field-by-field)
-7. [`*.safetensors` — the weight crates: format and contents](#7-safetensors--the-weight-crates-format-and-contents)
+7. [Tensors and `*.safetensors` — parameters on disk](#7-tensors-and-safetensors--parameters-on-disk)
 8. [Attention: kinds of looking-back, and how they work](#8-attention-kinds-of-looking-back-and-how-they-work)
 9. [The thinking process: how it is organized and how it works with the model](#9-the-thinking-process-how-it-is-organized-and-how-it-works-with-the-model)
-10. [The math, said gently (including embeddings)](#10-the-math-said-gently-including-embeddings)
+10. [Tensors, embeddings, and the arithmetic of inference](#10-tensors-embeddings-and-the-arithmetic-of-inference)
 11. [Choosing a word: not always the most obvious one](#11-choosing-a-word-not-always-the-most-obvious-one)
 12. [Why the program keeps a notebook of the past](#12-why-the-program-keeps-a-notebook-of-the-past)
 13. [Serving several conversations without chaos](#13-serving-several-conversations-without-chaos)
@@ -60,7 +60,7 @@ In one sentence:
 
 > **You give it text; it repeatedly chooses a plausible next scrap of text until the answer feels finished.**
 
-The rest of this book unpacks that sentence without assuming a technical background.
+The rest of this guide unpacks that sentence without assuming prior ML coursework.
 
 **In the code:** front door is `LLM` / `LLM.Builder`; interactive demo is `Example` (chapter 16).
 
@@ -339,24 +339,24 @@ You can override detection with `-Dnanovllm.arch=qwen3` or `gemma3` without edit
 
 ### Size of the dictionary and the stream
 
-| Field               | Means (short)                                                             | Used for                                                  | If missing                  |
-|---------------------|---------------------------------------------------------------------------|-----------------------------------------------------------|-----------------------------|
-| `vocab_size`        | How many distinct token ids the model knows                               | Width of embedding table and LM head (rows)               | Treated as 0 → broken model |
-| `hidden_size`       | How many numbers describe **each token’s ongoing state** inside the stack | The main “working page width” for attention and residuals | 0 → broken                  |
-| `intermediate_size` | How wide the **temporary expansion** is inside each layer’s MLP rewrite   | Gate/up and down projection sizes                         | 0 → broken                  |
+| Field               | Means (short)                                                           | Used for                                    | If missing                  |
+|---------------------|-------------------------------------------------------------------------|---------------------------------------------|-----------------------------|
+| `vocab_size`        | How many distinct token ids the model knows                             | Width of embedding table and LM head (rows) | Treated as 0 → broken model |
+| `hidden_size`       | Dimension $H$ of each token’s hidden state (residual stream width)      | Embedding dim; attention/MLP I/O width      | 0 → broken                  |
+| `intermediate_size` | How wide the **temporary expansion** is inside each layer’s MLP rewrite | Gate/up and down projection sizes           | 0 → broken                  |
 
 ### What `hidden_size` really is
 
-Imagine each token, while it travels through the model, carries a **fixed-length dossier** — not one score, but a long
-list of numbers (a vector). That list’s length is `hidden_size`.
+Each token position carries a **fixed-length hidden state** — a vector in $\mathbb{R}^{H}$ where $H$ = `hidden_size`.
+Papers often call this *d_model* or the *model dimension*.
 
-- After the embedding lookup, token id `42` becomes a dossier of length `hidden_size`.
-- Attention mixes dossiers, but each position still leaves with a dossier of the **same** length.
-- Residuals add edits onto that same-width stream.
-- At the very end, that dossier is compared against every vocabulary row to score the next token.
+- After the embedding lookup, token id `42` becomes a vector of length `hidden_size`.
+- Attention mixes information across positions, but each position still leaves with a vector of the **same** length.
+- Residuals add updates onto that same-width stream.
+- At the end, that vector is scored against every vocabulary row to produce next-token logits.
 
-So `hidden_size` is the **width of the model’s internal working page** — how many slots of “description” each place in
-the text keeps from layer to layer. Papers sometimes call it *d_model* or *model dimension*.
+So `hidden_size` is the **width of the residual stream**: the embedding dimension and the working width of every
+transformer block’s main path.
 
 It is **not**:
 
@@ -371,25 +371,25 @@ It is **not**:
   same width after attention, after MLP, after every layer
 ```
 
-Larger `hidden_size` → richer dossiers → usually more capacity and more memory/compute per token. Smaller → leaner.
+Larger `hidden_size` → higher capacity per position, and more memory/compute. Smaller → leaner.
 
 ### What `intermediate_size` really is
 
-Inside **each** layer, after attention, there is a private rewrite block (the MLP / feed-forward net). That block does
-**not** stay at width `hidden_size` the whole time. It typically:
+Inside **each** layer, after attention, the MLP / feed-forward block does **not** stay at width `hidden_size` the whole
+time. It typically:
 
-1. **Expands** the dossier from `hidden_size` to `intermediate_size` (often about 2×–4× wider),
+1. **Expands** the hidden state from `hidden_size` to `intermediate_size` (often about 2×–4× wider),
 2. Applies a nonlinearity / gate (SiLU, GELU, …),
 3. **Shrinks** back to `hidden_size` before joining the residual stream again.
 
-So `intermediate_size` is the width of that **temporary wide workshop** used only inside the MLP. The main hallway of
-the model stays `hidden_size`; the side workshop is `intermediate_size`.
+So `intermediate_size` is the width of that **temporary expanded representation** inside the MLP only. The residual
+stream stays at `hidden_size`.
 
 ```text
-  dossier (hidden_size H)
+  hidden state (width H)
         │
         ▼
-  expand to intermediate_size I   ◄── wide workshop (temporary)
+  expand to intermediate_size I   ◄── temporary wide MLP representation
         │
      gate / activate
         │
@@ -399,18 +399,18 @@ the model stays `hidden_size`; the side workshop is `intermediate_size`.
   add onto residual (still width H)
 ```
 
-Why expand? A wider workshop gives the layer more room to recombine features before returning to the shared stream. Most
-of a decoder layer’s **weight bulk** often sits in these expand/shrink matrices — that is why
-`intermediate_size` matters so much for file size and RAM.
+Why expand? A wider intermediate representation gives the layer more capacity to recombine features before returning to
+the residual stream. Most of a decoder layer’s **parameter count** often sits in these expand/shrink matrices — that is
+why `intermediate_size` matters so much for file size and RAM.
 
 ### How the two fit together
 
-|                            | `hidden_size` (H)                                              | `intermediate_size` (I)                                  |
-|----------------------------|----------------------------------------------------------------|----------------------------------------------------------|
-| Lives where?               | Everywhere: embeddings, attention mixes, residuals, final norm | Only inside each layer’s MLP                             |
-| Stays for the whole stack? | Yes — same H from first embed to last layer                    | No — temporary per layer                                 |
-| Everyday metaphor          | Width of the manuscript page you keep rewriting                | Width of the blotter you use while editing one paragraph |
-| Typical relation           | Baseline                                                       | Often roughly 2×–4× H (a design choice, not a law)       |
+|                            | `hidden_size` (H)                                        | `intermediate_size` (I)                            |
+|----------------------------|----------------------------------------------------------|----------------------------------------------------|
+| Lives where?               | Everywhere: embeddings, attention, residuals, final norm | Only inside each layer’s MLP                       |
+| Stays for the whole stack? | Yes — same H from first embed to last layer              | No — temporary per layer                           |
+| Role                       | Residual-stream / embedding dimension                    | Expanded MLP width                                 |
+| Typical relation           | Baseline                                                 | Often roughly 2×–4× H (a design choice, not a law) |
 
 **Real values** (from the example model folders this project documents — not quality rankings):
 
@@ -420,7 +420,7 @@ of a decoder layer’s **weight bulk** often sits in these expand/shrink matrice
 | `hidden_size` (H)       | **1024**         | **640**            |
 | `intermediate_size` (I) | **3072** (= 3×H) | **2048** (≈ 3.2×H) |
 
-So Qwen’s “page” is wider (1024 vs 640), and both use an MLP workshop about three times as wide as the page.
+So Qwen’s residual width is larger (1024 vs 640), and both use an MLP intermediate width about three times $H$.
 
 Gemma’s larger vocabulary and smaller hidden size are different design trade-offs — not “more intelligence” by
 themselves.
@@ -596,14 +596,15 @@ consult it.
 
 #### Qwen3-0.6B (compressed reading)
 
-> Family qwen3; 28 rooms; each token keeps a **1024**-wide dossier (`hidden_size`); each MLP briefly widens to
+> Family qwen3; 28 layers; residual width **1024** (`hidden_size`); each MLP briefly widens to
 > **3072** (`intermediate_size`, 3×); vocabulary ~152k; 16 Query heads with 8 KV groups
 > (GQA); head size 128; SiLU MLP; embeddings tied to LM head; RoPE base 1e6; context claim up to 40960; weights stored
 > as BF16 on disk, run as float32 here.
 
 #### Gemma3-270M (compressed reading)
 
-> Family gemma3_text; 18 rooms; dossier width **640**; MLP workshop **2048** (~3.2×) with GELU-tanh gate; vocabulary ~
+> Family gemma3_text; 18 layers; residual width **640**; MLP intermediate **2048** (~3.2×) with GELU-tanh gate;
+> vocabulary ~
 > 262k; 4 Query
 > heads sharing 1 KV head; head size 256; attention scaled by `query_pre_attn_scalar` 256; many layers only look back
 > 512 tokens, every sixth layer looks globally; local RoPE base 10k, global 1e6; expect tied embeddings.
@@ -831,17 +832,47 @@ ids); encode/decode and `applyChatTemplate` live on `Tokenizer` (chapter 16).
 
 ---
 
-## 7. `*.safetensors` — the weight crates: format and contents
+## 7. Tensors and `*.safetensors` — parameters on disk
 
-The large files named `model.safetensors` or `model-00001-of-00003.safetensors` hold the **learned numbers**. This
-project reads them with `SafetensorsReader` and pours them into the empty shelves built from `config.json`.
+The large files named `model.safetensors` or `model-00001-of-00003.safetensors` hold the **learned parameters** of the
+model. This project reads them with `SafetensorsReader` and copies them into the empty parameter buffers allocated from
+`config.json`. Before the file format, it helps to fix what a **tensor** is — because every weight, every activation,
+and every intermediate result in chapters 8–11 is one.
 
-### Why this format exists
+### What a tensor is
 
-Older workflows used opaque pickles. **Safetensors** is a simple, mmap-friendly layout:
+In this engineering context (and in deep-learning libraries generally), a **tensor** is a **multidimensional array of
+numbers**, together with a **shape** that says how those numbers are organized.
+
+| Rank (number of axes) | Usual name   | Example shape      | Example role                                    |
+|-----------------------|--------------|--------------------|-------------------------------------------------|
+| 0                     | scalar       | `()`               | Rare as a stored weight; one number             |
+| 1                     | vector       | `[H]`              | Hidden state of one token; RMSNorm scale vector |
+| 2                     | matrix       | `[V, H]`, `[I, H]` | Embedding table; linear-layer weight            |
+| 3+                    | higher-order | `[L, B, H]`, …     | Batched activations, caches (layout varies)     |
+
+**Shape** is an ordered list of positive integers. The product of the dimensions is the **number of elements**
+(`numel`). Storage is almost always a **flat contiguous buffer** in row-major order: the last index changes fastest.
+
+Two tensors with the same `numel` can be **reshaped** without moving values (reinterpret the axes). Two tensors with
+different `numel` cannot.
+
+**Weights vs activations.** Parameters loaded from disk (embedding matrix, projection matrices, norm scales) are
+**weights**. Arrays produced during a forward pass (hidden states, attention scores, logits) are **activations**. Both
+are tensors; only weights persist across requests as part of the model.
+
+**Dtype.** On disk a tensor may be stored as BF16, F16, or F32. After load, this educational CPU port widens everything
+to Java `float` (IEEE float32). Shape is unchanged; only element width grows.
+
+Formal detail and the Java type live in **chapter 10**. The rest of this chapter is the **on-disk container** that
+delivers named weight tensors into RAM.
+
+### Why the safetensors format exists
+
+Older workflows used opaque pickles. **Safetensors** is a simple, memory-map–friendly layout:
 
 1. A small binary length prefix.
-2. A JSON **catalog** naming every tensor.
+2. A JSON **catalog** naming every tensor (name → dtype, shape, byte range).
 3. A raw **payload** of little-endian numeric bytes.
 
 No hidden code execution — only data.
@@ -900,22 +931,22 @@ resident image in RAM.
 
 ### What the contents *are* (names and roles)
 
-Tensors are not mysterious blobs; their **names** say which shelf they fill. Typical patterns:
+Each catalog name identifies which parameter buffer it fills. Typical patterns:
 
-| Name pattern                                                                  | Content                                                                         |
-|-------------------------------------------------------------------------------|---------------------------------------------------------------------------------|
-| `model.embed_tokens.weight`                                                   | Embedding table `[vocab_size, hidden_size]` — one portrait per token id         |
-| `model.layers.i.input_layernorm.weight`                                       | RMSNorm scales for layer *i* (before attention)                                 |
-| `model.layers.i.self_attn.q_proj.weight`                                      | Query projection (HF may store Q/K/V separately)                                |
-| `model.layers.i.self_attn.k_proj.weight`                                      | Key projection                                                                  |
-| `model.layers.i.self_attn.v_proj.weight`                                      | Value projection                                                                |
-| `model.layers.i.self_attn.o_proj.weight`                                      | Output mix after attention                                                      |
-| `model.layers.i.self_attn.q_norm.weight` / `k_norm.weight`                    | Optional per-head Q/K norms                                                     |
-| `model.layers.i.post_attention_layernorm.weight`                              | Norm before MLP                                                                 |
-| `model.layers.i.mlp.gate_proj.weight` / `up_proj.weight` / `down_proj.weight` | Gated MLP pieces                                                                |
-| `model.layers.i.pre_feedforward_layernorm.weight` / `post_…`                  | Extra Gemma norms                                                               |
-| `model.norm.weight`                                                           | Final norm before scoring                                                       |
-| `lm_head.weight`                                                              | Vocab scorer `[vocab_size, hidden_size]` — may be absent if embeddings are tied |
+| Name pattern                                                                  | Tensor content (shape intuition)                                            |
+|-------------------------------------------------------------------------------|-----------------------------------------------------------------------------|
+| `model.embed_tokens.weight`                                                   | Token embedding matrix `[vocab_size, hidden_size]` — one row per token id   |
+| `model.layers.i.input_layernorm.weight`                                       | RMSNorm scale vector for layer *i* (before attention)                       |
+| `model.layers.i.self_attn.q_proj.weight`                                      | Query projection matrix (HF may store Q/K/V separately)                     |
+| `model.layers.i.self_attn.k_proj.weight`                                      | Key projection matrix                                                       |
+| `model.layers.i.self_attn.v_proj.weight`                                      | Value projection matrix                                                     |
+| `model.layers.i.self_attn.o_proj.weight`                                      | Output projection after attention                                           |
+| `model.layers.i.self_attn.q_norm.weight` / `k_norm.weight`                    | Optional per-head Q/K norms                                                 |
+| `model.layers.i.post_attention_layernorm.weight`                              | Norm before MLP                                                             |
+| `model.layers.i.mlp.gate_proj.weight` / `up_proj.weight` / `down_proj.weight` | Gated MLP matrices                                                          |
+| `model.layers.i.pre_feedforward_layernorm.weight` / `post_…`                  | Extra Gemma norms                                                           |
+| `model.norm.weight`                                                           | Final RMSNorm before scoring                                                |
+| `lm_head.weight`                                                              | LM head `[vocab_size, hidden_size]` — often absent when embeddings are tied |
 
 **Counts in samples:** Qwen3-0.6B ≈ **311** tensors in one file; Gemma3-270M ≈ **236** (tied head → often no separate
 `lm_head` tensor).
@@ -926,41 +957,43 @@ Large models may split weights across `model-00001-of-0000N.safetensors`. The lo
 opens them in sorted order, and plans every matching tensor. Each file has its **own** header + payload; names must not
 collide across shards for the same parameter.
 
-### How this project uses a tensor at load time
+### How this project loads a tensor
 
 ```text
-  1. Read header → know names, dtypes, shapes, byte ranges
+  1. Read header → names, dtypes, shapes, byte ranges
   2. Match name → WeightSlot on the live Java graph
        (rewrite q_proj/k_proj/v_proj → fused qkv_proj, etc.)
-  3. mmap / read payload slice → convert to float[] Tensor
+  3. mmap / read payload slice → convert to float32 Tensor
   4. slot.load(tensor) → copy into the layer’s weight storage
 ```
 
-Unknown names are skipped. Missing **required** names leave empty shelves and break inference.
+Unknown names are skipped. Missing **required** names leave empty buffers and break inference.
 
 ### What is *not* in `.safetensors`
 
 - Tokenizer strings and merges.
 - Chat templates.
-- KV cache / attention notebooks (created empty at runtime).
+- KV cache / attention state (allocated empty at runtime).
 - RoPE cos/sin tables (computed from `rope_theta` in config).
 
 Only **trained parameters** (and sometimes buffers stored as tensors).
 
 ### Size intuition
 
-Rough payload size ≈ sum over tensors of `bytes_per_element × numel`.
+Rough on-disk payload ≈ Σ over tensors of `bytes_per_element × numel`.
 
-Example: one BF16 embedding `[151936, 1024]` is already hundreds of megabytes before layers. After expansion to F32 in
-RAM, expect roughly **~2×** that payload for resident weights alone — plus KV pages and activations.
+Example: one BF16 embedding `[151936, 1024]` is already hundreds of megabytes before the layers. After expansion to F32
+in RAM, expect roughly **~2×** that payload for resident weights alone — plus KV pages and activations.
 
-### A fair one-sentence summary
+### Summary
 
-> **A `.safetensors` file is a labeled warehouse of matrices and vectors: a JSON index up front, raw numeric bytes
-> afterward, poured into the model’s shelves at load time (and widened to float32 in this port).**
+> **A `.safetensors` file is a named collection of tensors: a JSON index of shapes and byte ranges, followed by a raw
+> numeric payload. At load time this port widens elements to float32 and copies each tensor into the matching model
+> parameter.**
 
 **In the code:** `utils.SafetensorsReader` parses the file; `utils.ModelLoader.loadModel` matches names (including
-packed `q_proj`/`k_proj`/`v_proj` → `qkv_proj`) and calls `WeightSlot.load` (chapter 16).
+packed `q_proj`/`k_proj`/`v_proj` → `qkv_proj`) and calls `WeightSlot.load` (chapter 16). Conceptual tensor definitions:
+chapter 10.
 
 **Further reading:** format overview in the
 [Safetensors documentation](https://huggingface.co/docs/safetensors); binary layout notes in the
@@ -975,7 +1008,7 @@ Attention is the part people mean when they say the model “pays attention” t
 spotlight of consciousness. It is a **rule for mixing other places in the text into this place**.
 
 There is not only one kind. Models differ in *who may look at whom*, *how many separate glances run in parallel*, and
-*how thriftily they store the notebooks*. This chapter walks those kinds in plain language, then says which ones this
+*how thriftily they store the KV cache*. This chapter defines those variants, then states which ones this
 project actually uses.
 
 ### The shared recipe (every kind below starts here)
@@ -1233,7 +1266,7 @@ notebooks) — including what this Java chat path does with visible “thinking�
 
 ### First distinction: three senses of “thinking”
 
-| Sense | Name in this book                    | What it really is                                                                              | Visible as text?        |
+| Sense | Name in this guide                   | What it really is                                                                              | Visible as text?        |
 |-------|--------------------------------------|------------------------------------------------------------------------------------------------|-------------------------|
 | **A** | Silent inner work                    | The full stack of attention + rewrites for every next-token step                               | No                      |
 | **B** | Written reasoning (chain of thought) | Extra tokens that *narrate* steps, then become part of the past                                | Yes, in the reply       |
@@ -1545,76 +1578,172 @@ Written thinking helps **because** attention can reread it — not because a sec
 
 ---
 
-## 10. The math, said gently (including embeddings)
+## 10. Tensors, embeddings, and the arithmetic of inference
 
-You can skip this chapter and still understand the story. It exists for readers who want the *shape* of the arithmetic
-without a textbook.
+Earlier chapters describe *what* the engine does. This chapter fixes the **data objects and operations** that make those
+steps precise: tensors as the universal container, embeddings as the map from discrete token ids into continuous space,
+and the few algebraic patterns that recur everywhere else (linear maps, softmax, gated MLP).
 
-### Portraits as lists of numbers
+You can skim the formal notation and still follow later chapters; the definitions are here so “shape,” “lookup,” and
+“hidden size” stop being vague slogans.
 
-Every token becomes a list of numbers — a **vector**. “Nearness” of meaning is often reflected (imperfectly) in how
-these lists relate. Almost everything the model does is: take lists, mix them with stored tables of numbers, produce new
-lists.
+### Tensors — definition and notation
 
-### A linear layer
+A **tensor** $T$ of **rank** $r$ (also called *order*) is an array whose elements are indexed by $r$ integers. Its
+**shape** is $(n_1, n_2, \ldots, n_r)$. The number of scalar elements is
 
-“Mix every input trait into every output trait, using a big learned table, optionally add a bias.”  
-That single pattern appears everywhere: building Query/Key/Value, mixing attention heads, expanding and shrinking in the
-MLP, scoring the vocabulary.
+$$
+\mathrm{numel} (T) = n_1 \cdot n_2 \cdots n_r.
+$$
 
-### Embedding
+Common special cases:
 
-Not mixing — **looking up**. Token number 42 → copy row 42 from the embedding table into a vector of length
-`hidden_size`. That vector is the starting hidden state for that token before any transformer layer runs.
+| Rank | Name   | Notation (typical)              | Role in this model                            |
+|------|--------|---------------------------------|-----------------------------------------------|
+| 1    | vector | $\mathbf{h} \in \mathbb{R}^{H}$ | Hidden state of one position                  |
+| 2    | matrix | $W \in \mathbb{R}^{m \times n}$ | Linear layer; embedding table                 |
+| ≥3   | —      | e.g. batched activations        | Prefill batches, caches (exact layout varies) |
 
-### Embeddings in depth — kinds, representation, and this library
+**Indexing convention in this guide.** Matrices are written with shape `[rows, cols]`. An embedding table
+$E \in \mathbb{R}^{V \times H}$ has **one row per vocabulary id**. Row $t$ is written $E_{t,:}$ or $E[t]$.
 
-“Embedding” is used for several related ideas. In this project only some of them appear as large learned tables.
+**Contiguous storage.** Implementations store elements in a flat buffer (here: `float[]`) in **row-major** order: the
+last axis changes fastest. For a matrix of shape `[V, H]`, the element at row $t$, column $j$ sits at flat index
+`t * H + j`.
 
-#### What a token embedding is
+**Reshape** changes the shape tuple without changing $\mathrm{numel}$ or (usually) the underlying buffer. It does not
+create new learned parameters.
 
-The tokenizer gives **integer ids**. The model cannot run meaningful operations such as attention on bare integers. Each
-id must first become a vector — the **token embedding** table is a learned matrix with one row per vocabulary id.
-Looking up id `k` copies that row: a dense vector of length
-`hidden_size` (for example 1024 for Qwen3-0.6B, 640 for Gemma3-270M). Those numbers were set during training; this
-program only reads them.
+**Weights vs activations (again).**
+
+| Kind       | Lifetime                          | Examples                                            |
+|------------|-----------------------------------|-----------------------------------------------------|
+| Weight     | Loaded once; reused every request | `embed_tokens`, `q_proj`, RMSNorm scales, `lm_head` |
+| Activation | Ephemeral per forward step        | Token hidden states, attention scores, logits       |
+
+Both are `Tensor` instances in this library; only weights are filled from `.safetensors` (chapter 7).
+
+#### How `tensor.Tensor` represents this in Java
+
+| Property         | Meaning in `com.igormaznitsa.nanollvm.tensor.Tensor`  |
+|------------------|-------------------------------------------------------|
+| `data`           | Underlying `float[]` (float32 after load)             |
+| `shape`          | `int[]` of axis lengths                               |
+| `offset`         | Start index into `data` (supports views)              |
+| `numel` / `size` | Number of logical elements                            |
+| `reshape`        | New shape, same buffer and offset, if `numel` matches |
+
+Factories: `Tensor.zeros(shape…)`, `Tensor.of(float[], shape…)`. Kernels live in `Ops` and often allocate a new output
+tensor rather than mutating weights in place.
 
 ```text
-  token id  →  row lookup in embed_tokens  →  vector [hidden_size]
-       42   →  weight[42, :]               →  starting hidden state
+  conceptual layout of embed_tokens (weight)
+
+       columns →  j = 0 … H−1   (H = hidden_size)
+  rows
+    t = 0      [  e00  e01  …  e0,H−1 ]
+    t = 1      [  e10  e11  …  e1,H−1 ]
+    …
+    t = V−1    [  …               …   ]
+
+  flat index of E[t, j]  =  t * H + j
 ```
 
-That is **not** a database of definitions. Nearby vectors may correlate with similar usage in training text, but the
-engine only needs the lookup + later layers.
+**In the code:** `tensor.Tensor`, `tensor.Ops`, SIMD helpers in `tensor.VectorMath` (chapter 16).
 
-#### How it is represented in memory
+### Linear layers
 
-| Property   | In this library                                                                            |
-|------------|--------------------------------------------------------------------------------------------|
-| Shape      | `[vocab_size, hidden_size]` — rows = token ids from `config.json`, columns = `hidden_size` |
-| On disk    | Usually `model.embed_tokens.weight` in `*.safetensors` (often BF16)                        |
-| After load | `tensor.Tensor` of **float32** (this educational CPU port widens dtypes)                   |
-| Operation  | Row copy — `Ops.embedding(ids, weight)` — not a matrix multiply                            |
+A **linear** (affine) map takes an input vector $\mathbf{x} \in \mathbb{R}^{n}$ and a weight matrix
+$W \in \mathbb{R}^{m \times n}$, optionally a bias $\mathbf{b}$:
 
-Example scale: BF16 table `[151936, 1024]` is already hundreds of megabytes before the rest of the model.
+$$
+\mathbf{y} = W\mathbf{x} + \mathbf{b} \quad\text{ (or without bias).}
+$$
 
-#### Kinds of “embedding” you will meet (and which this port uses)
+In batched form the same matrix multiplies every row of an activation matrix. This single pattern builds Query / Key /
+Value, mixes attention heads, expands and contracts the MLP, and scores the vocabulary when the LM head is a separate
+matrix.
 
-| Kind                                   | Meaning                                                                                                | In this Java project?                                                                      |
-|----------------------------------------|--------------------------------------------------------------------------------------------------------|--------------------------------------------------------------------------------------------|
-| **Token embedding** (`embed_tokens`)   | Learned row per vocabulary id; starts the forward pass                                                 | **Yes** — main input path                                                                  |
-| **Tied embedding / LM head**           | Same weight matrix used to *score* next-token logits (transpose-style linear)                          | **Yes** when `tie_word_embeddings` (Qwen if set; Gemma3-270M always ties here)             |
-| **Separate LM head**                   | Distinct `lm_head.weight` for scoring                                                                  | **Yes** when not tied — still a linear map from hidden → vocab, not a second “input embed” |
-| **RoPE** (rotary positional embedding) | Position-dependent **rotation of Q/K vector components** (not a vocab table; not “rotating the index”) | **Yes** — `Norms.RotaryEmbedding`; cos/sin from `rope_theta` / local base                  |
-| Absolute learned position embedding    | Extra learned vector per position index added to tokens (older GPT-2 style)                            | **No**                                                                                     |
-| Segment / token-type embedding         | BERT-style A/B sentence markers                                                                        | **No**                                                                                     |
-| Multimodal / image patch embedding     | Vision or other modality towers                                                                        | **No** — text causal LM only                                                               |
+**In the code:** `Ops.linear`, wrappers in `layers.Linear`.
 
-So: everyday “the embedding” in chat LMs usually means the **token** table. **RoPE** is also called an embedding in
-papers, but it is a **positional transform of Q and K** inside attention — rotating pairs of features by an angle that
-depends on position — not another vocab lookup and not a rotation of the position index itself.
+### Embeddings — from discrete ids to vectors
 
-#### Where it is calculated in this library
+#### Definition
+
+A **token embedding** is a learned map
+
+$$
+\mathrm{emb} : \{0,1,\ldots,V-1\} \rightarrow \mathbb{R}^{H},
+$$
+
+implemented as a matrix $E \in \mathbb{R}^{V \times H}$ (**lookup table**). For token id $t$,
+
+$$
+\mathbf{x} = E_{t,:} \in \mathbb{R}^{H}.
+$$
+
+Equivalently, if $\mathbf{e}_t$ is a one-hot vector of length $V$, then $\mathbf{x} = E^{\mathsf{T}}\mathbf{e}_t$
+(or $\mathbf{e}_t^{\mathsf{T}} E$, depending on layout). The engine does **not** form the one-hot explicitly: it
+**copies row $t$** out of $E$. That is a gather, not a matrix multiply.
+
+$H$ is `hidden_size` from `config.json`. Examples: Qwen3-0.6B uses $H = 1024$; Gemma3-270M uses $H = 640$.
+$V$ is `vocab_size` (rows of $E$ and of the LM head when present).
+
+```text
+  token id t  →  row lookup  →  vector x ∈ R^H
+       42     →  E[42, :]    →  starting hidden state at that position
+```
+
+The table is **not** a dictionary of verbal definitions. Geometry in $\mathbb{R}^{H}$ may correlate with usage in the
+training corpus; inference only needs the numeric row and the subsequent layers.
+
+#### Representation in this library
+
+| Property   | Value                                                                                   |
+|------------|-----------------------------------------------------------------------------------------|
+| Shape      | `[vocab_size, hidden_size]` = `[V, H]`                                                  |
+| On disk    | Usually `model.embed_tokens.weight` in `*.safetensors` (often BF16)                     |
+| After load | `Tensor` of float32                                                                     |
+| Operation  | `Ops.embedding(ids, weight)` — for each id, `System.arraycopy` of one row of length $H$ |
+
+Scale: a BF16 table `[151936, 1024]` is already on the order of $V \cdot H \cdot 2$ bytes on disk (hundreds of MB)
+before any transformer layer.
+
+#### Gemma scaling
+
+After lookup, Gemma multiplies embeddings by $\sqrt{H}$ (`scaleEmbed`). That is a fixed constant from config, not a
+learned tensor. Qwen’s path in this port does not apply that scale.
+
+#### Tied embeddings and the LM head
+
+At the end of the stack, the last hidden vector $\mathbf{h} \in \mathbb{R}^{H}$ must become **logits**
+$\boldsymbol{\ell} \in \mathbb{R}^{V}$ (one score per vocabulary id). Two arrangements:
+
+| Arrangement | Mechanism                                                                                                                          | Config / disk                                               |
+|-------------|------------------------------------------------------------------------------------------------------------------------------------|-------------------------------------------------------------|
+| **Tied**    | Same matrix $E$ used as LM head: conceptually $\boldsymbol{\ell} = E \mathbf{h}$ (layout-dependent transpose in the linear kernel) | `tie_word_embeddings: true`; often no `lm_head.weight` file |
+| **Untied**  | Separate matrix $W_{\mathrm{lm}} \in \mathbb{R}^{V \times H}$                                                                      | Distinct `lm_head.weight`                                   |
+
+Sharing $E$ saves a large parameter block ($V \cdot H$ floats). Qwen3-0.6B sets tying in config; Gemma3-270M is treated
+as tied in this loader.
+
+#### Kinds of “embedding” in the literature (and this port)
+
+| Kind                                   | Mathematical idea                                                                     | In this Java project?             |
+|----------------------------------------|---------------------------------------------------------------------------------------|-----------------------------------|
+| **Token embedding** (`embed_tokens`)   | $E \in \mathbb{R}^{V \times H}$; row lookup                                           | **Yes** — input path              |
+| **Tied embedding / LM head**           | Reuse $E$ for scoring                                                                 | **Yes** when tied                 |
+| **Separate LM head**                   | Distinct $W_{\mathrm{lm}}$                                                            | **Yes** when not tied             |
+| **RoPE** (rotary positional embedding) | Rotate pairs of Q/K features by an angle that depends on position; **no** vocab table | **Yes** — `Norms.RotaryEmbedding` |
+| Absolute learned position embedding    | Add a learned vector per position index to the token vector (older GPT-2 style)       | **No**                            |
+| Segment / token-type embedding         | BERT-style segment markers                                                            | **No**                            |
+| Multimodal / patch embedding           | Vision or other modalities                                                            | **No** — text causal LM only      |
+
+Everyday speech (“the embedding”) almost always means the **token** table $E$. RoPE is also called an embedding in
+papers, but it is a **positional transform of Query and Key**, not another vocabulary lookup and not a rotation of the
+position index itself.
+
+#### Where embedding runs in this library
 
 ```text
 CausalLM#forward (Qwen3ForCausalLM / Gemma3ForCausalLM)
@@ -1629,54 +1758,61 @@ CausalLM#computeLogits
        → Ops#linear with lm_head weight  // same matrix if tied
 ```
 
-| Step                 | Class#method                                                 | Role                                               |
-|----------------------|--------------------------------------------------------------|----------------------------------------------------|
-| Allocate empty table | `VocabParallelEmbedding.<init>(vocabSize, hiddenSize)`       | Zeros `[V, H]` until load                          |
-| Load weights         | `ModelLoader` → `WeightSlot` for `model.embed_tokens.weight` | Fill the table                                     |
-| Lookup               | `VocabParallelEmbedding#forward` → `Ops#embedding`           | ids → hidden states                                |
-| Gemma scale          | `Gemma3Model#scaleEmbed`                                     | Multiply by `√hidden_size` after lookup            |
-| Tie or separate head | `Qwen3ForCausalLM` / `Gemma3ForCausalLM` constructor         | `lmHead.setWeight(embedTokens.weight())` when tied |
-| Position (RoPE)      | `Norms.RotaryEmbedding#get` / `#forward`                     | Cos/sin cache; rotate Q and K per position         |
-| Next-token scores    | `VocabParallelEmbedding.ParallelLMHead#forward`              | Hidden → logits over vocab                         |
+| Step                 | Class#method                                                 | Role                                                          |
+|----------------------|--------------------------------------------------------------|---------------------------------------------------------------|
+| Allocate empty table | `VocabParallelEmbedding.<init>(vocabSize, hiddenSize)`       | Zeros `[V, H]` until load                                     |
+| Load weights         | `ModelLoader` → `WeightSlot` for `model.embed_tokens.weight` | Fill $E$                                                      |
+| Lookup               | `VocabParallelEmbedding#forward` → `Ops#embedding`           | ids → hidden states `[n, H]`                                  |
+| Gemma scale          | `Gemma3Model#scaleEmbed`                                     | Multiply by $\sqrt{H}$ after lookup                           |
+| Tie or separate head | `Qwen3ForCausalLM` / `Gemma3ForCausalLM` constructor         | `lmHead.setWeight(embedTokens.weight())` when tied            |
+| Position (RoPE)      | `Norms.RotaryEmbedding#get` / `#forward`                     | Cos/sin cache; rotate Q and K per position                    |
+| Next-token scores    | `VocabParallelEmbedding.ParallelLMHead#forward`              | $\mathbf{h} \rightarrow \boldsymbol{\ell} \in \mathbb{R}^{V}$ |
 
 Weight file names: `model.embed_tokens.weight`; optional `lm_head.weight` when not tied (chapter 7).
 
-**In the code:** start at `layers.VocabParallelEmbedding`, `tensor.Ops.embedding`, `Norms.RotaryEmbedding`, and the
-`embedTokens.forward` call at the top of `Qwen3ForCausalLM` / `Gemma3ForCausalLM` model forward (chapter 16).
+**In the code:** `layers.VocabParallelEmbedding`, `tensor.Ops.embedding`, `Norms.RotaryEmbedding`, and
+`embedTokens.forward`
+at the top of each causal LM’s model forward (chapter 16).
 
-### Softmax — turning scores into shares of attention (or probability)
+### Softmax
 
-If three candidates score 10, 3, and 1, softmax turns that into portions that **add up to 100%**, with the winner
-getting most but not necessarily all. A technical trick subtracts the largest score first so the exponentials do not
-overflow — same idea, safer calculation.
+Given raw scores $z_1,\ldots,z_k$, softmax produces a probability vector:
 
-### Temperature and chance
+$$
+p_i = \frac{e^{z_i}}{\sum_j e^{z_j}}.
+$$
 
-Divide the scores by a **temperature** before making portions:
+Numerically, implementations subtract $\max_j z_j$ before the exponentials (same $p_i$, fewer overflows). Softmax
+appears in **attention** (weights over past positions) and in **sampling** (distribution over the vocabulary).
 
-- low temperature → the leader wins almost always (stern, repetitive);
-- high temperature → lesser candidates get more chance (wilder, more surprising).
+### Temperature
 
-This project always keeps a little randomness; pure “always pick the single top score” is disabled on purpose.
+Before softmax for sampling, scores are divided by a **temperature** $\tau > 0$:
+
+- small $\tau$ → mass concentrates on the argmax (more deterministic);
+- large $\tau$ → flatter distribution (more diverse draws).
+
+This project always keeps a positive temperature; pure greedy decoding ($\tau \rightarrow 0$) is rejected by
+`SamplingParams`.
 
 ### Attention in one line
 
-> Compare me to the past; turn comparisons into portions; take that weighted blend of past contents as my new note.
+> Form Query, Key, and Value; score Query against Keys; softmax; take the weighted sum of Values.
 
 ### The gated MLP in one line
 
-> Split a widened portrait into two halves; activate one half; multiply by the other; shrink back.  
-> (SiLU or a GELU-like curve is just the shape of that “activate.”)
+> Expand $\mathbf{h}$ from width $H$ to width related to `intermediate_size`; split into gate and up branches;
+> activate the gate (SiLU or GELU-tanh); multiply by the up branch; project back to $H$.
 
-None of this *is* understanding in the human sense. It is a procedure that, after training, often **imitates** fluent
-continuation well enough to be useful — and misleading.
+None of these operations *is* understanding in the human sense. After training they implement a procedure that often
+**imitates** fluent continuation well enough to be useful — and easy to over-interpret.
 
-**In the code:** portraits and tables are `tensor.Tensor`; mix/lookup/activate live in `Ops` (`linear`, `embedding`,
-`rmsNorm`, `siluAndMul` / `geluPytorchTanhAndMul`); SIMD helpers in `VectorMath`; softmax / temperature / draw in
-`layers.Sampler` (chapter 16).
+**In the code:** tensors in `tensor.Tensor`; mix / lookup / activate in `Ops` (`linear`, `embedding`, `rmsNorm`,
+`siluAndMul` / `geluPytorchTanhAndMul`); SIMD in `VectorMath`; softmax / temperature / draw in `layers.Sampler`
+(chapter 16).
 
 **Further reading:** [RMSNorm](https://arxiv.org/abs/1910.07467); gated MLP variants such
-as [SwiGLU](https://arxiv.org/abs/2002.05202); softmax background
+as [SwiGLU](https://arxiv.org/abs/2002.05202); softmax
 on [Wikipedia](https://en.wikipedia.org/wiki/Softmax_function); rotary positions
 [RoFormer / RoPE](https://arxiv.org/abs/2104.09864).
 
@@ -1983,10 +2119,10 @@ Portraits for every prompt token walk through **every** reading room.
 
 At each layer, for each position in the prompt (for example the token `2`, the token `+`, the later `2`, the `?`):
 
-1. Build Query / Key / Value from that position’s dossier.
+1. Build Query / Key / Value from that position’s hidden state.
 2. Compare this Query with Keys of **earlier** positions only (causal — no peeking at the future).
-3. Mix Values from the strong matches into an updated dossier.
-4. **Write** this position’s Key and Value into the KV notebooks for later decode.
+3. Mix Values from the strong matches into an updated hidden vector.
+4. **Write** this position’s Key and Value into the KV cache for later decode.
 
 So when the model is still “reading” `What is 2+2?`, attention is already linking pieces: the second `2` can glance at
 the first `2` and at `+`; the end of the user line can glance at the whole question. Multi-head glances (and GQA
@@ -2382,49 +2518,52 @@ in-flight work via the scheduler.
 Short glossary. For the Java home of each idea, prefer the **In the code** notes in earlier chapters and the map in
 **chapter 16**.
 
-| Term you may meet     | Plain meaning                                                                                    |
+| Term you may meet     | Meaning                                                                                          |
 |-----------------------|--------------------------------------------------------------------------------------------------|
-| Model                 | The finished “book” of learned numbers plus its dictionary and blueprint                         |
-| Loading               | Reading blueprint + dictionary + weights into memory and wiring them                             |
-| `config.json`         | Blueprint of sizes and recipe (not the learned weights)                                          |
+| Model                 | Pretrained parameters plus tokenizer and blueprint used for inference                            |
+| Loading               | Reading blueprint + dictionary + weight tensors into memory and wiring them                      |
+| `config.json`         | Architectural hyperparameters (sizes, norms, RoPE) — not the learned weights                     |
 | `tokenizer.json`      | Vocab, BPE merges, and text pipeline (string ↔ token ids)                                        |
-| `.safetensors`        | Catalogued raw weight tensors (matrices/vectors) on disk                                         |
+| Tensor                | Multidimensional numeric array with a shape; weights and activations are both tensors            |
+| Shape / `numel`       | Axis lengths of a tensor; product = number of scalar elements                                    |
+| `.safetensors`        | On-disk container: JSON catalog of named tensors + raw numeric payload                           |
 | BPE                   | Byte-Pair Encoding: merge frequent pieces using an ordered merge list                            |
 | `data_offsets`        | Byte range of one tensor inside a safetensors payload                                            |
-| `hidden_size`         | Length of each token’s internal dossier (main working width through all layers)                  |
+| `hidden_size`         | Width $H$ of the residual stream; also the embedding dimension                                   |
 | `intermediate_size`   | Temporary wider width inside each layer’s MLP expand→shrink step                                 |
-| `num_hidden_layers`   | How many stacked attention+MLP rooms                                                             |
-| GQA heads fields      | `num_attention_heads` vs `num_key_value_heads` (sharing of KV notebooks)                         |
-| Inference             | Using the book to produce text (not training it)                                                 |
-| Token                 | A scrap of text with a number in the dictionary                                                  |
-| Embedding (token)     | Learned vector per token id; lookup starts the forward pass (`embed_tokens`)                     |
+| `num_hidden_layers`   | Number of stacked attention+MLP blocks                                                           |
+| GQA heads fields      | `num_attention_heads` vs `num_key_value_heads` (sharing of KV cache groups)                      |
+| Inference             | Running the pretrained model to produce text (not training)                                      |
+| Token                 | A vocabulary unit with an integer id                                                             |
+| Embedding (token)     | Matrix $E \in \mathbb{R}^{V \times H}$; row lookup starts the forward pass                       |
 | RoPE                  | Rotary Position Embedding: rotate pairs inside Q/K by angle(position); encodes relative distance |
 | Tied embeddings       | Same matrix for input lookup and LM-head scoring (`tie_word_embeddings`)                         |
-| Vocabulary            | All scraps the model is allowed to emit                                                          |
-| Logits                | Raw preference scores for each vocabulary scrap, before turning into chances                     |
-| Softmax               | Turn raw scores into portions that add to 100%                                                   |
-| Attention             | Weighted reread of allowed places (Query matches Keys, mixes Values)                             |
-| Self-attention        | Looking within the same text (not at a second document)                                          |
-| Causal                | May only look at the past and present, not the future                                            |
-| Multi-head (MHA)      | Several parallel glances; each may have its own KV notebooks                                     |
+| Vocabulary            | Set of token ids the model may emit ($V =$ `vocab_size`)                                         |
+| Logits                | Raw scores over the vocabulary before softmax / sampling                                         |
+| Softmax               | Map raw scores to a probability distribution (nonnegative, sums to 1)                            |
+| Attention             | Weighted combination of past Values using Query–Key similarities                                 |
+| Self-attention        | Attention within the same sequence (not a second document)                                       |
+| Causal                | May only attend to past and present positions, not the future                                    |
+| Multi-head (MHA)      | Several parallel attention heads; each may have its own KV                                       |
 | GQA                   | Grouped-query: several Query heads share one Key/Value group                                     |
 | MQA                   | Multi-query: all Query heads share a single Key/Value pair                                       |
-| Sliding window        | May look back only a fixed recent stretch, not the whole past                                    |
-| Global attention      | May look back over the whole allowed past                                                        |
-| Query / Key / Value   | Search / label / content notes used by attention                                                 |
-| Inner work (Sense A)  | Invisible stack of attention + rewrites for each next token                                      |
+| Sliding window        | Attend only within a fixed recent span, not the full past                                        |
+| Global attention      | Attend over the whole allowed past                                                               |
+| Query / Key / Value   | Linear projections used by attention (search / address / content)                                |
+| Inner work (Sense A)  | Invisible stack of attention + MLP for each next token                                           |
 | Chain of thought (B)  | Reasoning written as ordinary tokens in the reply                                                |
 | Tagged scratchpad (C) | Written reasoning inside `<think>…</think>` for UI splitting                                     |
 | ChatReply             | Parsed pair of thinking text + visible answer after a turn                                       |
-| KV cache / notebook   | Stored Keys and Values, reused while continuing                                                  |
-| Prefill               | First heavy read of the prompt                                                                   |
+| KV cache              | Stored Keys and Values, reused while decoding                                                    |
+| Prefill               | First pass over the prompt that fills the KV cache                                               |
 | Decode                | Step-by-step production of later tokens                                                          |
-| Sampling              | Drawing the next token according to chances and filters                                          |
-| Temperature           | How strongly to favor the leading candidate                                                      |
-| Context length        | How much past text fits on the desk at once                                                      |
+| Sampling              | Drawing the next token from (filtered) probabilities                                             |
+| Temperature           | Softmax temperature $\tau$; lower → more peaked                                                  |
+| Context length        | How much past text fits in one forward pass                                                      |
 | Context window        | Hard token budget for one forward (`maxModelLen` / `max_position_embeddings`)                    |
 | Chat history          | `ChatSession` message list re-fed each turn; may be truncated                                    |
-| Weights               | The learned numbers on the shelves                                                               |
+| Weights               | Learned parameter tensors loaded from `.safetensors`                                             |
+| Activations           | Ephemeral tensors produced during a forward pass                                                 |
 
 ---
 
@@ -2438,7 +2577,7 @@ This project is a **teaching instrument**, not a production cloud service.
 - “Understanding,” “knowing,” “thinking,” and “meaning” here are **metaphors** for statistical continuation and inner
   arithmetic. A humanities reader is right to keep that distinction sharp.
 
-If this book did its job, you can now explain to another non-specialist:
+If this guide did its job, you can now explain to another non-specialist:
 
 > Loading unpacks a fixed library of trained numbers. Attention is how each moment rereads allowed parts of the current
 > page — causally, often with shared notebooks (GQA), sometimes through a sliding window. Thinking is organized as a
@@ -2471,6 +2610,7 @@ Implementation homes stay in the **In the code** notes and **chapter 16**; this 
 | Safetensors                | [HF docs](https://huggingface.co/docs/safetensors) · [GitHub format notes](https://github.com/huggingface/safetensors)             |
 | RoPE                       | [Su et al. / RoFormer (arXiv)](https://arxiv.org/abs/2104.09864)                                                                   |
 | Token / positional embeds  | (this guide ch. 10; RoPE paper above)                                                                                              |
+| Tensors / shapes           | (this guide ch. 7–10; `tensor.Tensor` in source)                                                                                   |
 | GQA                        | [Ainslie et al. (arXiv)](https://arxiv.org/abs/2305.13245)                                                                         |
 | Multi-query attention      | [Shazeer (arXiv)](https://arxiv.org/abs/1911.02150)                                                                                |
 | PagedAttention / vLLM      | [Kwon et al. (arXiv)](https://arxiv.org/abs/2309.06180) · [vLLM GitHub](https://github.com/vllm-project/vllm)                      |

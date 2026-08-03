@@ -3,8 +3,7 @@
 Pure Java 21+ port of [nano-vllm](https://github.com/GeeeekExplorer/nano-vllm) — a lightweight vLLM-style offline
 inference engine.
 
-How it works (plain-language guide for any curious reader): see [`description.md`](description.md)
-(English) or [`description_rus.md`](description_rus.md) (Russian).
+How it works (introductory academic guide): see [`description.md`](description.md).
 
 ## Key Features
 
