@@ -1690,11 +1690,11 @@ This pattern builds **Q / K / V**, the attention **output projection**, MLP **up
 
 #### Definition
 
-**What it is:** a big lookup table with one fixed list of numbers (a vector) for every vocabulary token id.  
-**What it does:** turns each discrete id from the tokenizer into a continuous vector the rest of the network can mix.  
-**What we get:** for every id in the prompt, a starting hidden vector of length `hidden_size` — the residual stream’s
-first content before any layer runs. It is *not* an English dictionary of meanings; inference only needs that numeric
-row.
+The tokenizer only hands the model integer ids. A **token embedding** is the learned lookup table that turns each id
+into a dense vector of length `hidden_size` — the starting description of that place in the text. Without it, attention
+and the MLP would have nothing continuous to work on. What you obtain after lookup is not a verbal definition of the
+token, only a fixed numeric row that later layers will rewrite; nearby rows may correlate with similar usage in
+training, but the engine never needs that story to run.
 
 Formally, a **token embedding** is a learned map
 
@@ -1715,19 +1715,18 @@ $H$ = `hidden_size` (e.g. 1024 for Qwen3-0.6B, 640 for Gemma3-270M). $V$ = `voca
 
 #### Gemma embedding scale
 
-**What it is:** a fixed multiplier applied right after the table lookup on Gemma.  
-**What it does:** scales every embedding vector by the square root of `hidden_size`.  
-**What we get:** slightly larger starting activations that match how Gemma was trained; no extra learned weights.
+On Gemma, right after the table lookup, every embedding vector is multiplied by a constant — the square root of
+`hidden_size`. That is not another learned table; it is a fixed training convention so starting activations sit at the
+scale the rest of the stack expects. Qwen’s path in this port skips that step.
 
-After lookup, Gemma multiplies by $\sqrt{H}$ (`scaleEmbed`). Fixed from config; not a learned tensor. Qwen’s path in
-this port does not apply that scale.
+After lookup, Gemma multiplies by $\sqrt{H}$ (`scaleEmbed`). Fixed from config; not a learned tensor.
 
 #### Tied LM head
 
-**What it is:** optionally reusing the same embedding table at the *end* of the model to score the next token.  
-**What it does:** maps the last hidden vector to one preference score per vocabulary id (logits).  
-**What we get:** either one shared matrix for input lookup and output scoring (**tied**, saves a huge parameter block),
-or a separate LM-head matrix (**untied**).
+At the end of the stack the model must score every vocabulary id as a candidate next token. Those scores (logits) can
+come from a **separate** LM-head matrix, or from **reusing the same embedding table** that started the forward pass
+(**tied** embeddings). Tying saves a large block of parameters and is common on the small models this project documents;
+untied heads keep input lookup and output scoring as two distinct matrices.
 
 Logits $\boldsymbol{\ell} \in \mathbb{R}^{V}$ from last hidden $\mathbf{h}$:
 
@@ -1738,19 +1737,17 @@ Logits $\boldsymbol{\ell} \in \mathbb{R}^{V}$ from last hidden $\mathbf{h}$:
 
 #### RoPE vs token embedding
 
-**What it is:** a contrast — RoPE is *not* another vocab lookup table.  
-**What it does:** twists pairs of numbers inside Query and Key by an angle that depends on token position.  
-**What we get:** order and relative distance enter attention scores without adding a separate learned vector per
-position (older GPT-2 style absolute embeddings are unused here).
-
-**RoPE** rotates pairs of coordinates inside **Q and K** only (formal detail in the RoPE section below). Absolute
-learned position embeddings are **not** used in this port.
+People also call **RoPE** an “embedding,” but it is a different mechanism: it does not look up a vocab row. Instead it
+rotates pairs of features inside Query and Key by an angle that depends on the token’s position, so relative order
+affects attention scores. This port does **not** add older GPT-2-style learned vectors per absolute position on top of
+the token table. Formal RoPE math is in the section below.
 
 #### Where embedding runs
 
-**What it is:** the call path in this library from ids to vectors and later to logits.  
-**What it does:** lookup (and optional Gemma scale) at the start of `forward`; linear scoring at `computeLogits`.  
-**What we get:** a clear map from Java methods to the ideas above.
+In this library the forward pass begins with the vocab table lookup (and Gemma’s optional scale), then the transformer
+layers; RoPE runs inside attention on Q and K. When it is time to pick the next token, `computeLogits` scores the
+vocabulary with the LM head — the same matrix as the embedding table when weights are tied. The diagram is only a map
+onto those Java calls.
 
 ```text
 CausalLM#forward
