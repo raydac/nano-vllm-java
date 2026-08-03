@@ -1672,8 +1672,10 @@ A **linear** (affine) map takes $\mathbf{x} \in \mathbb{R}^{n}$ and $W \in \math
 $\mathbf{b} \in \mathbb{R}^{m}$:
 
 $$
-\mathbf{y} = W\mathbf{x} + \mathbf{b} \quad\text{ (bias omitted when absent).}
+\mathbf{y} = W\mathbf{x} + \mathbf{b}
 $$
+
+(bias omitted when absent).
 
 **Layout in this port.** Weights are stored as `[out, in]` = $[m, n]$: row $o$ is the weight vector for output channel
 $o$. For one input row, output channel $o$ is the **dot product** of $\mathbf{x}$ with that row (plus bias). Batched
@@ -1770,11 +1772,11 @@ For one head, with Queries, Keys, Values $\mathbf{q}_t, \mathbf{k}_j, \mathbf{v}
 ($d$ = `head_dim`):
 
 $$
-\alpha_{tj} = \frac{\exp\!\big (\langle \mathbf{q}_t, \mathbf{k}_j \rangle / s\big)} {\sum_{j' \in \mathcal{A} (t)} \exp\!\big (\langle \mathbf{q}_t, \mathbf{k}_{j'} \rangle / s\big)}, \qquad \mathbf{o}_t = \sum_{j \in \mathcal{A} (t)} \alpha_{tj}\, \mathbf{v}_j.
+\alpha_{tj} = \frac{\exp\big (\langle \mathbf{q}_t, \mathbf{k}_j \rangle / s\big)} {\sum_{j' \in \mathcal{A} (t)} \exp\big (\langle \mathbf{q}_t, \mathbf{k}_{j'} \rangle / s\big)}, \qquad \mathbf{o}_t = \sum_{j \in \mathcal{A} (t)} \alpha_{tj}\, \mathbf{v}_j.
 $$
 
 - $\langle\cdot,\cdot\rangle$ is a **dot product** (`VectorMath.dot`).
-- Scale $s$: typically $\sqrt{d}$; Gemma may use $\sqrt{\texttt{query\_pre\_attn\_scalar}}$ from config.
+- Scale $s$: typically $\sqrt{d}$; Gemma may use $\sqrt{q}$ where $q$ is `query_pre_attn_scalar` from config.
 - Allowed set $\mathcal{A} (t)$: **causal** $j \le t$, optionally intersected with a **sliding window** of width $W$
   (Gemma local layers).
 - **Multi-head:** several heads in parallel; outputs concatenated and mixed by $W_O$ (`o_proj`).
@@ -1793,8 +1795,10 @@ For even head dimension $d$, split channels into $d/2$ pairs. At position $p$, p
 $\theta_{p,i} = p \cdot \omega_i$ with
 
 $$
-\omega_i = \mathrm{base}^{-2i/d} \quad\text{ (}\mathrm{base} = \texttt{rope\_theta}\text{ or a local base).}
+\omega_i = \mathrm{base}^{-2i/d}.
 $$
+
+Here $\mathrm{base}$ is the config field `rope_theta` (or a local RoPE base for sliding layers).
 
 If $(x_1, x_2)$ is one pair:
 

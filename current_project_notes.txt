@@ -13,6 +13,7 @@
 - Ch.7 opens with tensor definition (rank/shape/weights vs activations) then safetensors format
 - Ch.10 rewritten: tensors (notation + `tensor.Tensor`), embeddings ($E\in\mathbb{R}^{V\times H}$, gather, tied head, RoPE kinds), linear/softmax
 - Ch.10 expanded to full **math catalog**: decoder-layer map, RMSNorm, causal attention scores, RoPE rotation, SiLU/GELU-tanh MLP, sampling (top-k/p, Gumbel-style), SIMD dots — matched to `Ops` / `Attention` / `Sampler`
+- Ch.10 GitHub math: keep config names (`rope_theta`, …) outside `$…$` / `$$…$$` (no `\texttt{…_…}` in math — MathJax error)
 - Prefer Stream API for filter/map/collect transforms in LLM/engine helpers; keep stateful schedule/prefill and tensor kernels imperative
 - `LLM` business methods (`generate`, `step`, drive loop, load/close) carry `//` stage comments for algorithm readability
 - `tensor.Tensor` has full class/method JavaDoc (shape, offset/view, reshape sharing, data vs toFloatArray)
