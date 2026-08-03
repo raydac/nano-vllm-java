@@ -79,6 +79,11 @@ public final class Qwen3ForCausalLM implements CausalLM {
     return this.parameters.containsKey(name);
   }
 
+  @Override
+  public void seal() {
+    this.parameters.clear();
+  }
+
   private void registerParameters() {
     this.parameters.put("model.embed_tokens.weight",
         WeightSlot.of(this.model.embedTokens::loadWeight));
@@ -120,7 +125,7 @@ public final class Qwen3ForCausalLM implements CausalLM {
     final int qSize;
     final int kvSize;
 
-    Qwen3Attention(Config.HfConfig config) {
+    Qwen3Attention(Config.HfConfig config, int layerIndex) {
       int tpSize = 1;
       this.numHeads = config.numAttentionHeads() / tpSize;
       this.numKvHeads = config.numKeyValueHeads() / tpSize;
@@ -144,7 +149,7 @@ public final class Qwen3ForCausalLM implements CausalLM {
       this.rotaryEmb =
           RotaryEmbedding.get(this.headDim, this.headDim, config.maxPositionEmbeddings(),
               ropeTheta);
-      this.attn = new Attention(this.numHeads, this.headDim, scaling, this.numKvHeads);
+      this.attn = new Attention(this.numHeads, this.headDim, scaling, this.numKvHeads, layerIndex);
       if (!this.qkvBias) {
         this.qNorm = new RMSNorm(this.headDim, config.rmsNormEps());
         this.kNorm = new RMSNorm(this.headDim, config.rmsNormEps());
@@ -202,8 +207,8 @@ public final class Qwen3ForCausalLM implements CausalLM {
     final RMSNorm inputLayernorm;
     final RMSNorm postAttentionLayernorm;
 
-    Qwen3DecoderLayer(Config.HfConfig config) {
-      this.selfAttn = new Qwen3Attention(config);
+    Qwen3DecoderLayer(Config.HfConfig config, int layerIndex) {
+      this.selfAttn = new Qwen3Attention(config, layerIndex);
       this.mlp = new Qwen3MLP(config);
       this.inputLayernorm = new RMSNorm(config.hiddenSize(), config.rmsNormEps());
       this.postAttentionLayernorm = new RMSNorm(config.hiddenSize(), config.rmsNormEps());
@@ -233,7 +238,7 @@ public final class Qwen3ForCausalLM implements CausalLM {
     Qwen3Model(Config.HfConfig config) {
       this.embedTokens = new VocabParallelEmbedding(config.vocabSize(), config.hiddenSize());
       for (int i = 0; i < config.numHiddenLayers(); i++) {
-        this.layers.add(new Qwen3DecoderLayer(config));
+        this.layers.add(new Qwen3DecoderLayer(config, i));
       }
       this.norm = new RMSNorm(config.hiddenSize(), config.rmsNormEps());
     }

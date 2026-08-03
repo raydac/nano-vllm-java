@@ -2,15 +2,12 @@ package com.igormaznitsa.nanollvm.engine;
 
 import com.igormaznitsa.nanollvm.Config;
 import com.igormaznitsa.nanollvm.EngineIo;
-import com.igormaznitsa.nanollvm.ModelLoadException;
+import com.igormaznitsa.nanollvm.Model;
 import com.igormaznitsa.nanollvm.layers.Sampler;
 import com.igormaznitsa.nanollvm.models.CausalLM;
-import com.igormaznitsa.nanollvm.models.CausalLMFactory;
 import com.igormaznitsa.nanollvm.tensor.Tensor;
-import com.igormaznitsa.nanollvm.tensor.VectorMath;
 import com.igormaznitsa.nanollvm.utils.Context;
-import com.igormaznitsa.nanollvm.utils.ModelLoader;
-import java.io.IOException;
+
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -21,38 +18,25 @@ public final class ModelRunner implements AutoCloseable {
   private final EngineIo io;
   private final int blockSize;
   private final CausalLM model;
+  private final KvCacheArena kvCache;
   private final Sampler sampler = new Sampler();
 
-  public ModelRunner(Config config) {
-    this(config, EngineIo.silent());
+  public ModelRunner(Model model, Config config) {
+    this(model, config, EngineIo.silent());
   }
 
-  public ModelRunner(Config config, EngineIo io) {
+  public ModelRunner(Model model, Config config, EngineIo io) {
     this.config = config;
     this.io = io == null ? EngineIo.silent() : io;
     this.blockSize = config.kvcacheBlockSize();
-
-    long t0 = System.nanoTime();
-    this.io.info("CPU backend: " + VectorMath.backendInfo());
-    String arch = CausalLMFactory.detect(config.hfConfig());
-    this.io.info("Building " + arch + " model graph…");
-    this.model = CausalLMFactory.create(config.hfConfig());
-    this.io.infof("Model graph ready (%s) in %.1fs%n",
-        this.model.architectureName(), (System.nanoTime() - t0) / 1e9);
-
-    try {
-      ModelLoader.loadModel(this.model, config.model(), this.io);
-    } catch (IOException e) {
-      throw new ModelLoadException("failed to load model weights from " + config.model(), e);
-    }
+    this.model = model.network();
 
     this.io.info("Allocating KV cache…");
     long tKv = System.nanoTime();
-    this.allocateKvCache();
+    this.kvCache = this.allocateKvCache();
     this.io.infof("KV cache ready: %d blocks (%.1fs)%n",
         this.config.numKvcacheBlocks(),
         (System.nanoTime() - tKv) / 1e9);
-    this.io.infof("Model runner ready in %.1fs%n", (System.nanoTime() - t0) / 1e9);
   }
 
   private static Tensor toTensor1d(List<Integer> values) {
@@ -64,6 +48,7 @@ public final class ModelRunner implements AutoCloseable {
   }
 
   public List<Integer> run(List<Sequence> seqs, boolean isPrefill) {
+    Context.bindKvCache(this.kvCache);
     PreparedInputs prepared = this.prepareInputs(seqs, isPrefill);
     SamplingControls sampling = this.collectSamplingControls(seqs);
 
@@ -102,7 +87,7 @@ public final class ModelRunner implements AutoCloseable {
     Context.reset();
   }
 
-  private void allocateKvCache() {
+  private KvCacheArena allocateKvCache() {
     Config.HfConfig hf = this.config.hfConfig();
     if (this.config.numKvcacheBlocks() <= 0) {
       int blocksPerSeq = (this.config.maxModelLen() + this.blockSize - 1) / this.blockSize;
@@ -116,13 +101,12 @@ public final class ModelRunner implements AutoCloseable {
     if (this.config.numKvcacheBlocks() <= 0) {
       throw new IllegalStateException("numKvcacheBlocks must be > 0");
     }
-    this.model.attentionLayers().forEach(attn -> {
-      Tensor k = Tensor.zeros(this.config.numKvcacheBlocks(), this.blockSize, hf.numKeyValueHeads(),
-          hf.headDim());
-      Tensor v = Tensor.zeros(this.config.numKvcacheBlocks(), this.blockSize, hf.numKeyValueHeads(),
-          hf.headDim());
-      attn.setCaches(k, v);
-    });
+    return new KvCacheArena(
+        hf.numHiddenLayers(),
+        this.config.numKvcacheBlocks(),
+        this.blockSize,
+        hf.numKeyValueHeads(),
+        hf.headDim());
   }
 
   private int[][] prepareBlockTables(List<Sequence> seqs) {

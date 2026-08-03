@@ -49,16 +49,25 @@ public final class Config {
       throw new IllegalArgumentException("Java port currently supports tensorParallelSize=1 only");
     }
 
-    try {
-      this.hfConfig = HfConfig.load(this.model.resolve("config.json"));
-    } catch (IOException e) {
-      throw new IllegalArgumentException("failed to load config.json from " + this.model, e);
+    if (b.hfConfig != null) {
+      this.hfConfig = b.hfConfig;
+    } else {
+      try {
+        this.hfConfig = HfConfig.load(this.model.resolve("config.json"));
+      } catch (IOException e) {
+        throw new IllegalArgumentException("failed to load config.json from " + this.model, e);
+      }
     }
     this.maxModelLen = Math.min(b.maxModelLen, this.hfConfig.maxPositionEmbeddings());
   }
 
   public static Builder builder(Path model) {
     return new Builder(model);
+  }
+
+  public static Builder builder(Model model) {
+    requireNonNull(model, "model");
+    return new Builder(model.path(), model.hfConfig());
   }
 
   public Path model() {
@@ -129,6 +138,7 @@ public final class Config {
 
   public static final class Builder {
     private final Path model;
+    private final HfConfig hfConfig;
     private int maxNumBatchedTokens = 16384;
     private int maxNumSeqs = 512;
     private int maxModelLen = 4096;
@@ -140,7 +150,12 @@ public final class Config {
     private int numKvcacheBlocks = -1;
 
     private Builder(Path model) {
+      this(model, null);
+    }
+
+    private Builder(Path model, HfConfig hfConfig) {
       this.model = requireNonNull(model, "model").toAbsolutePath().normalize();
+      this.hfConfig = hfConfig;
     }
 
     public Builder maxNumBatchedTokens(int v) {

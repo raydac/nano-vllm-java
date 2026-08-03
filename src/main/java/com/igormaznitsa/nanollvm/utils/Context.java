@@ -1,5 +1,7 @@
 package com.igormaznitsa.nanollvm.utils;
 
+import com.igormaznitsa.nanollvm.engine.KvCacheArena;
+
 public final class Context {
 
   private static final ThreadLocal<Context> CURRENT = ThreadLocal.withInitial(Context::new);
@@ -12,9 +14,14 @@ public final class Context {
   private int[] slotMapping;
   private int[] contextLens;
   private int[][] blockTables;
+  private KvCacheArena kvCache;
 
   public static Context get() {
     return CURRENT.get();
+  }
+
+  public static void bindKvCache(KvCacheArena arena) {
+    CURRENT.get().kvCache = arena;
   }
 
   public static void set(
@@ -72,5 +79,9 @@ public final class Context {
 
   public int[][] blockTables() {
     return this.blockTables;
+  }
+
+  public KvCacheArena kvCache() {
+    return this.kvCache;
   }
 }

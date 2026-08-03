@@ -25,6 +25,8 @@ public interface CausalLM {
 
   String architectureName();
 
+  void seal();
+
   @FunctionalInterface
   interface WeightSlot {
     static WeightSlot of(java.util.function.Consumer<Tensor> loader) {

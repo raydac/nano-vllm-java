@@ -81,6 +81,11 @@ public final class Gemma3ForCausalLM implements CausalLM {
     return this.parameters.containsKey(name);
   }
 
+  @Override
+  public void seal() {
+    this.parameters.clear();
+  }
+
   private void registerParameters() {
     this.parameters.put("model.embed_tokens.weight",
         WeightSlot.of(this.model.embedTokens::loadWeight));
@@ -142,7 +147,7 @@ public final class Gemma3ForCausalLM implements CausalLM {
           RotaryEmbedding.get(this.headDim, this.headDim, config.maxPositionEmbeddings(), ropeBase);
       this.attn =
           new Attention(this.numHeads, this.headDim, config.attentionScale(), this.numKvHeads,
-              window);
+              window, layerIndex);
       this.qNorm = new RMSNorm(this.headDim, config.rmsNormEps(), true);
       this.kNorm = new RMSNorm(this.headDim, config.rmsNormEps(), true);
     }

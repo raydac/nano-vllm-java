@@ -1,5 +1,8 @@
 package com.igormaznitsa.nanollvm.layers;
 
+import static java.util.Objects.requireNonNull;
+
+import com.igormaznitsa.nanollvm.engine.KvCacheArena;
 import com.igormaznitsa.nanollvm.tensor.Tensor;
 import com.igormaznitsa.nanollvm.tensor.VectorMath;
 import com.igormaznitsa.nanollvm.utils.Context;
@@ -13,52 +16,58 @@ public final class Attention {
   private final int numKvHeads;
   private final int repeats;
   private final int slidingWindow;
-  private Tensor kCache = Tensor.zeros(1);
-  private Tensor vCache = Tensor.zeros(1);
+  private final int layerIndex;
 
-  public Attention(int numHeads, int headDim, float scale, int numKvHeads) {
-    this(numHeads, headDim, scale, numKvHeads, 0);
+  public Attention(int numHeads, int headDim, float scale, int numKvHeads, int layerIndex) {
+    this(numHeads, headDim, scale, numKvHeads, 0, layerIndex);
   }
 
-  public Attention(int numHeads, int headDim, float scale, int numKvHeads, int slidingWindow) {
+  public Attention(
+      int numHeads,
+      int headDim,
+      float scale,
+      int numKvHeads,
+      int slidingWindow,
+      int layerIndex
+  ) {
     this.numHeads = numHeads;
     this.headDim = headDim;
     this.scale = scale;
     this.numKvHeads = numKvHeads;
     this.repeats = numHeads / numKvHeads;
     this.slidingWindow = Math.max(0, slidingWindow);
+    this.layerIndex = layerIndex;
   }
 
-  public void setCaches(Tensor kCache, Tensor vCache) {
-    this.kCache = kCache;
-    this.vCache = vCache;
-  }
-
-  public Tensor kCache() {
-    return this.kCache;
-  }
-
-  public Tensor vCache() {
-    return this.vCache;
+  public int layerIndex() {
+    return this.layerIndex;
   }
 
   public Tensor forward(Tensor q, Tensor k, Tensor v) {
     Context ctx = Context.get();
+    KvCacheArena arena = requireNonNull(ctx.kvCache(), "KV cache arena not bound in Context");
+    Tensor kCache = arena.k(this.layerIndex);
+    Tensor vCache = arena.v(this.layerIndex);
     int[] slots = ctx.slotMapping();
-    if (this.kCache.numel() > 1 && this.vCache.numel() > 1 && slots != null &&
-        slots.length == k.size(0)) {
-      this.storeKvCache(k, v, slots);
+    if (kCache.numel() > 1 && vCache.numel() > 1 && slots != null && slots.length == k.size(0)) {
+      this.storeKvCache(k, v, slots, kCache, vCache);
     }
     if (ctx.isPrefill()) {
       if (ctx.blockTables() != null) {
-        return this.prefillWithCache(q, ctx);
+        return this.prefillWithCache(q, ctx, kCache, vCache);
       }
       return this.prefillDense(q, k, v, ctx);
     }
-    return this.decode(q, ctx);
+    return this.decode(q, ctx, kCache, vCache);
   }
 
-  private void storeKvCache(Tensor key, Tensor value, int[] slotMapping) {
+  private void storeKvCache(
+      Tensor key,
+      Tensor value,
+      int[] slotMapping,
+      Tensor kCache,
+      Tensor vCache
+  ) {
     int n = key.size(0);
     int d = this.numKvHeads * this.headDim;
     for (int i = 0; i < n; i++) {
@@ -66,10 +75,10 @@ public final class Attention {
       if (slot < 0) {
         continue;
       }
-      System.arraycopy(key.data(), key.offset() + i * d, this.kCache.data(),
-          this.kCache.offset() + slot * d, d);
-      System.arraycopy(value.data(), value.offset() + i * d, this.vCache.data(),
-          this.vCache.offset() + slot * d, d);
+      System.arraycopy(key.data(), key.offset() + i * d, kCache.data(),
+          kCache.offset() + slot * d, d);
+      System.arraycopy(value.data(), value.offset() + i * d, vCache.data(),
+          vCache.offset() + slot * d, d);
     }
   }
 
@@ -88,14 +97,14 @@ public final class Attention {
     return out;
   }
 
-  private Tensor prefillWithCache(Tensor q, Context ctx) {
+  private Tensor prefillWithCache(Tensor q, Context ctx, Tensor kCache, Tensor vCache) {
     int[] cuQ = ctx.cuSeqlensQ();
     int[] cuK = ctx.cuSeqlensK();
     int batch = cuQ.length - 1;
     int[][] blockTables = ctx.blockTables();
     Tensor out = Tensor.zeros(q.size(0), this.numHeads, this.headDim);
     int d = this.numKvHeads * this.headDim;
-    int blockSize = this.kCache.size(1);
+    int blockSize = kCache.size(1);
 
     for (int b = 0; b < batch; b++) {
       int qStart = cuQ[b];
@@ -108,20 +117,20 @@ public final class Attention {
         int blockId = table[t / blockSize];
         int offset = t % blockSize;
         int slot = blockId * blockSize + offset;
-        System.arraycopy(this.kCache.data(), this.kCache.offset() + slot * d, k.data(), t * d, d);
-        System.arraycopy(this.vCache.data(), this.vCache.offset() + slot * d, v.data(), t * d, d);
+        System.arraycopy(kCache.data(), kCache.offset() + slot * d, k.data(), t * d, d);
+        System.arraycopy(vCache.data(), vCache.offset() + slot * d, v.data(), t * d, d);
       }
       this.attendRange(q, k, v, out, qStart, qEnd, 0, kLen, true);
     }
     return out;
   }
 
-  private Tensor decode(Tensor q, Context ctx) {
+  private Tensor decode(Tensor q, Context ctx, Tensor kCache, Tensor vCache) {
     int bs = q.size(0);
     int[] contextLens = ctx.contextLens();
     int[][] blockTables = ctx.blockTables();
     int d = this.numKvHeads * this.headDim;
-    int blockSize = this.kCache.size(1);
+    int blockSize = kCache.size(1);
     Tensor out = Tensor.zeros(bs, this.numHeads, this.headDim);
 
     for (int b = 0; b < bs; b++) {
@@ -133,8 +142,8 @@ public final class Attention {
         int blockId = table[t / blockSize];
         int offset = t % blockSize;
         int slot = blockId * blockSize + offset;
-        System.arraycopy(this.kCache.data(), this.kCache.offset() + slot * d, k.data(), t * d, d);
-        System.arraycopy(this.vCache.data(), this.vCache.offset() + slot * d, v.data(), t * d, d);
+        System.arraycopy(kCache.data(), kCache.offset() + slot * d, k.data(), t * d, d);
+        System.arraycopy(vCache.data(), vCache.offset() + slot * d, v.data(), t * d, d);
       }
       this.attendRange(q, k, v, out, b, b + 1, 0, kLen, false);
     }

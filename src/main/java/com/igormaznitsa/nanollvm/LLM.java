@@ -26,7 +26,8 @@ import java.util.stream.IntStream;
  *
  * <h2>Typical use</h2>
  * <pre>{@code
- * try (LLM llm = LLM.builder(modelDir)
+ * Model model = ModelFactory.make(modelDir);  // load once, share freely
+ * try (LLM llm = LLM.builder(model)
  *         .maxModelLen(2048)
  *         .systemPrompt("Answer briefly.")  // optional
  *         .build()) {
@@ -35,6 +36,8 @@ import java.util.stream.IntStream;
  *     String raw = llm.complete("The capital of France is");
  * }
  * }</pre>
+ *
+ * <p>Path convenience {@code LLM.builder(path)} still loads a private {@link Model} internally.
  *
  * <h2>Layers</h2>
  * <ul>
@@ -50,10 +53,13 @@ import java.util.stream.IntStream;
  *
  * <h2>Thread safety</h2>
  * One instance must not run concurrent {@link #generate} or chat calls. Prefer one instance
- * per thread, or external locking. {@link #cancel()} is safe from another thread and aborts
- * an in-flight generate with {@link GenerationCancelledException}.
+ * per thread, or external locking. Share one immutable {@link Model} across many {@code LLM}s.
+ * {@link #cancel()} is safe from another thread and aborts an in-flight generate with
+ * {@link GenerationCancelledException}.
  *
  * @see Builder
+ * @see Model
+ * @see ModelFactory
  * @see ChatSession
  * @see EngineIo
  * @see SamplingParams
@@ -63,6 +69,7 @@ public final class LLM implements AutoCloseable {
   private static final int WARMUP_PREFILL_TOKENS = 64;
   private static final int WARMUP_DECODE_TOKENS = 16;
 
+  private final Model model;
   private final Config config;
   private final EngineIo io;
   private final String systemPromptOverride;
@@ -90,22 +97,30 @@ public final class LLM implements AutoCloseable {
     this(builder(modelPath));
   }
 
+  /**
+   * Binds a shared immutable {@link Model} with default builder settings.
+   */
+  public LLM(Model model) {
+    this(builder(model));
+  }
+
   private LLM(Builder builder) {
     requireNonNull(builder, "builder");
     try {
-      // Business load path: config → model graph+weights → tokenizer stops → scheduler
-      this.config = builder.toConfig();
+      // Business load path: resolve Model → engine config → KV/scheduler
+      this.model = builder.resolveModel();
+      this.config = builder.toConfig(this.model);
       this.io = builder.io;
       this.systemPromptOverride = builder.systemPromptOverride;
       Sequence.setBlockSize(this.config.kvcacheBlockSize());
-      this.modelRunner = new ModelRunner(this.config, this.io);
-      this.tokenizer = Tokenizer.fromPretrained(this.config.model());
+      this.tokenizer = this.model.tokenizer();
       this.applyTokenizerStopTokens();
+      this.modelRunner = new ModelRunner(this.model, this.config, this.io);
       this.scheduler = new Scheduler(this.config);
     } catch (ModelLoadException e) {
       throw e;
     } catch (RuntimeException e) {
-      throw new ModelLoadException("failed to load model from " + builder.model, e);
+      throw new ModelLoadException("failed to load model from " + builder.modelPath(), e);
     }
     if (builder.warmup) {
       this.warmup();
@@ -118,6 +133,13 @@ public final class LLM implements AutoCloseable {
       this.config.setEos(this.tokenizer.eosTokenId());
     }
     this.config.setStopTokenIds(this.tokenizer.stopTokenIds());
+  }
+
+  /**
+   * Starts a fluent configurator for a shared immutable {@link Model}.
+   */
+  public static Builder builder(Model model) {
+    return new Builder(requireNonNull(model, "model"));
   }
 
   /**
@@ -136,6 +158,13 @@ public final class LLM implements AutoCloseable {
    */
   public static Builder builder(String modelPath) {
     return new Builder(Path.of(requireNonNull(modelPath, "modelPath")));
+  }
+
+  /**
+   * The immutable loaded model bound to this engine (may be shared with other {@code LLM}s).
+   */
+  public Model model() {
+    return this.model;
   }
 
   private void warmup() {
@@ -642,13 +671,15 @@ public final class LLM implements AutoCloseable {
    * <p>Defaults: {@link EngineIo#silent()}, eager execution, warmup enabled, no system-prompt
    * override (model default via {@link ChatPrompts}).
    *
-   * <p>Mandatory: model directory via {@link LLM#builder(Path)}. Call {@link #build()} last.
+   * <p>Provide either a shared {@link Model} via {@link LLM#builder(Model)} or a model directory
+   * via {@link LLM#builder(Path)}. Call {@link #build()} last.
    *
    * @throws ModelLoadException from {@link #build()} when weights or config cannot be loaded
    */
   public static final class Builder {
 
-    private final Path model;
+    private final Model sharedModel;
+    private final Path modelDir;
     private EngineIo io = EngineIo.silent();
     private int maxNumBatchedTokens = 16384;
     private int maxNumSeqs = 512;
@@ -664,8 +695,14 @@ public final class LLM implements AutoCloseable {
      */
     private String systemPromptOverride = null;
 
-    private Builder(Path model) {
-      this.model = requireNonNull(model, "model");
+    private Builder(Model model) {
+      this.sharedModel = requireNonNull(model, "model");
+      this.modelDir = model.path();
+    }
+
+    private Builder(Path modelDir) {
+      this.sharedModel = null;
+      this.modelDir = requireNonNull(modelDir, "model");
     }
 
     /**
@@ -797,7 +834,7 @@ public final class LLM implements AutoCloseable {
     }
 
     /**
-     * Loads weights and returns a ready {@link LLM}.
+     * Returns a ready {@link LLM} bound to the resolved {@link Model}.
      *
      * @throws ModelLoadException if the model directory, config, or weights are unusable
      */
@@ -805,8 +842,19 @@ public final class LLM implements AutoCloseable {
       return new LLM(this);
     }
 
-    private Config toConfig() {
-      return Config.builder(this.model)
+    private Model resolveModel() {
+      if (this.sharedModel != null) {
+        return this.sharedModel;
+      }
+      return ModelFactory.make(this.modelDir, this.io);
+    }
+
+    private Path modelPath() {
+      return this.sharedModel != null ? this.sharedModel.path() : this.modelDir;
+    }
+
+    private Config toConfig(Model model) {
+      return Config.builder(model)
           .maxNumBatchedTokens(this.maxNumBatchedTokens)
           .maxNumSeqs(this.maxNumSeqs)
           .maxModelLen(this.maxModelLen)
