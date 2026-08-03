@@ -1690,7 +1690,13 @@ This pattern builds **Q / K / V**, the attention **output projection**, MLP **up
 
 #### Definition
 
-A **token embedding** is a learned map
+**What it is:** a big lookup table with one fixed list of numbers (a vector) for every vocabulary token id.  
+**What it does:** turns each discrete id from the tokenizer into a continuous vector the rest of the network can mix.  
+**What we get:** for every id in the prompt, a starting hidden vector of length `hidden_size` — the residual stream’s
+first content before any layer runs. It is *not* an English dictionary of meanings; inference only needs that numeric
+row.
+
+Formally, a **token embedding** is a learned map
 
 $$
 \mathrm{emb} : \{0,1,\ldots,V-1\} \rightarrow \mathbb{R}^{H},
@@ -1709,9 +1715,19 @@ $H$ = `hidden_size` (e.g. 1024 for Qwen3-0.6B, 640 for Gemma3-270M). $V$ = `voca
 
 #### Gemma embedding scale
 
-After lookup, Gemma multiplies by $\sqrt{H}$ (`scaleEmbed`). Fixed from config; not a learned tensor.
+**What it is:** a fixed multiplier applied right after the table lookup on Gemma.  
+**What it does:** scales every embedding vector by the square root of `hidden_size`.  
+**What we get:** slightly larger starting activations that match how Gemma was trained; no extra learned weights.
+
+After lookup, Gemma multiplies by $\sqrt{H}$ (`scaleEmbed`). Fixed from config; not a learned tensor. Qwen’s path in
+this port does not apply that scale.
 
 #### Tied LM head
+
+**What it is:** optionally reusing the same embedding table at the *end* of the model to score the next token.  
+**What it does:** maps the last hidden vector to one preference score per vocabulary id (logits).  
+**What we get:** either one shared matrix for input lookup and output scoring (**tied**, saves a huge parameter block),
+or a separate LM-head matrix (**untied**).
 
 Logits $\boldsymbol{\ell} \in \mathbb{R}^{V}$ from last hidden $\mathbf{h}$:
 
@@ -1722,10 +1738,19 @@ Logits $\boldsymbol{\ell} \in \mathbb{R}^{V}$ from last hidden $\mathbf{h}$:
 
 #### RoPE vs token embedding
 
-**RoPE** is *not* another vocab table. It rotates pairs of coordinates inside **Q and K** by an angle that depends on
-token position (section below). Absolute learned position embeddings (GPT-2 style) are **not** used here.
+**What it is:** a contrast — RoPE is *not* another vocab lookup table.  
+**What it does:** twists pairs of numbers inside Query and Key by an angle that depends on token position.  
+**What we get:** order and relative distance enter attention scores without adding a separate learned vector per
+position (older GPT-2 style absolute embeddings are unused here).
+
+**RoPE** rotates pairs of coordinates inside **Q and K** only (formal detail in the RoPE section below). Absolute
+learned position embeddings are **not** used in this port.
 
 #### Where embedding runs
+
+**What it is:** the call path in this library from ids to vectors and later to logits.  
+**What it does:** lookup (and optional Gemma scale) at the start of `forward`; linear scoring at `computeLogits`.  
+**What we get:** a clear map from Java methods to the ideas above.
 
 ```text
 CausalLM#forward
