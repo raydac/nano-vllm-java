@@ -13,6 +13,7 @@
 - Ch.7 opens with tensor definition (rank/shape/weights vs activations) then safetensors format
 - Ch.10 rewritten: tensors (notation + `tensor.Tensor`), embeddings ($E\in\mathbb{R}^{V\times H}$, gather, tied head, RoPE kinds), linear/softmax
 - Prefer Stream API for filter/map/collect transforms in LLM/engine helpers; keep stateful schedule/prefill and tensor kernels imperative
+- `LLM` business methods (`generate`, `step`, drive loop, load/close) carry `//` stage comments for algorithm readability
 
 
 ## 2. Architecture & Technical Discoveries
@@ -55,3 +56,4 @@
 - Educational guide: English `description.md` only — do not revive a Russian translation
 - Prefer Stream API for declarative filter/map/collect; keep stateful scheduler/prefill and numeric kernels as loops
 - User preference (global Java senior rule): Stream-first for collection work when a clear pipeline exists
+- In `LLM`, keep `//` comments on business orchestration methods and their internal stage calls (generate/step/drive)
