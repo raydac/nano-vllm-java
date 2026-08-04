@@ -65,6 +65,22 @@ class CoreUnitTest {
   }
 
   @Test
+  void sharedModelIsReusedAcrossLlmsWhenWeightsPresent() {
+    var path = BundledModels.find(BundledModels.QWEN3_0_6B);
+    org.junit.jupiter.api.Assumptions.assumeTrue(path.isPresent(), "Qwen3-0.6B not downloaded");
+
+    Model model = ModelFactory.make(path.get());
+    try (LLM a = LLM.builder(model).maxModelLen(256).numKvcacheBlocks(32).skipWarmup().build();
+         LLM b = LLM.builder(model).maxModelLen(256).numKvcacheBlocks(32).skipWarmup().build()) {
+      assertSame(model, a.model());
+      assertSame(model, b.model());
+      assertSame(model.tokenizer(), a.tokenizer());
+      assertSame(model.tokenizer(), b.tokenizer());
+      assertEquals(model.architectureName(), a.model().architectureName());
+    }
+  }
+
+  @Test
   void jsonParsesObject() {
     Map<String, Object> m = Json.parseObject("{\"a\":1,\"b\":[true,null,\"x\"],\"c\":1.5}");
     assertEquals(1, Json.asInt(m.get("a"), 0));
@@ -131,9 +147,9 @@ class CoreUnitTest {
 
   @Test
   void float16Conversion() {
-    float one = com.igormaznitsa.nanollvm.utils.SafetensorsReader.float16ToFloat(0x3C00);
+    float one = com.igormaznitsa.nanollvm.internal.SafetensorsReader.float16ToFloat(0x3C00);
     assertEquals(1.0f, one, 1e-3);
-    float bf = com.igormaznitsa.nanollvm.utils.SafetensorsReader.bfloat16ToFloat(0x3F80);
+    float bf = com.igormaznitsa.nanollvm.internal.SafetensorsReader.bfloat16ToFloat(0x3F80);
     assertEquals(1.0f, bf, 1e-3);
   }
 
@@ -507,10 +523,8 @@ class CoreUnitTest {
     }
     assertTrue(hf.tieWordEmbeddings());
     assertEquals("gemma3", com.igormaznitsa.nanollvm.models.CausalLMFactory.detect(hf));
-    com.igormaznitsa.nanollvm.models.CausalLM model =
-        com.igormaznitsa.nanollvm.models.CausalLMFactory.create(hf);
-    assertEquals("gemma3", model.architectureName());
-    assertTrue(model.hasParameter("model.layers.0.pre_feedforward_layernorm.weight"));
+    assertTrue(com.igormaznitsa.nanollvm.models.WeightSchema.gemma3(hf)
+        .expects("model.layers.0.pre_feedforward_layernorm.weight"));
   }
 
   @Test

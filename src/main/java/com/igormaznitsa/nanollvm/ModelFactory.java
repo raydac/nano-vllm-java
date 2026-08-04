@@ -1,13 +1,15 @@
 package com.igormaznitsa.nanollvm;
 
+import static com.igormaznitsa.nanollvm.utils.NanoVllmProps.CONFIG_JSON;
 import static java.util.Objects.requireNonNull;
 
+import com.igormaznitsa.nanollvm.internal.ModelLoader;
 import com.igormaznitsa.nanollvm.models.CausalLM;
 import com.igormaznitsa.nanollvm.models.CausalLMFactory;
+import com.igormaznitsa.nanollvm.models.WeightBag;
+import com.igormaznitsa.nanollvm.models.WeightSchema;
 import com.igormaznitsa.nanollvm.tensor.VectorMath;
 import com.igormaznitsa.nanollvm.tokenizer.Tokenizer;
-import com.igormaznitsa.nanollvm.utils.ModelLoader;
-
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -51,15 +53,18 @@ public final class ModelFactory {
     long t0 = System.nanoTime();
     io.info("CPU backend: " + VectorMath.backendInfo());
 
-    Config.HfConfig hfConfig = Config.HfConfig.load(path.resolve("config.json"));
+    Config.HfConfig hfConfig = Config.HfConfig.load(path.resolve(CONFIG_JSON));
     String arch = CausalLMFactory.detect(hfConfig);
-    io.info("Building " + arch + " model graph…");
-    CausalLM network = CausalLMFactory.create(hfConfig);
-    io.infof("Model graph ready (%s) in %.1fs%n",
-        network.architectureName(), (System.nanoTime() - t0) / 1e9);
+    WeightSchema schema = CausalLMFactory.schema(hfConfig);
 
-    ModelLoader.loadModel(network, path, io);
-    network.seal();
+    io.info("Loading " + arch + " weights…");
+    WeightBag weights = ModelLoader.loadWeights(path, hfConfig, schema, io);
+
+    io.info("Building " + arch + " model graph…");
+    long tGraph = System.nanoTime();
+    CausalLM network = CausalLMFactory.create(hfConfig, weights);
+    io.infof("Model graph ready (%s) in %.1fs%n",
+        network.architectureName(), (System.nanoTime() - tGraph) / 1e9);
 
     Tokenizer tokenizer = Tokenizer.fromPretrained(path);
     io.infof("Model loaded in %.1fs%n", (System.nanoTime() - t0) / 1e9);

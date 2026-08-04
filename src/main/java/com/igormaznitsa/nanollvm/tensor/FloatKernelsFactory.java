@@ -1,5 +1,7 @@
 package com.igormaznitsa.nanollvm.tensor;
 
+import static com.igormaznitsa.nanollvm.utils.NanoVllmProps.PROP_KERNELS;
+
 import com.igormaznitsa.nanollvm.tensor.scalar.ScalarFloatKernels;
 import com.igormaznitsa.nanollvm.tensor.vector.VectorFloatKernels;
 
@@ -35,7 +37,7 @@ public final class FloatKernelsFactory {
    * Default selection: honors {@code -Dnanovllm.kernels}, else best available.
    */
   public static FloatKernels create() {
-    return create(System.getProperty("nanovllm.kernels", "auto"));
+    return create(System.getProperty(PROP_KERNELS, "auto"));
   }
 
   /**
@@ -48,14 +50,15 @@ public final class FloatKernelsFactory {
       case "vector" -> {
         if (!VECTOR_API_AVAILABLE) {
           throw new IllegalStateException(
-              "Vector API kernels requested (-Dnanovllm.kernels=vector) but Vector API is unavailable"
+              "Vector API kernels requested (-D" + PROP_KERNELS
+                  + "=vector) but Vector API is unavailable"
           );
         }
         yield new VectorFloatKernels();
       }
       case "auto" -> createBestAvailable();
       default -> throw new IllegalArgumentException(
-          "Unknown -Dnanovllm.kernels=" + mode + " (use auto|vector|scalar)"
+          "Unknown -D" + PROP_KERNELS + "=" + mode + " (use auto|vector|scalar)"
       );
     };
   }

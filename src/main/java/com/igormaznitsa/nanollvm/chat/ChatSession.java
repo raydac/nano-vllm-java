@@ -27,6 +27,7 @@ public final class ChatSession {
   private PrintStream thinkOut;
   private PrintStream answerOut;
   private boolean color;
+  private Boolean enableThinking;
   private Consumer<String> diagnostics = message -> {
   };
 
@@ -61,6 +62,16 @@ public final class ChatSession {
     return this;
   }
 
+  /**
+   * When {@code false}, the chat template seeds an empty {@code <think></think>} so Qwen-style
+   * models skip long chain-of-thought (important for RAG token budgets). {@code null}/unset keeps
+   * the default: off for Gemma, on for other chat templates.
+   */
+  public ChatSession enableThinking(boolean enableThinking) {
+    this.enableThinking = enableThinking;
+    return this;
+  }
+
   public ChatSession diagnostics(Consumer<String> diagnostics) {
     this.diagnostics = diagnostics == null ? message -> {
     } : diagnostics;
@@ -78,25 +89,53 @@ public final class ChatSession {
 
   public ChatReply send(String userText) {
     requireNonNull(userText, "userText");
-    String user = userText.strip();
-    if (user.isEmpty()) {
-      throw new IllegalArgumentException("userText must not be blank");
+    return this.sendPrepared(userText, userText);
+  }
+
+  /**
+   * Adds {@code historyUserText} to the conversation history, but builds the model prompt as if
+   * the last user turn were {@code modelUserText} (used by RAG to keep a short history while
+   * injecting retrieved context for generation only).
+   */
+  public ChatReply sendPrepared(String historyUserText, String modelUserText) {
+    return this.sendPrepared(historyUserText, modelUserText, false);
+  }
+
+  /**
+   * @param isolateGeneration when {@code true}, the model sees only the system seed (if any) plus
+   *                          the prepared user turn — prior assistant answers are kept in history
+   *                          for the app, but not fed into this generate (avoids tiny-model latch)
+   */
+  public ChatReply sendPrepared(
+      String historyUserText,
+      String modelUserText,
+      boolean isolateGeneration
+  ) {
+    requireNonNull(historyUserText, "historyUserText");
+    requireNonNull(modelUserText, "modelUserText");
+    String historyUser = historyUserText.strip();
+    String modelUser = modelUserText.strip();
+    if (historyUser.isEmpty()) {
+      throw new IllegalArgumentException("historyUserText must not be blank");
+    }
+    if (modelUser.isEmpty()) {
+      throw new IllegalArgumentException("modelUserText must not be blank");
     }
 
-    this.history.add(ChatMessage.user(user));
+    this.history.add(ChatMessage.user(historyUser));
     Tokenizer tokenizer = this.llm.tokenizer();
     ChatMessages.truncateHistory(
         this.history, tokenizer, this.llm.config().maxModelLen(), this.samplingParams.maxTokens());
 
     boolean gemmaChat = tokenizer.isGemmaChat();
     StreamPrinter printer = this.newPrinter();
-    ChatReply reply = this.generateTurn(printer);
+    ChatReply reply = this.generateTurn(printer, modelUser, isolateGeneration);
 
     if (gemmaChat && ChatPrompts.isSetupBoilerplate(reply.answer())) {
       ChatMessages.scrubSetupBoilerplateTurns(this.history);
       this.diagnostics.accept("(setup boilerplate — retrying without filler history)");
       printer = this.newPrinter();
-      reply = this.generateTurn(printer);
+      reply = this.generateTurn(printer, modelUser, isolateGeneration);
       if (ChatPrompts.isSetupBoilerplate(reply.answer())) {
         reply = new ChatReply("", "Hello! What would you like to know?", false);
         this.diagnostics.accept("(setup boilerplate — used plain greeting fallback)");
@@ -113,12 +152,19 @@ public final class ChatSession {
     return new StreamPrinter(this.thinkOut, this.answerOut, this.color);
   }
 
-  private ChatReply generateTurn(StreamPrinter printer) {
+  private ChatReply generateTurn(
+      StreamPrinter printer,
+      String lastUserOverride,
+      boolean isolateGeneration
+  ) {
     Tokenizer tokenizer = this.llm.tokenizer();
     boolean gemmaChat = tokenizer.isGemmaChat();
-    boolean enableThinking = !gemmaChat;
+    boolean enableThinking = this.thinkingEnabled(gemmaChat);
+    List<ChatMessage> forTemplate = isolateGeneration
+        ? this.isolatedTurn(lastUserOverride)
+        : this.historyForTemplate(lastUserOverride);
     String prompt = tokenizer.applyChatTemplate(
-        ChatMessages.toTemplateMaps(this.history), true, enableThinking);
+        ChatMessages.toTemplateMaps(forTemplate), true, enableThinking);
 
     List<Integer> streamedIds = new ArrayList<>();
     List<LLM.GenerationOutput> outputs = this.llm.generate(
@@ -138,16 +184,39 @@ public final class ChatSession {
         AssistantParts.parse(tokenizer.decode(outputs.getFirst().tokenIds(), gemmaChat)));
   }
 
+  private boolean thinkingEnabled(boolean gemmaChat) {
+    return this.enableThinking != null ? this.enableThinking : !gemmaChat;
+  }
+
+  private List<ChatMessage> isolatedTurn(String modelUserText) {
+    List<ChatMessage> turn = new ArrayList<>(this.llm.newConversation());
+    turn.add(ChatMessage.user(modelUserText));
+    return turn;
+  }
+
+  private List<ChatMessage> historyForTemplate(String lastUserOverride) {
+    if (this.history.isEmpty()) {
+      return List.of();
+    }
+    ChatMessage last = this.history.getLast();
+    if (last.role() != ChatRole.USER || last.content().equals(lastUserOverride)) {
+      return this.history;
+    }
+    List<ChatMessage> copy = new ArrayList<>(this.history);
+    copy.set(copy.size() - 1, ChatMessage.user(lastUserOverride));
+    return copy;
+  }
+
   private ChatReply finishTurn(ChatReply reply, StreamPrinter printer) {
     String answer = reply.answer().strip();
     String thinking = reply.thinking();
     boolean thinkOpen = reply.thinkOpen();
 
-    if (answer.isBlank() && !thinking.isBlank()) {
+    if (this.shouldSalvageAnswer(answer, thinking)) {
       answer = AssistantParts.salvageFromThinking(thinking);
       this.diagnostics.accept(thinkOpen
           ? "(reply recovered from unclosed thinking)"
-          : "(reply recovered from thinking; model omitted visible answer)");
+          : "(reply recovered from thinking; model omitted or truncated visible answer)");
     }
     if (answer.isBlank()) {
       answer = "Sorry — I couldn't form a reply. Please try again.";
@@ -161,5 +230,15 @@ public final class ChatSession {
     }
     this.history.add(ChatMessage.assistant(finished.answer()));
     return finished;
+  }
+
+  private boolean shouldSalvageAnswer(String answer, String thinking) {
+    if (thinking.isBlank()) {
+      return false;
+    }
+    if (answer.isBlank()) {
+      return true;
+    }
+    return answer.length() <= 12 && thinking.length() >= 120;
   }
 }

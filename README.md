@@ -22,13 +22,13 @@ How it works (introductory academic guide): see [`description.md`](description.m
 
 ## Maven coordinates
 
-|               |                                                                         |
-|---------------|-------------------------------------------------------------------------|
-| GroupId       | `com.igormaznitsa`                                                      |
-| ArtifactId    | `nano-vllm-java`                                                        |
-| Version       | `0.2.0-SNAPSHOT`                                                        |
-| JPMS module   | `com.igormaznitsa.nanollvm`                                             |
-| Java packages | `com.igormaznitsa.nanollvm` (+ `chat`, `tokenizer`, `prompts`, `utils`) |
+|               |                                                                                |
+|---------------|--------------------------------------------------------------------------------|
+| GroupId       | `com.igormaznitsa`                                                             |
+| ArtifactId    | `nano-vllm-java`                                                               |
+| Version       | `0.2.0-SNAPSHOT`                                                               |
+| JPMS module   | `com.igormaznitsa.nanollvm`                                                    |
+| Java packages | `com.igormaznitsa.nanollvm` (+ `chat`, `rag`, `tokenizer`, `prompts`, `utils`) |
 
 ```xml
 
@@ -79,30 +79,35 @@ Windows: `.\models\download-qwen3-0.6b.ps1` / `.\models\download-gemma3-270m.ps1
 
 `Example` / `Bench` resolve `models/Qwen3-0.6B` by default via `BundledModels`.
 
-| Override    | Example                                                        |
-|-------------|----------------------------------------------------------------|
-| CLI         | `mvn … -Dexec.args=models/Gemma3-270M`                         |
-| Property    | `-Dnanovllm.model=models/Gemma3-270M`                          |
-| Force arch  | `-Dnanovllm.arch=gemma3` or `qwen3`                            |
-| Env         | `NANOVLLM_MODEL=models/Gemma3-270M`                            |
-| Models root | `-Dnanovllm.models.dir=/other/models` or `NANOVLLM_MODELS_DIR` |
+| Override    | Example                                                                                       |
+|-------------|-----------------------------------------------------------------------------------------------|
+| CLI         | `mvn … -Dexec.args=models/Gemma3-270M`                                                        |
+| Property    | `-Dnanovllm.model=models/Gemma3-270M`                                                         |
+| Force arch  | `-Dnanovllm.arch=gemma3` or `qwen3`                                                           |
+| Env         | `NANOVLLM_MODEL=models/Gemma3-270M`                                                           |
+| Models root | `-Dnanovllm.models.dir=/other/models` or `NANOVLLM_MODELS_DIR`                                |
+| RAG corpus  | project `rag/` folder (auto-loaded by `Example`); `-Dnanovllm.rag.dir=…` / `NANOVLLM_RAG_DIR` |
 
 ## Quick Start
 
-Interactive dialog (after model load):
+Interactive dialog (after model load). When `./rag` exists, Example uses BM25 RAG (`rag?>` prompt):
 
 ```text
-?> introduce yourself
+rag?> What is the capital of France?
 assistant> ...
-?> list primes within 20
+rag?> What does nano-vllm-java run on?
 assistant> ...
-?> /exit
+rag?> /exit
 ```
+
+Without a RAG folder it falls back to plain chat (`?>`).
 
 Or in code (library — quiet by default):
 
 ```java
-try(LLM llm = LLM.builder(BundledModels.resolveDefault())
+Model model = ModelFactory.make(BundledModels.resolveDefault()); // load once, share freely
+try(
+LLM llm = LLM.builder(model)
         .enforceEager(true)
         .maxModelLen(2048)
         .systemPrompt("Answer briefly and factually.") // optional
@@ -116,14 +121,23 @@ String once = llm.chatOnce("What is 2+2?");
 
 // Raw completion (no chat template)
 String raw = llm.complete("The capital of France is");
+
+// Shared RAG: preprocess + index once, reuse across LLMs
+var rag = com.igormaznitsa.nanollvm.rag.RagFactory.make(Path.of("docs"));
+// or: RagFactory.of("Paris is the capital of France.", "Berlin is in Germany.");
+// or: RagFactory.builder().forTinyModels().addFolder(…).build();
+String answer = llm.rag(rag).topK(2).ask("What is the capital of France?");
 }
 
+// Path convenience still works: LLM.builder(path).build()
 // CLI / tools that want load progress:
-// LLM.builder(path).withSystemIo().build()
+// ModelFactory.make(path, EngineIo.system()) or LLM.builder(path).withSystemIo().build()
 ```
 
-**Library notes:** one `LLM` per concurrent generate; call `llm.cancel()` to abort; optional
-`chat.timeout(Duration.ofSeconds(30))`; load failures throw `ModelLoadException`.
+**Library notes:** `Model` is immutable and shareable across many `LLM`s; one `LLM` per concurrent generate; call
+`llm.cancel()` to abort; optional `chat.timeout(Duration.ofSeconds(30))`; load failures throw `ModelLoadException`. Text
+RAG: `RagFactory` preparses documents once (`PassagePreparser` + inverted BM25) into a shareable `PreparedRag`; then
+`llm.rag(prepared)` on any number of models.
 
 ```bash
 # .mvn/jvm.config already adds jdk.incubator.vector for this project.

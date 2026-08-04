@@ -1,5 +1,11 @@
 package com.igormaznitsa.nanollvm.utils;
 
+import static com.igormaznitsa.nanollvm.utils.NanoVllmProps.CONFIG_JSON;
+import static com.igormaznitsa.nanollvm.utils.NanoVllmProps.ENV_MODEL;
+import static com.igormaznitsa.nanollvm.utils.NanoVllmProps.ENV_MODELS_DIR;
+import static com.igormaznitsa.nanollvm.utils.NanoVllmProps.PROP_MODEL;
+import static com.igormaznitsa.nanollvm.utils.NanoVllmProps.PROP_MODELS_DIR;
+
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Optional;
@@ -26,11 +32,11 @@ public final class BundledModels {
     if (cliArgs != null && cliArgs.length > 0 && cliArgs[0] != null && !cliArgs[0].isBlank()) {
       return Path.of(cliArgs[0]).toAbsolutePath().normalize();
     }
-    String prop = System.getProperty("nanovllm.model");
+    String prop = System.getProperty(PROP_MODEL);
     if (prop != null && !prop.isBlank()) {
       return Path.of(prop).toAbsolutePath().normalize();
     }
-    String env = System.getenv("NANOVLLM_MODEL");
+    String env = System.getenv(ENV_MODEL);
     if (env != null && !env.isBlank()) {
       return Path.of(env).toAbsolutePath().normalize();
     }
@@ -41,11 +47,11 @@ public final class BundledModels {
    * Models root: {@code -Dnanovllm.models.dir} → {@code NANOVLLM_MODELS_DIR} → {@code ./models}.
    */
   public static Path modelsRoot() {
-    String prop = System.getProperty("nanovllm.models.dir");
+    String prop = System.getProperty(PROP_MODELS_DIR);
     if (prop != null && !prop.isBlank()) {
       return Path.of(prop).toAbsolutePath().normalize();
     }
-    String env = System.getenv("NANOVLLM_MODELS_DIR");
+    String env = System.getenv(ENV_MODELS_DIR);
     if (env != null && !env.isBlank()) {
       return Path.of(env).toAbsolutePath().normalize();
     }
@@ -57,7 +63,7 @@ public final class BundledModels {
         "model not found: " + modelPathOrName
             + " (expected under " + modelsRoot()
             + "). Run models/download-qwen3-0.6b.sh or models/download-gemma3-270m.sh, "
-            + "or pass a model path / -Dnanovllm.model=… / NANOVLLM_MODEL."
+            + "or pass a model path / -D" + PROP_MODEL + "=… / " + ENV_MODEL + "."
     ));
   }
 
@@ -105,7 +111,7 @@ public final class BundledModels {
 
   private static boolean isModelDir(Path dir) {
     return Files.isDirectory(dir)
-        && Files.isRegularFile(dir.resolve("config.json"))
+        && Files.isRegularFile(dir.resolve(CONFIG_JSON))
         && hasSafetensors(dir);
   }
 

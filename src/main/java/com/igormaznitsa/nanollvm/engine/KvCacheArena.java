@@ -6,7 +6,7 @@ import com.igormaznitsa.nanollvm.tensor.Tensor;
 
 /**
  * Per-{@link com.igormaznitsa.nanollvm.LLM} KV page storage. Bound into {@link
- * com.igormaznitsa.nanollvm.utils.Context} for the duration of a forward pass.
+ * com.igormaznitsa.nanollvm.internal.Context} for the duration of a forward pass.
  */
 public final class KvCacheArena {
 

@@ -3,9 +3,9 @@ package com.igormaznitsa.nanollvm.layers;
 import static java.util.Objects.requireNonNull;
 
 import com.igormaznitsa.nanollvm.engine.KvCacheArena;
+import com.igormaznitsa.nanollvm.internal.Context;
 import com.igormaznitsa.nanollvm.tensor.Tensor;
 import com.igormaznitsa.nanollvm.tensor.VectorMath;
-import com.igormaznitsa.nanollvm.utils.Context;
 
 public final class Attention {
 

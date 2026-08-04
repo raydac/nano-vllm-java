@@ -1,9 +1,10 @@
-package com.igormaznitsa.nanollvm.utils;
+package com.igormaznitsa.nanollvm.internal;
 
 import static java.nio.charset.StandardCharsets.UTF_8;
 import static java.util.Objects.requireNonNull;
 
 import com.igormaznitsa.nanollvm.tensor.Tensor;
+import com.igormaznitsa.nanollvm.utils.Json;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;

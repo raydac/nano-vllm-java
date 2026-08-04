@@ -1,4 +1,4 @@
-package com.igormaznitsa.nanollvm.utils;
+package com.igormaznitsa.nanollvm.internal;
 
 import com.igormaznitsa.nanollvm.engine.KvCacheArena;
 

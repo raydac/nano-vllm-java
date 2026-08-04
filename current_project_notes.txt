@@ -1,14 +1,14 @@
 ## 1. Implementation Progress
 - Single-threaded CPU kernels; SIMD Vector API kept
 - CausalLM: Qwen3 + Gemma3; tokenizer GPT-2 BPE / Metaspace; downloads under models/
-- **Library API:** `LLM.Builder`, `EngineIo` (quiet default), `.systemPrompt()`, `ChatSession`, typed `ChatMessage`/`ChatRole`/`ChatReply`
+- **Library API:** `ModelFactory.make(path)` → immutable shared `Model`; `LLM.Builder(Model|Path)`, `EngineIo` (quiet default), `.systemPrompt()`, `ChatSession`, typed `ChatMessage`/`ChatRole`/`ChatReply`
 - Helpers: `llm.chat()`, `chatOnce()`, `complete()`, `SamplingDefaults`, `cancel()` / generate timeout
 - Errors: `ModelLoadException`, `GenerationCancelledException`, `GenerationTimeoutException`
 - Example uses `ChatSession` with streamTo; Gemma empty system + boilerplate scrub inside session
 - package-info documents public vs internal surface; **LLM** has library JavaDoc; **module-info.java** (`com.igormaznitsa.nanollvm`)
 - Root Java package + JPMS module: `com.igormaznitsa.nanollvm` (was `io.nanovllm`)
-- Educational walkthrough: `description.md` (English; academic-accessible tone)
-- Every narrative chapter has **In the code** class/method signposts; §16 is the full map + Samples A–F
+- Educational walkthrough: `description.md` (English; academic-accessible tone); **§17 Text RAG**
+- Every narrative chapter has **In the code** class/method signposts; §16 is the full map + Samples A–G; §17 RAG
 - §15 (“2+2”): master call chain + per-stage `Class#method` tables (send → generate → step → Attention → parse)
 - Ch.7 opens with tensor definition (rank/shape/weights vs activations) then safetensors format
 - Ch.10 rewritten: tensors (notation + `tensor.Tensor`), embeddings ($E\in\mathbb{R}^{V\times H}$, gather, tied head, RoPE kinds), linear/softmax
@@ -16,10 +16,25 @@
 - Ch.10 GitHub math: keep config names (`rope_theta`, …) outside `$…$` / `$$…$$` (no `\texttt{…_…}` in math — MathJax error)
 - Prefer Stream API for filter/map/collect transforms in LLM/engine helpers; keep stateful schedule/prefill and tensor kernels imperative
 - `LLM` business methods (`generate`, `step`, drive loop, load/close) carry `//` stage comments for algorithm readability
+- `engine.Scheduler` has full class/method JavaDoc (waiting/running, prefill-vs-decode, preemption, postprocess)
 - `tensor.Tensor` has full class/method JavaDoc (shape, offset/view, reshape sharing, data vs toFloatArray)
 - `FloatKernels` (+ scalar/vector backends, factory) JavaDoc: slice contract, SIMD main loop + scalar tail
 - `Ops` JavaDoc: layout conventions, linear/embedding/gates/softmax/RMSNorm/addRmsNorm/splitLast hard parts
 - `VectorMath` JavaDoc: FloatKernels facade + tiled linear (TILE_N/TILE_K) loop order
+- **Immutable Model split:** weights/tokenizer on `Model`; per-`LLM` `KvCacheArena` via `Context.bindKvCache`; `Attention` uses `layerIndex` only
+- **Immutable CausalLM graph:** `ModelLoader.loadWeights` → `WeightBag`; layers (`Linear`/`RMSNorm`/`Embedding`) take final tensors in ctors only; no WeightSlot/seal/setters
+- Qwen3/Gemma3 (+ nested Attention/MLP/DecoderLayer/Model) are `record`s with identity equals; factory ctors assemble then delegate to canonical
+- **Shared constants:** `models.WeightNames` (HF paths, arch ids, packed-module map); `utils.NanoVllmProps` (sys props/env/`config.json`)
+- **JPMS:** `ModelLoader`/`SafetensorsReader`/`Context` moved to non-exported `internal` (utils export no longer leaks models/tensor/engine types)
+- **Text RAG:** `RagFactory` → `PassagePreparser` (model/search text, pre-TF) → inverted `Bm25Index` in shareable `PreparedRag`
+- Query path scores only posting-list candidates; load once, share across LLMs
+- Query-term coverage rerank + question-first compact prompt; rich fact cards for Grimm + Red Riding Hood
+- Short follow-ups (<6 tokens) expand BM25 with prior user turn and prefer same source when competitive
+- Compact prompt = question then passages; Gemma: topK=2, isolateGeneration, mild sampling
+- RAG disables thinking by default (Qwen was burning maxTokens on `<think>`, leaving stub answers like "The")
+- Project `rag/` via `RagFactory.make`; override `-Dnanovllm.rag.dir` / `NANOVLLM_RAG_DIR`
+- Demo fact files: `facts-brothers-grimm.md`, `facts-little-red-riding-hood.md` (+ long tale/bio texts)
+
 
 
 ## 2. Architecture & Technical Discoveries
@@ -27,32 +42,48 @@
 - Gemma: no system role by default; long system+hello latches setup boilerplate
 - Scheduler.`clear()` aborts in-flight seqs on cancel/timeout
 - One LLM instance is not concurrent-safe for generate; `cancel()` is cross-thread
+- Share one `Model` across many `LLM`s; each LLM owns KV + scheduler; closing LLM does not unload Model
+- Share one `PreparedRag` across many LLMs; `PassagePreparser` + inverted BM25 run at load, not per query
+- Exported packages: root, chat, rag, tokenizer, prompts, utils (`BundledModels`/`BundledRag`/`Json`/`NanoVllmProps`)
+- Module-private: engine, layers, models, tensor, **internal** (loader/safetensors/Context)
+- `Model.network()` still returns module-private `CausalLM` for same-module `ModelRunner` (documented non-stable)
+
 
 ## 3. Technical Debt & Refactoring
 - Attention O(n²); no float16 / TP / CUDA graphs
 - Metaspace BPE simplified; optional chat_template.jinja in download
 - Optional repetition penalty for tiny IT models
+- `Sequence.setBlockSize` is still static (problem if LLMs use different block sizes)
+- `description.md` still mentions `utils.SafetensorsReader` / `utils.ModelLoader` / `utils.Context` — update signposts to `internal.*`
+
 
 ## 4. Current Work In Progress
 - Educational docs: maintain academic-accessible English `description.md`
 - Engine readability: LLM / ModelRunner / Scheduler DSL pass done
 
+
 ## 5. Known Issues & Limitations
 - CPU-only; large float32 heap; weights not in git
 - Gemma3-270M weak knowledge / paraphrase; first chat turn can be slow
+- Tiny Gemma can still invent facts not in retrieved passages; multi-turn latch mitigated by `RagSession.isolateGeneration`
+- Qwen RAG with thinking on + low maxTokens truncates answers after long `<think>` — mitigated by thinking-off default + stub salvage
+
 
 ## 6. Open Questions & Pending Decisions
 - Whether to fold Sampler into ModelRunner next
 
+
 ## 7. Useful References
-- How it works: `description.md` (academic-accessible; ch.10 math catalog; ch.7–10 tensors; §16 map/samples; §19 reading index)
+- How it works: `description.md` (academic-accessible; ch.10 math catalog; ch.7–10 tensors; §16 map/samples; **§17 text RAG**; §20 reading index)
 - Maven: `com.igormaznitsa:nano-vllm-java:0.2.0-SNAPSHOT`; JPMS module `com.igormaznitsa.nanollvm`
 - Build: `mvn -q test` / `MAVEN_OPTS="-Xmx8g" mvn -q exec:java -Dexec.mainClass=com.igormaznitsa.nanollvm.Example`
-- Library: `LLM.builder(path).systemPrompt(…).build()` then `llm.chat().send(…)` / `chatOnce` / `complete`
+- Library: `Model model = ModelFactory.make(path); LLM.builder(model).systemPrompt(…).build()` or path convenience `LLM.builder(path).build()`; RAG: `PreparedRag rag = RagFactory.make(dir); llm.rag(rag)` (shareable like Model)
+
 - CLI progress: `.withSystemIo()`
 - Plugins (pom): compiler 3.15.0, surefire 3.5.5, jar 3.5.0, exec 3.6.3; JUnit 6.0.2; Gson 2.13.2
-- `module-info`: exports `com.igormaznitsa.nanollvm`, `chat`, `tokenizer`, `prompts`, `utils`; requires `com.google.gson`, `requires static jdk.incubator.vector`
+- `module-info`: exports `com.igormaznitsa.nanollvm`, `chat`, `rag`, `tokenizer`, `prompts`, `utils`; requires `com.google.gson`, `requires static jdk.incubator.vector`; private: `engine`/`layers`/`models`/`tensor`/`internal`
 - Vector flags: `.mvn/jvm.config` for Maven/`exec:java`; surefire uses `jvm.module.args` (exec:java has no `jvmArgs` in 3.6.x)
+
 
 ## 8. User Advice and Recommendations
 - Document Maven as `mvn` (portable); on this machine the agent may invoke `mvn22`
@@ -63,3 +94,4 @@
 - Prefer Stream API for declarative filter/map/collect; keep stateful scheduler/prefill and numeric kernels as loops
 - User preference (global Java senior rule): Stream-first for collection work when a clear pipeline exists
 - In `LLM`, keep `//` comments on business orchestration methods and their internal stage calls (generate/step/drive)
+- Model = immutable loaded data; all thread/runtime state on LLM (`KvCacheArena`, scheduler, generate lock)

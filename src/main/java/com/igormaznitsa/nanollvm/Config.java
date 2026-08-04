@@ -1,9 +1,9 @@
 package com.igormaznitsa.nanollvm;
 
+import static com.igormaznitsa.nanollvm.utils.NanoVllmProps.CONFIG_JSON;
 import static java.util.Objects.requireNonNull;
 
 import com.igormaznitsa.nanollvm.utils.Json;
-
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -53,9 +53,10 @@ public final class Config {
       this.hfConfig = b.hfConfig;
     } else {
       try {
-        this.hfConfig = HfConfig.load(this.model.resolve("config.json"));
+        this.hfConfig = HfConfig.load(this.model.resolve(CONFIG_JSON));
       } catch (IOException e) {
-        throw new IllegalArgumentException("failed to load config.json from " + this.model, e);
+        throw new IllegalArgumentException("failed to load " + CONFIG_JSON + " from " + this.model,
+            e);
       }
     }
     this.maxModelLen = Math.min(b.maxModelLen, this.hfConfig.maxPositionEmbeddings());

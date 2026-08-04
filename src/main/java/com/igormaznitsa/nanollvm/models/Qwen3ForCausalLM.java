@@ -1,5 +1,22 @@
 package com.igormaznitsa.nanollvm.models;
 
+import static com.igormaznitsa.nanollvm.models.WeightNames.ARCH_QWEN3;
+import static com.igormaznitsa.nanollvm.models.WeightNames.DOWN_PROJ_WEIGHT;
+import static com.igormaznitsa.nanollvm.models.WeightNames.EMBED_TOKENS;
+import static com.igormaznitsa.nanollvm.models.WeightNames.GATE_UP_PROJ_WEIGHT;
+import static com.igormaznitsa.nanollvm.models.WeightNames.INPUT_LAYERNORM;
+import static com.igormaznitsa.nanollvm.models.WeightNames.K_NORM_WEIGHT;
+import static com.igormaznitsa.nanollvm.models.WeightNames.LM_HEAD;
+import static com.igormaznitsa.nanollvm.models.WeightNames.MODEL_NORM;
+import static com.igormaznitsa.nanollvm.models.WeightNames.O_PROJ_WEIGHT;
+import static com.igormaznitsa.nanollvm.models.WeightNames.POST_ATTENTION_LAYERNORM;
+import static com.igormaznitsa.nanollvm.models.WeightNames.QKV_PROJ_WEIGHT;
+import static com.igormaznitsa.nanollvm.models.WeightNames.Q_NORM_WEIGHT;
+import static com.igormaznitsa.nanollvm.models.WeightNames.layer;
+import static com.igormaznitsa.nanollvm.models.WeightNames.mlp;
+import static com.igormaznitsa.nanollvm.models.WeightNames.selfAttn;
+import static java.util.Objects.requireNonNull;
+
 import com.igormaznitsa.nanollvm.Config;
 import com.igormaznitsa.nanollvm.layers.Attention;
 import com.igormaznitsa.nanollvm.layers.Linear;
@@ -9,43 +26,34 @@ import com.igormaznitsa.nanollvm.layers.VocabParallelEmbedding;
 import com.igormaznitsa.nanollvm.layers.VocabParallelEmbedding.ParallelLMHead;
 import com.igormaznitsa.nanollvm.tensor.Ops;
 import com.igormaznitsa.nanollvm.tensor.Tensor;
+import com.igormaznitsa.nanollvm.utils.Json;
 
 import java.util.ArrayList;
-import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
 
-public final class Qwen3ForCausalLM implements CausalLM {
+/**
+ * Immutable Qwen3 causal LM. All weights are taken from {@link WeightBag} at construction.
+ */
+public record Qwen3ForCausalLM(Qwen3Model model, ParallelLMHead lmHead) implements CausalLM {
 
-  public static final Map<String, Object[]> PACKED_MODULES_MAPPING = Map.of(
-      "q_proj", new Object[] {"qkv_proj", "q"},
-      "k_proj", new Object[] {"qkv_proj", "k"},
-      "v_proj", new Object[] {"qkv_proj", "v"},
-      "gate_proj", new Object[] {"gate_up_proj", 0},
-      "up_proj", new Object[] {"gate_up_proj", 1}
-  );
+  public Qwen3ForCausalLM(Config.HfConfig config, WeightBag weights) {
+    this(assemble(requireNonNull(config, "config"), requireNonNull(weights, "weights")));
+  }
 
-  private final Qwen3Model model;
-  private final ParallelLMHead lmHead;
-  private final Map<String, WeightSlot> parameters = new LinkedHashMap<>();
+  private Qwen3ForCausalLM(Qwen3ForCausalLM assembled) {
+    this(assembled.model, assembled.lmHead);
+  }
 
-  public Qwen3ForCausalLM(Config.HfConfig config) {
-    this.model = new Qwen3Model(config);
-    this.lmHead = new ParallelLMHead(config.vocabSize(), config.hiddenSize());
-    this.registerParameters();
-    if (config.tieWordEmbeddings()) {
-      this.lmHead.setWeight(this.model.embedTokens.weight());
-    }
+  private static Qwen3ForCausalLM assemble(Config.HfConfig config, WeightBag weights) {
+    Qwen3Model model = new Qwen3Model(config, weights);
+    Tensor lmWeight = weights.find(LM_HEAD)
+        .orElseGet(() -> model.embedTokens().weight());
+    return new Qwen3ForCausalLM(model, new ParallelLMHead(lmWeight));
   }
 
   @Override
   public String architectureName() {
-    return "qwen3";
-  }
-
-  @Override
-  public Map<String, Object[]> packedModulesMapping() {
-    return PACKED_MODULES_MAPPING;
+    return ARCH_QWEN3;
   }
 
   @Override
@@ -60,103 +68,81 @@ public final class Qwen3ForCausalLM implements CausalLM {
 
   @Override
   public List<Attention> attentionLayers() {
-    return this.model.layers.stream()
-        .map(layer -> layer.selfAttn.attn)
+    return this.model.layers().stream()
+        .map(layer -> layer.selfAttn().attn())
         .toList();
   }
 
   @Override
-  public WeightSlot getParameter(String name) {
-    WeightSlot slot = this.parameters.get(name);
-    if (slot == null) {
-      throw new IllegalArgumentException("unknown parameter: " + name);
-    }
-    return slot;
+  public boolean equals(Object other) {
+    return this == other;
   }
 
   @Override
-  public boolean hasParameter(String name) {
-    return this.parameters.containsKey(name);
+  public int hashCode() {
+    return System.identityHashCode(this);
   }
 
-  @Override
-  public void seal() {
-    this.parameters.clear();
-  }
-
-  private void registerParameters() {
-    this.parameters.put("model.embed_tokens.weight",
-        WeightSlot.of(this.model.embedTokens::loadWeight));
-    for (int i = 0; i < this.model.layers.size(); i++) {
-      Qwen3DecoderLayer layer = this.model.layers.get(i);
-      String p = "model.layers." + i + ".";
-      this.parameters.put(p + "input_layernorm.weight",
-          WeightSlot.of(layer.inputLayernorm::setWeight));
-      this.parameters.put(p + "post_attention_layernorm.weight",
-          WeightSlot.of(layer.postAttentionLayernorm::setWeight));
-      this.parameters.put(p + "self_attn.qkv_proj.weight", WeightSlot.qkv(layer.selfAttn.qkvProj));
-      this.parameters.put(p + "self_attn.o_proj.weight",
-          WeightSlot.of(layer.selfAttn.oProj::loadWeight));
-      if (layer.selfAttn.qNorm != null) {
-        this.parameters.put(p + "self_attn.q_norm.weight",
-            WeightSlot.of(layer.selfAttn.qNorm::setWeight));
-        this.parameters.put(p + "self_attn.k_norm.weight",
-            WeightSlot.of(layer.selfAttn.kNorm::setWeight));
-      }
-      this.parameters.put(p + "mlp.gate_up_proj.weight", WeightSlot.merged(layer.mlp.gateUpProj));
-      this.parameters.put(p + "mlp.down_proj.weight",
-          WeightSlot.of(layer.mlp.downProj::loadWeight));
+  record Qwen3Attention(
+      Linear.Qkv qkvProj,
+      Linear.Row oProj,
+      RotaryEmbedding rotaryEmb,
+      Attention attn,
+      RMSNorm qNorm,
+      RMSNorm kNorm,
+      boolean qkvBias,
+      int numHeads,
+      int numKvHeads,
+      int headDim,
+      int qSize,
+      int kvSize
+  ) {
+    Qwen3Attention(Config.HfConfig config, WeightBag weights, int layerIndex) {
+      this(assemble(config, weights, layerIndex));
     }
-    this.parameters.put("model.norm.weight", WeightSlot.of(this.model.norm::setWeight));
-    this.parameters.put("lm_head.weight", WeightSlot.of(this.lmHead::loadWeight));
-  }
 
-  static final class Qwen3Attention {
-    final Linear.Qkv qkvProj;
-    final Linear.Row oProj;
-    final RotaryEmbedding rotaryEmb;
-    final Attention attn;
-    final RMSNorm qNorm;
-    final RMSNorm kNorm;
-    final boolean qkvBias;
-    final int numHeads;
-    final int numKvHeads;
-    final int headDim;
-    final int qSize;
-    final int kvSize;
+    private Qwen3Attention(Qwen3Attention assembled) {
+      this(
+          assembled.qkvProj, assembled.oProj, assembled.rotaryEmb, assembled.attn,
+          assembled.qNorm, assembled.kNorm, assembled.qkvBias,
+          assembled.numHeads, assembled.numKvHeads, assembled.headDim,
+          assembled.qSize, assembled.kvSize);
+    }
 
-    Qwen3Attention(Config.HfConfig config, int layerIndex) {
-      int tpSize = 1;
-      this.numHeads = config.numAttentionHeads() / tpSize;
-      this.numKvHeads = config.numKeyValueHeads() / tpSize;
-      this.headDim = config.headDim();
-      this.qSize = this.numHeads * this.headDim;
-      this.kvSize = this.numKvHeads * this.headDim;
-      float scaling = (float) Math.pow(this.headDim, -0.5);
-      this.qkvBias = config.attentionBias();
+    private static Qwen3Attention assemble(
+        Config.HfConfig config,
+        WeightBag weights,
+        int layerIndex
+    ) {
+      int numHeads = config.numAttentionHeads();
+      int numKvHeads = config.numKeyValueHeads();
+      int headDim = config.headDim();
+      int qSize = numHeads * headDim;
+      int kvSize = numKvHeads * headDim;
+      float scaling = (float) Math.pow(headDim, -0.5);
+      boolean qkvBias = config.attentionBias();
       float ropeTheta = config.ropeTheta();
       if (config.ropeScaling() != null && config.ropeScaling().containsKey("rope_theta")) {
-        ropeTheta =
-            com.igormaznitsa.nanollvm.utils.Json.asFloat(config.ropeScaling().get("rope_theta"),
-                ropeTheta);
+        ropeTheta = Json.asFloat(config.ropeScaling().get("rope_theta"), ropeTheta);
       }
-      this.qkvProj = new Linear.Qkv(
-          config.hiddenSize(), this.headDim,
-          config.numAttentionHeads(), config.numKeyValueHeads(), this.qkvBias
-      );
-      this.oProj =
-          new Linear.Row(config.numAttentionHeads() * this.headDim, config.hiddenSize(), false);
-      this.rotaryEmb =
-          RotaryEmbedding.get(this.headDim, this.headDim, config.maxPositionEmbeddings(),
-              ropeTheta);
-      this.attn = new Attention(this.numHeads, this.headDim, scaling, this.numKvHeads, layerIndex);
-      if (!this.qkvBias) {
-        this.qNorm = new RMSNorm(this.headDim, config.rmsNormEps());
-        this.kNorm = new RMSNorm(this.headDim, config.rmsNormEps());
-      } else {
-        this.qNorm = null;
-        this.kNorm = null;
-      }
+      String p = selfAttn(layerIndex);
+      Tensor qkvWeight = weights.require(p + QKV_PROJ_WEIGHT);
+      Linear.Qkv qkvProj = qkvBias
+          ? new Linear.Qkv(qkvWeight, Tensor.zeros(qkvWeight.size(0)))
+          : new Linear.Qkv(qkvWeight);
+      return new Qwen3Attention(
+          qkvProj,
+          new Linear.Row(weights.require(p + O_PROJ_WEIGHT)),
+          RotaryEmbedding.get(headDim, headDim, config.maxPositionEmbeddings(), ropeTheta),
+          new Attention(numHeads, headDim, scaling, numKvHeads, layerIndex),
+          qkvBias ? null : new RMSNorm(weights.require(p + Q_NORM_WEIGHT), config.rmsNormEps()),
+          qkvBias ? null : new RMSNorm(weights.require(p + K_NORM_WEIGHT), config.rmsNormEps()),
+          qkvBias,
+          numHeads,
+          numKvHeads,
+          headDim,
+          qSize,
+          kvSize);
     }
 
     Tensor forward(Tensor positions, Tensor hiddenStates) {
@@ -180,20 +166,23 @@ public final class Qwen3ForCausalLM implements CausalLM {
     }
   }
 
-  static final class Qwen3MLP {
-    final Linear.Merged gateUpProj;
-    final Linear.Row downProj;
+  record Qwen3MLP(Linear.Merged gateUpProj, Linear.Row downProj) {
+    Qwen3MLP(Config.HfConfig config, WeightBag weights, int layerIndex) {
+      this(assemble(config, weights, layerIndex));
+    }
 
-    Qwen3MLP(Config.HfConfig config) {
+    private Qwen3MLP(Qwen3MLP assembled) {
+      this(assembled.gateUpProj, assembled.downProj);
+    }
+
+    private static Qwen3MLP assemble(Config.HfConfig config, WeightBag weights, int layerIndex) {
       if (!"silu".equals(config.effectiveActivation()) && !"silu".equals(config.hiddenAct())) {
         throw new IllegalArgumentException("only silu supported for Qwen3");
       }
-      this.gateUpProj = new Linear.Merged(
-          config.hiddenSize(),
-          new int[] {config.intermediateSize(), config.intermediateSize()},
-          false
-      );
-      this.downProj = new Linear.Row(config.intermediateSize(), config.hiddenSize(), false);
+      String p = mlp(layerIndex);
+      return new Qwen3MLP(
+          new Linear.Merged(weights.require(p + GATE_UP_PROJ_WEIGHT)),
+          new Linear.Row(weights.require(p + DOWN_PROJ_WEIGHT)));
     }
 
     Tensor forward(Tensor x) {
@@ -201,17 +190,33 @@ public final class Qwen3ForCausalLM implements CausalLM {
     }
   }
 
-  static final class Qwen3DecoderLayer {
-    final Qwen3Attention selfAttn;
-    final Qwen3MLP mlp;
-    final RMSNorm inputLayernorm;
-    final RMSNorm postAttentionLayernorm;
+  record Qwen3DecoderLayer(
+      Qwen3Attention selfAttn,
+      Qwen3MLP mlp,
+      RMSNorm inputLayernorm,
+      RMSNorm postAttentionLayernorm
+  ) {
+    Qwen3DecoderLayer(Config.HfConfig config, WeightBag weights, int layerIndex) {
+      this(assemble(config, weights, layerIndex));
+    }
 
-    Qwen3DecoderLayer(Config.HfConfig config, int layerIndex) {
-      this.selfAttn = new Qwen3Attention(config, layerIndex);
-      this.mlp = new Qwen3MLP(config);
-      this.inputLayernorm = new RMSNorm(config.hiddenSize(), config.rmsNormEps());
-      this.postAttentionLayernorm = new RMSNorm(config.hiddenSize(), config.rmsNormEps());
+    private Qwen3DecoderLayer(Qwen3DecoderLayer assembled) {
+      this(
+          assembled.selfAttn, assembled.mlp,
+          assembled.inputLayernorm, assembled.postAttentionLayernorm);
+    }
+
+    private static Qwen3DecoderLayer assemble(
+        Config.HfConfig config,
+        WeightBag weights,
+        int layerIndex
+    ) {
+      String p = layer(layerIndex);
+      return new Qwen3DecoderLayer(
+          new Qwen3Attention(config, weights, layerIndex),
+          new Qwen3MLP(config, weights, layerIndex),
+          new RMSNorm(weights.require(p + INPUT_LAYERNORM), config.rmsNormEps()),
+          new RMSNorm(weights.require(p + POST_ATTENTION_LAYERNORM), config.rmsNormEps()));
     }
 
     Tensor[] forward(Tensor positions, Tensor hiddenStates, Tensor residual) {
@@ -230,17 +235,28 @@ public final class Qwen3ForCausalLM implements CausalLM {
     }
   }
 
-  static final class Qwen3Model {
-    final VocabParallelEmbedding embedTokens;
-    final List<Qwen3DecoderLayer> layers = new ArrayList<>();
-    final RMSNorm norm;
+  record Qwen3Model(
+      VocabParallelEmbedding embedTokens,
+      List<Qwen3DecoderLayer> layers,
+      RMSNorm norm
+  ) {
+    Qwen3Model(Config.HfConfig config, WeightBag weights) {
+      this(assemble(config, weights));
+    }
 
-    Qwen3Model(Config.HfConfig config) {
-      this.embedTokens = new VocabParallelEmbedding(config.vocabSize(), config.hiddenSize());
+    private Qwen3Model(Qwen3Model assembled) {
+      this(assembled.embedTokens, assembled.layers, assembled.norm);
+    }
+
+    private static Qwen3Model assemble(Config.HfConfig config, WeightBag weights) {
+      List<Qwen3DecoderLayer> built = new ArrayList<>(config.numHiddenLayers());
       for (int i = 0; i < config.numHiddenLayers(); i++) {
-        this.layers.add(new Qwen3DecoderLayer(config, i));
+        built.add(new Qwen3DecoderLayer(config, weights, i));
       }
-      this.norm = new RMSNorm(config.hiddenSize(), config.rmsNormEps());
+      return new Qwen3Model(
+          new VocabParallelEmbedding(weights.require(EMBED_TOKENS)),
+          List.copyOf(built),
+          new RMSNorm(weights.require(MODEL_NORM), config.rmsNormEps()));
     }
 
     Tensor forward(Tensor inputIds, Tensor positions) {

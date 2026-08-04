@@ -10,6 +10,10 @@ import com.igormaznitsa.nanollvm.engine.ModelRunner;
 import com.igormaznitsa.nanollvm.engine.Scheduler;
 import com.igormaznitsa.nanollvm.engine.Sequence;
 import com.igormaznitsa.nanollvm.prompts.ChatPrompts;
+import com.igormaznitsa.nanollvm.rag.PreparedRag;
+import com.igormaznitsa.nanollvm.rag.RagFactory;
+import com.igormaznitsa.nanollvm.rag.RagIndex;
+import com.igormaznitsa.nanollvm.rag.RagSession;
 import com.igormaznitsa.nanollvm.tokenizer.Tokenizer;
 
 import java.nio.file.Path;
@@ -44,6 +48,7 @@ import java.util.stream.IntStream;
  *   <li>{@link #chat()} / {@link #chatOnce(String)} — chat template, history, reply parsing</li>
  *   <li>{@link #complete(String)} — raw continuation of a prompt string (no chat template)</li>
  *   <li>{@link #generate(List, SamplingParams)} — batch / streaming engine API</li>
+ *   <li>{@link #rag(RagIndex)} — retrieval over a shared {@link PreparedRag} (or any index)</li>
  * </ul>
  *
  * <h2>Defaults</h2>
@@ -63,6 +68,8 @@ import java.util.stream.IntStream;
  * @see ChatSession
  * @see EngineIo
  * @see SamplingParams
+ * @see RagFactory
+ * @see PreparedRag
  */
 public final class LLM implements AutoCloseable {
 
@@ -577,6 +584,21 @@ public final class LLM implements AutoCloseable {
    */
   public ChatSession chat(int maxTokens) {
     return ChatSession.open(this, maxTokens);
+  }
+
+  /**
+   * Opens a retrieval-augmented session over {@code index}
+   * (a {@link PreparedRag} from {@link RagFactory}, or any {@link RagIndex}).
+   */
+  public RagSession rag(RagIndex index) {
+    return RagSession.open(this, index);
+  }
+
+  /**
+   * Opens a RAG session with model-aware sampling limited to {@code maxTokens}.
+   */
+  public RagSession rag(RagIndex index, int maxTokens) {
+    return RagSession.open(this, index, maxTokens);
   }
 
   /**

@@ -1,5 +1,6 @@
 package com.igormaznitsa.nanollvm.tokenizer;
 
+import static com.igormaznitsa.nanollvm.utils.NanoVllmProps.CONFIG_JSON;
 import static java.nio.charset.StandardCharsets.UTF_8;
 
 import com.igormaznitsa.nanollvm.prompts.ChatPrompts;
@@ -249,7 +250,7 @@ public final class Tokenizer {
       return true;
     }
     if (vocab.containsKey("<start_of_turn>") || vocab.containsKey("<bos>")) {
-      Path cfg = modelDir.resolve("config.json");
+      Path cfg = modelDir.resolve(CONFIG_JSON);
       if (Files.isRegularFile(cfg)) {
         String mt = Json.asString(Json.parseObject(Files.readString(cfg)).get("model_type"));
         if (mt != null && mt.toLowerCase(Locale.ROOT).contains("gemma")) {
@@ -383,7 +384,7 @@ public final class Tokenizer {
   }
 
   private static Tokenizer bare(Path modelDir) throws IOException {
-    Path config = modelDir.resolve("config.json");
+    Path config = modelDir.resolve(CONFIG_JSON);
     int vocabSize = 151936;
     if (Files.isRegularFile(config)) {
       vocabSize =

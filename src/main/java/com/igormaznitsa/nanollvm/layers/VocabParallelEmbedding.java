@@ -1,31 +1,31 @@
 package com.igormaznitsa.nanollvm.layers;
 
+import static java.util.Objects.requireNonNull;
+
+import com.igormaznitsa.nanollvm.internal.Context;
 import com.igormaznitsa.nanollvm.tensor.Ops;
 import com.igormaznitsa.nanollvm.tensor.Tensor;
-import com.igormaznitsa.nanollvm.utils.Context;
 
+/**
+ * Immutable token embedding table. Weight matrix is fixed at construction.
+ */
 public class VocabParallelEmbedding {
 
   private final int numEmbeddings;
   private final int embeddingDim;
-  protected Tensor weight;
+  protected final Tensor weight;
 
-  public VocabParallelEmbedding(int numEmbeddings, int embeddingDim) {
-    this.numEmbeddings = numEmbeddings;
-    this.embeddingDim = embeddingDim;
-    this.weight = Tensor.zeros(numEmbeddings, embeddingDim);
+  public VocabParallelEmbedding(Tensor weight) {
+    this.weight = requireNonNull(weight, "weight");
+    if (weight.ndim() != 2) {
+      throw new IllegalArgumentException("embedding weight must be rank 2, got " + weight.ndim());
+    }
+    this.numEmbeddings = weight.size(0);
+    this.embeddingDim = weight.size(1);
   }
 
   public Tensor weight() {
     return this.weight;
-  }
-
-  public void setWeight(Tensor weight) {
-    this.weight = weight;
-  }
-
-  public void loadWeight(Tensor loaded) {
-    this.weight.copyFrom(loaded);
   }
 
   public Tensor forward(Tensor inputIds) {
@@ -42,8 +42,8 @@ public class VocabParallelEmbedding {
 
   public static final class ParallelLMHead extends VocabParallelEmbedding {
 
-    public ParallelLMHead(int numEmbeddings, int embeddingDim) {
-      super(numEmbeddings, embeddingDim);
+    public ParallelLMHead(Tensor weight) {
+      super(weight);
     }
 
     @Override

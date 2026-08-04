@@ -1,5 +1,7 @@
 package com.igormaznitsa.nanollvm.layers;
 
+import static java.util.Objects.requireNonNull;
+
 import com.igormaznitsa.nanollvm.tensor.Ops;
 import com.igormaznitsa.nanollvm.tensor.Tensor;
 
@@ -11,27 +13,26 @@ public final class Norms {
   private Norms() {
   }
 
+  /**
+   * Immutable RMSNorm: scale vector is fixed at construction.
+   */
   public static final class RMSNorm {
     private final float eps;
     private final boolean gemmaStyle;
-    private Tensor weight;
+    private final Tensor weight;
 
-    public RMSNorm(int hiddenSize, float eps) {
-      this(hiddenSize, eps, false);
+    public RMSNorm(Tensor weight, float eps) {
+      this(weight, eps, false);
     }
 
-    public RMSNorm(int hiddenSize, float eps, boolean gemmaStyle) {
+    public RMSNorm(Tensor weight, float eps, boolean gemmaStyle) {
+      this.weight = requireNonNull(weight, "weight");
       this.eps = eps;
       this.gemmaStyle = gemmaStyle;
-      this.weight = gemmaStyle ? Tensor.zeros(hiddenSize) : Tensor.ones(hiddenSize);
     }
 
     public Tensor weight() {
       return this.weight;
-    }
-
-    public void setWeight(Tensor weight) {
-      this.weight = weight;
     }
 
     public Tensor forward(Tensor x) {
