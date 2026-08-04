@@ -26,6 +26,7 @@
 - Qwen3/Gemma3 (+ nested Attention/MLP/DecoderLayer/Model) are `record`s with identity equals; factory ctors assemble then delegate to canonical
 - **Shared constants:** `models.WeightNames` (HF paths, arch ids, packed-module map); `utils.NanoVllmProps` (sys props/env/`config.json`)
 - **JPMS:** `ModelLoader`/`SafetensorsReader`/`Context` moved to non-exported `internal` (utils export no longer leaks models/tensor/engine types)
+- **Pure Java JSON:** removed Gson; `utils.Json` now has an in-project recursive-descent parser (objects/arrays/strings/escapes/numbers/bool/null, BigInteger fallback for huge ints)
 - **Text RAG:** `RagFactory` → `PassagePreparser` (model/search text, pre-TF) → inverted `Bm25Index` in shareable `PreparedRag`
 - Query path scores only posting-list candidates; load once, share across LLMs
 - Query-term coverage rerank + question-first compact prompt; rich fact cards for Grimm + Red Riding Hood
@@ -80,8 +81,8 @@
 - Library: `Model model = ModelFactory.make(path); LLM.builder(model).systemPrompt(…).build()` or path convenience `LLM.builder(path).build()`; RAG: `PreparedRag rag = RagFactory.make(dir); llm.rag(rag)` (shareable like Model)
 
 - CLI progress: `.withSystemIo()`
-- Plugins (pom): compiler 3.15.0, surefire 3.5.5, jar 3.5.0, exec 3.6.3; JUnit 6.0.2; Gson 2.13.2
-- `module-info`: exports `com.igormaznitsa.nanollvm`, `chat`, `rag`, `tokenizer`, `prompts`, `utils`; requires `com.google.gson`, `requires static jdk.incubator.vector`; private: `engine`/`layers`/`models`/`tensor`/`internal`
+- Plugins (pom): compiler 3.15.0, surefire 3.5.5, jar 3.5.0, exec 3.6.3; JUnit 6.0.2
+- `module-info`: exports `com.igormaznitsa.nanollvm`, `chat`, `rag`, `tokenizer`, `prompts`, `utils`; requires `static jdk.incubator.vector`; private: `engine`/`layers`/`models`/`tensor`/`internal`
 - Vector flags: `.mvn/jvm.config` for Maven/`exec:java`; surefire uses `jvm.module.args` (exec:java has no `jvmArgs` in 3.6.x)
 
 

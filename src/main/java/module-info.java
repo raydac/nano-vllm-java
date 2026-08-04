@@ -8,7 +8,6 @@
  * (optional at runtime — scalar kernels are used when it is absent).
  */
 module com.igormaznitsa.nanollvm {
-  requires com.google.gson;
   requires static jdk.incubator.vector;
 
   exports com.igormaznitsa.nanollvm;

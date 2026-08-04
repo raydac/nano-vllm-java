@@ -12,13 +12,13 @@ How it works (introductory academic guide): see [`description.md`](description.m
   `-Dnanovllm.arch`
 * HuggingFace `config.json` + `.safetensors` weight loading
 * BPE tokenizer loader for `tokenizer.json` (GPT-2 byte BPE and Metaspace/`▁` for Gemma)
-* **No native / CUDA / PyTorch** — JDK 21+ plus **Gson** for JSON (HF configs / tokenizer / safetensors headers)
+* **No native / CUDA / PyTorch** — pure Java 21+ (including in-project JSON parsing for HF configs / tokenizer /
+  safetensors headers)
 
 ## Requirements
 
 * JDK 21+
 * Maven 3.9+ (`mvn` on `PATH`)
-* Gson (pulled by Maven)
 
 ## Maven coordinates
 
@@ -170,7 +170,7 @@ com.igormaznitsa.nanollvm          (~24 teaching-oriented sources)
 ├── models/     Qwen3ForCausalLM, Gemma3ForCausalLM
 ├── tensor/     Tensor, Ops, VectorMath
 ├── tokenizer/  HuggingFace BPE
-└── utils/      Json, SafetensorsReader, ModelLoader, Context, BundledModels
+└── utils/      Json, BundledModels, BundledRag, NanoVllmProps
 ```
 
 ## License
