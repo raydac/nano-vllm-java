@@ -1,37 +1,56 @@
+[![License Apache 2.0](https://img.shields.io/badge/license-Apache%20License%202.0-green.svg)](http://www.apache.org/licenses/LICENSE-2.0)
+[![Java 21+](https://img.shields.io/badge/java-21.0%2b-green.svg)](https://bell-sw.com/pages/downloads/)
+[![Maven 3.3.9+](https://img.shields.io/badge/maven-3.3.9%2b-green.svg)](https://maven.apache.org/)
+
 # Nano-vLLM (Java)
 
-Pure Java 21+ port of [nano-vllm](https://github.com/GeeeekExplorer/nano-vllm) — a lightweight vLLM-style offline
-inference engine.
+Pure **Java 21+** LLM inference engine: continuous batching, paged KV cache, and Hugging Face–compatible weight loading
+on **CPU only** — no CUDA, PyTorch, or third-party runtime libraries.
 
-How it works (introductory academic guide): see [`description.md`](description.md).
+Ideas in this project were inspired by the Python [nano-vllm](https://github.com/GeeeekExplorer/nano-vllm) educational
+engine.
 
-## Key Features
+For a guided tour of the design (scheduler, attention, tensors, RAG), see [`description.md`](description.md).
 
-* Continuous batching scheduler with paged KV cache and prefix caching
-* Pluggable causal LMs: **Qwen3** (default) and **Gemma3** (text), selected via path / config auto-detect /
-  `-Dnanovllm.arch`
-* HuggingFace `config.json` + `.safetensors` weight loading
-* BPE tokenizer loader for `tokenizer.json` (GPT-2 byte BPE and Metaspace/`▁` for Gemma)
-* **No native / CUDA / PyTorch** — pure Java 21+ (including in-project JSON parsing for HF configs / tokenizer /
-  safetensors headers)
+## Key features
+
+- Continuous batching scheduler with paged KV cache and prefix caching
+- **Qwen3** (default) and **Gemma3** text causal LMs; architecture from `config.json` or `-Dnanovllm.arch`
+- Loads HF `config.json`, `tokenizer.json`, and `.safetensors` weights
+- GPT-2 byte BPE and Gemma Metaspace BPE tokenizers
+- Optional **BM25 text RAG** over a local `rag/` corpus (used automatically by the Example CLI)
+- In-project JSON parser (no Gson or other JSON dependency)
 
 ## Requirements
 
-* JDK 21+
-* Maven 3.9+ (`mvn` on `PATH`)
+| Requirement                          | Notes                                                                      |
+|--------------------------------------|----------------------------------------------------------------------------|
+| **JDK 21+**                          | Language and runtime                                                       |
+| **Maven 3.9+**                       | Build and `exec:java` (`mvn` on `PATH`)                                    |
+| **~2–8 GB heap**                     | Model load; use `MAVEN_OPTS=-Xmx8g` for Qwen3-0.6B on modest machines      |
+| **Optional:** `jdk.incubator.vector` | Faster kernels; enabled via [`.mvn/jvm.config`](.mvn/jvm.config) for Maven |
 
-## Maven coordinates
+## Build
 
-|               |                                                                                |
-|---------------|--------------------------------------------------------------------------------|
-| GroupId       | `com.igormaznitsa`                                                             |
-| ArtifactId    | `nano-vllm-java`                                                               |
-| Version       | `0.2.0-SNAPSHOT`                                                               |
-| JPMS module   | `com.igormaznitsa.nanollvm`                                                    |
-| Java packages | `com.igormaznitsa.nanollvm` (+ `chat`, `rag`, `tokenizer`, `prompts`, `utils`) |
+Clone the repository, then compile and test:
+
+```bash
+cd nano-vllm-java
+mvn test
+mvn package
+```
+
+Artifacts:
+
+- `target/nano-vllm-java-0.2.0-SNAPSHOT.jar` — library JAR (JPMS module `com.igormaznitsa.nanollvm`)
+- `target/classes/` — compiled module for development runs
+
+Tests use the Vector incubator module (`jvm.module.args` in the POM). Production runs should use the same flags
+(see [Run from the CLI](#run-from-the-cli)).
+
+### Use as a dependency
 
 ```xml
-
 <dependency>
   <groupId>com.igormaznitsa</groupId>
   <artifactId>nano-vllm-java</artifactId>
@@ -45,134 +64,206 @@ On the module path:
 requires com.igormaznitsa.nanollvm;
 ```
 
-Optional Vector API (faster kernels): add `jdk.incubator.vector` / `--add-modules jdk.incubator.vector`. Scalar kernels
-are used when that module is absent.
+## Download and load models
 
-## Build
+Weights are **not** committed to git. They live under the project-root `models/` directory (see [
+`models/README.md`](models/README.md)).
 
-```bash
-cd nano-vllm-java
-mvn -q test
-mvn -q package
-```
+### What a valid model directory contains
 
-## Model
-
-Weights live outside `src/` in the project-root `models/` folder (gitignored checkpoints, tracked download scripts):
+Each checkpoint folder must look like a standard Hugging Face snapshot:
 
 ```
-models/
-  README.md
-  download-qwen3-0.6b.sh
-  download-gemma3-270m.sh
-  Qwen3-0.6B/          # default (~1.5GB)
-  Gemma3-270M/         # optional; HF license + HF_TOKEN
+models/Qwen3-0.6B/
+  config.json
+  tokenizer.json
+  tokenizer_config.json
+  model.safetensors          # one or more *.safetensors
+  …                          # merges.txt / vocab.json as needed
 ```
+
+At load time, `ModelFactory` reads `config.json`, builds the graph (Qwen3 or Gemma3), merges packed weights from
+safetensors, and constructs the tokenizer. Architecture is inferred from `model_type` / `architectures` unless you set
+`-Dnanovllm.arch=qwen3|gemma3`.
+
+### Download scripts
+
+**Qwen3-0.6B (default, ~1.5 GB, no HF gate)**
 
 ```bash
 ./models/download-qwen3-0.6b.sh
-# optional Gemma (accept license, then HF_TOKEN / huggingface-cli login):
+```
+
+**Gemma3-270M (optional, license on Hugging Face)**
+
+Accept terms at [google/gemma-3-270m-it](https://huggingface.co/google/gemma-3-270m-it), then:
+
+```bash
+export HF_TOKEN=hf_…   # or: huggingface-cli login
 ./models/download-gemma3-270m.sh
 ```
 
-Windows: `.\models\download-qwen3-0.6b.ps1` / `.\models\download-gemma3-270m.ps1` (or `.cmd`).
+**Windows:** `.\models\download-qwen3-0.6b.ps1` / `.cmd` and the matching Gemma scripts.
 
-`Example` / `Bench` resolve `models/Qwen3-0.6B` by default via `BundledModels`.
+You can also point the engine at **any** local HF-style directory (your own path or another download).
 
-| Override    | Example                                                                                       |
-|-------------|-----------------------------------------------------------------------------------------------|
-| CLI         | `mvn … -Dexec.args=models/Gemma3-270M`                                                        |
-| Property    | `-Dnanovllm.model=models/Gemma3-270M`                                                         |
-| Force arch  | `-Dnanovllm.arch=gemma3` or `qwen3`                                                           |
-| Env         | `NANOVLLM_MODEL=models/Gemma3-270M`                                                           |
-| Models root | `-Dnanovllm.models.dir=/other/models` or `NANOVLLM_MODELS_DIR`                                |
-| RAG corpus  | project `rag/` folder (auto-loaded by `Example`); `-Dnanovllm.rag.dir=…` / `NANOVLLM_RAG_DIR` |
+### How the default model path is chosen
 
-## Quick Start
+`BundledModels.resolveDefault()` (used by `Example` and `Bench`) picks the model in this order:
 
-Interactive dialog (after model load). When `./rag` exists, Example uses BM25 RAG (`rag?>` prompt):
+1. **First CLI argument** — model path or name (e.g. `models/Gemma3-270M`)
+2. **System property** `-Dnanovllm.model=…`
+3. **Environment** `NANOVLLM_MODEL=…`
+4. **Default** `models/Qwen3-0.6B` under the models root
+
+The models root itself defaults to `./models`, overridable with `-Dnanovllm.models.dir=…` or `NANOVLLM_MODELS_DIR`.
+
+| Mechanism          | Example                                                             |
+|--------------------|---------------------------------------------------------------------|
+| CLI arg            | `mvn … -Dexec.args=models/Gemma3-270M`                              |
+| Property           | `-Dnanovllm.model=/data/hf/Qwen3-0.6B`                              |
+| Environment        | `NANOVLLM_MODEL=models/Gemma3-270M`                                 |
+| Models root        | `-Dnanovllm.models.dir=/opt/models`                                 |
+| Force architecture | `-Dnanovllm.arch=gemma3` (when auto-detect is wrong)                |
+| RAG corpus dir     | `-Dnanovllm.rag.dir=./docs` or `NANOVLLM_RAG_DIR` (default `./rag`) |
+
+If you start **without** any of (1)– (3), the Example CLI shows an interactive menu (Qwen / Gemma / exit).
+
+## Run from the CLI
+
+### Interactive chat (`Example`)
+
+Recommended entry point: multi-turn chat with streaming output. Thinking tokens go to **stderr** (dim cyan when color is
+enabled); the reply goes to **stdout**.
+
+```bash
+# After downloading Qwen3-0.6B — use enough heap for load + inference
+MAVEN_OPTS="-Xmx8g" mvn -q exec:java
+```
+
+Pick a model interactively, or pass it explicitly:
+
+```bash
+MAVEN_OPTS="-Xmx8g" mvn -q exec:java -Dexec.args="models/Gemma3-270M"
+```
+
+```bash
+NANOVLLM_MODEL=models/Qwen3-0.6B MAVEN_OPTS="-Xmx8g" mvn -q exec:java
+```
+
+**RAG mode:** if the directory `rag/` exists (the repo includes sample fairy-tale texts and fact cards), Example builds
+a shared BM25 index and uses the `rag?>` prompt. Otherwise it uses plain chat (`?>`).
+
+Example session:
 
 ```text
-rag?> What is the capital of France?
-assistant> ...
+Loading model from …/models/Qwen3-0.6B
+RAG: prepared BM25 over …/rag (… chunks, shared index)
+Type a message and press Enter. Commands: /exit  /quit  /clear
+
 rag?> What does nano-vllm-java run on?
-assistant> ...
+assistant> …
+(retrieved 2 chunk(s): facts-….md)
+
+rag?> /clear
+(conversation cleared; RAG index kept)
+
 rag?> /exit
 ```
 
-Without a RAG folder it falls back to plain chat (`?>`).
+| Command                          | Action                                      |
+|----------------------------------|---------------------------------------------|
+| `/exit`, `/quit`, `exit`, `quit` | Leave the program                           |
+| `/clear`                         | Reset chat history (RAG index stays loaded) |
 
-Or in code (library — quiet by default):
+**Display:** set `NO_COLOR=1` or `-Dnanovllm.color=false` to disable ANSI colors.
 
-```java
-Model model = ModelFactory.make(BundledModels.resolveDefault()); // load once, share freely
-try(
-LLM llm = LLM.builder(model)
-        .enforceEager(true)
-        .maxModelLen(2048)
-        .systemPrompt("Answer briefly and factually.") // optional
-        .build()){
+Maven note: `exec:java` runs in the **same JVM as Maven**; Vector API flags come from [
+`.mvn/jvm.config`](.mvn/jvm.config) (`--add-modules=jdk.incubator.vector`). The exec plugin does not fork, so
+`<jvmArgs>` in the POM are not applied — use `MAVEN_OPTS` for heap.
 
-// Multi-turn chat (history + template + truncation)
-String reply = llm.chat(256).send("Hello, Nano-vLLM.").answer();
+### Run the packaged JAR (module path)
 
-// One-shot chat
-String once = llm.chatOnce("What is 2+2?");
-
-// Raw completion (no chat template)
-String raw = llm.complete("The capital of France is");
-
-// Shared RAG: preprocess + index once, reuse across LLMs
-var rag = com.igormaznitsa.nanollvm.rag.RagFactory.make(Path.of("docs"));
-// or: RagFactory.of("Paris is the capital of France.", "Berlin is in Germany.");
-// or: RagFactory.builder().forTinyModels().addFolder(…).build();
-String answer = llm.rag(rag).topK(2).ask("What is the capital of France?");
-}
-
-// Path convenience still works: LLM.builder(path).build()
-// CLI / tools that want load progress:
-// ModelFactory.make(path, EngineIo.system()) or LLM.builder(path).withSystemIo().build()
-```
-
-**Library notes:** `Model` is immutable and shareable across many `LLM`s; one `LLM` per concurrent generate; call
-`llm.cancel()` to abort; optional `chat.timeout(Duration.ofSeconds(30))`; load failures throw `ModelLoadException`. Text
-RAG: `RagFactory` preparses documents once (`PassagePreparser` + inverted BM25) into a shareable `PreparedRag`; then
-`llm.rag(prepared)` on any number of models.
+After `mvn package`:
 
 ```bash
-# .mvn/jvm.config already adds jdk.incubator.vector for this project.
-# Extra heap for model load:
-MAVEN_OPTS="-Xmx8g" mvn -q exec:java -Dexec.mainClass=com.igormaznitsa.nanollvm.Example
+java --add-modules jdk.incubator.vector \
+  -Xmx8g \
+  -p target/nano-vllm-java-0.2.0-SNAPSHOT.jar \
+  -m com.igormaznitsa.nanollvm/com.igormaznitsa.nanollvm.Example \
+  models/Qwen3-0.6B
 ```
 
-Requires JDK 21+ with the Vector incubator module available. Surefire gets
-`--add-modules jdk.incubator.vector` via `jvm.module.args` in the POM; `exec:java`
-inherits JVM flags from `.mvn/jvm.config` (it cannot take `<jvmArgs>` — that goal is not forked).
+Replace the main class with `com.igormaznitsa.nanollvm.Bench` for throughput smoke tests.
 
-## Differences from Python
+### Benchmark (`Bench`)
 
-| Area            | Python             | Java                          |
-|-----------------|--------------------|-------------------------------|
-| Device          | CUDA + flash-attn  | CPU float32                   |
-| Tensor parallel | NCCL multi-process | `tensor_parallel_size=1` only |
-| CUDA graphs     | Supported          | Eager only                    |
-| Hash            | xxhash             | Pure-JDK block hash           |
-| Throughput      | GPU-class          | Educational / CPU baseline    |
+Loads the same default model and runs random token-id batches (scheduler / KV stress):
 
-## Layout
+```bash
+MAVEN_OPTS="-Xmx8g" mvn -q exec:java \
+  -Dexec.mainClass=com.igormaznitsa.nanollvm.Bench \
+  -Dexec.args="models/Qwen3-0.6B 8"
+```
+
+Second argument is the number of concurrent sequences (default `8`).
+
+## Library quick start
+
+Load once, share `Model` across many `LLM` instances; generation is not concurrent on a single `LLM` (use one instance
+per thread or call sequentially).
+
+```java
+import com.igormaznitsa.nanollvm.*;
+import com.igormaznitsa.nanollvm.utils.BundledModels;
+import java.nio.file.Path;
+
+Path modelDir = BundledModels.resolveDefault(); // or Path.of("models/Qwen3-0.6B")
+Model model = ModelFactory.make(modelDir);      // quiet; use EngineIo.system() for progress
+
+try(
+LLM llm = LLM.builder(model)
+    .enforceEager(true)
+    .maxModelLen(2048)
+    .systemPrompt("Answer briefly and factually.")
+    .build()){
+
+String reply = llm.chat(256).send("Hello.").answer();
+String once = llm.chatOnce("What is 2+2?");
+String completion = llm.complete("The capital of France is");
+}
+```
+
+**RAG:** index documents once, attach to any LLM:
+
+```java
+import com.igormaznitsa.nanollvm.rag.*;
+
+PreparedRag rag = RagFactory.make(Path.of("rag"));
+try(
+LLM llm = LLM.builder(model).build()){
+String answer = llm.rag(rag).topK(4).ask("Your question");
+}
+```
+
+See [`description.md`](description.md) §17 and package `com.igormaznitsa.nanollvm.rag` for retrieval options.
+
+## Source layout
 
 ```
-com.igormaznitsa.nanollvm          (~24 teaching-oriented sources)
-├── LLM / EngineIo / SamplingParams / SamplingDefaults / Example / Bench
-├── chat/       ChatSession, ChatMessage, ChatRole, StreamPrinter
-├── engine/     Scheduler, Sequence, BlockManager, ModelRunner
-├── layers/     Attention, Linear(+Qkv/Merged/…), Norms, Sampler, Embedding
-├── models/     Qwen3ForCausalLM, Gemma3ForCausalLM
-├── tensor/     Tensor, Ops, VectorMath
-├── tokenizer/  HuggingFace BPE
+com.igormaznitsa.nanollvm
+├── LLM, Model, ModelFactory, Example, Bench, …
+├── chat/       ChatSession, streaming, templates
+├── rag/        BM25 index, RagSession, RagFactory
+├── engine/     Scheduler, KV cache, ModelRunner
+├── layers/     Attention, Linear, norms, sampler
+├── models/     Qwen3 / Gemma3 causal LM graphs
+├── tensor/     Tensor, Ops, Vector/scalar kernels
+├── tokenizer/  HF BPE loader
+├── internal/   Safetensors loader, weight merge, inference Context (module-private)
 └── utils/      Json, BundledModels, BundledRag, NanoVllmProps
 ```
 
 ## License
 
-MIT (same as upstream nano-vllm).
+[Apache License 2.0](LICENSE).

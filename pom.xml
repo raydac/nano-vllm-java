@@ -17,6 +17,35 @@
         <jvm.module.args>--add-modules jdk.incubator.vector</jvm.module.args>
     </properties>
 
+    <inceptionYear>2026</inceptionYear>
+    <url>https://github.com/raydac/nano-vllm-java</url>
+
+    <licenses>
+        <license>
+            <name>The Apache Software License, Version 2.0</name>
+            <url>https://www.apache.org/licenses/LICENSE-2.0.txt</url>
+            <distribution>repo</distribution>
+        </license>
+    </licenses>
+
+    <developers>
+        <developer>
+            <id>raydac</id>
+            <name>Igor Maznitsa</name>
+            <email>rrg4400@gmail.com</email>
+            <url>https://www.igormaznitsa.com</url>
+            <timezone>+3</timezone>
+            <roles>
+                <role>Author</role>
+            </roles>
+        </developer>
+    </developers>
+
+    <organization>
+        <name>Igor Maznitsa</name>
+        <url>https://www.igormaznitsa.com</url>
+    </organization>
+
     <dependencies>
         <dependency>
             <groupId>org.junit.jupiter</groupId>
@@ -65,10 +94,6 @@
                 <artifactId>exec-maven-plugin</artifactId>
                 <version>3.6.3</version>
                 <configuration>
-                    <!--
-                      exec:java runs in the Maven JVM (no fork), so <jvmArgs> is not supported
-                      in 3.6.x. Vector API flags live in .mvn/jvm.config and/or MAVEN_OPTS.
-                    -->
                     <mainClass>com.igormaznitsa.nanollvm.Example</mainClass>
                 </configuration>
             </plugin>
