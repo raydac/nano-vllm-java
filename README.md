@@ -236,9 +236,9 @@ LLM llm = LLM.builder(model)
     .systemPrompt("Answer briefly and factually.")
     .build()){
 
-String reply = llm.chat(256).send("Hello.").answer();
-String once = llm.chatOnce("What is 2+2?");
-String completion = llm.complete("The capital of France is");
+  String reply = llm.chat(256).send("Hello.").answer();
+  String once = llm.chatOnce("What is 2+2?");
+  String completion = llm.complete("The capital of France is");
 }
 ```
 
@@ -250,8 +250,8 @@ import com.igormaznitsa.nanollvm.rag.*;
 
 PreparedRag rag = RagFactory.make(Path.of("rag"));
 try(
-LLM llm = LLM.builder(model).build()){
-String answer = llm.rag(rag).topK(4).ask("Your question");
+  LLM llm = LLM.builder(model).build()){
+  String answer = llm.rag(rag).topK(4).ask("Your question");
 }
 ```
 
