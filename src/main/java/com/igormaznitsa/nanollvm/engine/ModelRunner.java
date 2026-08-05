@@ -1,11 +1,11 @@
 package com.igormaznitsa.nanollvm.engine;
 
-import com.igormaznitsa.nanollvm.Config;
-import com.igormaznitsa.nanollvm.EngineIo;
-import com.igormaznitsa.nanollvm.Model;
 import com.igormaznitsa.nanollvm.internal.Context;
 import com.igormaznitsa.nanollvm.layers.Sampler;
+import com.igormaznitsa.nanollvm.llm.Config;
+import com.igormaznitsa.nanollvm.llm.EngineIo;
 import com.igormaznitsa.nanollvm.models.CausalLM;
+import com.igormaznitsa.nanollvm.models.Model;
 import com.igormaznitsa.nanollvm.tensor.Tensor;
 import java.util.ArrayList;
 import java.util.Arrays;

@@ -1,11 +1,8 @@
-package com.igormaznitsa.nanollvm;
+package com.igormaznitsa.nanollvm.exceptions;
 
 import java.time.Duration;
 
-/**
- * Thrown when a {@link LLM#generate} call exceeds its timeout.
- */
-public final class GenerationTimeoutException extends RuntimeException {
+public final class GenerationTimeoutException extends NanoLlvmException {
 
   private final Duration timeout;
 

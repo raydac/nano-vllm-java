@@ -1,4 +1,4 @@
-package com.igormaznitsa.nanollvm;
+package com.igormaznitsa.nanollvm.llm;
 
 import static java.util.Objects.requireNonNull;
 
@@ -9,13 +9,17 @@ import com.igormaznitsa.nanollvm.chat.ChatSession;
 import com.igormaznitsa.nanollvm.engine.ModelRunner;
 import com.igormaznitsa.nanollvm.engine.Scheduler;
 import com.igormaznitsa.nanollvm.engine.Sequence;
+import com.igormaznitsa.nanollvm.exceptions.GenerationCancelledException;
+import com.igormaznitsa.nanollvm.exceptions.GenerationTimeoutException;
+import com.igormaznitsa.nanollvm.exceptions.ModelLoadException;
+import com.igormaznitsa.nanollvm.models.Model;
+import com.igormaznitsa.nanollvm.models.ModelFactory;
 import com.igormaznitsa.nanollvm.prompts.ChatPrompts;
 import com.igormaznitsa.nanollvm.rag.PreparedRag;
 import com.igormaznitsa.nanollvm.rag.RagFactory;
 import com.igormaznitsa.nanollvm.rag.RagIndex;
 import com.igormaznitsa.nanollvm.rag.RagSession;
 import com.igormaznitsa.nanollvm.tokenizer.Tokenizer;
-
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;

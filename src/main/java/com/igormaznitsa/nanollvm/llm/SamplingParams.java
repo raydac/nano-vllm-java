@@ -1,4 +1,4 @@
-package com.igormaznitsa.nanollvm;
+package com.igormaznitsa.nanollvm.llm;
 
 public record SamplingParams(
     float temperature,

@@ -1,6 +1,6 @@
 package com.igormaznitsa.nanollvm.engine;
 
-import com.igormaznitsa.nanollvm.SamplingParams;
+import com.igormaznitsa.nanollvm.llm.SamplingParams;
 
 import java.util.ArrayList;
 import java.util.List;

@@ -214,7 +214,10 @@ Load once, share `Model` across many `LLM` instances; generation is not concurre
 per thread or call sequentially).
 
 ```java
-import com.igormaznitsa.nanollvm.*;
+import com.igormaznitsa.nanollvm.models.Model;
+import com.igormaznitsa.nanollvm.models.ModelFactory;
+import com.igormaznitsa.nanollvm.llm.EngineIo;
+import com.igormaznitsa.nanollvm.llm.LLM;
 import com.igormaznitsa.nanollvm.utils.BundledModels;
 import java.nio.file.Path;
 
@@ -237,6 +240,7 @@ String completion = llm.complete("The capital of France is");
 **RAG:** index documents once, attach to any LLM:
 
 ```java
+import com.igormaznitsa.nanollvm.llm.LLM;
 import com.igormaznitsa.nanollvm.rag.*;
 
 PreparedRag rag = RagFactory.make(Path.of("rag"));
@@ -252,12 +256,13 @@ See [`description.md`](description.md) §17 and package `com.igormaznitsa.nanoll
 
 ```
 com.igormaznitsa.nanollvm
-├── LLM, Model, ModelFactory, Example, Bench, …
+├── Example, Bench, …
+├── models/     Model, ModelFactory, Qwen3 / Gemma3 causal LM graphs
+├── llm/        LLM, Config, EngineIo, SamplingParams, SamplingDefaults
 ├── chat/       ChatSession, streaming, templates
 ├── rag/        BM25 index, RagSession, RagFactory
 ├── engine/     Scheduler, KV cache, ModelRunner
 ├── layers/     Attention, Linear, norms, sampler
-├── models/     Qwen3 / Gemma3 causal LM graphs
 ├── tensor/     Tensor, Ops, Vector/scalar kernels
 ├── tokenizer/  HF BPE loader
 ├── internal/   Safetensors loader, weight merge, inference Context (module-private)

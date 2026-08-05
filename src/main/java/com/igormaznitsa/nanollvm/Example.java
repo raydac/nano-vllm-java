@@ -5,6 +5,8 @@ import static com.igormaznitsa.nanollvm.utils.NanoVllmProps.PROP_COLOR;
 import static com.igormaznitsa.nanollvm.utils.NanoVllmProps.PROP_MODEL;
 
 import com.igormaznitsa.nanollvm.chat.ChatSession;
+import com.igormaznitsa.nanollvm.llm.LLM;
+import com.igormaznitsa.nanollvm.llm.SamplingParams;
 import com.igormaznitsa.nanollvm.rag.PreparedRag;
 import com.igormaznitsa.nanollvm.rag.RagFactory;
 import com.igormaznitsa.nanollvm.rag.RagHit;
@@ -99,6 +101,7 @@ public final class Example {
     boolean gemma = llm.tokenizer().isGemmaChat();
     int maxTokens = gemma ? RAG_MAX_TOKENS_GEMMA : RAG_MAX_TOKENS_DEFAULT;
     RagSession rag = llm.rag(prepared, maxTokens)
+        .maxTokensWhenNoHits(gemma ? MAX_NEW_TOKENS : RAG_MAX_TOKENS_DEFAULT)
         .topK(gemma ? RAG_TOP_K_GEMMA : RAG_TOP_K_DEFAULT)
         .maxContextChars(gemma ? RAG_CONTEXT_CHARS_GEMMA : RAG_CONTEXT_CHARS_DEFAULT)
         .sampling(new SamplingParams(gemma ? 0.2f : 0.6f, maxTokens, false, gemma ? 40 : 0,

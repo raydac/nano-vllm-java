@@ -2476,9 +2476,9 @@ You do not need to read every file. Use the tables to jump, then skim the named 
 ### Sample A — library use (what most apps call)
 
 ```java
-import com.igormaznitsa.nanollvm.LLM;
-import com.igormaznitsa.nanollvm.Model;
-import com.igormaznitsa.nanollvm.ModelFactory;
+import com.igormaznitsa.nanollvm.models.Model;
+import com.igormaznitsa.nanollvm.models.ModelFactory;
+import com.igormaznitsa.nanollvm.llm.LLM;
 import com.igormaznitsa.nanollvm.utils.BundledModels;
 
 import java.nio.file.Path;

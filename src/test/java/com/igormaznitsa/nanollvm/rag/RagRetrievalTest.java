@@ -33,4 +33,34 @@ class RagRetrievalTest {
     assertEquals(1, preferred.size());
     assertTrue(preferred.getFirst().chunk().text().contains("Jacob"));
   }
+
+  @Test
+  void offTopicCodingRequestDoesNotRetrieveOnWeakCorpusOverlap() {
+    Bm25Index index = Bm25Index.of(
+        "In 1829 the position should have been awarded by Jacob Grimm, "
+            + "but another person, one without any merit, was preferred. "
+            + "See also the text about their work.");
+    assertTrue(index.retrieve(
+        "write a Java program reading a file and printing its text lines one by one",
+        2).isEmpty());
+    assertTrue(index.retrieve("please write any Java program", 2).isEmpty());
+    assertFalse(index.retrieve("Jacob Grimm awarded position", 1).isEmpty());
+  }
+
+  @Test
+  void shortCodingFollowUpDoesNotInheritGrimmAnchor() {
+    assertTrue(RagRetrieval.needsAnchor("write a Java program without explanation"));
+    assertEquals(
+        "names of the Grimm Brothers\nwrite a Java program without explanation",
+        RagRetrieval.retrievalQuery(
+            "write a Java program without explanation",
+            "names of the Grimm Brothers"));
+
+    PreparedRag rag = RagFactory.of(
+        RagLoadOptions.defaults(),
+        "Jacob Grimm and Wilhelm Grimm were the Brothers Grimm. Their names are Jacob and Wilhelm.");
+    assertTrue(rag.bm25().isOutsideCorpus("write a Java program without explanation"));
+    assertFalse(rag.bm25().isOutsideCorpus("what are their names?"));
+    assertFalse(rag.retrieve("Jacob Wilhelm Grimm brothers names", 2).isEmpty());
+  }
 }

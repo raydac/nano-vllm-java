@@ -46,7 +46,11 @@ public final class RagPrompt {
       return q;
     }
     if (compact) {
-      return q + "\n\n" + context;
+      return q + """
+          
+          
+          Notes (use only if relevant; otherwise answer the request normally):
+          """ + context;
     }
     return """
         Context:

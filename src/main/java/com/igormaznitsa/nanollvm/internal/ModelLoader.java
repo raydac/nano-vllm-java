@@ -3,8 +3,8 @@ package com.igormaznitsa.nanollvm.internal;
 import static com.igormaznitsa.nanollvm.models.WeightNames.GATE_UP_PROJ;
 import static com.igormaznitsa.nanollvm.models.WeightNames.QKV_PROJ;
 
-import com.igormaznitsa.nanollvm.Config;
-import com.igormaznitsa.nanollvm.EngineIo;
+import com.igormaznitsa.nanollvm.llm.Config;
+import com.igormaznitsa.nanollvm.llm.EngineIo;
 import com.igormaznitsa.nanollvm.models.WeightBag;
 import com.igormaznitsa.nanollvm.models.WeightSchema;
 import com.igormaznitsa.nanollvm.tensor.Tensor;

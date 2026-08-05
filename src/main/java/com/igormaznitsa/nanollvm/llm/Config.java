@@ -1,8 +1,9 @@
-package com.igormaznitsa.nanollvm;
+package com.igormaznitsa.nanollvm.llm;
 
 import static com.igormaznitsa.nanollvm.utils.NanoVllmProps.CONFIG_JSON;
 import static java.util.Objects.requireNonNull;
 
+import com.igormaznitsa.nanollvm.models.Model;
 import com.igormaznitsa.nanollvm.utils.Json;
 import java.io.IOException;
 import java.nio.file.Files;

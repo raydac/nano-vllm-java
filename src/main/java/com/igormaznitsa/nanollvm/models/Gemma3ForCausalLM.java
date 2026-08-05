@@ -19,16 +19,15 @@ import static com.igormaznitsa.nanollvm.models.WeightNames.mlp;
 import static com.igormaznitsa.nanollvm.models.WeightNames.selfAttn;
 import static java.util.Objects.requireNonNull;
 
-import com.igormaznitsa.nanollvm.Config;
 import com.igormaznitsa.nanollvm.layers.Attention;
 import com.igormaznitsa.nanollvm.layers.Linear;
 import com.igormaznitsa.nanollvm.layers.Norms.RMSNorm;
 import com.igormaznitsa.nanollvm.layers.Norms.RotaryEmbedding;
 import com.igormaznitsa.nanollvm.layers.VocabParallelEmbedding;
 import com.igormaznitsa.nanollvm.layers.VocabParallelEmbedding.ParallelLMHead;
+import com.igormaznitsa.nanollvm.llm.Config;
 import com.igormaznitsa.nanollvm.tensor.Ops;
 import com.igormaznitsa.nanollvm.tensor.Tensor;
-
 import java.util.ArrayList;
 import java.util.List;
 

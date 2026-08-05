@@ -1,13 +1,13 @@
-package com.igormaznitsa.nanollvm;
+package com.igormaznitsa.nanollvm.models;
 
 import static com.igormaznitsa.nanollvm.utils.NanoVllmProps.CONFIG_JSON;
 import static java.util.Objects.requireNonNull;
 
+import com.igormaznitsa.nanollvm.exceptions.ModelLoadException;
 import com.igormaznitsa.nanollvm.internal.ModelLoader;
-import com.igormaznitsa.nanollvm.models.CausalLM;
-import com.igormaznitsa.nanollvm.models.CausalLMFactory;
-import com.igormaznitsa.nanollvm.models.WeightBag;
-import com.igormaznitsa.nanollvm.models.WeightSchema;
+import com.igormaznitsa.nanollvm.llm.Config;
+import com.igormaznitsa.nanollvm.llm.EngineIo;
+import com.igormaznitsa.nanollvm.llm.LLM;
 import com.igormaznitsa.nanollvm.tensor.VectorMath;
 import com.igormaznitsa.nanollvm.tokenizer.Tokenizer;
 import java.io.IOException;

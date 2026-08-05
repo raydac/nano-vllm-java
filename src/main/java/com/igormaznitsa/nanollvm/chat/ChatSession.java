@@ -2,9 +2,9 @@ package com.igormaznitsa.nanollvm.chat;
 
 import static java.util.Objects.requireNonNull;
 
-import com.igormaznitsa.nanollvm.LLM;
-import com.igormaznitsa.nanollvm.SamplingDefaults;
-import com.igormaznitsa.nanollvm.SamplingParams;
+import com.igormaznitsa.nanollvm.llm.LLM;
+import com.igormaznitsa.nanollvm.llm.SamplingDefaults;
+import com.igormaznitsa.nanollvm.llm.SamplingParams;
 import com.igormaznitsa.nanollvm.prompts.ChatPrompts;
 import com.igormaznitsa.nanollvm.tokenizer.Tokenizer;
 
@@ -48,6 +48,10 @@ public final class ChatSession {
   public ChatSession sampling(SamplingParams samplingParams) {
     this.samplingParams = requireNonNull(samplingParams, "samplingParams");
     return this;
+  }
+
+  public SamplingParams samplingParams() {
+    return this.samplingParams;
   }
 
   public ChatSession timeout(Duration timeout) {

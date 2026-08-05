@@ -99,6 +99,7 @@ class RagUnitTest {
     assertTrue(prompt.contains("The Nile is a major river in Africa."));
     assertTrue(prompt.contains("what is Nile?"));
     assertTrue(prompt.indexOf("what is Nile?") < prompt.indexOf("The Nile is a major river"));
+    assertTrue(prompt.contains("Notes (use only if relevant"));
     assertFalse(prompt.contains("If the context is insufficient"));
     assertFalse(prompt.contains("previous answer was wrong"));
   }

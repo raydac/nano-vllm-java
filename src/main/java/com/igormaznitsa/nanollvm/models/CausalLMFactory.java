@@ -5,7 +5,7 @@ import static com.igormaznitsa.nanollvm.models.WeightNames.ARCH_QWEN3;
 import static com.igormaznitsa.nanollvm.utils.NanoVllmProps.PROP_ARCH;
 import static java.util.Locale.ROOT;
 
-import com.igormaznitsa.nanollvm.Config;
+import com.igormaznitsa.nanollvm.llm.Config;
 
 import java.util.List;
 

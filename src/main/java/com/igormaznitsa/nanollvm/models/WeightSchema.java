@@ -21,7 +21,7 @@ import static com.igormaznitsa.nanollvm.models.WeightNames.mlp;
 import static com.igormaznitsa.nanollvm.models.WeightNames.selfAttn;
 import static java.util.Objects.requireNonNull;
 
-import com.igormaznitsa.nanollvm.Config;
+import com.igormaznitsa.nanollvm.llm.Config;
 
 import java.util.LinkedHashSet;
 import java.util.Map;

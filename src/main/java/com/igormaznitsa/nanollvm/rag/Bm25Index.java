@@ -23,6 +23,7 @@ public final class Bm25Index implements RagIndex {
   private final List<PreparedPassage> passages;
   private final Map<String, List<Posting>> inverted;
   private final Map<String, Double> idf;
+  private final Map<String, Integer> docFreq;
   private final double avgDocLen;
   private final int docCount;
 
@@ -30,11 +31,13 @@ public final class Bm25Index implements RagIndex {
       List<PreparedPassage> passages,
       Map<String, List<Posting>> inverted,
       Map<String, Double> idf,
+      Map<String, Integer> docFreq,
       double avgDocLen
   ) {
     this.passages = List.copyOf(passages);
     this.inverted = Map.copyOf(inverted);
     this.idf = Map.copyOf(idf);
+    this.docFreq = Map.copyOf(docFreq);
     this.avgDocLen = avgDocLen;
     this.docCount = passages.size();
   }
@@ -81,7 +84,7 @@ public final class Bm25Index implements RagIndex {
     }
 
     double avg = totalTokens / (double) passages.size();
-    return new Bm25Index(passages, frozenPostings, idf, Math.max(avg, 1.0));
+    return new Bm25Index(passages, frozenPostings, idf, Map.copyOf(docFreq), Math.max(avg, 1.0));
   }
 
   public static Bm25Index of(String... texts) {
@@ -115,6 +118,15 @@ public final class Bm25Index implements RagIndex {
     return PassagePreparser.tokenize(text);
   }
 
+  List<String> selectedQueryTerms(String query) {
+    return RagQueryTerms.select(this.docFreq, this.docCount, query);
+  }
+
+  boolean isOutsideCorpus(String query) {
+    List<String> raw = List.copyOf(new LinkedHashSet<>(PassagePreparser.tokenize(query)));
+    return RagQueryTerms.queryOutsideCorpus(this.docFreq, raw);
+  }
+
   public List<PreparedPassage> passages() {
     return this.passages;
   }
@@ -134,8 +146,12 @@ public final class Bm25Index implements RagIndex {
     if (topK <= 0) {
       throw new IllegalArgumentException("topK must be > 0");
     }
-    List<String> terms = PassagePreparser.tokenize(query);
+    List<String> terms = RagQueryTerms.select(this.docFreq, this.docCount, query);
     if (terms.isEmpty()) {
+      return List.of();
+    }
+    int rawDistinct = new LinkedHashSet<>(PassagePreparser.tokenize(query)).size();
+    if (RagQueryTerms.queryTooBroadForCorpus(rawDistinct, terms)) {
       return List.of();
     }
 
@@ -154,9 +170,13 @@ public final class Bm25Index implements RagIndex {
 
     List<RagHit> scored = new ArrayList<>(candidates.size());
     for (int docId : candidates) {
+      PreparedPassage passage = this.passages.get(docId);
+      if (!RagQueryTerms.qualifies(passage, terms)) {
+        continue;
+      }
       double score = this.scoreDocument(docId, terms);
       if (score > 0.0) {
-        scored.add(new RagHit(this.passages.get(docId).chunk(), score));
+        scored.add(new RagHit(passage.chunk(), score));
       }
     }
     scored.sort(Comparator.comparingDouble(RagHit::score).reversed());

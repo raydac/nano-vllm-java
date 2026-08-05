@@ -95,7 +95,10 @@ public final class PassagePreparser {
     List<String> tokens = new ArrayList<>();
     var matcher = TOKEN.matcher(text.toLowerCase(Locale.ROOT));
     while (matcher.find()) {
-      tokens.add(matcher.group());
+      String token = matcher.group();
+      if (token.length() > 1) {
+        tokens.add(token);
+      }
     }
     return tokens;
   }

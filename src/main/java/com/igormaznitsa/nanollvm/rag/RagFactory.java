@@ -9,7 +9,7 @@ import java.util.Set;
 
 /**
  * Loads and preprocesses documents into a shareable {@link PreparedRag}.
- * Analogous to {@link com.igormaznitsa.nanollvm.ModelFactory} for weights.
+ * Analogous to {@link com.igormaznitsa.nanollvm.models.ModelFactory} for weights.
  *
  * <p>Preprocessing is document-side only: section titles, sentence passages, load-time
  * preparsing (model vs search text, term frequencies), inverted BM25 — not user-reply rules.

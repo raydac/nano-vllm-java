@@ -34,10 +34,6 @@ public final class PreparedRag implements RagIndex {
     this.corpus = TextCorpus.ofChunks(this.passages.stream().map(PreparedPassage::chunk).toList());
   }
 
-  static List<String> distinctTerms(String query) {
-    return List.copyOf(new LinkedHashSet<>(Bm25Index.tokenize(query)));
-  }
-
   /**
    * Fraction of distinct query terms that appear in the passage (0..1).
    * Favors fact cards that mention {@code fairy}/{@code fable}/… over long narration
@@ -78,7 +74,7 @@ public final class PreparedRag implements RagIndex {
 
   @Override
   public List<RagHit> retrieve(String query, int topK) {
-    List<String> terms = distinctTerms(query);
+    List<String> terms = this.index.selectedQueryTerms(query);
     List<RagHit> hits = this.index.retrieve(query, Math.max(topK * 4, topK));
     return hits.stream()
         .map(hit -> new RagHit(hit.chunk(),

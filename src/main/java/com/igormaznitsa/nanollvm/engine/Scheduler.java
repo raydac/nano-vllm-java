@@ -1,6 +1,6 @@
 package com.igormaznitsa.nanollvm.engine;
 
-import com.igormaznitsa.nanollvm.Config;
+import com.igormaznitsa.nanollvm.llm.Config;
 
 import java.util.ArrayDeque;
 import java.util.ArrayList;
@@ -9,7 +9,7 @@ import java.util.List;
 import java.util.stream.IntStream;
 
 /**
- * Continuous batching scheduler for one {@link com.igormaznitsa.nanollvm.LLM} engine.
+ * Continuous batching scheduler for one {@link com.igormaznitsa.nanollvm.llm.LLM} engine.
  *
  * <h2>Role in the engine</h2>
  * Each generate step asks the scheduler for the next work batch, runs the model on it, then feeds

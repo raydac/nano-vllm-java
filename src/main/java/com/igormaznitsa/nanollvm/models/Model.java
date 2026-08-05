@@ -1,8 +1,9 @@
-package com.igormaznitsa.nanollvm;
+package com.igormaznitsa.nanollvm.models;
 
 import static java.util.Objects.requireNonNull;
 
-import com.igormaznitsa.nanollvm.models.CausalLM;
+import com.igormaznitsa.nanollvm.llm.Config;
+import com.igormaznitsa.nanollvm.llm.LLM;
 import com.igormaznitsa.nanollvm.tokenizer.Tokenizer;
 
 import java.nio.file.Path;
@@ -51,7 +52,7 @@ public final class Model {
 
   /**
    * Internal network graph used by the inference engine. Not part of the stable public surface
-   * for application code ({@code models} is module-private under JPMS).
+   * for application code.
    */
   public CausalLM network() {
     return this.network;
