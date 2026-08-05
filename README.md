@@ -171,6 +171,10 @@ rag?> /clear
 rag?> /exit
 ```
 
+Session recording (Gemma3 load + RAG questions about the Grimm brothers and their father):
+
+![Gemma3 RAG session recording](assets/java_nano_llvm_session_1.gif)
+
 | Command                          | Action                                      |
 |----------------------------------|---------------------------------------------|
 | `/exit`, `/quit`, `exit`, `quit` | Leave the program                           |

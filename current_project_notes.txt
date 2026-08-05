@@ -80,6 +80,7 @@
 ## 7. Useful References
 - How it works: `description.md` (academic-accessible; ch.10 math catalog; ch.7–10 tensors; §16 map/samples; **§17 text RAG**; §20 reading index)
 - **README.md:** build, model download/load resolution order, Example/Bench/JAR CLI, RAG commands, library snippet (publication-oriented)
+- Session demo asset: `assets/java_nano_llvm_session_1.gif` (Gemma3 load + RAG questions about Grimm brothers/father), embedded in README RAG section
 - Maven: `com.igormaznitsa:nano-vllm-java:0.2.0-SNAPSHOT`; JPMS module `com.igormaznitsa.nanollvm`
 - Build: `mvn -q test` / `MAVEN_OPTS="-Xmx8g" mvn -q exec:java -Dexec.mainClass=com.igormaznitsa.nanollvm.Example`
 - Library: `Model model = ModelFactory.make(path)` in `models`; `LLM.builder(model).systemPrompt(…).build()` in `llm`; RAG: `PreparedRag rag = RagFactory.make(dir); llm.rag(rag)` (shareable like Model)
