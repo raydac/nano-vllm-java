@@ -21,7 +21,6 @@ For a guided tour of the design (scheduler, attention, tensors, RAG), see [`desc
 - Loads HF `config.json`, `tokenizer.json`, and `.safetensors` weights
 - GPT-2 byte BPE and Gemma Metaspace BPE tokenizers
 - Optional **BM25 text RAG** over a local `rag/` corpus (used automatically by the Example CLI)
-- In-project JSON parser (no Gson or other JSON dependency)
 
 ## Requirements
 
