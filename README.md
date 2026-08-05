@@ -4,7 +4,7 @@
 [![Java 21+](https://img.shields.io/badge/java-21.0%2b-green.svg)](https://bell-sw.com/pages/downloads/)
 [![Maven 3.9+](https://img.shields.io/badge/maven-3.9%2b-green.svg)](https://maven.apache.org/)
 
-# Nano-vLLM (Java)
+# Nano-vLLM Java
 
 Pure **Java 21+** LLM inference engine: continuous batching, paged KV cache, and Hugging Face–compatible weight loading
 on **CPU only** — no CUDA, PyTorch, or third-party runtime libraries.
