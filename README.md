@@ -257,24 +257,3 @@ String answer = llm.rag(rag).topK(4).ask("Your question");
 ```
 
 See [`description.md`](description.md) §17 and package `com.igormaznitsa.nanollvm.rag` for retrieval options.
-
-## Source layout
-
-```
-com.igormaznitsa.nanollvm
-├── Example, Bench, …
-├── models/     Model, ModelFactory, Qwen3 / Gemma3 causal LM graphs
-├── llm/        LLM, Config, EngineIo, SamplingParams, SamplingDefaults
-├── chat/       ChatSession, streaming, templates
-├── rag/        BM25 index, RagSession, RagFactory
-├── engine/     Scheduler, KV cache, ModelRunner
-├── layers/     Attention, Linear, norms, sampler
-├── tensor/     Tensor, Ops, Vector/scalar kernels
-├── tokenizer/  HF BPE loader
-├── internal/   Safetensors loader, weight merge, inference Context (module-private)
-└── utils/      Json, BundledModels, BundledRag, NanoVllmProps
-```
-
-## License
-
-[Apache License 2.0](LICENSE).
