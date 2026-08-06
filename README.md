@@ -43,7 +43,7 @@ mvn package
 
 Artifacts:
 
-- `target/nano-vllm-java-0.2.0-SNAPSHOT.jar` — library JAR (JPMS module `com.igormaznitsa.nanollvm`)
+- `target/nano-vllm-java-1.0.0-SNAPSHOT.jar` — library JAR (JPMS module `com.igormaznitsa.nanollvm`)
 - `target/classes/` — compiled module for development runs
 
 Tests use the Vector incubator module (`jvm.module.args` in the POM). Production runs should use the same flags
@@ -55,7 +55,7 @@ Tests use the Vector incubator module (`jvm.module.args` in the POM). Production
 <dependency>
   <groupId>com.igormaznitsa</groupId>
   <artifactId>nano-vllm-java</artifactId>
-  <version>0.2.0-SNAPSHOT</version>
+  <version>1.0.0-SNAPSHOT</version>
 </dependency>
 ```
 
@@ -194,7 +194,7 @@ After `mvn package`:
 ```bash
 java --add-modules jdk.incubator.vector \
   -Xmx8g \
-  -p target/nano-vllm-java-0.2.0-SNAPSHOT.jar \
+  -p target/nano-vllm-java-1.0.0-SNAPSHOT.jar \
   -m com.igormaznitsa.nanollvm/com.igormaznitsa.nanollvm.Example \
   models/Qwen3-0.6B
 ```

@@ -12,3 +12,4 @@ target/
 models/Qwen3-0.6B/
 models/Gemma3-270M/
 /current_project_notes.txt
+/.editorconfig
