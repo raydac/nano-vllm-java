@@ -2528,11 +2528,7 @@ Compressed from `LLM.step` / `Transformer.step`:
 // conceptual — names match the real methods
 ScheduleResult scheduled = scheduler.schedule();
 List<Integer> tokenIds = transformer.step(scheduled.sequences(), scheduled.prefill());
-scheduler.
-
-postprocess(scheduled.sequences(),tokenIds,scheduled.
-
-prefill(),appendedOut);
+scheduler.postprocess(scheduled.sequences(), tokenIds, scheduled.prefill(), appendedOut);
 ```
 
 Inside `Transformer.step`:
