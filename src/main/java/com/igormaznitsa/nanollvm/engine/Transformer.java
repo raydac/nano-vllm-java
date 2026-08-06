@@ -11,29 +11,36 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 
-public final class ModelRunner implements AutoCloseable {
+/**
+ * Named home for one transformer tick: prepare batch tensors → {@link CausalLM#forward} →
+ * logits → sample. Owns the per-{@code LLM} {@link KvCacheArena}; the immutable network graph
+ * lives on {@link Model}/{@link CausalLM}.
+ *
+ * <p>Call chain for readers: {@link #step} → {@link #prepareInputs} → {@link #forwardHidden} →
+ * {@link #computeLogits} → {@link #sampleTokens}.
+ */
+public final class Transformer implements AutoCloseable {
 
   private final Config config;
-  private final EngineIo io;
   private final int blockSize;
-  private final CausalLM model;
+  private final CausalLM network;
   private final KvCacheArena kvCache;
   private final Sampler sampler = new Sampler();
 
-  public ModelRunner(Model model, Config config) {
+  public Transformer(Model model, Config config) {
     this(model, config, EngineIo.silent());
   }
 
-  public ModelRunner(Model model, Config config, EngineIo io) {
+  public Transformer(Model model, Config config, EngineIo io) {
     this.config = config;
-    this.io = io == null ? EngineIo.silent() : io;
+    final EngineIo io1 = io == null ? EngineIo.silent() : io;
     this.blockSize = config.kvcacheBlockSize();
-    this.model = model.network();
+    this.network = model.network();
 
-    this.io.info("Allocating KV cache…");
+    io1.info("Allocating KV cache…");
     long tKv = System.nanoTime();
     this.kvCache = this.allocateKvCache();
-    this.io.infof("KV cache ready: %d blocks (%.1fs)%n",
+    io1.infof("KV cache ready: %d blocks (%.1fs)%n",
         this.config.numKvcacheBlocks(),
         (System.nanoTime() - tKv) / 1e9);
   }
@@ -46,18 +53,34 @@ public final class ModelRunner implements AutoCloseable {
     return Tensor.of(data, values.size());
   }
 
-  public List<Integer> run(List<Sequence> seqs, boolean isPrefill) {
+  /**
+   * One forward+sample over a scheduled batch (prefill or decode).
+   */
+  public List<Integer> step(List<Sequence> seqs, boolean isPrefill) {
     Context.bindKvCache(this.kvCache);
+
     PreparedInputs prepared = this.prepareInputs(seqs, isPrefill);
     SamplingControls sampling = this.collectSamplingControls(seqs);
 
-    Tensor hidden = this.model.forward(prepared.inputIds(), prepared.positions());
-    Tensor logits = this.model.computeLogits(hidden);
-    int[] sampledIds = this.sampler.forward(
-        logits, sampling.temperatures(), sampling.topKs(), sampling.topPs());
+    Tensor hidden = this.forwardHidden(prepared);
+    Tensor logits = this.computeLogits(hidden);
+    List<Integer> tokenIds = this.sampleTokens(logits, sampling);
 
     Context.reset();
-    return this.toTokenIdList(sampledIds);
+    return tokenIds;
+  }
+
+  private Tensor forwardHidden(PreparedInputs prepared) {
+    return this.network.forward(prepared.inputIds(), prepared.positions());
+  }
+
+  private Tensor computeLogits(Tensor hidden) {
+    return this.network.computeLogits(hidden);
+  }
+
+  private List<Integer> sampleTokens(Tensor logits, SamplingControls sampling) {
+    return this.toTokenIdList(this.sampler.forward(
+        logits, sampling.temperatures(), sampling.topKs(), sampling.topPs()));
   }
 
   private PreparedInputs prepareInputs(List<Sequence> seqs, boolean isPrefill) {
@@ -141,8 +164,8 @@ public final class ModelRunner implements AutoCloseable {
         inputIds.add(seq.tokenAt(i));
         positions.add(i);
       }
-      cuSeqlensQ.add(cuSeqlensQ.get(cuSeqlensQ.size() - 1) + seqlenQ);
-      cuSeqlensK.add(cuSeqlensK.get(cuSeqlensK.size() - 1) + seqlenK);
+      cuSeqlensQ.add(cuSeqlensQ.getLast() + seqlenQ);
+      cuSeqlensK.add(cuSeqlensK.getLast() + seqlenK);
       maxSeqlenQ = Math.max(maxSeqlenQ, seqlenQ);
       maxSeqlenK = Math.max(maxSeqlenK, seqlenK);
       if (seq.blockTable().isEmpty()) {
@@ -169,7 +192,7 @@ public final class ModelRunner implements AutoCloseable {
     }
 
     int[][] blockTables = null;
-    if (cuSeqlensK.get(cuSeqlensK.size() - 1) > cuSeqlensQ.get(cuSeqlensQ.size() - 1) &&
+    if (cuSeqlensK.getLast() > cuSeqlensQ.getLast() &&
         anyBlockTable) {
       blockTables = this.prepareBlockTables(seqs);
     }
@@ -198,7 +221,7 @@ public final class ModelRunner implements AutoCloseable {
       inputIds[i] = seq.lastToken();
       positions[i] = seq.length() - 1;
       contextLens[i] = seq.length();
-      slotMapping[i] = seq.blockTable().get(seq.blockTable().size() - 1) * this.blockSize
+      slotMapping[i] = seq.blockTable().getLast() * this.blockSize
           + seq.lastBlockNumTokens() - 1;
     }
     Context.set(false, null, null, 0, 0, slotMapping, contextLens, this.prepareBlockTables(seqs));

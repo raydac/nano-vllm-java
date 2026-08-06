@@ -16,6 +16,7 @@
 - Ch.10 GitHub math: keep config names (`rope_theta`, …) outside `$…$` / `$$…$$` (no `\texttt{…_…}` in math — MathJax error)
 - Prefer Stream API for filter/map/collect transforms in LLM/engine helpers; keep stateful schedule/prefill and tensor kernels imperative
 - `LLM` business methods (`generate`, `step`, drive loop, load/close) carry `//` stage comments for algorithm readability
+- **`engine.Transformer`** (was `ModelRunner`): named prepare → `CausalLM.forward` → logits → sample; owns per-LLM `KvCacheArena`
 - `engine.Scheduler` has full class/method JavaDoc (waiting/running, prefill-vs-decode, preemption, postprocess)
 - `tensor.Tensor` has full class/method JavaDoc (shape, offset/view, reshape sharing, data vs toFloatArray)
 - `FloatKernels` (+ scalar/vector backends, factory) JavaDoc: slice contract, SIMD main loop + scalar tail
@@ -48,7 +49,7 @@
 - Share one `PreparedRag` across many LLMs; `PassagePreparser` + inverted BM25 run at load, not per query
 - Exported packages: root (Example/Bench), models, llm, chat, rag, exceptions, tokenizer, prompts, utils (`BundledModels`/`BundledRag`/`Json`/`NanoVllmProps`)
 - Module-private: engine, layers, tensor, **internal** (loader/safetensors/Context); `models` also holds graph types (`CausalLM`, …) alongside public `Model` / `ModelFactory`
-- `Model.network()` still returns `CausalLM` for same-module `ModelRunner` (documented non-stable; `models` package is exported)
+- `Model.network()` still returns `CausalLM` for same-module `Transformer` (documented non-stable; `models` package is exported)
 
 
 ## 3. Technical Debt & Refactoring
@@ -61,7 +62,7 @@
 
 ## 4. Current Work In Progress
 - Educational docs: maintain academic-accessible English `description.md`
-- Engine readability: LLM / ModelRunner / Scheduler DSL pass done
+- Engine readability: LLM / Transformer / Scheduler DSL pass done; `ModelRunner` renamed to `Transformer` (prepare → forward → logits → sample)
 
 
 ## 5. Known Issues & Limitations
@@ -74,7 +75,7 @@
 
 
 ## 6. Open Questions & Pending Decisions
-- Whether to fold Sampler into ModelRunner next
+- Whether to fold Sampler deeper into Transformer bricks next
 
 
 ## 7. Useful References
@@ -101,3 +102,4 @@
 - User preference (global Java senior rule): Stream-first for collection work when a clear pipeline exists
 - In `LLM`, keep `//` comments on business orchestration methods and their internal stage calls (generate/step/drive)
 - Model = immutable loaded data; all thread/runtime state on LLM (`KvCacheArena`, scheduler, generate lock)
+- Named forward+sample home is `engine.Transformer` (was `ModelRunner`); architecture graphs stay on `CausalLM`

@@ -114,7 +114,8 @@ Two families of models are supported here (different “editions” of the book,
 and **Gemma3**. You usually need not care which; the program detects which files you pointed it at.
 
 **In the code:** architecture pick is `CausalLMFactory.detect` / `create` → `Qwen3ForCausalLM` or
-`Gemma3ForCausalLM`; one next-token step is `ModelRunner.run` → `CausalLM.forward` / `computeLogits` → `Sampler.forward`
+`Gemma3ForCausalLM`; one next-token step is `Transformer.step` → `CausalLM.forward` / `computeLogits` →
+`Sampler.forward`
 (chapter 16).
 
 ---
@@ -234,7 +235,7 @@ After this, the **learned shelves stay fixed**. Chat does not rewrite the model 
 worksheets change while answering.
 
 **In the code:** `ModelFactory.make` runs `CausalLMFactory` + `ModelLoader.loadModel` + `Tokenizer.fromPretrained`
-and seals weights into an immutable `Model`. Each `LLM` then allocates its own KV arena via `ModelRunner`
+and seals weights into an immutable `Model`. Each `LLM` then allocates its own KV arena via `Transformer`
 (chapter 16).
 
 **Further reading:** Hub layout and `from_pretrained`-style folders are covered in Hugging Face
@@ -1384,7 +1385,7 @@ not rebuild every past Key/Value each time.
 So: **weights = long-term habits; notebooks = short-term notes for this conversation; Sense A = the procedure that
 combines them every step.**
 
-**In the code (Sense A):** `LLM.generate` / `step` → `Scheduler.schedule` → `ModelRunner.run` → layer
+**In the code (Sense A):** `LLM.generate` / `step` → `Scheduler.schedule` → `Transformer.step` → layer
 `forward` stacks on `Qwen3ForCausalLM` / `Gemma3ForCausalLM` (chapter 16).
 
 ---
@@ -2106,7 +2107,7 @@ OPEN (once)
       → CausalLMFactory#create(hf, bag)    (immutable Qwen3/Gemma3 graph)
       → Tokenizer#fromPretrained
   LLM#builder(Model) → LLM.Builder#build → LLM.<init>
-      → ModelRunner.<init>                 (binds shared Model; allocates KvCacheArena)
+      → Transformer.<init>                 (binds shared Model; allocates KvCacheArena)
       → Scheduler.<init>                   (owns BlockManager)
       → LLM#warmup                         (optional tiny generate)
 
@@ -2121,7 +2122,7 @@ ONE TURN
               → loop while !LLM#isFinished:
                     LLM#step
                       → Scheduler#schedule          (BlockManager#allocate / #mayAppend)
-                      → ModelRunner#run             (via ModelRunner#call("run", …))
+                      → Transformer#step
                           → preparePrefill | prepareDecode
                           → CausalLM#forward        (Qwen3ForCausalLM or Gemma3ForCausalLM)
                           → CausalLM#computeLogits
@@ -2174,7 +2175,7 @@ ChatReply reply = llm.chat(256).send("What is 2+2?");
 | Pour weights    | `ModelLoader#loadWeights` → `WeightBag` → `CausalLMFactory#create` | Merge shards; construct immutable graph                   |
 | Seal            | (graph is immutable at construction)                               | No post-load weight mutation                              |
 | Dictionary      | `Tokenizer#fromPretrained`                                         | `tokenizer.json` + chat template / stop ids               |
-| Blank notebooks | `ModelRunner` → `KvCacheArena`                                     | Per-`LLM` KV pages; bound into `Context` for `Attention`  |
+| Blank notebooks | `Transformer` → `KvCacheArena`                                     | Per-`LLM` KV pages; bound into `Context` for `Attention`  |
 | Waiting room    | `Scheduler.<init>` → `BlockManager.<init>`                         | Page pool for later allocate                              |
 | Optional        | `LLM#warmup`                                                       | Tiny generate so first real answer is not also cold-start |
 
@@ -2239,8 +2240,8 @@ which might be `<`, or `4`, or `The`, depending on style and chance.
 LLM#generate
   └─ LLM#step                         // first tick is usually prefill
        ├─ Scheduler#schedule          // BlockManager#canAllocate / #allocate; prefill=true
-       ├─ ModelRunner#run(seqs, true)
-       │    ├─ ModelRunner#preparePrefill   // ids, positions, Context slot maps / block tables
+       ├─ Transformer#step(seqs, true)
+       │    ├─ Transformer#preparePrefill   // ids, positions, Context slot maps / block tables
        │    ├─ CausalLM#forward             // e.g. Qwen3ForCausalLM#forward
        │    │    └─ per layer: … → Qwen3Attention#forward → Attention#forward
        │    │         ├─ Attention#storeKvCache
@@ -2255,7 +2256,7 @@ LLM#generate
 |--------------|------------------------------------------------|-----------------------------------------|
 | Pick work    | `Scheduler#schedule`                           | Prefill batch for this `Sequence`       |
 | Pages        | `BlockManager#allocate`                        | Give the prompt notebook pages          |
-| Pack tensors | `ModelRunner#preparePrefill`                   | Build input ids / positions / `Context` |
+| Pack tensors | `Transformer#preparePrefill`                   | Build input ids / positions / `Context` |
 | Walk rooms   | `Qwen3ForCausalLM#forward` (or Gemma)          | Embedding → N layers → norm             |
 | One glance   | `Qwen3Attention#forward` → `Attention#forward` | QKV, RoPE, store KV, causal attend      |
 | Rewrite      | `Qwen3MLP#forward`                             | Gated feed-forward after attention      |
@@ -2309,8 +2310,8 @@ places attend to each other.
 ```text
 LLM#step
   ├─ Scheduler#schedule              // prefill=false; BlockManager#mayAppend
-  ├─ ModelRunner#run(seqs, false)
-  │    ├─ ModelRunner#prepareDecode  // mostly the newest token + block tables
+  ├─ Transformer#step(seqs, false)
+  │    ├─ Transformer#prepareDecode  // mostly the newest token + block tables
   │    ├─ CausalLM#forward
   │    │    └─ Attention#forward → #storeKvCache → #decode → #attendRange
   │    ├─ CausalLM#computeLogits
@@ -2323,11 +2324,11 @@ fire the `onToken` callback that `ChatSession#generateTurn` registered.
 
 **Thinking’s three roles in this same decode loop**
 
-| Sense                     | What happens on “What is 2+2?”                                                                                                   | Library home                                                                |
-|---------------------------|----------------------------------------------------------------------------------------------------------------------------------|-----------------------------------------------------------------------------|
-| **A — silent**            | Every decode step is a full layer-walk (attention + MLP + sample). Always on, never shown as text.                               | `ModelRunner#run` → model `#forward` / `#computeLogits` → `Sampler#forward` |
-| **B — written reasoning** | The model may emit ordinary words like “add” or “four” as intermediate text. Those words join the past.                          | Same loop; tokens land in `Sequence` via `Scheduler#postprocess`            |
-| **C — tagged scratchpad** | On Qwen-style chat it may emit `<think> … </think>` then the answer. Same Sense A underneath; markers let the UI split channels. | `AssistantParts#parse` on decode/`finishTurn`                               |
+| Sense                     | What happens on “What is 2+2?”                                                                                                   | Library home                                                                 |
+|---------------------------|----------------------------------------------------------------------------------------------------------------------------------|------------------------------------------------------------------------------|
+| **A — silent**            | Every decode step is a full layer-walk (attention + MLP + sample). Always on, never shown as text.                               | `Transformer#step` → model `#forward` / `#computeLogits` → `Sampler#forward` |
+| **B — written reasoning** | The model may emit ordinary words like “add” or “four” as intermediate text. Those words join the past.                          | Same loop; tokens land in `Sequence` via `Scheduler#postprocess`             |
+| **C — tagged scratchpad** | On Qwen-style chat it may emit `<think> … </think>` then the answer. Same Sense A underneath; markers let the UI split channels. | `AssistantParts#parse` on decode/`finishTurn`                                |
 
 Example timeline (one possible Qwen-style path — not guaranteed wording):
 
@@ -2373,7 +2374,7 @@ the finished stream for display (`thinking` vs `answer`).
 
 ```text
   ModelFactory#make → Model              LOAD immutable weights + tokenizer
-  LLM.<init> / ModelRunner.<init>        BIND Model + empty KvCacheArena
+  LLM.<init> / Transformer.<init>        BIND Model + empty KvCacheArena
            │
            ▼
   Tokenizer#applyChatTemplate
@@ -2382,7 +2383,7 @@ the finished stream for display (`thinking` vs `answer`).
            ▼
   LLM#step (prefill)                  PREFILL (Sense A)
   Scheduler#schedule
-  ModelRunner#run → CausalLM#forward
+  Transformer#step → CausalLM#forward
   Attention storeKv / prefill…           attention: every prompt place looks back; notebooks fill
   Sampler#forward                        thinking: silent only
            │
@@ -2406,11 +2407,11 @@ You should be able to point at **both** the story and the library:
 
 | Story piece            | Primary `Class#method` homes                                                                |
 |------------------------|---------------------------------------------------------------------------------------------|
-| Open model             | `ModelFactory#make` → `Model`; `LLM#builder(Model)` → `ModelRunner.<init>` (`KvCacheArena`) |
+| Open model             | `ModelFactory#make` → `Model`; `LLM#builder(Model)` → `Transformer.<init>` (`KvCacheArena`) |
 | Chat ask               | `ChatSession#send` → `#generateTurn` → `#finishTurn`                                        |
 | Template / ids         | `Tokenizer#applyChatTemplate` / `#encode` / `#decode`                                       |
 | Engine loop            | `LLM#generate` → `#step` → `Scheduler#schedule` / `#postprocess`                            |
-| One forward+sample     | `ModelRunner#run` → `CausalLM#forward` / `#computeLogits` → `Sampler#forward`               |
+| One forward+sample     | `Transformer#step` → `CausalLM#forward` / `#computeLogits` → `Sampler#forward`              |
 | Attention + notebooks  | `Context#bindKvCache` → `Attention#forward` (by `layerIndex`) / `#attendRange`              |
 | Visible thinking split | `AssistantParts#parse` (history keeps answer via `finishTurn`)                              |
 
@@ -2445,7 +2446,7 @@ You do not need to read every file. Use the tables to jump, then skim the named 
 | `tokenizer/Tokenizer`                                                                  | `tokenizer.json` → encode / decode / chat template   |
 | `Config`, `Config.HfConfig`                                                            | `config.json` blueprint + per-LLM engine knobs       |
 | `utils/ModelLoader`, `utils/SafetensorsReader`, `utils/BundledModels`                  | Load weights; find default model dir                 |
-| `engine/Scheduler`, `Sequence`, `BlockManager`, `ModelRunner`, `KvCacheArena`          | Prefill/decode loop, pages, one forward+sample       |
+| `engine/Scheduler`, `Sequence`, `BlockManager`, `Transformer`, `KvCacheArena`          | Prefill/decode loop, pages, one forward+sample       |
 | `models/CausalLM`, `CausalLMFactory`, `Qwen3ForCausalLM`, `Gemma3ForCausalLM`          | Architecture graph                                   |
 | `layers/Attention`, `Sampler`, `Linear`, `Norms`, …                                    | Attention, sampling, projections, RMSNorm/RoPE       |
 | `tensor/Tensor`, `Ops`, `VectorMath`                                                   | Arrays and kernels                                   |
@@ -2465,8 +2466,8 @@ You do not need to read every file. Use the tables to jump, then skim the named 
 | Token embedding / RoPE / LM head | `VocabParallelEmbedding`, `Ops`, `RotaryEmbedding`, `ParallelLMHead` | `embedTokens.forward` → `Ops.embedding`; Gemma `scaleEmbed`; `RotaryEmbedding.forward`; tied or separate head |
 | Blueprint                        | `Config.HfConfig`                                                    | `HfConfig.load(config.json)`; `CausalLMFactory.detect/create`                                                 |
 | Pour weights                     | `ModelFactory`, `ModelLoader`, `WeightBag`, `CausalLMFactory`        | `loadWeights` → merge packed shards → `CausalLMFactory.create(hf, bag)`                                       |
-| One engine tick                  | `LLM.step`, `Scheduler`, `ModelRunner`                               | `schedule` → `ModelRunner.run` → `postprocess`                                                                |
-| Forward + sample                 | `ModelRunner`, `CausalLM`, `Sampler`                                 | `model.forward` → `computeLogits` → `sampler.forward`                                                         |
+| One engine tick                  | `LLM.step`, `Scheduler`, `Transformer`                               | `schedule` → `Transformer.step` → `postprocess`                                                               |
+| Forward + sample                 | `Transformer`, `CausalLM`, `Sampler`                                 | `network.forward` → `computeLogits` → `sampler.forward`                                                       |
 | Attention + KV write             | `Attention`, `KvCacheArena`, `utils.Context`                         | `Context.bindKvCache`; `Attention.forward` by `layerIndex`; prefill/decode helpers                            |
 | Pages / prefix reuse             | `BlockManager`                                                       | `canAllocate`, `allocate`, `hashBlocks`, `mayAppend`                                                          |
 | Split thinking UI                | `AssistantParts`, `ChatReply`                                        | `AssistantParts.parse`, `salvageFromThinking`                                                                 |
@@ -2513,7 +2514,7 @@ Interactive CLI wiring lives in `Example.main`: `LLM.builder(…).withSystemIo()
 
 ```text
 Scheduler.schedule()          // pick prefill or decode batch
-    → ModelRunner.run(seqs, prefill)
+    → Transformer.step(seqs, prefill)
         preparePrefill / prepareDecode  (+ Context.set slot maps, block tables)
         CausalLM.forward(inputIds, positions)
         CausalLM.computeLogits(hidden)
@@ -2521,12 +2522,12 @@ Scheduler.schedule()          // pick prefill or decode batch
     → Scheduler.postprocess(…)   // append token, finish on stop / maxTokens
 ```
 
-Compressed from `LLM.step` / `ModelRunner.run`:
+Compressed from `LLM.step` / `Transformer.step`:
 
 ```java
 // conceptual — names match the real methods
 ScheduleResult scheduled = scheduler.schedule();
-List<Integer> tokenIds = modelRunner.run(scheduled.sequences(), scheduled.prefill());
+List<Integer> tokenIds = transformer.step(scheduled.sequences(), scheduled.prefill());
 scheduler.
 
 postprocess(scheduled.sequences(),tokenIds,scheduled.
@@ -2534,10 +2535,11 @@ postprocess(scheduled.sequences(),tokenIds,scheduled.
 prefill(),appendedOut);
 ```
 
-Inside `ModelRunner.run`:
+Inside `Transformer.step`:
 
 ```java
-Tensor logits = model.computeLogits(model.forward(inputIds, positions));
+Tensor hidden = network.forward(inputIds, positions);
+Tensor logits = network.computeLogits(hidden);
 int[] tokenIds = sampler.forward(logits, temperatures, topKs, topPs);
 ```
 
@@ -2563,7 +2565,7 @@ ModelFactory.make(dir):
   CausalLMFactory.create(hf, weights) builds immutable Qwen3ForCausalLM or Gemma3ForCausalLM
   Tokenizer.fromPretrained(dir)
 LLM.builder(model).build():
-  ModelRunner allocates KvCacheArena (per LLM); Context.bindKvCache on each run
+  Transformer allocates KvCacheArena (per LLM); Context.bindKvCache on each step
 ```
 
 ### Sample E — chat thinking path (Sense C)
@@ -2623,7 +2625,7 @@ src/main/java/com/igormaznitsa/nanollvm/
   rag/PreparedRag.java     ← shareable index
   rag/Bm25Index.java       ← inverted BM25 retrieve
   rag/RagSession.java      ← retrieve → prompt → chat
-  engine/ModelRunner.java  ← forward + sample
+  engine/Transformer.java  ← forward + sample
   engine/Scheduler.java    ← prefill/decode batches
   layers/Attention.java    ← QKV cache + attendRange
   models/Qwen3ForCausalLM.java / Gemma3ForCausalLM.java

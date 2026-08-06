@@ -6,9 +6,9 @@ import com.igormaznitsa.nanollvm.chat.ChatMessage;
 import com.igormaznitsa.nanollvm.chat.ChatMessages;
 import com.igormaznitsa.nanollvm.chat.ChatReply;
 import com.igormaznitsa.nanollvm.chat.ChatSession;
-import com.igormaznitsa.nanollvm.engine.ModelRunner;
 import com.igormaznitsa.nanollvm.engine.Scheduler;
 import com.igormaznitsa.nanollvm.engine.Sequence;
+import com.igormaznitsa.nanollvm.engine.Transformer;
 import com.igormaznitsa.nanollvm.exceptions.GenerationCancelledException;
 import com.igormaznitsa.nanollvm.exceptions.GenerationTimeoutException;
 import com.igormaznitsa.nanollvm.exceptions.ModelLoadException;
@@ -84,7 +84,7 @@ public final class LLM implements AutoCloseable {
   private final Config config;
   private final EngineIo io;
   private final String systemPromptOverride;
-  private final ModelRunner modelRunner;
+  private final Transformer transformer;
   private final Tokenizer tokenizer;
   private final Scheduler scheduler;
   private final Object generateLock = new Object();
@@ -126,7 +126,7 @@ public final class LLM implements AutoCloseable {
       Sequence.setBlockSize(this.config.kvcacheBlockSize());
       this.tokenizer = this.model.tokenizer();
       this.applyTokenizerStopTokens();
-      this.modelRunner = new ModelRunner(this.model, this.config, this.io);
+      this.transformer = new Transformer(this.model, this.config, this.io);
       this.scheduler = new Scheduler(this.config);
     } catch (ModelLoadException e) {
       throw e;
@@ -238,8 +238,8 @@ public final class LLM implements AutoCloseable {
   }
 
   private List<Integer> runForwardAndSample(Scheduler.ScheduleResult scheduled) {
-    // Internal: CausalLM forward → logits → Sampler (one id per sequence in the batch)
-    return this.modelRunner.run(scheduled.sequences(), scheduled.prefill());
+    // Internal: Transformer.step → CausalLM forward → logits → Sampler
+    return this.transformer.step(scheduled.sequences(), scheduled.prefill());
   }
 
   private List<int[]> applySchedulerPostprocess(
@@ -687,7 +687,7 @@ public final class LLM implements AutoCloseable {
     // Business: stop in-flight generate, then release runner / Context under the generate lock
     this.cancel();
     synchronized (this.generateLock) {
-      this.modelRunner.close();
+      this.transformer.close();
     }
   }
 

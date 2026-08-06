@@ -51,7 +51,7 @@ import java.util.stream.IntStream;
  *
  * @see Sequence
  * @see BlockManager
- * @see ModelRunner
+ * @see Transformer
  * @see ScheduleResult
  */
 public final class Scheduler {
