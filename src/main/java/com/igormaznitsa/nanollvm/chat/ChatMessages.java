@@ -38,7 +38,7 @@ public final class ChatMessages {
       final int maxTokens
   ) {
     int budget = Math.max(64, maxModelLen - maxTokens - PROMPT_MARGIN);
-    boolean enableThinking = !tokenizer.isGemmaChat();
+    boolean enableThinking = tokenizer.invitesThinking();
     int minKeep = !history.isEmpty() && history.getFirst().role() == ChatRole.SYSTEM ? 2 : 1;
     while (history.size() > minKeep) {
       String prompt = tokenizer.applyChatTemplate(toTemplateMaps(history), true, enableThinking);

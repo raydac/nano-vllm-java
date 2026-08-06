@@ -25,6 +25,7 @@ public final class Transformer implements AutoCloseable {
   private final int blockSize;
   private final CausalLM network;
   private final KvCacheArena kvCache;
+  private final ConvStateArena convCache;
   private final Sampler sampler = new Sampler();
 
   public Transformer(final Model model, final Config config) {
@@ -43,6 +44,14 @@ public final class Transformer implements AutoCloseable {
     io1.infof("KV cache ready: %d blocks (%.1fs)%n",
         this.config.numKvcacheBlocks(),
         (System.nanoTime() - tKv) / 1e9);
+
+    Config.HfConfig hf = this.config.hfConfig();
+    if (hf.convLCache() > 0) {
+      this.convCache = new ConvStateArena(hf.numHiddenLayers(), hf.hiddenSize(), hf.convLCache());
+      io1.info("Conv state arena ready (" + this.convCache + ")");
+    } else {
+      this.convCache = null;
+    }
   }
 
   private static Tensor toTensor1d(final List<Integer> values) {
@@ -58,6 +67,9 @@ public final class Transformer implements AutoCloseable {
    */
   public List<Integer> step(final List<Sequence> seqs, final boolean isPrefill) {
     Context.bindKvCache(this.kvCache);
+    if (this.convCache != null) {
+      Context.bindConvCache(this.convCache);
+    }
 
     PreparedInputs prepared = this.prepareInputs(seqs, isPrefill);
     SamplingControls sampling = this.collectSamplingControls(seqs);
@@ -148,6 +160,7 @@ public final class Transformer implements AutoCloseable {
     List<Integer> positions = new ArrayList<>();
     List<Integer> cuSeqlensQ = new ArrayList<>();
     List<Integer> cuSeqlensK = new ArrayList<>();
+    List<Integer> seqIds = new ArrayList<>();
     cuSeqlensQ.add(0);
     cuSeqlensK.add(0);
     int maxSeqlenQ = 0;
@@ -159,15 +172,15 @@ public final class Transformer implements AutoCloseable {
       int start = seq.numCachedTokens();
       int seqlenQ = seq.numScheduledTokens();
       int end = start + seqlenQ;
-      int seqlenK = end;
       for (int i = start; i < end; i++) {
         inputIds.add(seq.tokenAt(i));
         positions.add(i);
+        seqIds.add(seq.seqId());
       }
       cuSeqlensQ.add(cuSeqlensQ.getLast() + seqlenQ);
-      cuSeqlensK.add(cuSeqlensK.getLast() + seqlenK);
+      cuSeqlensK.add(cuSeqlensK.getLast() + end);
       maxSeqlenQ = Math.max(maxSeqlenQ, seqlenQ);
-      maxSeqlenK = Math.max(maxSeqlenK, seqlenK);
+      maxSeqlenK = Math.max(maxSeqlenK, end);
       if (seq.blockTable().isEmpty()) {
         continue;
       }
@@ -205,7 +218,8 @@ public final class Transformer implements AutoCloseable {
         maxSeqlenK,
         slotMapping.stream().mapToInt(Integer::intValue).toArray(),
         null,
-        blockTables
+      blockTables,
+      seqIds.stream().mapToInt(Integer::intValue).toArray()
     );
     return new PreparedInputs(toTensor1d(inputIds), toTensor1d(positions));
   }
@@ -216,15 +230,18 @@ public final class Transformer implements AutoCloseable {
     float[] positions = new float[n];
     int[] slotMapping = new int[n];
     int[] contextLens = new int[n];
+    int[] seqIds = new int[n];
     for (int i = 0; i < n; i++) {
       Sequence seq = seqs.get(i);
       inputIds[i] = seq.lastToken();
       positions[i] = seq.length() - 1;
       contextLens[i] = seq.length();
+      seqIds[i] = seq.seqId();
       slotMapping[i] = seq.blockTable().getLast() * this.blockSize
           + seq.lastBlockNumTokens() - 1;
     }
-    Context.set(false, null, null, 0, 0, slotMapping, contextLens, this.prepareBlockTables(seqs));
+    Context.set(
+      false, null, null, 0, 0, slotMapping, contextLens, this.prepareBlockTables(seqs), seqIds);
     return new PreparedInputs(Tensor.of(inputIds, n), Tensor.of(positions, n));
   }
 

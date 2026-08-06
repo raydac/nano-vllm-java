@@ -9,10 +9,15 @@ public final class WeightNames {
 
   public static final String ARCH_GEMMA3 = "gemma3";
   public static final String ARCH_QWEN3 = "qwen3";
+  public static final String ARCH_LFM2 = "lfm2";
 
   public static final String EMBED_TOKENS = "model.embed_tokens.weight";
   public static final String MODEL_NORM = "model.norm.weight";
   public static final String LM_HEAD = "lm_head.weight";
+
+  public static final String GGUF_TOKEN_EMBD = "token_embd.weight";
+  public static final String GGUF_TOKEN_EMBD_NORM = "token_embd_norm.weight";
+  public static final String GGUF_OUTPUT = "output.weight";
 
   public static final String QKV_PROJ = "qkv_proj";
   public static final String GATE_UP_PROJ = "gate_up_proj";
@@ -50,5 +55,9 @@ public final class WeightNames {
 
   public static String mlp(final int layerIndex) {
     return layer(layerIndex) + "mlp.";
+  }
+
+  public static String ggufBlk(final int layerIndex) {
+    return "blk." + layerIndex + ".";
   }
 }

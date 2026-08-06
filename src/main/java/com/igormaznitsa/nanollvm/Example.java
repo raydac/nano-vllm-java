@@ -49,11 +49,21 @@ public final class Example {
       }
 
       boolean gemmaPath = path.toString().toLowerCase(Locale.ROOT).contains("gemma");
+      boolean ggufPath = path.toString().toLowerCase(Locale.ROOT).endsWith(".gguf")
+        || path.toString().toLowerCase(Locale.ROOT).contains("lfm2");
       Optional<PreparedRag> preparedRag = loadPreparedRag(gemmaPath);
 
       System.out.println("Loading model from " + path);
       System.out.println(
-          "Architecture auto-detects from config.json (override: -Dnanovllm.arch=qwen3|gemma3).");
+        "Architecture auto-detects from config.json / GGUF metadata "
+          + "(override: -Dnanovllm.arch=qwen3|gemma3|lfm2).");
+      System.out.println(
+        "CPU matmul: " + Runtime.getRuntime().availableProcessors()
+          + " threads from Runtime (override: -Dnanovllm.cpu.threads=N).");
+      if (ggufPath) {
+        System.out.println(
+          "GGUF/LFM2: weights expand to float32 — default heap is -Xmx16g via .mvn/jvm.config.");
+      }
       if (preparedRag.isPresent()) {
         PreparedRag rag = preparedRag.get();
         System.out.println("RAG: prepared BM25 over " + BundledRag.ragRoot()
@@ -104,7 +114,7 @@ public final class Example {
         .maxTokensWhenNoHits(gemma ? MAX_NEW_TOKENS : RAG_MAX_TOKENS_DEFAULT)
         .topK(gemma ? RAG_TOP_K_GEMMA : RAG_TOP_K_DEFAULT)
         .maxContextChars(gemma ? RAG_CONTEXT_CHARS_GEMMA : RAG_CONTEXT_CHARS_DEFAULT)
-      .enableThinking(!gemma)
+      .enableThinking(llm.tokenizer().invitesThinking())
       .sampling(new SamplingParams(gemma ? 0.1f : 0.4f, maxTokens, false, gemma ? 30 : 0,
         gemma ? 0.8f : 0.85f))
         .streamTo(System.err, System.out, color)
@@ -209,13 +219,17 @@ public final class Example {
   private static Path promptModelChoice(final BufferedReader in) throws Exception {
     var qwen = BundledModels.find(BundledModels.QWEN3_0_6B);
     var gemma = BundledModels.find(BundledModels.GEMMA3_270M);
+    var lfm2 = BundledModels.find(BundledModels.LFM2_5_2_6B_GGUF);
 
     while (true) {
       System.out.println("Select model to load:");
       System.out.println("  1) Qwen3-0.6B" + (qwen.isPresent() ? "" : "  [not downloaded]"));
       System.out.println("  2) Gemma3-270M" + (gemma.isPresent() ? "" : "  [not downloaded]"));
-      System.out.println("  3) Exit");
-      System.out.print("Choice [1-3]: ");
+      System.out.println(
+        "  3) LFM2.5-2.6B GGUF Q4_K_M" + (lfm2.isPresent() ? "" : "  [not downloaded]")
+          + "  (~16g heap)");
+      System.out.println("  4) Exit");
+      System.out.print("Choice [1-4]: ");
       System.out.flush();
       String line = in.readLine();
       if (line == null) {
@@ -230,11 +244,16 @@ public final class Example {
           return gemma.orElseThrow(() -> new IllegalStateException(
               "Gemma3-270M not found. Run models/download-gemma3-270m.sh (HF license + HF_TOKEN)"));
         }
-        case "3", "q", "quit", "exit" -> {
+        case "3" -> {
+          return lfm2.orElseThrow(() -> new IllegalStateException(
+            "LFM2.5 GGUF not found. Run models/download-lfm2.5-2.6b-gguf.sh "
+              + "(heap: .mvn/jvm.config -Xmx16g)"));
+        }
+        case "4", "q", "quit", "exit" -> {
           System.out.println("Bye.");
           return null;
         }
-        default -> System.out.println("Enter 1, 2, or 3.");
+        default -> System.out.println("Enter 1, 2, 3, or 4.");
       }
     }
   }

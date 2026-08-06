@@ -40,10 +40,6 @@ public final class Attention {
     this.layerIndex = layerIndex;
   }
 
-  public int layerIndex() {
-    return this.layerIndex;
-  }
-
   public Tensor forward(final Tensor q, final Tensor k, final Tensor v) {
     Context ctx = Context.get();
     KvCacheArena arena = requireNonNull(ctx.kvCache(), "KV cache arena not bound in Context");

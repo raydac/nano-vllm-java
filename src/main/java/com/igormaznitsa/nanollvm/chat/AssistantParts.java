@@ -9,11 +9,11 @@ public record AssistantParts(String thinking, String answer, boolean thinkOpen) 
   private static final Pattern SPECIAL_TOKEN = Pattern.compile("<\\|[^\\s|>]*\\|>?");
   private static final Pattern LEADING_ASSISTANT = Pattern.compile("(?i)^\\s*assistant\\s*:?\\s*");
   private static final Pattern STATED_ANSWER = Pattern.compile(
-      "(?i)(?:answer(?:\\s+should)?\\s+be|returns?|result(?:\\s+is)?)\\s*[:\"']?\\s*(.+)$");
+    "(?i)(?:answer(?:\\s+should)?\\s+be|returns?|result(?:\\s+is)?)\\s*[:\"']?\\s*(.+)$");
   private static final List<String> CHAT_MARKUP = List.of(
-      "<|im_end|>", "<|im_start|>", "<|endoftext|>",
-      "<end_of_turn>", "<start_of_turn>", "<eos>", "<bos>",
-      "<think>", "</think>"
+    "<|im_end|>", "<|im_start|>", "<|endoftext|>",
+    "<end_of_turn>", "<start_of_turn>", "<eos>", "<bos>",
+    "<think>", "</think>"
   );
 
   public static AssistantParts parse(final String raw) {
@@ -24,8 +24,8 @@ public record AssistantParts(String thinking, String answer, boolean thinkOpen) 
     String text = holdIncompleteMarkupSuffix(raw);
     int startThink = text.indexOf("<think>");
     int endThink = startThink >= 0
-        ? text.indexOf("</think>", startThink + "<think>".length())
-        : text.indexOf("</think>");
+      ? text.indexOf("</think>", startThink + "<think>".length())
+      : text.indexOf("</think>");
 
     String thinking;
     boolean open;
@@ -71,9 +71,9 @@ public record AssistantParts(String thinking, String answer, boolean thinkOpen) 
     String inner = fromThink.substring(0, end);
     Remainder nested = splitRemainder(fromThink.substring(end + "</think>".length()));
     return new Remainder(
-        joinThink(inner, nested.thinking()),
-        joinAnswer(before, nested.answer()),
-        nested.open());
+      joinThink(inner, nested.thinking()),
+      joinAnswer(before, nested.answer()),
+      nested.open());
   }
 
   private static String joinThink(final String first, final String second) {
@@ -125,10 +125,6 @@ public record AssistantParts(String thinking, String answer, boolean thinkOpen) 
   private static String finishSanitize(final String text) {
     final String withoutTokens = SPECIAL_TOKEN.matcher(text).replaceAll("");
     return LEADING_ASSISTANT.matcher(withoutTokens).replaceFirst("").strip();
-  }
-
-  static String stripSpecialTokens(final String raw) {
-    return stripChatMarkup(raw);
   }
 
   public static String cleanAssistantText(final String raw) {
@@ -183,13 +179,13 @@ public record AssistantParts(String thinking, String answer, boolean thinkOpen) 
   private static boolean looksLikeReasoning(final String line) {
     String lower = line.toLowerCase();
     return lower.startsWith("okay")
-        || lower.startsWith("wait")
-        || lower.startsWith("let me")
-        || lower.startsWith("i think")
-        || lower.startsWith("i need")
-        || lower.contains("the user")
-        || lower.contains("user wants")
-        || lower.contains("user said");
+      || lower.startsWith("wait")
+      || lower.startsWith("let me")
+      || lower.startsWith("i think")
+      || lower.startsWith("i need")
+      || lower.contains("the user")
+      || lower.contains("user wants")
+      || lower.contains("user said");
   }
 
   /**

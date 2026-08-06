@@ -17,9 +17,10 @@ For a guided tour of the design (scheduler, attention, tensors, RAG), see [`desc
 ## Key features
 
 - Continuous batching scheduler with paged KV cache and prefix caching
-- **Qwen3** (default) and **Gemma3** text causal LMs; architecture from `config.json` or `-Dnanovllm.arch`
-- Loads HF `config.json`, `tokenizer.json`, and `.safetensors` weights
-- GPT-2 byte BPE and Gemma Metaspace BPE tokenizers
+- **Qwen3** (default), **Gemma3**, and **LFM2** (hybrid short-conv + GQA) causal LMs
+- Loads HF `config.json` + `.safetensors`, or a single **`.gguf`** file (dequantized to float32)
+- Optional multi-thread CPU matmul (`cpuThreads`); defaults to `Runtime.availableProcessors()` for all models
+- GPT-2 byte BPE, Gemma Metaspace BPE, and GGUF-embedded tokenizers
 - Optional **BM25 text RAG** over a local `rag/` corpus (used automatically by the Example CLI)
 
 ## Requirements
@@ -28,7 +29,8 @@ For a guided tour of the design (scheduler, attention, tensors, RAG), see [`desc
 |--------------------------------------|----------------------------------------------------------------------------|
 | **JDK 21+**                          | Language and runtime                                                       |
 | **Maven 3.9+**                       | Build and `exec:java` (`mvn` on `PATH`)                                    |
-| **~2–8 GB heap**                     | Model load; use `MAVEN_OPTS=-Xmx8g` for Qwen3-0.6B on modest machines      |
+| **~2–8 GB heap**                     | Enough for Qwen3-0.6B / Gemma3-270M                                         |
+| **~16 GB heap**                      | Default in [`.mvn/jvm.config`](.mvn/jvm.config) (`-Xmx16g`) for LFM2 GGUF    |
 | **Optional:** `jdk.incubator.vector` | Faster kernels; enabled via [`.mvn/jvm.config`](.mvn/jvm.config) for Maven |
 
 ## Build
@@ -85,7 +87,26 @@ models/Qwen3-0.6B/
 
 At load time, `ModelFactory` reads `config.json`, builds the graph (Qwen3 or Gemma3), merges packed weights from
 safetensors, and constructs the tokenizer. Architecture is inferred from `model_type` / `architectures` unless you set
-`-Dnanovllm.arch=qwen3|gemma3`.
+`-Dnanovllm.arch=qwen3|gemma3|lfm2`.
+
+### GGUF (LFM2)
+
+A single `.gguf` file is also valid. Example: LiquidAI [LFM2.5-2.6B-GGUF](https://huggingface.co/LiquidAI/LFM2.5-2.6B-GGUF)
+`Q4_K_M` (~1.67 GB on disk). Weights are **dequantized to float32** at load (~10 GB weights alone; plan on
+**~16 GB heap** with KV/JVM) and run on the same CPU kernels; there is no quantized matmul path. For GGUF, dense
+matmul defaults to **`Runtime.availableProcessors()`**
+(`LLM.Builder.cpuThreads(N)` / `.allCpuThreads()`, or `-Dnanovllm.cpu.threads=N`).
+
+```bash
+./models/download-lfm2.5-2.6b-gguf.sh
+mvn -q exec:java \
+  -Dexec.mainClass=com.igormaznitsa.nanollvm.Example \
+  -Dexec.args=models/LFM2.5-2.6B-Q4_K_M.gguf
+```
+
+Supported GGUF dtypes for this path: `Q4_K`, `Q4_0`, `Q6_K`, `Q8_0`, `F16`, `BF16`, `F32`. Architecture must be
+`lfm2` (hybrid short-convolution + attention). Heap defaults to **16 GB** via `.mvn/jvm.config` (override with
+`MAVEN_OPTS` if you need more).
 
 ### Download scripts
 
@@ -138,18 +159,18 @@ Recommended entry point: multi-turn chat with streaming output. Thinking tokens 
 enabled); the reply goes to **stdout**.
 
 ```bash
-# After downloading Qwen3-0.6B — use enough heap for load + inference
-MAVEN_OPTS="-Xmx8g" mvn -q exec:java
+# After downloading a model — heap defaults to -Xmx16g via .mvn/jvm.config
+mvn -q exec:java
 ```
 
 Pick a model interactively, or pass it explicitly:
 
 ```bash
-MAVEN_OPTS="-Xmx8g" mvn -q exec:java -Dexec.args="models/Gemma3-270M"
+mvn -q exec:java -Dexec.args="models/Gemma3-270M"
 ```
 
 ```bash
-NANOVLLM_MODEL=models/Qwen3-0.6B MAVEN_OPTS="-Xmx8g" mvn -q exec:java
+NANOVLLM_MODEL=models/Qwen3-0.6B mvn -q exec:java
 ```
 
 **RAG mode:** if the directory `rag/` exists (the repo includes sample fairy-tale texts and fact cards), Example builds
@@ -183,9 +204,9 @@ Session recording (Gemma3 load + RAG questions about the Grimm brothers and thei
 
 **Display:** set `NO_COLOR=1` or `-Dnanovllm.color=false` to disable ANSI colors.
 
-Maven note: `exec:java` runs in the **same JVM as Maven**; Vector API flags come from [
-`.mvn/jvm.config`](.mvn/jvm.config) (`--add-modules=jdk.incubator.vector`). The exec plugin does not fork, so
-`<jvmArgs>` in the POM are not applied — use `MAVEN_OPTS` for heap.
+Maven note: `exec:java` runs in the **same JVM as Maven**. Vector API flags and heap come from [
+`.mvn/jvm.config`](.mvn/jvm.config) (`--add-modules=jdk.incubator.vector`, `-Xmx16g`). The exec plugin does not fork, so
+`<jvmArgs>` in the POM are not applied — override with `MAVEN_OPTS` when needed.
 
 ### Run the packaged JAR (module path)
 
@@ -193,7 +214,7 @@ After `mvn package`:
 
 ```bash
 java --add-modules jdk.incubator.vector \
-  -Xmx8g \
+  -Xmx16g \
   -p target/nano-vllm-java-1.0.0-SNAPSHOT.jar \
   -m com.igormaznitsa.nanollvm/com.igormaznitsa.nanollvm.Example \
   models/Qwen3-0.6B
@@ -206,7 +227,7 @@ Replace the main class with `com.igormaznitsa.nanollvm.Bench` for throughput smo
 Loads the same default model and runs random token-id batches (scheduler / KV stress):
 
 ```bash
-MAVEN_OPTS="-Xmx8g" mvn -q exec:java \
+mvn -q exec:java \
   -Dexec.mainClass=com.igormaznitsa.nanollvm.Bench \
   -Dexec.args="models/Qwen3-0.6B 8"
 ```

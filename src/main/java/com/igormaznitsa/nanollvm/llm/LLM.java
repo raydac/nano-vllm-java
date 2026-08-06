@@ -19,7 +19,9 @@ import com.igormaznitsa.nanollvm.rag.PreparedRag;
 import com.igormaznitsa.nanollvm.rag.RagFactory;
 import com.igormaznitsa.nanollvm.rag.RagIndex;
 import com.igormaznitsa.nanollvm.rag.RagSession;
+import com.igormaznitsa.nanollvm.tensor.VectorMath;
 import com.igormaznitsa.nanollvm.tokenizer.Tokenizer;
+import com.igormaznitsa.nanollvm.utils.NanoVllmProps;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -119,8 +121,10 @@ public final class LLM implements AutoCloseable {
     requireNonNull(builder, "builder");
     try {
       // Business load path: resolve Model → engine config → KV/scheduler
+      int cpuThreads = builder.resolveCpuThreads();
+      VectorMath.configureCpuThreads(cpuThreads);
       this.model = builder.resolveModel();
-      this.config = builder.toConfig(this.model);
+      this.config = builder.toConfig(this.model, cpuThreads);
       this.io = builder.io;
       this.systemPromptOverride = builder.systemPromptOverride;
       Sequence.setBlockSize(this.config.kvcacheBlockSize());
@@ -128,6 +132,7 @@ public final class LLM implements AutoCloseable {
       this.applyTokenizerStopTokens();
       this.transformer = new Transformer(this.model, this.config, this.io);
       this.scheduler = new Scheduler(this.config);
+      this.io.info("CPU matmul: " + VectorMath.backendInfo());
     } catch (ModelLoadException e) {
       throw e;
     } catch (RuntimeException e) {
@@ -303,6 +308,8 @@ public final class LLM implements AutoCloseable {
   }
 
   /**
+   * Generates completions for one or more prompts, optionally printing batch progress.
+   *
    * @param useTqdm when {@code true} and I/O is not silent, prints batch progress to {@link EngineIo#out()}
    */
   public List<GenerationOutput> generate(final List<?> prompts, final Object samplingParams,
@@ -311,6 +318,8 @@ public final class LLM implements AutoCloseable {
   }
 
   /**
+   * Generates completions with an optional per-token callback and no timeout.
+   *
    * @param onToken invoked for each newly decoded token id (optional; may be {@code null})
    */
   public List<GenerationOutput> generate(
@@ -666,14 +675,14 @@ public final class LLM implements AutoCloseable {
 
   /**
    * System text used by {@link #newConversation()} and {@link #chat()}.
-   * Builder override wins; otherwise {@link ChatPrompts#systemFor(boolean)}
-   * (empty for Gemma by default).
+   * Builder override wins; otherwise {@link ChatPrompts#systemFor(Tokenizer)}
+   * (empty for Gemma; short plain text when thinking is not invited; Qwen-style otherwise).
    */
   public String systemPrompt() {
     if (this.systemPromptOverride != null) {
       return this.systemPromptOverride;
     }
-    return ChatPrompts.systemFor(this.tokenizer.isGemmaChat());
+    return ChatPrompts.systemFor(this.tokenizer);
   }
 
   /**
@@ -703,8 +712,6 @@ public final class LLM implements AutoCloseable {
    *
    * <p>Provide either a shared {@link Model} via {@link LLM#builder(Model)} or a model directory
    * via {@link LLM#builder(Path)}. Call {@link #build()} last.
-   *
-   * @throws ModelLoadException from {@link #build()} when weights or config cannot be loaded
    */
   public static final class Builder {
 
@@ -717,6 +724,7 @@ public final class LLM implements AutoCloseable {
     private float gpuMemoryUtilization = 0.9f;
     private int tensorParallelSize = 1;
     private boolean enforceEager = true;
+    private Integer cpuThreads;
     private int kvcacheBlockSize = 256;
     private int numKvcacheBlocks = -1;
     private boolean warmup = true;
@@ -774,7 +782,7 @@ public final class LLM implements AutoCloseable {
     }
 
     /**
-     * Clears an override so {@link ChatPrompts#systemFor(boolean)} applies again.
+     * Clears an override so {@link ChatPrompts#systemFor(Tokenizer)} applies again.
      */
     public Builder defaultSystemPrompt() {
       this.systemPromptOverride = null;
@@ -833,6 +841,27 @@ public final class LLM implements AutoCloseable {
     }
 
     /**
+     * CPU workers for dense matmul in {@link VectorMath#linear}. {@code 1} is sequential.
+     *
+     * <p>Default when omitted: {@link Runtime#availableProcessors()}. Override with
+     * {@code -Dnanovllm.cpu.threads=N}.
+     */
+    public Builder cpuThreads(final int value) {
+      if (value < 1) {
+        throw new IllegalArgumentException("cpuThreads must be >= 1, got " + value);
+      }
+      this.cpuThreads = value;
+      return this;
+    }
+
+    /**
+     * Sets matmul workers to {@link Runtime#availableProcessors()} (same as the builder default).
+     */
+    public Builder allCpuThreads() {
+      return this.cpuThreads(Runtime.getRuntime().availableProcessors());
+    }
+
+    /**
      * KV block size in tokens; must be a multiple of 256. Default {@code 256}.
      */
     public Builder kvcacheBlockSize(final int value) {
@@ -883,7 +912,7 @@ public final class LLM implements AutoCloseable {
       return this.sharedModel != null ? this.sharedModel.path() : this.modelDir;
     }
 
-    private Config toConfig(final Model model) {
+    private Config toConfig(final Model model, final int cpuThreads) {
       return Config.builder(model)
           .maxNumBatchedTokens(this.maxNumBatchedTokens)
           .maxNumSeqs(this.maxNumSeqs)
@@ -891,9 +920,26 @@ public final class LLM implements AutoCloseable {
           .gpuMemoryUtilization(this.gpuMemoryUtilization)
           .tensorParallelSize(this.tensorParallelSize)
           .enforceEager(this.enforceEager)
+        .cpuThreads(cpuThreads)
           .kvcacheBlockSize(this.kvcacheBlockSize)
           .numKvcacheBlocks(this.numKvcacheBlocks)
           .build();
+    }
+
+    private int resolveCpuThreads() {
+      String prop = System.getProperty(NanoVllmProps.PROP_CPU_THREADS);
+      if (prop != null && !prop.isBlank()) {
+        int parsed = Integer.parseInt(prop.strip());
+        if (parsed < 1) {
+          throw new IllegalArgumentException(
+            "-" + NanoVllmProps.PROP_CPU_THREADS + " must be >= 1, got " + parsed);
+        }
+        return parsed;
+      }
+      if (this.cpuThreads != null) {
+        return this.cpuThreads;
+      }
+      return Runtime.getRuntime().availableProcessors();
     }
   }
 

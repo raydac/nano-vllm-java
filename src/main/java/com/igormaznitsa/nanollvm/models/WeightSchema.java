@@ -1,10 +1,14 @@
 package com.igormaznitsa.nanollvm.models;
 
 import static com.igormaznitsa.nanollvm.models.WeightNames.ARCH_GEMMA3;
+import static com.igormaznitsa.nanollvm.models.WeightNames.ARCH_LFM2;
 import static com.igormaznitsa.nanollvm.models.WeightNames.ARCH_QWEN3;
 import static com.igormaznitsa.nanollvm.models.WeightNames.DOWN_PROJ_WEIGHT;
 import static com.igormaznitsa.nanollvm.models.WeightNames.EMBED_TOKENS;
 import static com.igormaznitsa.nanollvm.models.WeightNames.GATE_UP_PROJ_WEIGHT;
+import static com.igormaznitsa.nanollvm.models.WeightNames.GGUF_OUTPUT;
+import static com.igormaznitsa.nanollvm.models.WeightNames.GGUF_TOKEN_EMBD;
+import static com.igormaznitsa.nanollvm.models.WeightNames.GGUF_TOKEN_EMBD_NORM;
 import static com.igormaznitsa.nanollvm.models.WeightNames.INPUT_LAYERNORM;
 import static com.igormaznitsa.nanollvm.models.WeightNames.K_NORM_WEIGHT;
 import static com.igormaznitsa.nanollvm.models.WeightNames.LM_HEAD;
@@ -16,6 +20,7 @@ import static com.igormaznitsa.nanollvm.models.WeightNames.POST_FEEDFORWARD_LAYE
 import static com.igormaznitsa.nanollvm.models.WeightNames.PRE_FEEDFORWARD_LAYERNORM;
 import static com.igormaznitsa.nanollvm.models.WeightNames.QKV_PROJ_WEIGHT;
 import static com.igormaznitsa.nanollvm.models.WeightNames.Q_NORM_WEIGHT;
+import static com.igormaznitsa.nanollvm.models.WeightNames.ggufBlk;
 import static com.igormaznitsa.nanollvm.models.WeightNames.layer;
 import static com.igormaznitsa.nanollvm.models.WeightNames.mlp;
 import static com.igormaznitsa.nanollvm.models.WeightNames.selfAttn;
@@ -50,6 +55,7 @@ public final class WeightSchema {
     return switch (arch) {
       case ARCH_GEMMA3 -> gemma3(config);
       case ARCH_QWEN3 -> qwen3(config);
+      case ARCH_LFM2 -> lfm2(config);
       default -> throw new IllegalArgumentException("unsupported architecture '" + arch + "'");
     };
   }
@@ -104,6 +110,39 @@ public final class WeightSchema {
     expected.add(MODEL_NORM);
     optional.add(LM_HEAD);
     return new WeightSchema(PACKED_MODULES_MAPPING, expected, optional);
+  }
+
+  public static WeightSchema lfm2(final Config.HfConfig config) {
+    Set<String> expected = new LinkedHashSet<>();
+    Set<String> optional = new LinkedHashSet<>();
+    expected.add(GGUF_TOKEN_EMBD);
+    expected.add(GGUF_TOKEN_EMBD_NORM);
+    for (int i = 0; i < config.numHiddenLayers(); i++) {
+      String blk = ggufBlk(i);
+      expected.add(blk + "attn_norm.weight");
+      expected.add(blk + "ffn_norm.weight");
+      expected.add(blk + "ffn_gate.weight");
+      expected.add(blk + "ffn_up.weight");
+      expected.add(blk + "ffn_down.weight");
+      if (config.isConvLayer(i)) {
+        expected.add(blk + "shortconv.conv.weight");
+        expected.add(blk + "shortconv.in_proj.weight");
+        expected.add(blk + "shortconv.out_proj.weight");
+      } else {
+        expected.add(blk + "attn_q.weight");
+        expected.add(blk + "attn_k.weight");
+        expected.add(blk + "attn_v.weight");
+        expected.add(blk + "attn_output.weight");
+        expected.add(blk + "attn_q_norm.weight");
+        expected.add(blk + "attn_k_norm.weight");
+      }
+    }
+    if (config.tieWordEmbeddings()) {
+      optional.add(GGUF_OUTPUT);
+    } else {
+      expected.add(GGUF_OUTPUT);
+    }
+    return new WeightSchema(Map.of(), expected, optional);
   }
 
   public Map<String, Object[]> packedModulesMapping() {

@@ -11,5 +11,6 @@ target/
 # External HF weights — download via models/download-*.sh
 models/Qwen3-0.6B/
 models/Gemma3-270M/
+models/*.gguf
 /current_project_notes.txt
 /.editorconfig

@@ -72,7 +72,7 @@ public final class BlockManager {
     if (block.refCount() != 0) {
       throw new IllegalStateException("free block has refCount != 0");
     }
-    if (block.hash() != -1L && this.hashToBlockId.getOrDefault(block.hash(), -1) == blockId) {
+    if (block.hash() != -1L && this.hashToBlockId.getOrDefault(block.hash(), -1).equals(blockId)) {
       this.hashToBlockId.remove(block.hash());
     }
     block.reset();

@@ -1,5 +1,6 @@
 package com.igormaznitsa.nanollvm.prompts;
 
+import com.igormaznitsa.nanollvm.tokenizer.Tokenizer;
 import java.util.regex.Pattern;
 
 public final class ChatPrompts {
@@ -30,11 +31,30 @@ public final class ChatPrompts {
    */
   public static final String GEMMA_CHAT_SYSTEM = "";
 
+  /**
+   * LFM2 (and other non-Qwen ChatML models): short role cue without {@code <think>} format
+   * rules — those instructions make the model narrate the template instead of answering.
+   */
+  public static final String PLAIN_CHAT_SYSTEM = """
+      You are a helpful assistant. Reply briefly and clearly to the user's message.
+      Do not invent facts. If you do not know, say so.
+      """.strip();
+
   private static final Pattern SETUP_BOILERPLATE = Pattern.compile(
       "(?i).*\\b(i(?:'m| am) ready|let'?s begin|okay[,.]?\\s*i understand)\\b.*"
   );
 
   private ChatPrompts() {
+  }
+
+  public static String systemFor(final Tokenizer tokenizer) {
+    if (tokenizer == null || tokenizer.isGemmaChat()) {
+      return GEMMA_CHAT_SYSTEM;
+    }
+    if (!tokenizer.invitesThinking()) {
+      return PLAIN_CHAT_SYSTEM;
+    }
+    return CHAT_SYSTEM;
   }
 
   public static String systemFor(final boolean gemmaChat) {

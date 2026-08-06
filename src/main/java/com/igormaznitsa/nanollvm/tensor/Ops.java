@@ -2,6 +2,8 @@ package com.igormaznitsa.nanollvm.tensor;
 
 import static java.util.Objects.requireNonNull;
 
+import java.util.Arrays;
+
 /**
  * High-level tensor operations used by transformer layers (linear, embedding, norms, MLP gates,
  * softmax, splits).
@@ -135,6 +137,56 @@ public final class Ops {
    */
   public static Tensor siluAndMul(final Tensor x) {
     return gatedActAndMul(x, false);
+  }
+
+  /**
+   * SwiGLU with separate gate and up tensors: {@code silu(gate) * up} (LFM2-style unfused MLP).
+   */
+  public static Tensor siluAndMul(final Tensor gate, final Tensor up) {
+    requireSameShape(gate, up, "gate", "up");
+    Tensor out = Tensor.zeros(gate.shape());
+    float[] gd = gate.data();
+    float[] ud = up.data();
+    float[] od = out.data();
+    int gOff = gate.offset();
+    int uOff = up.offset();
+    int n = gate.numel();
+    for (int i = 0; i < n; i++) {
+      float g = gd[gOff + i];
+      od[i] = (g / (1.0f + (float) Math.exp(-g))) * ud[uOff + i];
+    }
+    return out;
+  }
+
+  /**
+   * Elementwise sum of two same-shaped tensors (residual add).
+   */
+  public static Tensor add(final Tensor a, final Tensor b) {
+    requireSameShape(a, b, "a", "b");
+    Tensor out = Tensor.zeros(a.shape());
+    float[] ad = a.data();
+    float[] bd = b.data();
+    float[] od = out.data();
+    int aOff = a.offset();
+    int bOff = b.offset();
+    int n = a.numel();
+    for (int i = 0; i < n; i++) {
+      od[i] = ad[aOff + i] + bd[bOff + i];
+    }
+    return out;
+  }
+
+  private static void requireSameShape(
+    final Tensor left,
+    final Tensor right,
+    final String leftName,
+    final String rightName
+  ) {
+    if (!Arrays.equals(left.rawShape(), right.rawShape())) {
+      throw new IllegalArgumentException(
+        leftName + " shape " + Arrays.toString(left.rawShape())
+          + " != " + rightName + " shape " + Arrays.toString(right.rawShape()));
+    }
   }
 
   /**

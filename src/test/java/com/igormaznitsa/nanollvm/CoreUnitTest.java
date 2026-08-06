@@ -31,8 +31,11 @@ import com.igormaznitsa.nanollvm.tensor.Ops;
 import com.igormaznitsa.nanollvm.tensor.Tensor;
 import com.igormaznitsa.nanollvm.utils.BundledModels;
 import com.igormaznitsa.nanollvm.utils.Json;
+import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
 
@@ -108,6 +111,23 @@ class CoreUnitTest {
   }
 
   @Test
+  void addAndSeparateSiluAndMul() {
+    Tensor a = Tensor.of(new float[] {1f, 2f}, 2);
+    Tensor b = Tensor.of(new float[] {3f, 4f}, 2);
+    Tensor sum = Ops.add(a, b);
+    assertEquals(4f, sum.get(0), 1e-5);
+    assertEquals(6f, sum.get(1), 1e-5);
+
+    Tensor gate = Tensor.of(new float[] {1f, -1f}, 2);
+    Tensor up = Tensor.of(new float[] {2f, 3f}, 2);
+    float silu1 = 1f / (1f + (float) Math.exp(-1f));
+    float siluNeg = -1f / (1f + (float) Math.exp(1f));
+    Tensor out = Ops.siluAndMul(gate, up);
+    assertEquals(silu1 * 2f, out.get(0), 1e-5);
+    assertEquals(siluNeg * 3f, out.get(1), 1e-5);
+  }
+
+  @Test
   void siluAndMul() {
     Tensor x2 = Tensor.of(new float[] {1f, 2f}, 2);
     float silu1 = 1f / (1f + (float) Math.exp(-1f));
@@ -177,10 +197,10 @@ class CoreUnitTest {
     float[] x = new float[rows * in];
     float[] w = new float[out * in];
     for (int i = 0; i < x.length; i++) {
-      x[i] = (i % 7) * 0.1f;
+      x[i] = i % 7 * 0.1f;
     }
     for (int i = 0; i < w.length; i++) {
-      w[i] = ((i * 3) % 11) * 0.05f;
+      w[i] = i * 3 % 11 * 0.05f;
     }
     Tensor xt = Tensor.of(x, rows, in);
     Tensor wt = Tensor.of(w, out, in);
@@ -200,6 +220,43 @@ class CoreUnitTest {
   }
 
   @Test
+  void parallelLinearMatchesSequential() {
+    int rows = 3;
+    int in = 128;
+    int out = 256;
+    float[] x = new float[rows * in];
+    float[] w = new float[out * in];
+    float[] bias = new float[out];
+    for (int i = 0; i < x.length; i++) {
+      x[i] = i % 9 * 0.07f;
+    }
+    for (int i = 0; i < w.length; i++) {
+      w[i] = i * 5 % 13 * 0.03f;
+    }
+    for (int i = 0; i < out; i++) {
+      bias[i] = i % 5 * 0.01f;
+    }
+    float[] sequential = new float[rows * out];
+    float[] parallel = new float[rows * out];
+    try {
+      com.igormaznitsa.nanollvm.tensor.VectorMath.configureCpuThreads(1);
+      com.igormaznitsa.nanollvm.tensor.VectorMath.linear(
+        x, 0, w, 0, bias, sequential, 0, rows, in, out);
+
+      com.igormaznitsa.nanollvm.tensor.VectorMath.configureCpuThreads(
+        Math.max(2, Runtime.getRuntime().availableProcessors()));
+      com.igormaznitsa.nanollvm.tensor.VectorMath.linear(
+        x, 0, w, 0, bias, parallel, 0, rows, in, out);
+    } finally {
+      com.igormaznitsa.nanollvm.tensor.VectorMath.configureCpuThreads(1);
+    }
+    for (int i = 0; i < sequential.length; i++) {
+      assertEquals(sequential[i], parallel[i], 1e-4f, "index " + i);
+    }
+    assertTrue(com.igormaznitsa.nanollvm.tensor.VectorMath.backendInfo().contains("cpuThreads"));
+  }
+
+  @Test
   void scalarAndVectorKernelsAgree() {
     assertTrue(FloatKernelsFactory.isVectorApiAvailable());
     FloatKernels scalar = FloatKernelsFactory.create("scalar");
@@ -212,8 +269,8 @@ class CoreUnitTest {
     float[] outV = new float[64];
     for (int i = 0; i < 64; i++) {
       a[i] = i * 0.1f;
-      b[i] = 1.0f + (i % 7) * 0.01f;
-      w[i] = 0.5f + (i % 5) * 0.02f;
+      b[i] = 1.0f + i % 7 * 0.01f;
+      w[i] = 0.5f + i % 5 * 0.02f;
     }
 
     assertEquals(scalar.dot(a, 0, b, 0, 64), vector.dot(a, 0, b, 0, 64), 1e-4f);
@@ -256,7 +313,7 @@ class CoreUnitTest {
         com.igormaznitsa.nanollvm.tokenizer.Tokenizer.decodeUtf8Complete(new byte[] {shch[0]}));
     assertEquals("щ", com.igormaznitsa.nanollvm.tokenizer.Tokenizer.decodeUtf8Complete(shch));
     assertEquals("ащ", com.igormaznitsa.nanollvm.tokenizer.Tokenizer.decodeUtf8Complete(
-        ("ащ").getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+      "ащ".getBytes(java.nio.charset.StandardCharsets.UTF_8)));
 
     var path = com.igormaznitsa.nanollvm.utils.BundledModels.require(
         com.igormaznitsa.nanollvm.utils.BundledModels.QWEN3_0_6B);
@@ -351,13 +408,15 @@ class CoreUnitTest {
   void chatSystemPromptUsesDialogHistory() {
     assertTrue(ChatPrompts.CHAT_SYSTEM.contains("You are the Assistant"));
     assertTrue(ChatPrompts.CHAT_SYSTEM.contains("User"));
-    assertTrue(ChatPrompts.CHAT_SYSTEM.toLowerCase().contains("conversation"));
-    assertTrue(ChatPrompts.CHAT_SYSTEM.toLowerCase().contains("do not repeat")
-        || ChatPrompts.CHAT_SYSTEM.toLowerCase().contains("do not greet"));
+    assertTrue(ChatPrompts.CHAT_SYSTEM.toLowerCase(Locale.ROOT).contains("conversation"));
+    assertTrue(ChatPrompts.CHAT_SYSTEM.toLowerCase(Locale.ROOT).contains("do not repeat")
+      || ChatPrompts.CHAT_SYSTEM.toLowerCase(Locale.ROOT).contains("do not greet"));
     assertTrue(ChatPrompts.CHAT_SYSTEM.contains("<think>"));
-    assertFalse(ChatPrompts.CHAT_SYSTEM.toLowerCase().contains("knowledge base"));
+    assertFalse(ChatPrompts.CHAT_SYSTEM.toLowerCase(Locale.ROOT).contains("knowledge base"));
     assertEquals(ChatPrompts.CHAT_SYSTEM, ChatPrompts.systemFor(false));
     assertEquals(ChatPrompts.GEMMA_CHAT_SYSTEM, ChatPrompts.systemFor(true));
+    assertFalse(ChatPrompts.PLAIN_CHAT_SYSTEM.contains("<think>"));
+    assertTrue(ChatPrompts.CHAT_SYSTEM.contains("<think>"));
     assertTrue(ChatPrompts.GEMMA_CHAT_SYSTEM.isBlank());
     assertTrue(ChatPrompts.gemmaUserContent("SYS", "hi", true).startsWith("SYS"));
     assertEquals("hi", ChatPrompts.gemmaUserContent("SYS", "hi", false));
@@ -443,6 +502,8 @@ class CoreUnitTest {
         com.igormaznitsa.nanollvm.utils.BundledModels.QWEN3_0_6B);
     var tok = com.igormaznitsa.nanollvm.tokenizer.Tokenizer.fromPretrained(path);
     assertFalse(tok.isGemmaChat());
+    assertTrue(tok.invitesThinking());
+    assertEquals(ChatPrompts.CHAT_SYSTEM, ChatPrompts.systemFor(tok));
     String chat = tok.applyChatTemplate(
         List.of(Map.of("role", "user", "content", "hi")), true, false);
     assertTrue(chat.contains("<|im_start|>"));
@@ -457,7 +518,7 @@ class CoreUnitTest {
                 100, 64, 128, 1, 4, 1, 16, 128, 1e-6f, "gelu", false, false,
                 1e6f, null, "float32", "gemma3_text",
                 List.of("Gemma3ForCausalLM"), "gelu_pytorch_tanh",
-                512, List.of("sliding_attention"), 10_000f, 256f)));
+              512, List.of("sliding_attention"), 10_000f, 256f, 0)));
 
     Path dir = createTempDirectory("gemma-tok");
     try {
@@ -493,7 +554,8 @@ class CoreUnitTest {
         walk.sorted(java.util.Comparator.reverseOrder()).forEach(p -> {
           try {
             deleteIfExists(p);
-          } catch (Exception ignored) {
+          } catch (IOException e) {
+            throw new UncheckedIOException("failed to delete temp path " + p, e);
           }
         });
       }
@@ -553,7 +615,7 @@ class CoreUnitTest {
 
     assertTrue(Example.resolveModel(
         new String[0],
-        new java.io.BufferedReader(new java.io.StringReader("3\n"))) == null);
+      new java.io.BufferedReader(new java.io.StringReader("4\n"))) == null);
   }
 
   @Test

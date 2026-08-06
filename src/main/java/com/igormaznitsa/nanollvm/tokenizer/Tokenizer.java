@@ -3,6 +3,7 @@ package com.igormaznitsa.nanollvm.tokenizer;
 import static com.igormaznitsa.nanollvm.utils.NanoVllmProps.CONFIG_JSON;
 import static java.nio.charset.StandardCharsets.UTF_8;
 
+import com.igormaznitsa.nanollvm.internal.GgufReader;
 import com.igormaznitsa.nanollvm.prompts.ChatPrompts;
 import com.igormaznitsa.nanollvm.utils.Json;
 
@@ -76,6 +77,10 @@ public final class Tokenizer {
    * When true, prepend {@code ▁} (Metaspace); Gemma uses replace-only normalizer.
    */
   private final boolean prependMetaSpace;
+  /**
+   * When true, chat may use a {@code <think>} scratchpad (Qwen-style). LFM2 GGUF is false.
+   */
+  private final boolean inviteThinking;
 
   private Tokenizer(
       final Map<String, Integer> vocab,
@@ -89,7 +94,8 @@ public final class Tokenizer {
       final boolean byteFallback,
       final Style style,
       final boolean gemmaChat,
-      final boolean prependMetaSpace
+      final boolean prependMetaSpace,
+      final boolean inviteThinking
   ) {
     this.vocab = vocab;
     this.idToToken = new HashMap<>();
@@ -115,6 +121,7 @@ public final class Tokenizer {
     this.style = style;
     this.gemmaChat = gemmaChat;
     this.prependMetaSpace = prependMetaSpace;
+    this.inviteThinking = inviteThinking;
   }
 
   public static Tokenizer fromPretrained(final Path modelDir) {
@@ -222,11 +229,78 @@ public final class Tokenizer {
           Json.asBoolean(model.get("byte_fallback"), style == Style.GPT2_BYTE_BPE);
       return new Tokenizer(
           vocab, merges, addedTexts, specialTexts, eos, stopIds, pad,
-          chatTemplate, byteFallback, style, gemmaChat, prependMetaSpace
+        chatTemplate, byteFallback, style, gemmaChat, prependMetaSpace, !gemmaChat
       );
     } catch (IOException e) {
       throw new IllegalStateException("failed to load tokenizer from " + modelDir, e);
     }
+  }
+
+  /**
+   * Builds a tokenizer from GGUF {@code tokenizer.ggml.*} metadata (LFM2 and similar).
+   */
+  public static Tokenizer fromGguf(final GgufReader reader) {
+    List<String> tokens = reader.metaStringArray("tokenizer.ggml.tokens");
+    if (tokens.isEmpty()) {
+      throw new IllegalStateException("GGUF missing tokenizer.ggml.tokens");
+    }
+    Map<String, Integer> vocab = new LinkedHashMap<>(tokens.size() * 2);
+    Set<String> addedTexts = new HashSet<>();
+    Set<String> specialTexts = new HashSet<>();
+    for (int i = 0; i < tokens.size(); i++) {
+      String tok = tokens.get(i);
+      vocab.put(tok, i);
+      if (tok.startsWith("<") && tok.endsWith(">")) {
+        addedTexts.add(tok);
+        specialTexts.add(tok);
+      }
+    }
+
+    Map<String, Integer> merges = new HashMap<>();
+    List<String> mergeList = reader.metaStringArray("tokenizer.ggml.merges");
+    for (int i = 0; i < mergeList.size(); i++) {
+      merges.put(mergeList.get(i), i);
+    }
+
+    String ggmlModel = reader.metaString("tokenizer.ggml.model", "gpt2").toLowerCase(Locale.ROOT);
+    boolean metaspace =
+      tokens.stream().limit(4000).filter(t -> t.startsWith(META_SPACE)).count() > 200
+        || ggmlModel.contains("llama")
+        || ggmlModel.contains("spm");
+    Style style = metaspace ? Style.METASPACE_BPE : Style.GPT2_BYTE_BPE;
+    boolean prependMetaSpace = metaspace && !ggmlModel.contains("lfm");
+
+    int eos = reader.metaInt("tokenizer.ggml.eos_token_id", -1);
+    if (eos < 0) {
+      eos = resolveEos(vocab, null, false);
+    }
+    int pad = reader.metaInt("tokenizer.ggml.padding_token_id", -1);
+    if (pad < 0) {
+      pad = resolvePad(vocab, null, eos);
+    }
+    List<Integer> stopIds = new ArrayList<>();
+    stopIds.add(eos);
+    int eot = reader.metaInt("tokenizer.ggml.eot_token_id", -1);
+    if (eot >= 0 && !stopIds.contains(eot)) {
+      stopIds.add(eot);
+    }
+    addStopIfPresent(vocab, stopIds, "<|im_end|>");
+    addStopIfPresent(vocab, stopIds, "<|endoftext|>");
+
+    String chatTemplate = reader.metaString("tokenizer.chat_template", null);
+    if (chatTemplate == null) {
+      chatTemplate = reader.metaString("tokenizer.ggml.chat_template", null);
+    }
+    if (chatTemplate == null && vocab.containsKey("<|im_start|>")) {
+      chatTemplate = "<|im_start|>";
+    }
+    boolean gemmaChat = chatTemplate != null && chatTemplate.contains("start_of_turn");
+    boolean byteFallback = style == Style.GPT2_BYTE_BPE;
+
+    return new Tokenizer(
+      vocab, merges, addedTexts, specialTexts, eos, stopIds, pad,
+      chatTemplate, byteFallback, style, gemmaChat, prependMetaSpace, false
+    );
   }
 
   private static String tokenString(final Object value) {
@@ -401,7 +475,7 @@ public final class Tokenizer {
     return new Tokenizer(
         vocab, Map.of(), Set.of(), Set.of(),
         vocabSize - 1, List.of(vocabSize - 1), vocabSize - 1,
-        null, true, Style.GPT2_BYTE_BPE, false, false
+      null, true, Style.GPT2_BYTE_BPE, false, false, false
     );
   }
 
@@ -463,6 +537,14 @@ public final class Tokenizer {
       complete = i;
     }
     return complete == 0 ? "" : new String(bytes, 0, complete, UTF_8);
+  }
+
+  /**
+   * Whether this chat path invites a {@code <think>} scratchpad (Qwen-style).
+   * LFM2 GGUF and Gemma return {@code false}.
+   */
+  public boolean invitesThinking() {
+    return this.inviteThinking;
   }
 
   private static int utf8SequenceLength(final byte lead) {
@@ -678,7 +760,7 @@ public final class Tokenizer {
         (this.chatTemplate != null && this.chatTemplate.contains("start_of_turn"))) {
       return this.applyGemmaChat(messages, addGenerationPrompt);
     }
-    if (this.chatTemplate != null && this.chatTemplate.contains("<|im_start|>")) {
+    if (this.usesChatMl()) {
       StringBuilder sb = new StringBuilder();
       for (Map<String, String> msg : messages) {
         String role = msg.getOrDefault("role", "user");
@@ -687,7 +769,7 @@ public final class Tokenizer {
       }
       if (addGenerationPrompt) {
         sb.append("<|im_start|>assistant\n");
-        if (!enableThinking) {
+        if (!enableThinking && this.inviteThinking) {
           sb.append("<think>\n\n</think>\n\n");
         }
       }
@@ -702,6 +784,11 @@ public final class Tokenizer {
       sb.append("assistant: ");
     }
     return sb.toString();
+  }
+
+  private boolean usesChatMl() {
+    return (this.chatTemplate != null && this.chatTemplate.contains("<|im_start|>"))
+      || this.vocab.containsKey("<|im_start|>");
   }
 
   private String tokensToUtf8(final String tokenString) {

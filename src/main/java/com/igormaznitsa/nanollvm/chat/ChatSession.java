@@ -68,9 +68,11 @@ public final class ChatSession {
   }
 
   /**
-   * When {@code false}, the chat template seeds an empty {@code <think></think>} so Qwen-style
+   * Enables or disables thinking-scratchpad invitation for this session.
+   *
+   * <p>When {@code false}, the chat template seeds an empty {@code <think></think>} so Qwen-style
    * models skip long chain-of-thought (important for RAG token budgets). {@code null}/unset keeps
-   * the default: off for Gemma, on for other chat templates.
+   * the default from {@link com.igormaznitsa.nanollvm.tokenizer.Tokenizer#invitesThinking()}.
    */
   public ChatSession enableThinking(final boolean enableThinking) {
     this.enableThinking = enableThinking;
@@ -107,6 +109,9 @@ public final class ChatSession {
   }
 
   /**
+   * Sends a turn that stores one user text in history but may generate from a different prepared
+   * user string.
+   *
    * @param isolateGeneration when {@code true}, the model sees only the system seed (if any) plus
    *                          the prepared user turn — prior assistant answers are kept in history
    *                          for the app, but not fed into this generate (avoids tiny-model latch)
@@ -164,7 +169,7 @@ public final class ChatSession {
   ) {
     Tokenizer tokenizer = this.llm.tokenizer();
     boolean gemmaChat = tokenizer.isGemmaChat();
-    boolean enableThinking = this.thinkingEnabled(gemmaChat);
+    boolean enableThinking = this.thinkingEnabled(tokenizer);
     List<ChatMessage> forTemplate = isolateGeneration
         ? this.isolatedTurn(lastUserOverride)
         : this.historyForTemplate(lastUserOverride);
@@ -189,8 +194,8 @@ public final class ChatSession {
         AssistantParts.parse(tokenizer.decode(outputs.getFirst().tokenIds(), gemmaChat)));
   }
 
-  private boolean thinkingEnabled(final boolean gemmaChat) {
-    return this.enableThinking != null ? this.enableThinking : !gemmaChat;
+  private boolean thinkingEnabled(final Tokenizer tokenizer) {
+    return this.enableThinking != null ? this.enableThinking : tokenizer.invitesThinking();
   }
 
   private List<ChatMessage> isolatedTurn(final String modelUserText) {

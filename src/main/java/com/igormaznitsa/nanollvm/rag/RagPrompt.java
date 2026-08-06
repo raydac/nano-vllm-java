@@ -52,7 +52,7 @@ public final class RagPrompt {
 
 
         Context (use only these; if they do not answer, say you do not know):
-          """ + context;
+        """ + context;
     }
     return """
         Context:
@@ -62,7 +62,7 @@ public final class RagPrompt {
 
       Answer using only the context. Do not invent names, dates, or other details.
       If the context does not contain the answer, say you do not know. Be concise.
-        """.formatted(context, q).strip();
+      """.formatted(context, q).strip();
   }
 
   private static String truncateContext(final List<RagHit> hits, final int maxContextChars,

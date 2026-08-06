@@ -16,6 +16,7 @@ public final class NanoVllmProps {
 
   public static final String PROP_ARCH = "nanovllm.arch";
   public static final String PROP_KERNELS = "nanovllm.kernels";
+  public static final String PROP_CPU_THREADS = "nanovllm.cpu.threads";
   public static final String PROP_COLOR = "nanovllm.color";
 
   public static final String CONFIG_JSON = "config.json";

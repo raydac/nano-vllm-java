@@ -1,7 +1,5 @@
 package com.igormaznitsa.nanollvm.engine;
 
-import static java.util.Objects.requireNonNull;
-
 import com.igormaznitsa.nanollvm.tensor.Tensor;
 
 /**
@@ -34,10 +32,6 @@ public final class KvCacheArena {
     }
   }
 
-  public int numLayers() {
-    return this.kCaches.length;
-  }
-
   public Tensor k(final int layerIndex) {
     return this.kCaches[this.requireLayer(layerIndex)];
   }
@@ -56,7 +50,6 @@ public final class KvCacheArena {
 
   @Override
   public String toString() {
-    requireNonNull(this.kCaches);
     return "KvCacheArena[layers=%d, blocks=%d]".formatted(
         this.kCaches.length,
         this.kCaches[0].size(0));

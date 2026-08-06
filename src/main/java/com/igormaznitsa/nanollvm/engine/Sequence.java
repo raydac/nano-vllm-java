@@ -33,7 +33,7 @@ public final class Sequence {
     this.seqId = nextSeqId++;
     this.status = Status.WAITING;
     this.tokenIds = new ArrayList<>(tokenIds);
-    this.lastToken = tokenIds.get(tokenIds.size() - 1);
+    this.lastToken = tokenIds.getLast();
     this.numTokens = tokenIds.size();
     this.numPromptTokens = tokenIds.size();
     this.numCachedTokens = 0;

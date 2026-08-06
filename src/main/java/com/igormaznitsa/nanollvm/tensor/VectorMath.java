@@ -1,5 +1,15 @@
 package com.igormaznitsa.nanollvm.tensor;
 
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.Callable;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.atomic.AtomicInteger;
+
 /**
  * Facade over {@link FloatKernels} plus the tiled dense linear (GEMM-like) routine used by
  * {@link Ops#linear}.
@@ -25,6 +35,9 @@ package com.igormaznitsa.nanollvm.tensor;
  * row-major). That keeps a working set of weights and activations in cache longer and reuses the
  * SIMD/scalar {@code dot} kernel.
  *
+ * <p>When {@link #configureCpuThreads(int)} is greater than 1, {@link #linear} splits the
+ * {@code out} axis across a dedicated daemon pool (decode-friendly: typically {@code rows == 1}).
+ *
  * @see FloatKernels
  * @see Ops#linear(Tensor, Tensor, Tensor)
  */
@@ -41,18 +54,53 @@ public final class VectorMath {
    */
   private static final int TILE_K = 256;
 
+  private static final int MIN_PARALLEL_OUT = TILE_N * 2;
+
   private static final FloatKernels KERNELS = FloatKernels.get();
+
+  private static final Object POOL_LOCK = new Object();
+  private static volatile int cpuThreads = 1;
+  private static volatile ExecutorService pool;
 
   private VectorMath() {
   }
 
   /**
-   * Short description of the active float backend and tiling knobs (for load logs / diagnostics).
+   * Process-wide CPU workers for {@link #linear}. {@code 1} keeps the sequential tiled path.
    *
-   * @return e.g. {@code "scalar, tileN=64 tileK=256"} or a Vector API species string with the same tiles
+   * @param threads worker count; must be {@code >= 1}
+   */
+  public static void configureCpuThreads(final int threads) {
+    if (threads < 1) {
+      throw new IllegalArgumentException("cpuThreads must be >= 1, got " + threads);
+    }
+    synchronized (POOL_LOCK) {
+      if (threads == cpuThreads && (threads == 1) == (pool == null)) {
+        return;
+      }
+      shutdownPoolUnlocked();
+      cpuThreads = threads;
+      if (threads > 1) {
+        pool = Executors.newFixedThreadPool(threads, namedDaemonFactory());
+      }
+    }
+  }
+
+  /**
+   * Current process-wide matmul worker count ({@code 1} = sequential).
+   */
+  public static int cpuThreads() {
+    return cpuThreads;
+  }
+
+  /**
+   * Short description of the active float backend, tiling knobs, and CPU workers.
+   *
+   * @return e.g. {@code "scalar, tileN=64 tileK=256, cpuThreads=1"}
    */
   public static String backendInfo() {
-    return "%s, tileN=%d tileK=%d".formatted(KERNELS.name(), TILE_N, TILE_K);
+    return "%s, tileN=%d tileK=%d, cpuThreads=%d".formatted(
+      KERNELS.name(), TILE_N, TILE_K, cpuThreads);
   }
 
   /**
@@ -122,7 +170,8 @@ public final class VectorMath {
    *           y[r, o] += dot(x[r, k0:k1], w[o, k0:k1])
    * </pre>
    * Partial dots accumulate into {@code y}; the same {@code x} K-tile is reused across the N-tile’s
-   * output channels before moving on.
+   * output channels before moving on. With {@code cpuThreads > 1}, disjoint {@code out} ranges
+   * run on the dedicated pool.
    *
    * @param x       input activations
    * @param xOffset start of the first input row
@@ -142,11 +191,48 @@ public final class VectorMath {
       final float[] y, final int yOffset,
       final int rows, final int in, final int out
   ) {
+    ExecutorService exec = pool;
+    int threads = cpuThreads;
+    if (exec == null || threads <= 1 || out < MIN_PARALLEL_OUT) {
+      linearRange(x, xOffset, w, wOffset, bias, y, yOffset, rows, in, out, 0, out);
+      return;
+    }
+
+    int workers = Math.min(threads, (out + TILE_N - 1) / TILE_N);
+    if (workers <= 1) {
+      linearRange(x, xOffset, w, wOffset, bias, y, yOffset, rows, in, out, 0, out);
+      return;
+    }
+
+    int chunk = (out + workers - 1) / workers;
+    List<Callable<Void>> tasks = new ArrayList<>(workers);
+    for (int worker = 0; worker < workers; worker++) {
+      int out0 = worker * chunk;
+      int out1 = Math.min(out, out0 + chunk);
+      if (out0 >= out1) {
+        break;
+      }
+      tasks.add(() -> {
+        linearRange(x, xOffset, w, wOffset, bias, y, yOffset, rows, in, out, out0, out1);
+        return null;
+      });
+    }
+    awaitAll(exec, tasks);
+  }
+
+  private static void linearRange(
+    final float[] x, final int xOffset,
+    final float[] w, final int wOffset,
+    final float[] bias,
+    final float[] y, final int yOffset,
+    final int rows, final int in, final int out,
+    final int out0, final int out1
+  ) {
     for (int r = 0; r < rows; r++) {
       int xBase = xOffset + r * in;
       int yBase = yOffset + r * out;
-      for (int tile0 = 0; tile0 < out; tile0 += TILE_N) {
-        int tile1 = Math.min(out, tile0 + TILE_N);
+      for (int tile0 = out0; tile0 < out1; tile0 += TILE_N) {
+        int tile1 = Math.min(out1, tile0 + TILE_N);
         for (int o = tile0; o < tile1; o++) {
           y[yBase + o] = bias != null ? bias[o] : 0f;
         }
@@ -158,6 +244,44 @@ public final class VectorMath {
           }
         }
       }
+    }
+  }
+
+  private static void awaitAll(final ExecutorService exec, final List<Callable<Void>> tasks) {
+    try {
+      List<Future<Void>> futures = exec.invokeAll(tasks);
+      for (Future<Void> future : futures) {
+        future.get();
+      }
+    } catch (InterruptedException e) {
+      Thread.currentThread().interrupt();
+      throw new IllegalStateException("CPU matmul interrupted", e);
+    } catch (ExecutionException e) {
+      Throwable cause = e.getCause();
+      if (cause instanceof RuntimeException runtime) {
+        throw runtime;
+      }
+      if (cause instanceof Error error) {
+        throw error;
+      }
+      throw new IllegalStateException("CPU matmul failed", cause);
+    }
+  }
+
+  private static ThreadFactory namedDaemonFactory() {
+    AtomicInteger seq = new AtomicInteger();
+    return runnable -> {
+      Thread thread = new Thread(runnable, "nanollvm-matmul-" + seq.getAndIncrement());
+      thread.setDaemon(true);
+      return thread;
+    };
+  }
+
+  private static void shutdownPoolUnlocked() {
+    ExecutorService current = pool;
+    pool = null;
+    if (current != null) {
+      current.shutdownNow();
     }
   }
 }

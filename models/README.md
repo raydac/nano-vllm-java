@@ -34,14 +34,27 @@ Windows: `.\models\download-gemma3-270m.ps1` or `models\download-gemma3-270m.cmd
 
 Creates `models/Gemma3-270M/`.
 
+## LFM2.5-2.6B GGUF (optional)
+
+Hybrid Liquid LFM2 checkpoint as a single GGUF file. On load, Q4 weights expand to ~10 GB float32 — plan on
+**~16 GB heap** (default `-Xmx16g` in [`.mvn/jvm.config`](../.mvn/jvm.config)).
+
+```bash
+./models/download-lfm2.5-2.6b-gguf.sh
+```
+
+Windows: `.\models\download-lfm2.5-2.6b-gguf.ps1` or `models\download-lfm2.5-2.6b-gguf.cmd`.
+
+Creates `models/LFM2.5-2.6B-Q4_K_M.gguf`.
+
 ## Selecting a model
 
 | Mechanism          | Example                                                                                           |
 |--------------------|---------------------------------------------------------------------------------------------------|
-| CLI arg            | `… Example models/Gemma3-270M`                                                                    |
+| CLI arg            | `… Example models/Gemma3-270M` or `… Example models/LFM2.5-2.6B-Q4_K_M.gguf`                      |
 | System property    | `-Dnanovllm.model=models/Gemma3-270M`                                                             |
-| Force architecture | `-Dnanovllm.arch=gemma3` (or `qwen3`)                                                             |
+| Force architecture | `-Dnanovllm.arch=gemma3` (or `qwen3` / `lfm2`)                                                    |
 | Env                | `NANOVLLM_MODEL=models/Gemma3-270M`                                                               |
 | Models root        | `-Dnanovllm.models.dir=/other/models` or `NANOVLLM_MODELS_DIR` (default loads `<dir>/Qwen3-0.6B`) |
 
-Architecture is auto-detected from `config.json` (`model_type` / `architectures`) unless `-Dnanovllm.arch` is set.
+Architecture is auto-detected from `config.json` or GGUF `general.architecture` unless `-Dnanovllm.arch` is set.

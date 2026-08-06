@@ -1,5 +1,6 @@
 package com.igormaznitsa.nanollvm.internal;
 
+import com.igormaznitsa.nanollvm.engine.ConvStateArena;
 import com.igormaznitsa.nanollvm.engine.KvCacheArena;
 
 public final class Context {
@@ -14,7 +15,9 @@ public final class Context {
   private int[] slotMapping;
   private int[] contextLens;
   private int[][] blockTables;
+  private int[] seqIds;
   private KvCacheArena kvCache;
+  private ConvStateArena convCache;
 
   public static Context get() {
     return CURRENT.get();
@@ -22,6 +25,10 @@ public final class Context {
 
   public static void bindKvCache(final KvCacheArena arena) {
     CURRENT.get().kvCache = arena;
+  }
+
+  public static void bindConvCache(final ConvStateArena arena) {
+    CURRENT.get().convCache = arena;
   }
 
   public static void set(
@@ -32,7 +39,8 @@ public final class Context {
       final int maxSeqlenK,
       final int[] slotMapping,
       final int[] contextLens,
-      final int[][] blockTables
+      final int[][] blockTables,
+      final int[] seqIds
   ) {
     Context ctx = CURRENT.get();
     ctx.prefill = isPrefill;
@@ -43,6 +51,7 @@ public final class Context {
     ctx.slotMapping = slotMapping;
     ctx.contextLens = contextLens;
     ctx.blockTables = blockTables;
+    ctx.seqIds = seqIds;
   }
 
   public static void reset() {
@@ -81,7 +90,15 @@ public final class Context {
     return this.blockTables;
   }
 
+  public int[] seqIds() {
+    return this.seqIds;
+  }
+
   public KvCacheArena kvCache() {
     return this.kvCache;
+  }
+
+  public ConvStateArena convCache() {
+    return this.convCache;
   }
 }

@@ -30,6 +30,7 @@ file paths.
 5. [`config.json` — the blueprint field by field](#5-configjson--the-blueprint-field-by-field)
 6. [`tokenizer.json` — the dictionary file field by field](#6-tokenizerjson--the-dictionary-file-field-by-field)
 7. [Tensors and `*.safetensors` — parameters on disk](#7-tensors-and-safetensors--parameters-on-disk)
+7a. [GGUF and LFM2 — format, dequant, hybrid chat](#7a-gguf-and-lfm2--quantized-single-file-models)
 8. [Attention: kinds of looking-back, and how they work](#8-attention-kinds-of-looking-back-and-how-they-work)
 9. [The thinking process: how it is organized and how it works with the model](#9-the-thinking-process-how-it-is-organized-and-how-it-works-with-the-model)
 10. [Tensors, embeddings, and the arithmetic of inference](#10-tensors-embeddings-and-the-arithmetic-of-inference) —
@@ -110,11 +111,13 @@ finished script, not writing the script.
 [Vaswani et al., *Attention Is All You Need*](https://arxiv.org/abs/1706.03762); a line-by-line walkthrough
 is [The Annotated Transformer](https://nlp.seas.harvard.edu/annotated-transformer/).
 
-Two families of models are supported here (different “editions” of the book, same kind of reading process): **Qwen3**
-and **Gemma3**. You usually need not care which; the program detects which files you pointed it at.
+Two families of Hugging Face checkpoints are supported here (different “editions” of the book, same kind of reading
+process): **Qwen3** and **Gemma3**. A third path loads **LFM2** from a **GGUF** file (hybrid short-convolution + GQA).
+You usually need not care which; the program detects which files you pointed it at.
 
-**In the code:** architecture pick is `CausalLMFactory.detect` / `create` → `Qwen3ForCausalLM` or
-`Gemma3ForCausalLM`; one next-token step is `Transformer.step` → `CausalLM.forward` / `computeLogits` →
+**In the code:** architecture pick is `CausalLMFactory.detect` / `create` → `Qwen3ForCausalLM`,
+`Gemma3ForCausalLM`, or `Lfm2ForCausalLM`; GGUF entry is `ModelFactory` → `GgufModelLoader` / `GgufReader`; one
+next-token step is `Transformer.step` → `CausalLM.forward` / `computeLogits` →
 `Sampler.forward`
 (chapter 16).
 
@@ -1006,6 +1009,137 @@ packed `q_proj`/`k_proj`/`v_proj` → `qkv_proj`) and merges into `WeightBag`; `
 
 ---
 
+## 7a. GGUF and LFM2 — quantized single-file models
+
+Chapter 7 described **safetensors**: a JSON catalog plus a raw float/BF16 payload. **GGUF** is the other on-disk
+container this project can open (popular with llama.cpp). One file holds **typed metadata**, an embedded **tokenizer**,
+and **GGML-typed weight blocks** (often quantized). This engine supports **GGUF v2/v3** for architecture **`lfm2`**: it
+**dequantizes every tensor to float32** at load, then builds an `Lfm2ForCausalLM` graph. Quantization shrinks the file,
+not resident RAM (a ~1.7 GB Q4_K_M 2.6B file becomes ~10 GB of float weights; with KV and JVM overhead plan on **~16 GB
+heap**, default `-Xmx16g` in `.mvn/jvm.config`).
+
+### Why GGUF exists (vs safetensors)
+
+| | `.safetensors` (ch. 7) | `.gguf` (this section) |
+|--|------------------------|-------------------------|
+| Typical source | Hugging Face snapshot directory | Single llama.cpp-style export |
+| Catalog | UTF-8 JSON header | Binary KV metadata + tensor info table |
+| Element types | `F32` / `F16` / `BF16` / … | GGML types: floats **and** block quants (`Q4_K`, …) |
+| Tokenizer | Separate `tokenizer.json` | Often embedded (`tokenizer.ggml.*`) |
+| This port | Widen to float32 | **Dequant** blocks → float32, then same kernels |
+
+No pickle, no executable code — only structured data. This reader memory-maps the file (current limit: **≤ 2 GiB** map).
+
+### On-disk layout (byte by byte)
+
+Little-endian throughout:
+
+```text
+  offset 0        4 bytes     magic "GGUF"  (uint32 0x46554747)
+  offset 4        4 bytes     version       (2 or 3 supported here)
+  offset 8        8 bytes     tensor_count  (uint64)
+  offset 16       8 bytes     kv_count      (uint64)
+  …               …           kv_count × (key string, value type, value)
+  …               …           tensor_count × (name, n_dims, dims[], ggml_type, relative_offset)
+  …               pad         align to general.alignment (default 32)
+  …               …           tensor payload bytes (quant blocks or floats)
+```
+
+Strings are `uint64 length` + UTF-8 bytes. Each metadata **value** has a type tag (uint32, float32, string, array, …).
+Each **tensor info** records:
+
+| Field | Means |
+|-------|--------|
+| **name** | GGML / export name (e.g. `blk.0.attn_q.weight`, `token_embd.weight`) — not always HF dotted paths |
+| `n_dims` / `dims[]` | Axis lengths in **GGML order** (often reverse of HF `[out, in]`) |
+| `ggml_type` | Element / block layout id (see table below) |
+| `relative_offset` | Byte offset from the start of the **aligned payload**, not from file start |
+
+**Shape note:** when this reader builds a Java `Tensor`, **2D dims are reversed** to Hugging Face style
+`[out, in]` / embedding `[vocab, dim]`. Higher-rank dims are reversed the same way. That mismatch is a common source of
+“wrong matmul shape” bugs if skipped.
+
+### GGML dtypes this port dequantizes
+
+| `ggml_type` (id) | On disk | What `GgufDequant` does |
+|------------------|---------|-------------------------|
+| `0` F32 | 32-bit float | Copy into `float[]` |
+| `1` F16 | IEEE float16 | Expand to Java `float` |
+| `30` BF16 | bfloat16 | Expand to Java `float` |
+| `2` Q4_0 | 32-elem blocks (scale + nibbles) | Dequant → `float[]` |
+| `8` Q8_0 | 32-elem blocks | Dequant → `float[]` |
+| `12` Q4_K | 256-elem K-quants | Dequant → `float[]` |
+| `14` Q6_K | 256-elem K-quants | Dequant → `float[]` |
+
+A **Q4_K_M** file typically mixes **Q4_K** and **Q6_K** tensors. After load, compute is the same float32 path as
+safetensors — there is **no** quantized matmul kernel here.
+
+### What else lives in GGUF metadata
+
+Useful keys this loader / tokenizer read (names vary slightly by export):
+
+| Key pattern | Role |
+|-------------|------|
+| `general.architecture` | Must contain `lfm2` for this port |
+| `lfm2.*` / `*.block_count`, `*.embedding_length`, … | Sizes → `Config.HfConfig` |
+| `lfm2.attention.head_count_kv` | Often a **per-layer array** (0 on conv layers) — use max > 0 as GQA kv heads |
+| `tokenizer.ggml.tokens` / `.merges` | Embedded vocab |
+| `tokenizer.chat_template` | Optional; many LFM2 files **omit** it even when ChatML specials exist in vocab |
+
+### LFM2 graph (why architecture matters)
+
+**LFM2** is a *hybrid* stack: most layers are gated **short convolutions** (small rolling state per sequence), and a
+subset are full **grouped-query attention**. A GGUF that only matched Qwen/Gemma layer shapes would still be wrong —
+the graph must know which layers are `conv` vs `full_attention`.
+
+### Chat packaging (easy to get wrong)
+
+Many LFM2 GGUF exports omit an embedded `chat_template` string even though the vocab still contains ChatML markers
+(`<|im_start|>`, `<|im_end|>`). This port therefore:
+
+- Uses **ChatML** turn wrapping when those markers exist in the vocab (not the plain `user: / assistant:` fallback).
+- Sets `Tokenizer.invitesThinking()` to **false** for GGUF LFM2 and uses a short `PLAIN_CHAT_SYSTEM` — Qwen-style
+  “open with `<think>…`” system rules make LFM2 **narrate the format** instead of answering.
+- Does **not** pre-insert an empty `<think></think>` block on the assistant prompt (that trick is Qwen-only).
+
+The UI can still split `<think>` / answer if the model emits those tags; LFM2 chat simply does not invite them by
+default. (Sense C details: chapter 9.)
+
+Example ChatML prompt fragment this tokenizer builds:
+
+```text
+<|im_start|>system
+You are a helpful assistant. …
+<|im_end|>
+<|im_start|>user
+hello
+<|im_end|>
+<|im_start|>assistant
+```
+
+### CPU matmul threads
+
+Dense `VectorMath.linear` can split the output axis across workers. `LLM` defaults to
+`Runtime.availableProcessors()` for all models (`LLM.Builder.cpuThreads(N)` / `.allCpuThreads()`, or
+`-Dnanovllm.cpu.threads=N`). This helps multi-core decode; it does not shrink the ~16 GB float footprint.
+
+### Summary
+
+> **A `.gguf` file is a little-endian catalog of metadata + named GGML tensors, followed by an aligned payload of
+> float or block-quantized bytes. This port maps the file, dequantizes supported types to float32 (reversing 2D dims to
+> HF layout), and wires an LFM2 hybrid graph — same float32 kernels as safetensors after load.**
+
+**In the code:** `internal.GgufReader` / `GgufDequant` / `GgufModelLoader`; `models.Lfm2ForCausalLM`; short-conv state in
+`engine.ConvStateArena` bound from `Transformer` via `Context`; tokenizer via `Tokenizer.fromGguf`; chat defaults via
+`ChatPrompts.systemFor(Tokenizer)` and `Tokenizer.invitesThinking()`; matmul workers via `VectorMath.configureCpuThreads`.
+
+**Further reading:** [GGUF format notes](https://github.com/ggml-org/ggml/blob/master/docs/gguf.md); Liquid
+[LFM2 blog](https://www.liquid.ai/blog/liquid-foundation-models-v2-our-second-series-of-generative-ai-models);
+example weights [LFM2.5-2.6B-GGUF](https://huggingface.co/LiquidAI/LFM2.5-2.6B-GGUF).
+
+
+---
+
 ## 8. Attention: kinds of looking-back, and how they work
 
 Attention is the part people mean when they say the model “pays attention” to something you wrote earlier. It is not a
@@ -1436,9 +1570,9 @@ glance can reuse.
 Sense C is Sense B with **stage directions** so software can separate “notes for the assistant” from “lines for the
 human.”
 
-#### The format this chat path expects (Qwen-style chat)
+#### The format this chat path expects (Qwen-style tagged scratchpad)
 
-For non-Gemma chat, the default system stage directions ask roughly:
+For **Qwen-style** chat (`Tokenizer.invitesThinking()`), the default system stage directions ask roughly:
 
 1. Open with `<think>` … `</think>` for short private notes (intent, useful history, plan).
 2. **Close** the tag before the user-visible answer.
@@ -1455,12 +1589,15 @@ Plan: answer with 4.
 4
 ```
 
+**LFM2 GGUF** does **not** use that invitation. Turns are wrapped as **ChatML** (`<|im_start|>role` …
+`<|im_end|>`); the system text is short (`PLAIN_CHAT_SYSTEM`) with no `<think>` rules. See §7a.
+
 #### How the program organizes Sense C around the model
 
 ```text
   1. Build chat history + system directions
   2. Apply chat template → one big prompt string
-       (Gemma: thinking tags not relied on)
+       (Gemma / LFM2 GGUF: thinking tags not invited)
        (Qwen-style: enableThinking=true + system text invite <think>…)
   3. Prefill + decode (pure Sense A) until the turn ends
   4. Decode tokens → raw assistant text
@@ -1477,17 +1614,18 @@ Plan: answer with 4.
 Important: **the model does not call a `Think()` function.** It emits the characters `<`, `t`, `h`, … as ordinary tokens
 if sampling chose them. Parsing happens **after** generation (and incrementally while streaming).
 
-#### Gemma vs Qwen organization in this project
+#### Qwen vs Gemma vs LFM2 (GGUF) organization in this project
 
-|                                         | Qwen-style chat                                                                                | Gemma chat here                                                                                            |
-|-----------------------------------------|------------------------------------------------------------------------------------------------|------------------------------------------------------------------------------------------------------------|
-| System directions about `<think>`       | Yes (default `CHAT_SYSTEM`)                                                                    | No (empty system; avoids latching into filler)                                                             |
-| `enableThinking` in `applyChatTemplate` | **true** — do **not** pre-insert an empty sealed `<think></think>`; the model may open its own | Flag is **false**, but Gemma uses its own turn template and ignores that im_start empty-think trick anyway |
-| Reliable tagged scratchpad              | Encouraged by system text                                                                      | Not relied on                                                                                              |
-| Sense A (layers)                        | Same kind of engine                                                                            | Same kind of engine                                                                                        |
+|                                         | Qwen-style chat | Gemma chat here | LFM2 GGUF |
+|-----------------------------------------|-----------------|-----------------|-----------|
+| System directions about `<think>`       | Yes (`CHAT_SYSTEM`) | No (empty system) | No (`PLAIN_CHAT_SYSTEM` — think-format rules cause meta-narration) |
+| `invitesThinking` / default enable      | **true** — do not pre-insert empty `<think></think>`; model may open its own | **false** (Gemma turn template) | **false**; ChatML via `<\|im_start\|>` vocab even if GGUF omits `chat_template` |
+| Reliable tagged scratchpad              | Encouraged by system text | Not relied on | Not invited (UI still splits tags if emitted) |
+| Sense A (layers)                        | Same kind of engine | Same kind of engine | Hybrid: short-conv + GQA |
 
-So “thinking UI” is a **chat convention** on top of the same model machinery — stronger on Qwen-style templates here.
-`enableThinking` is not a second brain switch; it only changes how the **prompt string** is wrapped before Sense A runs.
+So “thinking UI” is a **chat convention** on top of the same model machinery — strongest on Qwen-style templates here.
+`enableThinking` / `invitesThinking` are not a second brain switch; they only change how the **prompt string** is wrapped
+before Sense A runs.
 
 #### Streaming organization
 
@@ -2817,8 +2955,11 @@ Short glossary. For the Java home of each idea, prefer the **In the code** notes
 | Tensor                | Multidimensional numeric array with a shape; weights and activations are both tensors            |
 | Shape / `numel`       | Axis lengths of a tensor; product = number of scalar elements                                    |
 | `.safetensors`        | On-disk container: JSON catalog of named tensors + raw numeric payload                           |
+| `.gguf` / GGUF        | Single-file container: binary metadata + GGML tensor table + aligned (often quantized) payload   |
+| GGML type             | On-disk element/block layout in GGUF (`F32`, `Q4_K`, …); this port dequants to float32           |
 | BPE                   | Byte-Pair Encoding: merge frequent pieces using an ordered merge list                            |
 | `data_offsets`        | Byte range of one tensor inside a safetensors payload                                            |
+| ChatML                | Turn markers `<\|im_start\|>` / `<\|im_end\|>` (LFM2 GGUF chat packaging here)                   |
 | `hidden_size`         | Width $H$ of the residual stream; also the embedding dimension                                   |
 | `intermediate_size`   | Temporary wider width inside each layer’s MLP expand→shrink step                                 |
 | `num_hidden_layers`   | Number of stacked attention+MLP blocks                                                           |
@@ -2852,7 +2993,7 @@ Short glossary. For the Java home of each idea, prefer the **In the code** notes
 | Context length        | How much past text fits in one forward pass                                                      |
 | Context window        | Hard token budget for one forward (`maxModelLen` / `max_position_embeddings`)                    |
 | Chat history          | `ChatSession` message list re-fed each turn; may be truncated                                    |
-| Weights               | Learned parameter tensors loaded from `.safetensors`                                             |
+| Weights               | Learned parameter tensors loaded from `.safetensors` or dequantized from `.gguf`                 |
 | Activations           | Ephemeral tensors produced during a forward pass                                                 |
 | RAG                   | Retrieval-augmented generation: look up documents, put them in the prompt, then generate         |
 | `PreparedRag`         | Immutable shareable corpus + BM25 index (load once, like `Model`)                                |
@@ -2907,6 +3048,8 @@ and format docs only.
 | Chat templates             | [Transformers guide](https://huggingface.co/docs/transformers/chat_templating)                                                     |
 | Model `config` class       | [PretrainedConfig](https://huggingface.co/docs/transformers/main/en/main_classes/configuration)                                    |
 | Safetensors                | [HF docs](https://huggingface.co/docs/safetensors) · [GitHub format notes](https://github.com/huggingface/safetensors)             |
+| GGUF                       | [ggml GGUF docs](https://github.com/ggml-org/ggml/blob/master/docs/gguf.md) · (this guide §7a — layout, dtypes, LFM2)              |
+| LFM2                       | [Liquid LFM2 blog](https://www.liquid.ai/blog/liquid-foundation-models-v2-our-second-series-of-generative-ai-models) · [LFM2.5-2.6B-GGUF](https://huggingface.co/LiquidAI/LFM2.5-2.6B-GGUF) |
 | RoPE                       | [Su et al. / RoFormer (arXiv)](https://arxiv.org/abs/2104.09864)                                                                   |
 | Token / positional embeds  | (this guide ch. 10; RoPE paper above)                                                                                              |
 | Math catalog (formulas)    | (this guide ch. 10 — layer map, linear, RMSNorm, attention, RoPE, gated MLP, sampling, SIMD dots)                                  |
