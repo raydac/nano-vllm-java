@@ -7,7 +7,7 @@ import java.util.List;
  */
 public interface RagIndex {
 
-  List<RagHit> retrieve(String query, int topK);
+  List<RagHit> retrieve(final String query, final int topK);
 
   default int size() {
     return -1;

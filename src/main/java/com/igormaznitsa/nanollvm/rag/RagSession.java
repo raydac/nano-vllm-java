@@ -40,7 +40,7 @@ public final class RagSession {
   private String anchorQuery = "";
   private String lastSource = "";
 
-  private RagSession(LLM llm, ChatSession chat, RagIndex index) {
+  private RagSession(final LLM llm, final ChatSession chat, final RagIndex index) {
     this.llm = llm;
     this.chat = requireNonNull(chat, "chat");
     this.index = requireNonNull(index, "index");
@@ -48,21 +48,21 @@ public final class RagSession {
     this.chat.enableThinking(false);
   }
 
-  public static RagSession open(LLM llm, RagIndex index) {
+  public static RagSession open(final LLM llm, final RagIndex index) {
     requireNonNull(llm, "llm");
     return new RagSession(llm, new ChatSession(llm), index);
   }
 
-  public static RagSession open(LLM llm, RagIndex index, int maxTokens) {
+  public static RagSession open(final LLM llm, final RagIndex index, final int maxTokens) {
     requireNonNull(llm, "llm");
     return new RagSession(llm, ChatSession.open(llm, maxTokens), index);
   }
 
-  public static RagSession open(ChatSession chat, RagIndex index) {
+  public static RagSession open(final ChatSession chat, final RagIndex index) {
     return new RagSession(null, chat, index);
   }
 
-  public RagSession topK(int topK) {
+  public RagSession topK(final int topK) {
     if (topK <= 0) {
       throw new IllegalArgumentException("topK must be > 0");
     }
@@ -70,7 +70,7 @@ public final class RagSession {
     return this;
   }
 
-  public RagSession maxContextChars(int maxContextChars) {
+  public RagSession maxContextChars(final int maxContextChars) {
     if (maxContextChars < 64) {
       throw new IllegalArgumentException("maxContextChars must be >= 64");
     }
@@ -83,7 +83,7 @@ public final class RagSession {
    * not earlier assistant replies — avoids tiny-model latch on prior answers. Defaults on for Gemma.
    * Turns with no hits keep full chat history so follow-ups (“fix the method above”) still work.
    */
-  public RagSession isolateGeneration(boolean isolateGeneration) {
+  public RagSession isolateGeneration(final boolean isolateGeneration) {
     this.isolateGeneration = isolateGeneration;
     return this;
   }
@@ -92,12 +92,12 @@ public final class RagSession {
    * RAG defaults to thinking off so the token budget goes to the grounded answer.
    * Re-enable for plain Qwen-style chain-of-thought if desired.
    */
-  public RagSession enableThinking(boolean enableThinking) {
+  public RagSession enableThinking(final boolean enableThinking) {
     this.chat.enableThinking(enableThinking);
     return this;
   }
 
-  public RagSession sampling(SamplingParams samplingParams) {
+  public RagSession sampling(final SamplingParams samplingParams) {
     this.baseSampling = requireNonNull(samplingParams, "samplingParams");
     this.chat.sampling(this.baseSampling);
     return this;
@@ -108,7 +108,7 @@ public final class RagSession {
    * {@link SamplingParams#maxTokens()} from {@link #sampling} when lower). Default {@code 384}.
    * Grounded turns still use the {@link #sampling} budget (e.g. short answers on Gemma).
    */
-  public RagSession maxTokensWhenNoHits(int maxTokens) {
+  public RagSession maxTokensWhenNoHits(final int maxTokens) {
     if (maxTokens < 1) {
       throw new IllegalArgumentException("maxTokens must be >= 1");
     }
@@ -116,17 +116,18 @@ public final class RagSession {
     return this;
   }
 
-  public RagSession timeout(Duration timeout) {
+  public RagSession timeout(final Duration timeout) {
     this.chat.timeout(timeout);
     return this;
   }
 
-  public RagSession streamTo(PrintStream thinkOut, PrintStream answerOut, boolean color) {
+  public RagSession streamTo(final PrintStream thinkOut, final PrintStream answerOut,
+                             final boolean color) {
     this.chat.streamTo(thinkOut, answerOut, color);
     return this;
   }
 
-  public RagSession diagnostics(Consumer<String> diagnostics) {
+  public RagSession diagnostics(final Consumer<String> diagnostics) {
     this.chat.diagnostics(diagnostics);
     return this;
   }
@@ -146,7 +147,7 @@ public final class RagSession {
     this.lastSource = "";
   }
 
-  public ChatReply send(String question) {
+  public ChatReply send(final String question) {
     requireNonNull(question, "question");
     String q = question.strip();
     if (q.isEmpty()) {
@@ -184,11 +185,11 @@ public final class RagSession {
     }
   }
 
-  public String ask(String question) {
+  public String ask(final String question) {
     return this.send(question).answer();
   }
 
-  private List<RagHit> retrieve(String question) {
+  private List<RagHit> retrieve(final String question) {
     if (this.isOutsideCorpus(question)) {
       return List.of();
     }
@@ -203,7 +204,7 @@ public final class RagSession {
         : List.copyOf(candidates.subList(0, this.topK));
   }
 
-  private boolean isOutsideCorpus(String question) {
+  private boolean isOutsideCorpus(final String question) {
     return switch (this.index) {
       case PreparedRag prepared -> prepared.bm25().isOutsideCorpus(question);
       case Bm25Index bm25 -> bm25.isOutsideCorpus(question);

@@ -34,7 +34,7 @@ public final class Bench {
   private Bench() {
   }
 
-  public static void main(String[] args) {
+  public static void main(final String[] args) {
     Path path = BundledModels.resolveDefault(args);
     int numSeqs = args.length > 1 ? Integer.parseInt(args[1]) : 8;
     int kvBlocks = kvBlocksFor(numSeqs);
@@ -75,12 +75,12 @@ public final class Bench {
     }
   }
 
-  private static int kvBlocksFor(int numSeqs) {
+  private static int kvBlocksFor(final int numSeqs) {
     int blocksPerSeq = (MAX_MODEL_LEN + KV_BLOCK_SIZE - 1) / KV_BLOCK_SIZE;
     return Math.max(1, numSeqs) * blocksPerSeq;
   }
 
-  private static String formatBytes(long bytes) {
+  private static String formatBytes(final long bytes) {
     return "%.1f GiB".formatted(bytes / (1024.0 * 1024.0 * 1024.0));
   }
 }

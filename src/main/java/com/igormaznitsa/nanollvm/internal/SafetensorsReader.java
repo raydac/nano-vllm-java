@@ -25,7 +25,7 @@ public final class SafetensorsReader implements AutoCloseable {
   private final Map<String, TensorInfo> tensors;
   private final long dataOffset;
 
-  public SafetensorsReader(Path path) throws IOException {
+  public SafetensorsReader(final Path path) throws IOException {
     this.path = requireNonNull(path, "path");
     this.channel = FileChannel.open(path);
     long size = this.channel.size();
@@ -56,19 +56,19 @@ public final class SafetensorsReader implements AutoCloseable {
     }
   }
 
-  public static SafetensorsReader open(Path path) throws IOException {
+  public static SafetensorsReader open(final Path path) throws IOException {
     return new SafetensorsReader(path);
   }
 
-  public static float float16ToFloat(int h) {
+  public static float float16ToFloat(final int h) {
     return Float.float16ToFloat((short) h);
   }
 
-  public static float bfloat16ToFloat(int h) {
+  public static float bfloat16ToFloat(final int h) {
     return Float.intBitsToFloat(h << 16);
   }
 
-  public static List<Path> listSafetensors(Path modelDir) throws IOException {
+  public static List<Path> listSafetensors(final Path modelDir) throws IOException {
     try (var stream = Files.list(modelDir)) {
       return stream
           .filter(p -> p.getFileName().toString().endsWith(".safetensors"))
@@ -85,16 +85,16 @@ public final class SafetensorsReader implements AutoCloseable {
     return this.tensors.size();
   }
 
-  public long byteSize(String name) {
+  public long byteSize(final String name) {
     TensorInfo info = this.requireInfo(name);
     return info.end - info.start;
   }
 
-  public boolean contains(String name) {
+  public boolean contains(final String name) {
     return this.tensors.containsKey(name);
   }
 
-  public Tensor getTensor(String name) {
+  public Tensor getTensor(final String name) {
     TensorInfo info = this.requireInfo(name);
     int numel = 1;
     for (int d : info.shape) {
@@ -135,7 +135,7 @@ public final class SafetensorsReader implements AutoCloseable {
     return Tensor.of(data, info.shape);
   }
 
-  private TensorInfo requireInfo(String name) {
+  private TensorInfo requireInfo(final String name) {
     TensorInfo info = this.tensors.get(name);
     if (info == null) {
       throw new IllegalArgumentException("missing tensor: " + name);

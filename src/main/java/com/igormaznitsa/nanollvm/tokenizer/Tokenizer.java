@@ -78,18 +78,18 @@ public final class Tokenizer {
   private final boolean prependMetaSpace;
 
   private Tokenizer(
-      Map<String, Integer> vocab,
-      Map<String, Integer> merges,
-      Set<String> addedTokenTexts,
-      Set<String> skipTokenTexts,
-      int eosTokenId,
-      List<Integer> stopTokenIds,
-      int padTokenId,
-      String chatTemplate,
-      boolean byteFallback,
-      Style style,
-      boolean gemmaChat,
-      boolean prependMetaSpace
+      final Map<String, Integer> vocab,
+      final Map<String, Integer> merges,
+      final Set<String> addedTokenTexts,
+      final Set<String> skipTokenTexts,
+      final int eosTokenId,
+      final List<Integer> stopTokenIds,
+      final int padTokenId,
+      final String chatTemplate,
+      final boolean byteFallback,
+      final Style style,
+      final boolean gemmaChat,
+      final boolean prependMetaSpace
   ) {
     this.vocab = vocab;
     this.idToToken = new HashMap<>();
@@ -117,7 +117,7 @@ public final class Tokenizer {
     this.prependMetaSpace = prependMetaSpace;
   }
 
-  public static Tokenizer fromPretrained(Path modelDir) {
+  public static Tokenizer fromPretrained(final Path modelDir) {
     try {
       Path tokenizerJson = modelDir.resolve("tokenizer.json");
       if (!Files.isRegularFile(tokenizerJson)) {
@@ -229,7 +229,7 @@ public final class Tokenizer {
     }
   }
 
-  private static String tokenString(Object value) {
+  private static String tokenString(final Object value) {
     if (value instanceof String s) {
       return s;
     }
@@ -241,10 +241,10 @@ public final class Tokenizer {
   }
 
   private static boolean isGemmaStyle(
-      Path modelDir,
-      Map<String, Integer> vocab,
-      String chatTemplate,
-      Map<String, Object> tokenizerRoot
+      final Path modelDir,
+      final Map<String, Integer> vocab,
+      final String chatTemplate,
+      final Map<String, Object> tokenizerRoot
   ) throws IOException {
     if (chatTemplate != null && chatTemplate.contains("start_of_turn")) {
       return true;
@@ -261,7 +261,8 @@ public final class Tokenizer {
     return usesMetaspace(tokenizerRoot, vocab) && vocab.containsKey("<bos>");
   }
 
-  private static boolean usesMetaspace(Map<String, Object> root, Map<String, Integer> vocab) {
+  private static boolean usesMetaspace(final Map<String, Object> root,
+                                       final Map<String, Integer> vocab) {
     if (containsMetaspaceNode(root.get("pre_tokenizer")) ||
         containsMetaspaceNode(root.get("decoder"))) {
       return true;
@@ -285,11 +286,11 @@ public final class Tokenizer {
   /**
    * Metaspace pretokenizer usually prepends ▁; Gemma's Replace normalizer does not.
    */
-  private static boolean shouldPrependMetaSpace(Map<String, Object> root) {
+  private static boolean shouldPrependMetaSpace(final Map<String, Object> root) {
     return containsMetaspaceNode(root.get("pre_tokenizer"));
   }
 
-  private static boolean normalizerReplacesSpaceWithMeta(Object node) {
+  private static boolean normalizerReplacesSpaceWithMeta(final Object node) {
     if (!(node instanceof Map<?, ?> map)) {
       return false;
     }
@@ -313,7 +314,7 @@ public final class Tokenizer {
     return false;
   }
 
-  private static boolean containsMetaspaceNode(Object node) {
+  private static boolean containsMetaspaceNode(final Object node) {
     if (!(node instanceof Map<?, ?> map)) {
       return false;
     }
@@ -340,7 +341,8 @@ public final class Tokenizer {
     return false;
   }
 
-  private static int resolveEos(Map<String, Integer> vocab, String eosToken, boolean gemma) {
+  private static int resolveEos(final Map<String, Integer> vocab, final String eosToken,
+                                final boolean gemma) {
     if (eosToken != null && vocab.containsKey(eosToken)) {
       return vocab.get(eosToken);
     }
@@ -362,7 +364,8 @@ public final class Tokenizer {
     return 151645;
   }
 
-  private static int resolvePad(Map<String, Integer> vocab, String padToken, int eos) {
+  private static int resolvePad(final Map<String, Integer> vocab, final String padToken,
+                                final int eos) {
     if (padToken != null && vocab.containsKey(padToken)) {
       return vocab.get(padToken);
     }
@@ -375,15 +378,16 @@ public final class Tokenizer {
     return eos;
   }
 
-  private static void addStopIfPresent(Map<String, Integer> vocab, List<Integer> stopIds,
-                                       String token) {
+  private static void addStopIfPresent(final Map<String, Integer> vocab,
+                                       final List<Integer> stopIds,
+                                       final String token) {
     Integer id = vocab.get(token);
     if (id != null && !stopIds.contains(id)) {
       stopIds.add(id);
     }
   }
 
-  private static Tokenizer bare(Path modelDir) throws IOException {
+  private static Tokenizer bare(final Path modelDir) throws IOException {
     Path config = modelDir.resolve(CONFIG_JSON);
     int vocabSize = 151936;
     if (Files.isRegularFile(config)) {
@@ -401,7 +405,7 @@ public final class Tokenizer {
     );
   }
 
-  private static List<String> codepoints(String text) {
+  private static List<String> codepoints(final String text) {
     List<String> out = new ArrayList<>();
     for (int i = 0; i < text.length(); ) {
       int cp = text.codePointAt(i);
@@ -430,11 +434,62 @@ public final class Tokenizer {
     return this.gemmaChat;
   }
 
-  public List<Integer> encode(String text) {
+  /**
+   * Decode UTF-8 but drop a trailing incomplete multi-byte sequence.
+   * Needed for streamed token decode so Cyrillic (e.g. щ = D1 89) does not show as �.
+   */
+  public static String decodeUtf8Complete(final byte[] bytes) {
+    if (bytes == null || bytes.length == 0) {
+      return "";
+    }
+    int complete = 0;
+    int i = 0;
+    while (i < bytes.length) {
+      int need = utf8SequenceLength(bytes[i]);
+      if (need < 1 || i + need > bytes.length) {
+        break;
+      }
+      boolean ok = true;
+      for (int j = 1; j < need; j++) {
+        if ((bytes[i + j] & 0xC0) != 0x80) {
+          ok = false;
+          break;
+        }
+      }
+      if (!ok) {
+        break;
+      }
+      i += need;
+      complete = i;
+    }
+    return complete == 0 ? "" : new String(bytes, 0, complete, UTF_8);
+  }
+
+  private static int utf8SequenceLength(final byte lead) {
+    int v = lead & 0xFF;
+    if (v < 0x80) {
+      return 1;
+    }
+    if (v < 0xC2) {
+      return -1;
+    }
+    if (v < 0xE0) {
+      return 2;
+    }
+    if (v < 0xF0) {
+      return 3;
+    }
+    if (v < 0xF5) {
+      return 4;
+    }
+    return -1;
+  }
+
+  public List<Integer> encode(final String text) {
     return this.style == Style.METASPACE_BPE ? this.encodeMetaspace(text) : this.encodeGpt2(text);
   }
 
-  private List<Integer> encodeGpt2(String text) {
+  private List<Integer> encodeGpt2(final String text) {
     List<Integer> ids = new ArrayList<>();
     int i = 0;
     while (i < text.length()) {
@@ -462,7 +517,7 @@ public final class Tokenizer {
     return ids;
   }
 
-  private List<Integer> encodeMetaspace(String text) {
+  private List<Integer> encodeMetaspace(final String text) {
     List<Integer> ids = new ArrayList<>();
     int i = 0;
     while (i < text.length()) {
@@ -486,7 +541,7 @@ public final class Tokenizer {
     return ids;
   }
 
-  private int findNextAdded(String text, int from) {
+  private int findNextAdded(final String text, final int from) {
     int best = text.length();
     for (String added : this.addedTokensByLength) {
       int at = text.indexOf(added, from);
@@ -497,11 +552,11 @@ public final class Tokenizer {
     return best;
   }
 
-  public String decode(List<Integer> tokenIds) {
+  public String decode(final List<Integer> tokenIds) {
     return this.decode(tokenIds, false);
   }
 
-  public String decode(List<Integer> tokenIds, boolean skipSpecialTokens) {
+  public String decode(final List<Integer> tokenIds, final boolean skipSpecialTokens) {
     StringBuilder sb = new StringBuilder();
     for (int id : tokenIds) {
       if (skipSpecialTokens && this.skipTokenIds.contains(id)) {
@@ -519,62 +574,13 @@ public final class Tokenizer {
     return this.tokensToUtf8(sb.toString());
   }
 
-  /**
-   * Decode UTF-8 but drop a trailing incomplete multi-byte sequence.
-   * Needed for streamed token decode so Cyrillic (e.g. щ = D1 89) does not show as �.
-   */
-  public static String decodeUtf8Complete(byte[] bytes) {
-    if (bytes == null || bytes.length == 0) {
-      return "";
-    }
-    int complete = 0;
-    int i = 0;
-    while (i < bytes.length) {
-      int need = utf8SequenceLength(bytes[i]);
-      if (need < 1 || i + need > bytes.length) {
-        break;
-      }
-      boolean ok = true;
-      for (int j = 1; j < need; j++) {
-        if ((bytes[i + j] & 0xC0) != 0x80) {
-          ok = false;
-          break;
-        }
-      }
-      if (!ok) {
-        break;
-      }
-      i += need;
-      complete = i;
-    }
-    return complete == 0 ? "" : new String(bytes, 0, complete, UTF_8);
-  }
-
-  public String applyChatTemplate(List<Map<String, String>> messages, boolean addGenerationPrompt) {
+  public String applyChatTemplate(final List<Map<String, String>> messages,
+                                  final boolean addGenerationPrompt) {
     return this.applyChatTemplate(messages, addGenerationPrompt, true);
   }
 
-  private static int utf8SequenceLength(byte lead) {
-    int v = lead & 0xFF;
-    if (v < 0x80) {
-      return 1;
-    }
-    if (v < 0xC2) {
-      return -1;
-    }
-    if (v < 0xE0) {
-      return 2;
-    }
-    if (v < 0xF0) {
-      return 3;
-    }
-    if (v < 0xF5) {
-      return 4;
-    }
-    return -1;
-  }
-
-  private String applyGemmaChat(List<Map<String, String>> messages, boolean addGenerationPrompt) {
+  private String applyGemmaChat(final List<Map<String, String>> messages,
+                                final boolean addGenerationPrompt) {
     String system = null;
     List<Map<String, String>> turns = new ArrayList<>();
     for (Map<String, String> msg : messages) {
@@ -610,7 +616,7 @@ public final class Tokenizer {
     return sb.toString();
   }
 
-  private String matchAdded(String text, int index) {
+  private String matchAdded(final String text, final int index) {
     for (String added : this.addedTokensByLength) {
       if (text.startsWith(added, index)) {
         return added;
@@ -619,7 +625,7 @@ public final class Tokenizer {
     return null;
   }
 
-  private List<String> utf8ToTokens(String text) {
+  private List<String> utf8ToTokens(final String text) {
     byte[] bytes = text.getBytes(UTF_8);
     List<String> tokens = new ArrayList<>(bytes.length);
     for (byte b : bytes) {
@@ -628,7 +634,7 @@ public final class Tokenizer {
     return tokens;
   }
 
-  private String decodeMetaspace(String tokenString) {
+  private String decodeMetaspace(final String tokenString) {
     StringBuilder out = new StringBuilder();
     int i = 0;
     List<Byte> bytes = new ArrayList<>();
@@ -665,8 +671,9 @@ public final class Tokenizer {
     return out.toString().replace(META_SPACE, " ");
   }
 
-  public String applyChatTemplate(List<Map<String, String>> messages, boolean addGenerationPrompt,
-                                  boolean enableThinking) {
+  public String applyChatTemplate(final List<Map<String, String>> messages,
+                                  final boolean addGenerationPrompt,
+                                  final boolean enableThinking) {
     if (this.gemmaChat ||
         (this.chatTemplate != null && this.chatTemplate.contains("start_of_turn"))) {
       return this.applyGemmaChat(messages, addGenerationPrompt);
@@ -697,7 +704,7 @@ public final class Tokenizer {
     return sb.toString();
   }
 
-  private String tokensToUtf8(String tokenString) {
+  private String tokensToUtf8(final String tokenString) {
     StringBuilder out = new StringBuilder();
     int i = 0;
     while (i < tokenString.length()) {
@@ -736,7 +743,7 @@ public final class Tokenizer {
     return out.toString();
   }
 
-  private List<Integer> bpe(List<String> tokens) {
+  private List<Integer> bpe(final List<String> tokens) {
     if (tokens.isEmpty()) {
       return List.of();
     }

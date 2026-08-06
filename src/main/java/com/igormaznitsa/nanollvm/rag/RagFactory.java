@@ -19,11 +19,11 @@ public final class RagFactory {
   private RagFactory() {
   }
 
-  public static PreparedRag make(Path folderOrFile) {
+  public static PreparedRag make(final Path folderOrFile) {
     return make(folderOrFile, RagLoadOptions.defaults());
   }
 
-  public static PreparedRag make(Path folderOrFile, RagLoadOptions options) {
+  public static PreparedRag make(final Path folderOrFile, final RagLoadOptions options) {
     requireNonNull(folderOrFile, "folderOrFile");
     requireNonNull(options, "options");
     Path path = folderOrFile.toAbsolutePath().normalize();
@@ -42,7 +42,7 @@ public final class RagFactory {
     return of(RagLoadOptions.defaults(), texts);
   }
 
-  public static PreparedRag of(RagLoadOptions options, String... texts) {
+  public static PreparedRag of(final RagLoadOptions options, String... texts) {
     requireNonNull(options, "options");
     requireNonNull(texts, "texts");
     TextCorpus.Builder corpus = TextCorpus.builder().apply(options);
@@ -52,7 +52,7 @@ public final class RagFactory {
     return seal(corpus.build(), null, options);
   }
 
-  public static PreparedRag of(List<String> texts) {
+  public static PreparedRag of(final List<String> texts) {
     return of(RagLoadOptions.defaults(), texts.toArray(String[]::new));
   }
 
@@ -60,7 +60,8 @@ public final class RagFactory {
     return new Builder();
   }
 
-  private static PreparedRag seal(TextCorpus corpus, Path sourceRoot, RagLoadOptions options) {
+  private static PreparedRag seal(final TextCorpus corpus, final Path sourceRoot,
+                                  final RagLoadOptions options) {
     List<PreparedPassage> passages = PassagePreparser.prepare(corpus.chunks());
     return new PreparedRag(passages, Bm25Index.buildPrepared(passages), sourceRoot, options);
   }
@@ -72,7 +73,7 @@ public final class RagFactory {
     private Path sourceRoot;
     private boolean hasContent;
 
-    public Builder options(RagLoadOptions options) {
+    public Builder options(final RagLoadOptions options) {
       if (this.hasContent) {
         throw new IllegalStateException("options must be set before adding documents");
       }
@@ -85,35 +86,35 @@ public final class RagFactory {
       return this.options(RagLoadOptions.forTinyModels());
     }
 
-    public Builder sourceRoot(Path sourceRoot) {
+    public Builder sourceRoot(final Path sourceRoot) {
       this.sourceRoot = requireNonNull(sourceRoot, "sourceRoot").toAbsolutePath().normalize();
       return this;
     }
 
-    public Builder folderExtensions(Set<String> extensions) {
+    public Builder folderExtensions(final Set<String> extensions) {
       this.corpus.folderExtensions(extensions);
       return this;
     }
 
-    public Builder add(String text) {
+    public Builder add(final String text) {
       this.hasContent = true;
       this.corpus.add(text);
       return this;
     }
 
-    public Builder add(String id, String text) {
+    public Builder add(final String id, final String text) {
       this.hasContent = true;
       this.corpus.add(id, text);
       return this;
     }
 
-    public Builder addFile(Path file) {
+    public Builder addFile(final Path file) {
       this.hasContent = true;
       this.corpus.addFile(file);
       return this;
     }
 
-    public Builder addFolder(Path folder) {
+    public Builder addFolder(final Path folder) {
       this.hasContent = true;
       this.corpus.addFolder(folder);
       if (this.sourceRoot == null) {

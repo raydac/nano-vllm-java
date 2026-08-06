@@ -35,15 +35,15 @@ import java.util.List;
  */
 public record Qwen3ForCausalLM(Qwen3Model model, ParallelLMHead lmHead) implements CausalLM {
 
-  public Qwen3ForCausalLM(Config.HfConfig config, WeightBag weights) {
+  public Qwen3ForCausalLM(final Config.HfConfig config, final WeightBag weights) {
     this(assemble(requireNonNull(config, "config"), requireNonNull(weights, "weights")));
   }
 
-  private Qwen3ForCausalLM(Qwen3ForCausalLM assembled) {
+  private Qwen3ForCausalLM(final Qwen3ForCausalLM assembled) {
     this(assembled.model, assembled.lmHead);
   }
 
-  private static Qwen3ForCausalLM assemble(Config.HfConfig config, WeightBag weights) {
+  private static Qwen3ForCausalLM assemble(final Config.HfConfig config, final WeightBag weights) {
     Qwen3Model model = new Qwen3Model(config, weights);
     Tensor lmWeight = weights.find(LM_HEAD)
         .orElseGet(() -> model.embedTokens().weight());
@@ -56,12 +56,12 @@ public record Qwen3ForCausalLM(Qwen3Model model, ParallelLMHead lmHead) implemen
   }
 
   @Override
-  public Tensor forward(Tensor inputIds, Tensor positions) {
+  public Tensor forward(final Tensor inputIds, final Tensor positions) {
     return this.model.forward(inputIds, positions);
   }
 
   @Override
-  public Tensor computeLogits(Tensor hiddenStates) {
+  public Tensor computeLogits(final Tensor hiddenStates) {
     return this.lmHead.forward(hiddenStates);
   }
 
@@ -73,7 +73,7 @@ public record Qwen3ForCausalLM(Qwen3Model model, ParallelLMHead lmHead) implemen
   }
 
   @Override
-  public boolean equals(Object other) {
+  public boolean equals(final Object other) {
     return this == other;
   }
 
@@ -100,7 +100,7 @@ public record Qwen3ForCausalLM(Qwen3Model model, ParallelLMHead lmHead) implemen
       this(assemble(config, weights, layerIndex));
     }
 
-    private Qwen3Attention(Qwen3Attention assembled) {
+    private Qwen3Attention(final Qwen3Attention assembled) {
       this(
           assembled.qkvProj, assembled.oProj, assembled.rotaryEmb, assembled.attn,
           assembled.qNorm, assembled.kNorm, assembled.qkvBias,
@@ -109,9 +109,9 @@ public record Qwen3ForCausalLM(Qwen3Model model, ParallelLMHead lmHead) implemen
     }
 
     private static Qwen3Attention assemble(
-        Config.HfConfig config,
-        WeightBag weights,
-        int layerIndex
+        final Config.HfConfig config,
+        final WeightBag weights,
+        final int layerIndex
     ) {
       int numHeads = config.numAttentionHeads();
       int numKvHeads = config.numKeyValueHeads();
@@ -144,7 +144,7 @@ public record Qwen3ForCausalLM(Qwen3Model model, ParallelLMHead lmHead) implemen
           kvSize);
     }
 
-    Tensor forward(Tensor positions, Tensor hiddenStates) {
+    Tensor forward(final Tensor positions, final Tensor hiddenStates) {
       Tensor qkv = this.qkvProj.forward(hiddenStates);
       Tensor[] parts = Ops.splitLast(qkv, this.qSize, this.kvSize, this.kvSize);
       Tensor q = parts[0].reshape(parts[0].size(0), this.numHeads, this.headDim);
@@ -159,7 +159,7 @@ public record Qwen3ForCausalLM(Qwen3Model model, ParallelLMHead lmHead) implemen
       return this.oProj.forward(o.reshape(o.size(0), this.numHeads * this.headDim));
     }
 
-    private Tensor normHeads(Tensor x, RMSNorm norm) {
+    private Tensor normHeads(final Tensor x, final RMSNorm norm) {
       return norm.forward(x.reshape(x.size(0) * x.size(1), this.headDim))
           .reshape(x.size(0), x.size(1), this.headDim);
     }
@@ -170,11 +170,12 @@ public record Qwen3ForCausalLM(Qwen3Model model, ParallelLMHead lmHead) implemen
       this(assemble(config, weights, layerIndex));
     }
 
-    private Qwen3MLP(Qwen3MLP assembled) {
+    private Qwen3MLP(final Qwen3MLP assembled) {
       this(assembled.gateUpProj, assembled.downProj);
     }
 
-    private static Qwen3MLP assemble(Config.HfConfig config, WeightBag weights, int layerIndex) {
+    private static Qwen3MLP assemble(final Config.HfConfig config, final WeightBag weights,
+                                     final int layerIndex) {
       if (!"silu".equals(config.effectiveActivation()) && !"silu".equals(config.hiddenAct())) {
         throw new IllegalArgumentException("only silu supported for Qwen3");
       }
@@ -184,7 +185,7 @@ public record Qwen3ForCausalLM(Qwen3Model model, ParallelLMHead lmHead) implemen
           new Linear.Row(weights.require(p + DOWN_PROJ_WEIGHT)));
     }
 
-    Tensor forward(Tensor x) {
+    Tensor forward(final Tensor x) {
       return this.downProj.forward(Ops.siluAndMul(this.gateUpProj.forward(x)));
     }
   }
@@ -199,16 +200,16 @@ public record Qwen3ForCausalLM(Qwen3Model model, ParallelLMHead lmHead) implemen
       this(assemble(config, weights, layerIndex));
     }
 
-    private Qwen3DecoderLayer(Qwen3DecoderLayer assembled) {
+    private Qwen3DecoderLayer(final Qwen3DecoderLayer assembled) {
       this(
           assembled.selfAttn, assembled.mlp,
           assembled.inputLayernorm, assembled.postAttentionLayernorm);
     }
 
     private static Qwen3DecoderLayer assemble(
-        Config.HfConfig config,
-        WeightBag weights,
-        int layerIndex
+        final Config.HfConfig config,
+        final WeightBag weights,
+        final int layerIndex
     ) {
       String p = layer(layerIndex);
       return new Qwen3DecoderLayer(
@@ -218,19 +219,21 @@ public record Qwen3ForCausalLM(Qwen3Model model, ParallelLMHead lmHead) implemen
           new RMSNorm(weights.require(p + POST_ATTENTION_LAYERNORM), config.rmsNormEps()));
     }
 
-    Tensor[] forward(Tensor positions, Tensor hiddenStates, Tensor residual) {
+    Tensor[] forward(final Tensor positions, final Tensor hiddenStates, final Tensor residual) {
+      Tensor hidden;
+      Tensor resid;
       if (residual == null) {
-        residual = hiddenStates;
-        hiddenStates = this.inputLayernorm.forward(hiddenStates);
+        resid = hiddenStates;
+        hidden = this.inputLayernorm.forward(hiddenStates);
       } else {
         Tensor[] n = this.inputLayernorm.forward(hiddenStates, residual);
-        hiddenStates = n[0];
-        residual = n[1];
+        hidden = n[0];
+        resid = n[1];
       }
-      hiddenStates = this.selfAttn.forward(positions, hiddenStates);
-      Tensor[] n = this.postAttentionLayernorm.forward(hiddenStates, residual);
-      hiddenStates = this.mlp.forward(n[0]);
-      return new Tensor[] {hiddenStates, n[1]};
+      hidden = this.selfAttn.forward(positions, hidden);
+      Tensor[] n = this.postAttentionLayernorm.forward(hidden, resid);
+      hidden = this.mlp.forward(n[0]);
+      return new Tensor[] {hidden, n[1]};
     }
   }
 
@@ -243,11 +246,11 @@ public record Qwen3ForCausalLM(Qwen3Model model, ParallelLMHead lmHead) implemen
       this(assemble(config, weights));
     }
 
-    private Qwen3Model(Qwen3Model assembled) {
+    private Qwen3Model(final Qwen3Model assembled) {
       this(assembled.embedTokens, assembled.layers, assembled.norm);
     }
 
-    private static Qwen3Model assemble(Config.HfConfig config, WeightBag weights) {
+    private static Qwen3Model assemble(final Config.HfConfig config, final WeightBag weights) {
       List<Qwen3DecoderLayer> built = new ArrayList<>(config.numHiddenLayers());
       for (int i = 0; i < config.numHiddenLayers(); i++) {
         built.add(new Qwen3DecoderLayer(config, weights, i));
@@ -258,7 +261,7 @@ public record Qwen3ForCausalLM(Qwen3Model model, ParallelLMHead lmHead) implemen
           new RMSNorm(weights.require(MODEL_NORM), config.rmsNormEps()));
     }
 
-    Tensor forward(Tensor inputIds, Tensor positions) {
+    Tensor forward(final Tensor inputIds, final Tensor positions) {
       Tensor hiddenStates = this.embedTokens.forward(inputIds);
       Tensor residual = null;
       for (Qwen3DecoderLayer layer : this.layers) {

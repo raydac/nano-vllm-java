@@ -23,7 +23,7 @@ public final class PassagePreparser {
   private PassagePreparser() {
   }
 
-  public static List<PreparedPassage> prepare(List<TextChunk> chunks) {
+  public static List<PreparedPassage> prepare(final List<TextChunk> chunks) {
     requireNonNull(chunks, "chunks");
     List<PreparedPassage> prepared = new ArrayList<>(chunks.size());
     for (TextChunk chunk : chunks) {
@@ -37,7 +37,7 @@ public final class PassagePreparser {
     return List.copyOf(prepared);
   }
 
-  public static PreparedPassage prepareOne(TextChunk chunk) {
+  public static PreparedPassage prepareOne(final TextChunk chunk) {
     requireNonNull(chunk, "chunk");
     String modelText = normalizeModelText(chunk.text());
     TextChunk normalized = new TextChunk(chunk.id(), chunk.source(), modelText);
@@ -47,7 +47,7 @@ public final class PassagePreparser {
     return new PreparedPassage(normalized, searchText, tf, tokens);
   }
 
-  static String normalizeModelText(String raw) {
+  static String normalizeModelText(final String raw) {
     if (raw == null || raw.isBlank()) {
       return "";
     }
@@ -55,7 +55,7 @@ public final class PassagePreparser {
     return text.replace('\u00A0', ' ').replaceAll("\\s+", " ").strip();
   }
 
-  static String buildSearchText(String modelText, String source) {
+  static String buildSearchText(final String modelText, final String source) {
     StringBuilder search = new StringBuilder(modelText);
     for (String stemToken : sourceStemTokens(source)) {
       search.append(' ').append(stemToken);
@@ -63,7 +63,7 @@ public final class PassagePreparser {
     return search.toString();
   }
 
-  static List<String> sourceStemTokens(String source) {
+  static List<String> sourceStemTokens(final String source) {
     if (source == null || source.isBlank()) {
       return List.of();
     }
@@ -91,7 +91,7 @@ public final class PassagePreparser {
     return List.copyOf(tokens);
   }
 
-  static List<String> tokenize(String text) {
+  static List<String> tokenize(final String text) {
     List<String> tokens = new ArrayList<>();
     var matcher = TOKEN.matcher(text.toLowerCase(Locale.ROOT));
     while (matcher.find()) {
@@ -103,7 +103,7 @@ public final class PassagePreparser {
     return tokens;
   }
 
-  static Map<String, Integer> termFrequencies(String text) {
+  static Map<String, Integer> termFrequencies(final String text) {
     Map<String, Integer> tf = new HashMap<>();
     for (String token : tokenize(text)) {
       tf.merge(token, 1, Integer::sum);

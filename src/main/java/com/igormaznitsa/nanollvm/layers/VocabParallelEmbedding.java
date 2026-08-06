@@ -15,7 +15,7 @@ public class VocabParallelEmbedding {
   private final int embeddingDim;
   protected final Tensor weight;
 
-  public VocabParallelEmbedding(Tensor weight) {
+  public VocabParallelEmbedding(final Tensor weight) {
     this.weight = requireNonNull(weight, "weight");
     if (weight.ndim() != 2) {
       throw new IllegalArgumentException("embedding weight must be rank 2, got " + weight.ndim());
@@ -28,7 +28,7 @@ public class VocabParallelEmbedding {
     return this.weight;
   }
 
-  public Tensor forward(Tensor inputIds) {
+  public Tensor forward(final Tensor inputIds) {
     return Ops.embedding(inputIds, this.weight);
   }
 
@@ -42,12 +42,12 @@ public class VocabParallelEmbedding {
 
   public static final class ParallelLMHead extends VocabParallelEmbedding {
 
-    public ParallelLMHead(Tensor weight) {
+    public ParallelLMHead(final Tensor weight) {
       super(weight);
     }
 
     @Override
-    public Tensor forward(Tensor x) {
+    public Tensor forward(final Tensor x) {
       Context ctx = Context.get();
       Tensor hidden = x;
       if (ctx.isPrefill()) {

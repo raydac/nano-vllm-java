@@ -37,15 +37,15 @@ import java.util.List;
  */
 public record Gemma3ForCausalLM(Gemma3Model model, ParallelLMHead lmHead) implements CausalLM {
 
-  public Gemma3ForCausalLM(Config.HfConfig config, WeightBag weights) {
+  public Gemma3ForCausalLM(final Config.HfConfig config, final WeightBag weights) {
     this(assemble(requireNonNull(config, "config"), requireNonNull(weights, "weights")));
   }
 
-  private Gemma3ForCausalLM(Gemma3ForCausalLM assembled) {
+  private Gemma3ForCausalLM(final Gemma3ForCausalLM assembled) {
     this(assembled.model, assembled.lmHead);
   }
 
-  private static Gemma3ForCausalLM assemble(Config.HfConfig config, WeightBag weights) {
+  private static Gemma3ForCausalLM assemble(final Config.HfConfig config, final WeightBag weights) {
     Gemma3Model model = new Gemma3Model(config, weights);
     // Gemma3-270M has no lm_head in the checkpoint; HF ties embeddings.
     Tensor lmWeight = weights.find(LM_HEAD)
@@ -59,12 +59,12 @@ public record Gemma3ForCausalLM(Gemma3Model model, ParallelLMHead lmHead) implem
   }
 
   @Override
-  public Tensor forward(Tensor inputIds, Tensor positions) {
+  public Tensor forward(final Tensor inputIds, final Tensor positions) {
     return this.model.forward(inputIds, positions);
   }
 
   @Override
-  public Tensor computeLogits(Tensor hiddenStates) {
+  public Tensor computeLogits(final Tensor hiddenStates) {
     return this.lmHead.forward(hiddenStates);
   }
 
@@ -76,7 +76,7 @@ public record Gemma3ForCausalLM(Gemma3Model model, ParallelLMHead lmHead) implem
   }
 
   @Override
-  public boolean equals(Object other) {
+  public boolean equals(final Object other) {
     return this == other;
   }
 
@@ -102,7 +102,7 @@ public record Gemma3ForCausalLM(Gemma3Model model, ParallelLMHead lmHead) implem
       this(assemble(config, weights, layerIndex));
     }
 
-    private Gemma3Attention(Gemma3Attention assembled) {
+    private Gemma3Attention(final Gemma3Attention assembled) {
       this(
           assembled.qkvProj, assembled.oProj, assembled.rotaryEmb, assembled.attn,
           assembled.qNorm, assembled.kNorm,
@@ -111,9 +111,9 @@ public record Gemma3ForCausalLM(Gemma3Model model, ParallelLMHead lmHead) implem
     }
 
     private static Gemma3Attention assemble(
-        Config.HfConfig config,
-        WeightBag weights,
-        int layerIndex
+        final Config.HfConfig config,
+        final WeightBag weights,
+        final int layerIndex
     ) {
       int numHeads = config.numAttentionHeads();
       int numKvHeads = config.numKeyValueHeads();
@@ -136,7 +136,7 @@ public record Gemma3ForCausalLM(Gemma3Model model, ParallelLMHead lmHead) implem
           numKvHeads * headDim);
     }
 
-    Tensor forward(Tensor positions, Tensor hiddenStates) {
+    Tensor forward(final Tensor positions, final Tensor hiddenStates) {
       Tensor qkv = this.qkvProj.forward(hiddenStates);
       Tensor[] parts = Ops.splitLast(qkv, this.qSize, this.kvSize, this.kvSize);
       Tensor q = parts[0].reshape(parts[0].size(0), this.numHeads, this.headDim);
@@ -149,7 +149,7 @@ public record Gemma3ForCausalLM(Gemma3Model model, ParallelLMHead lmHead) implem
       return this.oProj.forward(o.reshape(o.size(0), this.numHeads * this.headDim));
     }
 
-    private Tensor normHeads(Tensor x, RMSNorm norm) {
+    private Tensor normHeads(final Tensor x, final RMSNorm norm) {
       return norm.forward(x.reshape(x.size(0) * x.size(1), this.headDim))
           .reshape(x.size(0), x.size(1), this.headDim);
     }
@@ -160,11 +160,12 @@ public record Gemma3ForCausalLM(Gemma3Model model, ParallelLMHead lmHead) implem
       this(assemble(config, weights, layerIndex));
     }
 
-    private Gemma3MLP(Gemma3MLP assembled) {
+    private Gemma3MLP(final Gemma3MLP assembled) {
       this(assembled.gateUpProj, assembled.downProj);
     }
 
-    private static Gemma3MLP assemble(Config.HfConfig config, WeightBag weights, int layerIndex) {
+    private static Gemma3MLP assemble(final Config.HfConfig config, final WeightBag weights,
+                                      final int layerIndex) {
       String act = config.effectiveActivation().toLowerCase();
       if (!act.contains("gelu")) {
         throw new IllegalArgumentException("Gemma3 expects gelu_pytorch_tanh, got " + act);
@@ -175,7 +176,7 @@ public record Gemma3ForCausalLM(Gemma3Model model, ParallelLMHead lmHead) implem
           new Linear.Row(weights.require(p + DOWN_PROJ_WEIGHT)));
     }
 
-    Tensor forward(Tensor x) {
+    Tensor forward(final Tensor x) {
       return this.downProj.forward(Ops.geluPytorchTanhAndMul(this.gateUpProj.forward(x)));
     }
   }
@@ -192,7 +193,7 @@ public record Gemma3ForCausalLM(Gemma3Model model, ParallelLMHead lmHead) implem
       this(assemble(config, weights, layerIndex));
     }
 
-    private Gemma3DecoderLayer(Gemma3DecoderLayer assembled) {
+    private Gemma3DecoderLayer(final Gemma3DecoderLayer assembled) {
       this(
           assembled.selfAttn, assembled.mlp,
           assembled.inputLayernorm, assembled.postAttentionLayernorm,
@@ -200,9 +201,9 @@ public record Gemma3ForCausalLM(Gemma3Model model, ParallelLMHead lmHead) implem
     }
 
     private static Gemma3DecoderLayer assemble(
-        Config.HfConfig config,
-        WeightBag weights,
-        int layerIndex
+        final Config.HfConfig config,
+        final WeightBag weights,
+        final int layerIndex
     ) {
       String p = layer(layerIndex);
       return new Gemma3DecoderLayer(
@@ -214,17 +215,17 @@ public record Gemma3ForCausalLM(Gemma3Model model, ParallelLMHead lmHead) implem
           new RMSNorm(weights.require(p + POST_FEEDFORWARD_LAYERNORM), config.rmsNormEps(), true));
     }
 
-    Tensor forward(Tensor positions, Tensor hiddenStates) {
+    Tensor forward(final Tensor positions, final Tensor hiddenStates) {
       Tensor residual = hiddenStates;
-      hiddenStates = this.selfAttn.forward(positions, this.inputLayernorm.forward(hiddenStates));
-      hiddenStates = this.add(residual, this.postAttentionLayernorm.forward(hiddenStates));
+      Tensor hidden = this.selfAttn.forward(positions, this.inputLayernorm.forward(hiddenStates));
+      hidden = this.add(residual, this.postAttentionLayernorm.forward(hidden));
 
-      residual = hiddenStates;
-      hiddenStates = this.mlp.forward(this.preFeedforwardLayernorm.forward(hiddenStates));
-      return this.add(residual, this.postFeedforwardLayernorm.forward(hiddenStates));
+      residual = hidden;
+      hidden = this.mlp.forward(this.preFeedforwardLayernorm.forward(hidden));
+      return this.add(residual, this.postFeedforwardLayernorm.forward(hidden));
     }
 
-    private Tensor add(Tensor a, Tensor b) {
+    private Tensor add(final Tensor a, final Tensor b) {
       Tensor out = Tensor.zeros(a.shape());
       float[] ad = a.data();
       float[] bd = b.data();
@@ -249,11 +250,11 @@ public record Gemma3ForCausalLM(Gemma3Model model, ParallelLMHead lmHead) implem
       this(assemble(config, weights));
     }
 
-    private Gemma3Model(Gemma3Model assembled) {
+    private Gemma3Model(final Gemma3Model assembled) {
       this(assembled.embedTokens, assembled.layers, assembled.norm, assembled.embedScale);
     }
 
-    private static Gemma3Model assemble(Config.HfConfig config, WeightBag weights) {
+    private static Gemma3Model assemble(final Config.HfConfig config, final WeightBag weights) {
       List<Gemma3DecoderLayer> built = new ArrayList<>(config.numHiddenLayers());
       for (int i = 0; i < config.numHiddenLayers(); i++) {
         built.add(new Gemma3DecoderLayer(config, weights, i));
@@ -265,7 +266,7 @@ public record Gemma3ForCausalLM(Gemma3Model model, ParallelLMHead lmHead) implem
           (float) Math.sqrt(config.hiddenSize()));
     }
 
-    Tensor forward(Tensor inputIds, Tensor positions) {
+    Tensor forward(final Tensor inputIds, final Tensor positions) {
       Tensor hiddenStates = this.scaleEmbed(this.embedTokens.forward(inputIds));
       for (Gemma3DecoderLayer layer : this.layers) {
         hiddenStates = layer.forward(positions, hiddenStates);
@@ -273,7 +274,7 @@ public record Gemma3ForCausalLM(Gemma3Model model, ParallelLMHead lmHead) implem
       return this.norm.forward(hiddenStates);
     }
 
-    private Tensor scaleEmbed(Tensor emb) {
+    private Tensor scaleEmbed(final Tensor emb) {
       Tensor out = Tensor.zeros(emb.shape());
       float[] ed = emb.data();
       float[] od = out.data();

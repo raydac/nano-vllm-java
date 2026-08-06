@@ -17,7 +17,7 @@ public final class EngineIo {
   private final PrintStream err;
   private final boolean silent;
 
-  private EngineIo(PrintStream out, PrintStream err, boolean silent) {
+  private EngineIo(final PrintStream out, final PrintStream err, final boolean silent) {
     this.out = requireNonNull(out, "out");
     this.err = requireNonNull(err, "err");
     this.silent = silent;
@@ -33,7 +33,7 @@ public final class EngineIo {
     return new EngineIo(System.out, System.err, false);
   }
 
-  public static EngineIo of(PrintStream out, PrintStream err) {
+  public static EngineIo of(final PrintStream out, final PrintStream err) {
     return new EngineIo(out, err, false);
   }
 
@@ -49,15 +49,15 @@ public final class EngineIo {
     return this.silent;
   }
 
-  public void info(String message) {
+  public void info(final String message) {
     this.err.println(message);
   }
 
-  public void infof(String format, Object... args) {
+  public void infof(final String format, Object... args) {
     this.err.printf(Locale.ROOT, format, args);
   }
 
-  public void progressf(String format, Object... args) {
+  public void progressf(final String format, Object... args) {
     this.out.printf(Locale.ROOT, format, args);
   }
 }

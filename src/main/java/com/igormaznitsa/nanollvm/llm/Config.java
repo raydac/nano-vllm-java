@@ -26,7 +26,7 @@ public final class Config {
   private List<Integer> stopTokenIds = List.of();
   private int numKvcacheBlocks;
 
-  private Config(Builder b) {
+  private Config(final Builder b) {
     this.model = b.model;
     this.maxNumBatchedTokens = b.maxNumBatchedTokens;
     this.maxNumSeqs = b.maxNumSeqs;
@@ -63,11 +63,11 @@ public final class Config {
     this.maxModelLen = Math.min(b.maxModelLen, this.hfConfig.maxPositionEmbeddings());
   }
 
-  public static Builder builder(Path model) {
+  public static Builder builder(final Path model) {
     return new Builder(model);
   }
 
-  public static Builder builder(Model model) {
+  public static Builder builder(final Model model) {
     requireNonNull(model, "model");
     return new Builder(model.path(), model.hfConfig());
   }
@@ -108,7 +108,7 @@ public final class Config {
     return this.eos;
   }
 
-  public void setEos(int eos) {
+  public void setEos(final int eos) {
     this.eos = eos;
     if (this.stopTokenIds.isEmpty()) {
       this.stopTokenIds = List.of(eos);
@@ -119,7 +119,7 @@ public final class Config {
     return this.stopTokenIds;
   }
 
-  public void setStopTokenIds(List<Integer> stopTokenIds) {
+  public void setStopTokenIds(final List<Integer> stopTokenIds) {
     this.stopTokenIds = List.copyOf(stopTokenIds);
     if (!stopTokenIds.isEmpty()) {
       this.eos = stopTokenIds.getFirst();
@@ -134,7 +134,7 @@ public final class Config {
     return this.numKvcacheBlocks;
   }
 
-  public void setNumKvcacheBlocks(int numKvcacheBlocks) {
+  public void setNumKvcacheBlocks(final int numKvcacheBlocks) {
     this.numKvcacheBlocks = numKvcacheBlocks;
   }
 
@@ -151,56 +151,56 @@ public final class Config {
     private int kvcacheBlockSize = 256;
     private int numKvcacheBlocks = -1;
 
-    private Builder(Path model) {
+    private Builder(final Path model) {
       this(model, null);
     }
 
-    private Builder(Path model, HfConfig hfConfig) {
+    private Builder(final Path model, final HfConfig hfConfig) {
       this.model = requireNonNull(model, "model").toAbsolutePath().normalize();
       this.hfConfig = hfConfig;
     }
 
-    public Builder maxNumBatchedTokens(int v) {
+    public Builder maxNumBatchedTokens(final int v) {
       this.maxNumBatchedTokens = v;
       return this;
     }
 
-    public Builder maxNumSeqs(int v) {
+    public Builder maxNumSeqs(final int v) {
       this.maxNumSeqs = v;
       return this;
     }
 
-    public Builder maxModelLen(int v) {
+    public Builder maxModelLen(final int v) {
       this.maxModelLen = v;
       return this;
     }
 
-    public Builder gpuMemoryUtilization(float v) {
+    public Builder gpuMemoryUtilization(final float v) {
       this.gpuMemoryUtilization = v;
       return this;
     }
 
-    public Builder tensorParallelSize(int v) {
+    public Builder tensorParallelSize(final int v) {
       this.tensorParallelSize = v;
       return this;
     }
 
-    public Builder enforceEager(boolean v) {
+    public Builder enforceEager(final boolean v) {
       this.enforceEager = v;
       return this;
     }
 
-    public Builder eos(int v) {
+    public Builder eos(final int v) {
       this.eos = v;
       return this;
     }
 
-    public Builder kvcacheBlockSize(int v) {
+    public Builder kvcacheBlockSize(final int v) {
       this.kvcacheBlockSize = v;
       return this;
     }
 
-    public Builder numKvcacheBlocks(int v) {
+    public Builder numKvcacheBlocks(final int v) {
       this.numKvcacheBlocks = v;
       return this;
     }
@@ -234,7 +234,7 @@ public final class Config {
       float ropeLocalBaseFreq,
       float queryPreAttnScalar
   ) {
-    public static HfConfig load(Path configJson) throws IOException {
+    public static HfConfig load(final Path configJson) throws IOException {
       Map<String, Object> m = Json.parseObject(Files.readString(configJson));
       int hiddenSize = Json.asInt(m.get("hidden_size"), 0);
       int numAttentionHeads = Json.asInt(m.get("num_attention_heads"), 0);
@@ -297,7 +297,7 @@ public final class Config {
       return (float) Math.pow(denom, -0.5);
     }
 
-    public boolean isSlidingLayer(int layerIndex) {
+    public boolean isSlidingLayer(final int layerIndex) {
       if (this.layerTypes != null && layerIndex >= 0 && layerIndex < this.layerTypes.size()) {
         String type = this.layerTypes.get(layerIndex);
         return type != null && type.toLowerCase().contains("sliding");

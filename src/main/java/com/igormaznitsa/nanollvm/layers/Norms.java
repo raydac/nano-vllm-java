@@ -21,11 +21,11 @@ public final class Norms {
     private final boolean gemmaStyle;
     private final Tensor weight;
 
-    public RMSNorm(Tensor weight, float eps) {
+    public RMSNorm(final Tensor weight, final float eps) {
       this(weight, eps, false);
     }
 
-    public RMSNorm(Tensor weight, float eps, boolean gemmaStyle) {
+    public RMSNorm(final Tensor weight, final float eps, final boolean gemmaStyle) {
       this.weight = requireNonNull(weight, "weight");
       this.eps = eps;
       this.gemmaStyle = gemmaStyle;
@@ -35,11 +35,11 @@ public final class Norms {
       return this.weight;
     }
 
-    public Tensor forward(Tensor x) {
+    public Tensor forward(final Tensor x) {
       return Ops.rmsNorm(x, this.weight, this.eps, this.gemmaStyle);
     }
 
-    public Tensor[] forward(Tensor x, Tensor residual) {
+    public Tensor[] forward(final Tensor x, final Tensor residual) {
       return Ops.addRmsNorm(x, residual, this.weight, this.eps, this.gemmaStyle);
     }
   }
@@ -50,7 +50,8 @@ public final class Norms {
     private final int headSize;
     private final Tensor cosSinCache;
 
-    public RotaryEmbedding(int headSize, int rotaryDim, int maxPositionEmbeddings, float base) {
+    public RotaryEmbedding(final int headSize, final int rotaryDim, final int maxPositionEmbeddings,
+                           final float base) {
       if (rotaryDim != headSize) {
         throw new IllegalArgumentException("rotaryDim must equal headSize");
       }
@@ -71,13 +72,14 @@ public final class Norms {
       this.cosSinCache = Tensor.of(cache, maxPositionEmbeddings, rotaryDim);
     }
 
-    public static RotaryEmbedding get(int headSize, int rotaryDim, int maxPosition, float base) {
+    public static RotaryEmbedding get(final int headSize, final int rotaryDim,
+                                      final int maxPosition, final float base) {
       String key = headSize + ":" + rotaryDim + ":" + maxPosition + ":" + base;
       return CACHE.computeIfAbsent(key,
           k -> new RotaryEmbedding(headSize, rotaryDim, maxPosition, base));
     }
 
-    public Tensor[] forward(Tensor positions, Tensor query, Tensor key) {
+    public Tensor[] forward(final Tensor positions, final Tensor query, final Tensor key) {
       int tokens = query.size(0);
       int headsQ = query.size(1);
       int headsK = key.size(1);
@@ -93,7 +95,8 @@ public final class Norms {
       return new Tensor[] {qOut, kOut};
     }
 
-    private void apply(Tensor in, Tensor out, int token, int heads, int half, int cBase) {
+    private void apply(final Tensor in, final Tensor out, final int token, final int heads,
+                       final int half, final int cBase) {
       for (int h = 0; h < heads; h++) {
         int base = in.offset() + (token * heads + h) * this.headSize;
         int oBase = (token * heads + h) * this.headSize;

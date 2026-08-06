@@ -28,11 +28,11 @@ public final class Bm25Index implements RagIndex {
   private final int docCount;
 
   private Bm25Index(
-      List<PreparedPassage> passages,
-      Map<String, List<Posting>> inverted,
-      Map<String, Double> idf,
-      Map<String, Integer> docFreq,
-      double avgDocLen
+      final List<PreparedPassage> passages,
+      final Map<String, List<Posting>> inverted,
+      final Map<String, Double> idf,
+      final Map<String, Integer> docFreq,
+      final double avgDocLen
   ) {
     this.passages = List.copyOf(passages);
     this.inverted = Map.copyOf(inverted);
@@ -42,7 +42,7 @@ public final class Bm25Index implements RagIndex {
     this.docCount = passages.size();
   }
 
-  public static Bm25Index build(TextCorpus corpus) {
+  public static Bm25Index build(final TextCorpus corpus) {
     requireNonNull(corpus, "corpus");
     if (corpus.isEmpty()) {
       throw new IllegalArgumentException("corpus must not be empty");
@@ -50,7 +50,7 @@ public final class Bm25Index implements RagIndex {
     return buildPrepared(PassagePreparser.prepare(corpus.chunks()));
   }
 
-  public static Bm25Index buildPrepared(List<PreparedPassage> passages) {
+  public static Bm25Index buildPrepared(final List<PreparedPassage> passages) {
     requireNonNull(passages, "passages");
     if (passages.isEmpty()) {
       throw new IllegalArgumentException("passages must not be empty");
@@ -91,18 +91,18 @@ public final class Bm25Index implements RagIndex {
     return build(TextCorpus.ofStrings(texts));
   }
 
-  public static Bm25Index fromFile(Path file) {
+  public static Bm25Index fromFile(final Path file) {
     return build(TextCorpus.fromFile(file));
   }
 
-  public static Bm25Index fromFolder(Path folder) {
+  public static Bm25Index fromFolder(final Path folder) {
     return build(TextCorpus.fromFolder(folder));
   }
 
   /**
    * Drops hits far below the best score so weak lexical matches do not dilute the prompt.
    */
-  static List<RagHit> keepStrongHits(List<RagHit> scored, int topK) {
+  static List<RagHit> keepStrongHits(final List<RagHit> scored, final int topK) {
     if (scored.isEmpty()) {
       return List.of();
     }
@@ -114,15 +114,15 @@ public final class Bm25Index implements RagIndex {
         .toList();
   }
 
-  static List<String> tokenize(String text) {
+  static List<String> tokenize(final String text) {
     return PassagePreparser.tokenize(text);
   }
 
-  List<String> selectedQueryTerms(String query) {
+  List<String> selectedQueryTerms(final String query) {
     return RagQueryTerms.select(this.docFreq, this.docCount, query);
   }
 
-  boolean isOutsideCorpus(String query) {
+  boolean isOutsideCorpus(final String query) {
     List<String> raw = List.copyOf(new LinkedHashSet<>(PassagePreparser.tokenize(query)));
     return RagQueryTerms.queryOutsideCorpus(this.docFreq, raw);
   }
@@ -141,7 +141,7 @@ public final class Bm25Index implements RagIndex {
   }
 
   @Override
-  public List<RagHit> retrieve(String query, int topK) {
+  public List<RagHit> retrieve(final String query, final int topK) {
     requireNonNull(query, "query");
     if (topK <= 0) {
       throw new IllegalArgumentException("topK must be > 0");
@@ -183,7 +183,7 @@ public final class Bm25Index implements RagIndex {
     return List.copyOf(keepStrongHits(scored, topK));
   }
 
-  private double scoreDocument(int docIndex, List<String> queryTerms) {
+  private double scoreDocument(final int docIndex, final List<String> queryTerms) {
     PreparedPassage passage = this.passages.get(docIndex);
     Map<String, Integer> tf = passage.termFreqs();
     int docLen = passage.tokenCount();

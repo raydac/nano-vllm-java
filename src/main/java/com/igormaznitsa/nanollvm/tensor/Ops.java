@@ -57,7 +57,7 @@ public final class Ops {
    * @return transformed tensor with last dim {@code out}
    * @throws IllegalArgumentException if {@code weight} is not 2D or {@code x} width mismatches
    */
-  public static Tensor linear(Tensor x, Tensor weight, Tensor bias) {
+  public static Tensor linear(final Tensor x, final Tensor weight, final Tensor bias) {
     requireNonNull(x, "x");
     requireNonNull(weight, "weight");
     int[] xs = x.rawShape();
@@ -107,7 +107,7 @@ public final class Ops {
    * @throws IllegalArgumentException  if {@code weight} is not {@code [vocab, dim]}
    * @throws IndexOutOfBoundsException if any id is outside {@code [0, vocab)}
    */
-  public static Tensor embedding(Tensor ids, Tensor weight) {
+  public static Tensor embedding(final Tensor ids, final Tensor weight) {
     int[] ws = weight.rawShape();
     if (ws.length != 2) {
       throw new IllegalArgumentException("embedding weight must be [vocab, dim]");
@@ -133,7 +133,7 @@ public final class Ops {
    * @param x last dim even; layout {@code […, gate | up]}
    * @return tensor with last dim halved
    */
-  public static Tensor siluAndMul(Tensor x) {
+  public static Tensor siluAndMul(final Tensor x) {
     return gatedActAndMul(x, false);
   }
 
@@ -146,7 +146,7 @@ public final class Ops {
    * @param x last dim even; layout {@code […, gate | up]}
    * @return tensor with last dim halved
    */
-  public static Tensor geluPytorchTanhAndMul(Tensor x) {
+  public static Tensor geluPytorchTanhAndMul(final Tensor x) {
     return gatedActAndMul(x, true);
   }
 
@@ -164,7 +164,7 @@ public final class Ops {
    * @return activated-and-multiplied tensor
    * @throws IllegalArgumentException if last dim is odd
    */
-  private static Tensor gatedActAndMul(Tensor x, boolean geluTanh) {
+  private static Tensor gatedActAndMul(final Tensor x, final boolean geluTanh) {
     int[] shape = x.rawShape();
     int last = shape[shape.length - 1];
     if (last % 2 != 0) {
@@ -200,7 +200,7 @@ public final class Ops {
    *
    * <p>Constant {@code 0.7978845608028654} is {@code √(2/π)}.
    */
-  private static float geluPytorchTanh(float x) {
+  private static float geluPytorchTanh(final float x) {
     return 0.5f * x * (1.0f + (float) Math.tanh(0.7978845608028654 * (x + 0.044715 * x * x * x)));
   }
 
@@ -213,7 +213,7 @@ public final class Ops {
    * @param logits scores with arbitrary leading shape and last dim = class / key count
    * @return same shape as {@code logits}; non-negative, last-axis sums to ~1
    */
-  public static Tensor softmaxLastDim(Tensor logits) {
+  public static Tensor softmaxLastDim(final Tensor logits) {
     int[] shape = logits.rawShape();
     int last = shape[shape.length - 1];
     int rows = logits.numel() / last;
@@ -247,7 +247,7 @@ public final class Ops {
    *
    * @see #rmsNorm(Tensor, Tensor, float, boolean)
    */
-  public static Tensor rmsNorm(Tensor x, Tensor weight, float eps) {
+  public static Tensor rmsNorm(final Tensor x, final Tensor weight, final float eps) {
     return rmsNorm(x, weight, eps, false);
   }
 
@@ -266,7 +266,8 @@ public final class Ops {
    * @param gemmaStyle whether to use {@code (1 + w)} scales
    * @return same shape as {@code x}
    */
-  public static Tensor rmsNorm(Tensor x, Tensor weight, float eps, boolean gemmaStyle) {
+  public static Tensor rmsNorm(final Tensor x, final Tensor weight, final float eps,
+                               final boolean gemmaStyle) {
     int[] shape = x.rawShape();
     int last = shape[shape.length - 1];
     int rows = x.numel() / last;
@@ -297,7 +298,8 @@ public final class Ops {
    *
    * @see #addRmsNorm(Tensor, Tensor, Tensor, float, boolean)
    */
-  public static Tensor[] addRmsNorm(Tensor x, Tensor residual, Tensor weight, float eps) {
+  public static Tensor[] addRmsNorm(final Tensor x, final Tensor residual, final Tensor weight,
+                                    final float eps) {
     return addRmsNorm(x, residual, weight, eps, false);
   }
 
@@ -317,8 +319,9 @@ public final class Ops {
    * @return {@code new Tensor[] { normed, xPlusResidual }}
    * @throws IllegalArgumentException if {@code x} and {@code residual} sizes differ
    */
-  public static Tensor[] addRmsNorm(Tensor x, Tensor residual, Tensor weight, float eps,
-                                    boolean gemmaStyle) {
+  public static Tensor[] addRmsNorm(final Tensor x, final Tensor residual, final Tensor weight,
+                                    final float eps,
+                                    final boolean gemmaStyle) {
     requireSameSize(x, residual);
     int[] shape = x.rawShape();
     int last = shape[shape.length - 1];
@@ -367,7 +370,7 @@ public final class Ops {
    * @return one tensor per size, in order
    * @throws IllegalArgumentException if sizes do not sum to the last dimension
    */
-  public static Tensor[] splitLast(Tensor x, int... sizes) {
+  public static Tensor[] splitLast(final Tensor x, int... sizes) {
     int[] shape = x.rawShape();
     int last = shape[shape.length - 1];
     int sum = 0;
@@ -397,7 +400,7 @@ public final class Ops {
   /**
    * Guards fused residual ops: both views must expose the same number of scalars.
    */
-  private static void requireSameSize(Tensor a, Tensor b) {
+  private static void requireSameSize(final Tensor a, final Tensor b) {
     if (a.numel() != b.numel()) {
       throw new IllegalArgumentException(
           "numel mismatch: %d vs %d".formatted(a.numel(), b.numel()));

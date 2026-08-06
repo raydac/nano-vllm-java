@@ -37,16 +37,16 @@ public final class WeightSchema {
   private final Set<String> optionalParameters;
 
   private WeightSchema(
-      Map<String, Object[]> packedModulesMapping,
-      Set<String> expectedParameters,
-      Set<String> optionalParameters
+      final Map<String, Object[]> packedModulesMapping,
+      final Set<String> expectedParameters,
+      final Set<String> optionalParameters
   ) {
     this.packedModulesMapping = Map.copyOf(requireNonNull(packedModulesMapping));
     this.expectedParameters = Set.copyOf(requireNonNull(expectedParameters));
     this.optionalParameters = Set.copyOf(requireNonNull(optionalParameters));
   }
 
-  public static WeightSchema forArchitecture(String arch, Config.HfConfig config) {
+  public static WeightSchema forArchitecture(final String arch, final Config.HfConfig config) {
     return switch (arch) {
       case ARCH_GEMMA3 -> gemma3(config);
       case ARCH_QWEN3 -> qwen3(config);
@@ -54,7 +54,7 @@ public final class WeightSchema {
     };
   }
 
-  public static WeightSchema qwen3(Config.HfConfig config) {
+  public static WeightSchema qwen3(final Config.HfConfig config) {
     Set<String> expected = new LinkedHashSet<>();
     Set<String> optional = new LinkedHashSet<>();
     expected.add(EMBED_TOKENS);
@@ -82,7 +82,7 @@ public final class WeightSchema {
     return new WeightSchema(PACKED_MODULES_MAPPING, expected, optional);
   }
 
-  public static WeightSchema gemma3(Config.HfConfig config) {
+  public static WeightSchema gemma3(final Config.HfConfig config) {
     Set<String> expected = new LinkedHashSet<>();
     Set<String> optional = new LinkedHashSet<>();
     expected.add(EMBED_TOKENS);
@@ -110,12 +110,12 @@ public final class WeightSchema {
     return this.packedModulesMapping;
   }
 
-  public boolean accepts(String paramName) {
+  public boolean accepts(final String paramName) {
     return this.expectedParameters.contains(paramName)
         || this.optionalParameters.contains(paramName);
   }
 
-  public boolean expects(String paramName) {
+  public boolean expects(final String paramName) {
     return this.expectedParameters.contains(paramName);
   }
 

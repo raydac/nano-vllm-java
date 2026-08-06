@@ -15,11 +15,11 @@ public final class ChatMessages {
   private ChatMessages() {
   }
 
-  public static List<ChatMessage> newConversation(boolean gemmaChat) {
+  public static List<ChatMessage> newConversation(final boolean gemmaChat) {
     return newConversation(ChatPrompts.systemFor(gemmaChat));
   }
 
-  public static List<ChatMessage> newConversation(String systemPrompt) {
+  public static List<ChatMessage> newConversation(final String systemPrompt) {
     List<ChatMessage> history = new ArrayList<>();
     if (systemPrompt != null && !systemPrompt.isBlank()) {
       history.add(ChatMessage.system(systemPrompt));
@@ -27,15 +27,15 @@ public final class ChatMessages {
     return history;
   }
 
-  public static List<Map<String, String>> toTemplateMaps(List<ChatMessage> history) {
+  public static List<Map<String, String>> toTemplateMaps(final List<ChatMessage> history) {
     return history.stream().map(ChatMessage::toMap).toList();
   }
 
   public static void truncateHistory(
-      List<ChatMessage> history,
-      Tokenizer tokenizer,
-      int maxModelLen,
-      int maxTokens
+      final List<ChatMessage> history,
+      final Tokenizer tokenizer,
+      final int maxModelLen,
+      final int maxTokens
   ) {
     int budget = Math.max(64, maxModelLen - maxTokens - PROMPT_MARGIN);
     boolean enableThinking = !tokenizer.isGemmaChat();
@@ -56,7 +56,7 @@ public final class ChatMessages {
     }
   }
 
-  public static void scrubSetupBoilerplateTurns(List<ChatMessage> history) {
+  public static void scrubSetupBoilerplateTurns(final List<ChatMessage> history) {
     IntStream.range(0, history.size())
         .filter(i -> history.get(i).role() == ChatRole.ASSISTANT
             && ChatPrompts.isSetupBoilerplate(history.get(i).content()))

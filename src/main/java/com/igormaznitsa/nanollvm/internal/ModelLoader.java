@@ -30,10 +30,10 @@ public final class ModelLoader {
   }
 
   public static WeightBag loadWeights(
-      Path modelDir,
-      Config.HfConfig hfConfig,
-      WeightSchema schema,
-      EngineIo io
+      final Path modelDir,
+      final Config.HfConfig hfConfig,
+      final WeightSchema schema,
+      final EngineIo io
   ) throws IOException {
     EngineIo streams = io == null ? EngineIo.silent() : io;
     List<Path> files = SafetensorsReader.listSafetensors(modelDir);
@@ -111,9 +111,9 @@ public final class ModelLoader {
   }
 
   private static ResolvedParam resolveParam(
-      String weightName,
-      WeightSchema schema,
-      Map<String, Object[]> packed
+      final String weightName,
+      final WeightSchema schema,
+      final Map<String, Object[]> packed
   ) {
     for (var e : packed.entrySet()) {
       String key = e.getKey();
@@ -133,7 +133,7 @@ public final class ModelLoader {
   }
 
   private interface ShardMerge {
-    void write(Object shardId, Tensor loaded);
+    void write(final Object shardId, final Tensor loaded);
 
     Tensor finish();
   }
@@ -159,7 +159,7 @@ public final class ModelLoader {
       this.hf = hf;
     }
 
-    void accept(String paramName, Object shardId, Tensor tensor) {
+    void accept(final String paramName, final Object shardId, final Tensor tensor) {
       if (shardId == null) {
         this.complete.put(paramName, tensor);
         return;
@@ -174,7 +174,7 @@ public final class ModelLoader {
       return new WeightBag(this.complete);
     }
 
-    private ShardMerge newMerge(String paramName) {
+    private ShardMerge newMerge(final String paramName) {
       if (paramName.contains(QKV_PROJ)) {
         return new QkvMerge(this.hf);
       }
@@ -201,7 +201,7 @@ public final class ModelLoader {
     }
 
     @Override
-    public void write(Object shardId, Tensor loaded) {
+    public void write(final Object shardId, final Tensor loaded) {
       String id = String.valueOf(shardId);
       int shardSize;
       int shardOffset;
@@ -228,7 +228,7 @@ public final class ModelLoader {
       this.seen[seenIndex] = true;
     }
 
-    private void copyRows(Tensor loaded, int shardOffset, int shardSize) {
+    private void copyRows(final Tensor loaded, final int shardOffset, final int shardSize) {
       int in = this.weight.size(1);
       for (int o = 0; o < shardSize; o++) {
         System.arraycopy(
@@ -259,7 +259,7 @@ public final class ModelLoader {
     }
 
     @Override
-    public void write(Object shardId, Tensor loaded) {
+    public void write(final Object shardId, final Tensor loaded) {
       int id = ((Number) shardId).intValue();
       if (id < 0 || id >= this.outputSizes.length) {
         throw new IllegalArgumentException("shardId " + shardId);
@@ -308,20 +308,20 @@ public final class ModelLoader {
       this.render();
     }
 
-    private static String formatSeconds(double seconds) {
+    private static String formatSeconds(final double seconds) {
       if (seconds < 60) {
         return String.format(Locale.ROOT, "%.0fs", seconds);
       }
       return String.format(Locale.ROOT, "%dm%02ds", (int) (seconds / 60), (int) (seconds % 60));
     }
 
-    void step(String detail) {
+    void step(final String detail) {
       this.current = Math.min(this.current + 1, this.total);
       this.detail = detail == null ? "" : detail;
       this.render();
     }
 
-    void finish(String message) {
+    void finish(final String message) {
       if (this.finished) {
         return;
       }

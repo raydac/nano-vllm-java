@@ -15,11 +15,11 @@ public final class WeightBag {
 
   private final Map<String, Tensor> byName;
 
-  public WeightBag(Map<String, Tensor> byName) {
+  public WeightBag(final Map<String, Tensor> byName) {
     this.byName = Map.copyOf(requireNonNull(byName, "byName"));
   }
 
-  public Tensor require(String name) {
+  public Tensor require(final String name) {
     Tensor tensor = this.byName.get(name);
     if (tensor == null) {
       throw new IllegalArgumentException("missing weight: " + name);
@@ -27,11 +27,11 @@ public final class WeightBag {
     return tensor;
   }
 
-  public Optional<Tensor> find(String name) {
+  public Optional<Tensor> find(final String name) {
     return Optional.ofNullable(this.byName.get(name));
   }
 
-  public boolean has(String name) {
+  public boolean has(final String name) {
     return this.byName.containsKey(name);
   }
 

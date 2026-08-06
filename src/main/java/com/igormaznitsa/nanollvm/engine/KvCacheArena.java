@@ -14,11 +14,11 @@ public final class KvCacheArena {
   private final Tensor[] vCaches;
 
   public KvCacheArena(
-      int numLayers,
-      int numBlocks,
-      int blockSize,
-      int numKvHeads,
-      int headDim
+      final int numLayers,
+      final int numBlocks,
+      final int blockSize,
+      final int numKvHeads,
+      final int headDim
   ) {
     if (numLayers <= 0) {
       throw new IllegalArgumentException("numLayers must be > 0");
@@ -38,15 +38,15 @@ public final class KvCacheArena {
     return this.kCaches.length;
   }
 
-  public Tensor k(int layerIndex) {
+  public Tensor k(final int layerIndex) {
     return this.kCaches[this.requireLayer(layerIndex)];
   }
 
-  public Tensor v(int layerIndex) {
+  public Tensor v(final int layerIndex) {
     return this.vCaches[this.requireLayer(layerIndex)];
   }
 
-  private int requireLayer(int layerIndex) {
+  private int requireLayer(final int layerIndex) {
     if (layerIndex < 0 || layerIndex >= this.kCaches.length) {
       throw new IllegalArgumentException(
           "layerIndex out of range: " + layerIndex + " (layers=" + this.kCaches.length + ")");

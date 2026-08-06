@@ -32,27 +32,27 @@ public record RagLoadOptions(
     return new RagLoadOptions(220, 0, true, true, true);
   }
 
-  public RagLoadOptions withMaxChunkChars(int maxChunkChars) {
+  public RagLoadOptions withMaxChunkChars(final int maxChunkChars) {
     return new RagLoadOptions(
         maxChunkChars, this.chunkOverlap, this.preprocess, this.atomicSentences, this.dedupe);
   }
 
-  public RagLoadOptions withChunkOverlap(int chunkOverlap) {
+  public RagLoadOptions withChunkOverlap(final int chunkOverlap) {
     return new RagLoadOptions(
         this.maxChunkChars, chunkOverlap, this.preprocess, this.atomicSentences, this.dedupe);
   }
 
-  public RagLoadOptions withPreprocess(boolean preprocess) {
+  public RagLoadOptions withPreprocess(final boolean preprocess) {
     return new RagLoadOptions(
         this.maxChunkChars, this.chunkOverlap, preprocess, this.atomicSentences, this.dedupe);
   }
 
-  public RagLoadOptions withAtomicSentences(boolean atomicSentences) {
+  public RagLoadOptions withAtomicSentences(final boolean atomicSentences) {
     return new RagLoadOptions(
         this.maxChunkChars, this.chunkOverlap, this.preprocess, atomicSentences, this.dedupe);
   }
 
-  public RagLoadOptions withDedupe(boolean dedupe) {
+  public RagLoadOptions withDedupe(final boolean dedupe) {
     return new RagLoadOptions(
         this.maxChunkChars, this.chunkOverlap, this.preprocess, this.atomicSentences, dedupe);
   }

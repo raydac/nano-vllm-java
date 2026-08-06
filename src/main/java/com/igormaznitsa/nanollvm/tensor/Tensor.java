@@ -52,7 +52,7 @@ public final class Tensor {
   private final int offset;
   private final int size;
 
-  private Tensor(float[] data, int[] shape, int offset, int size) {
+  private Tensor(final float[] data, final int[] shape, final int offset, final int size) {
     this.data = data;
     this.shape = shape;
     this.offset = offset;
@@ -97,7 +97,7 @@ public final class Tensor {
    * @throws NullPointerException     if {@code data} or {@code shape} is {@code null}
    * @throws IllegalArgumentException if lengths disagree or {@code shape} is invalid
    */
-  public static Tensor of(float[] data, int... shape) {
+  public static Tensor of(final float[] data, int... shape) {
     int[] s = requireShape(shape);
     int n = numel(s);
     requireNonNull(data, "data");
@@ -129,7 +129,7 @@ public final class Tensor {
   /**
    * Product of all dimensions; uses {@link Math#multiplyExact(int, int)} to fail on overflow.
    */
-  static int numel(int[] shape) {
+  static int numel(final int[] shape) {
     int n = 1;
     for (int d : shape) {
       n = Math.multiplyExact(n, d);
@@ -168,7 +168,7 @@ public final class Tensor {
    * @return {@code shape[dim]}
    * @throws ArrayIndexOutOfBoundsException if {@code dim} is out of range
    */
-  public int size(int dim) {
+  public int size(final int dim) {
     return this.shape[dim];
   }
 
@@ -212,7 +212,7 @@ public final class Tensor {
    * @return the float at that logical position
    * @throws ArrayIndexOutOfBoundsException if {@code offset + index} is outside {@code data}
    */
-  public float get(int index) {
+  public float get(final int index) {
     return this.data[this.offset + index];
   }
 
@@ -223,7 +223,7 @@ public final class Tensor {
    * @param value new float value
    * @throws ArrayIndexOutOfBoundsException if {@code offset + index} is outside {@code data}
    */
-  public void set(int index, float value) {
+  public void set(final int index, final float value) {
     this.data[this.offset + index] = value;
   }
 
@@ -272,7 +272,7 @@ public final class Tensor {
    * @param other source tensor view
    * @throws IllegalArgumentException if {@code other.numel() != this.numel()}
    */
-  public void copyFrom(Tensor other) {
+  public void copyFrom(final Tensor other) {
     if (this.size != other.size) {
       throw new IllegalArgumentException("size mismatch");
     }

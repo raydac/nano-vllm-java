@@ -13,7 +13,7 @@ public enum ChatRole {
     this.wireName = wireName;
   }
 
-  public static ChatRole fromWire(String role) {
+  public static ChatRole fromWire(final String role) {
     if (role == null || role.isBlank()) {
       return USER;
     }

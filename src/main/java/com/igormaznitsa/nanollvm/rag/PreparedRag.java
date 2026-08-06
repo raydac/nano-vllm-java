@@ -39,7 +39,7 @@ public final class PreparedRag implements RagIndex {
    * Favors fact cards that mention {@code fairy}/{@code fable}/… over long narration
    * that only matches the story title tokens.
    */
-  static double termCoverage(String passageText, List<String> queryTerms) {
+  static double termCoverage(final String passageText, final List<String> queryTerms) {
     if (queryTerms.isEmpty()) {
       return 0.0;
     }
@@ -73,7 +73,7 @@ public final class PreparedRag implements RagIndex {
   }
 
   @Override
-  public List<RagHit> retrieve(String query, int topK) {
+  public List<RagHit> retrieve(final String query, final int topK) {
     List<String> terms = this.index.selectedQueryTerms(query);
     List<RagHit> hits = this.index.retrieve(query, Math.max(topK * 4, topK));
     return hits.stream()

@@ -68,7 +68,7 @@ public final class Scheduler {
    * Builds a scheduler from engine limits and stop tokens in {@code config}.
    * Instantiates a fresh {@link BlockManager} sized to {@code config.numKvcacheBlocks()}.
    */
-  public Scheduler(Config config) {
+  public Scheduler(final Config config) {
     this.maxNumSeqs = config.maxNumSeqs();
     this.maxNumBatchedTokens = config.maxNumBatchedTokens();
     this.stopTokenIds = config.stopTokenIds().isEmpty()
@@ -96,7 +96,7 @@ public final class Scheduler {
     this.waiting.clear();
   }
 
-  private void finishAndDeallocateAll(Iterable<Sequence> sequences) {
+  private void finishAndDeallocateAll(final Iterable<Sequence> sequences) {
     for (Sequence seq : sequences) {
       this.blockManager.deallocate(seq);
       seq.setStatus(Sequence.Status.FINISHED);
@@ -115,7 +115,7 @@ public final class Scheduler {
   /**
    * Enqueues {@code seq} at the end of the waiting queue (status should already be WAITING).
    */
-  public void add(Sequence seq) {
+  public void add(final Sequence seq) {
     this.waiting.addLast(seq);
   }
 
@@ -162,7 +162,7 @@ public final class Scheduler {
     return scheduled;
   }
 
-  private PrefillPlan planPrefillTokens(Sequence seq) {
+  private PrefillPlan planPrefillTokens(final Sequence seq) {
     if (seq.blockTable().isEmpty()) {
       int cachedBlocks = this.blockManager.canAllocate(seq);
       if (cachedBlocks == -1) {
@@ -173,14 +173,15 @@ public final class Scheduler {
     return new PrefillPlan(seq.numTokens() - seq.numCachedTokens(), 0, false);
   }
 
-  private void commitPrefillSlot(Sequence seq, PrefillPlan plan, int remainingCapacity) {
+  private void commitPrefillSlot(final Sequence seq, final PrefillPlan plan,
+                                 final int remainingCapacity) {
     if (plan.needsAllocate()) {
       this.blockManager.allocate(seq, plan.cachedBlocks());
     }
     seq.setNumScheduledTokens(Math.min(plan.tokenCount(), remainingCapacity));
   }
 
-  private void promoteToRunningIfPrefillComplete(Sequence seq) {
+  private void promoteToRunningIfPrefillComplete(final Sequence seq) {
     if (seq.numCachedTokens() + seq.numScheduledTokens() != seq.numTokens()) {
       return;
     }
@@ -209,7 +210,7 @@ public final class Scheduler {
     return scheduled;
   }
 
-  private boolean ensureAppendCapacity(Sequence seq) {
+  private boolean ensureAppendCapacity(final Sequence seq) {
     while (!this.blockManager.canAppend(seq)) {
       if (this.running.isEmpty()) {
         this.preempt(seq);
@@ -220,13 +221,13 @@ public final class Scheduler {
     return true;
   }
 
-  private void commitDecodeSlot(Sequence seq) {
+  private void commitDecodeSlot(final Sequence seq) {
     seq.setNumScheduledTokens(1);
     seq.setPrefill(false);
     this.blockManager.mayAppend(seq);
   }
 
-  private void restoreRunningOrder(List<Sequence> scheduled) {
+  private void restoreRunningOrder(final List<Sequence> scheduled) {
     for (int i = scheduled.size() - 1; i >= 0; i--) {
       this.running.addFirst(scheduled.get(i));
     }
@@ -236,7 +237,7 @@ public final class Scheduler {
    * Evicts {@code seq} from decode: frees its KV pages, marks it WAITING / prefill-again, and
    * requeues it at the <em>front</em> of waiting so it is retried before newer arrivals.
    */
-  public void preempt(Sequence seq) {
+  public void preempt(final Sequence seq) {
     seq.setStatus(Sequence.Status.WAITING);
     seq.setPrefill(true);
     this.blockManager.deallocate(seq);
@@ -248,7 +249,8 @@ public final class Scheduler {
    *
    * @see #postprocess(List, List, boolean, List)
    */
-  public void postprocess(List<Sequence> seqs, List<Integer> tokenIds, boolean isPrefill) {
+  public void postprocess(final List<Sequence> seqs, final List<Integer> tokenIds,
+                          final boolean isPrefill) {
     this.postprocess(seqs, tokenIds, isPrefill, null);
   }
 
@@ -266,20 +268,20 @@ public final class Scheduler {
    * @param appendedOut nullable collector of newly appended completion tokens for streaming UIs
    */
   public void postprocess(
-      List<Sequence> seqs,
-      List<Integer> tokenIds,
-      boolean isPrefill,
-      List<int[]> appendedOut
+      final List<Sequence> seqs,
+      final List<Integer> tokenIds,
+      final boolean isPrefill,
+      final List<int[]> appendedOut
   ) {
     IntStream.range(0, seqs.size())
         .forEach(i -> this.postprocessOne(seqs.get(i), tokenIds.get(i), isPrefill, appendedOut));
   }
 
   private void postprocessOne(
-      Sequence seq,
-      int tokenId,
-      boolean isPrefill,
-      List<int[]> appendedOut
+      final Sequence seq,
+      final int tokenId,
+      final boolean isPrefill,
+      final List<int[]> appendedOut
   ) {
     this.blockManager.hashBlocks(seq);
     seq.addCachedTokens(seq.numScheduledTokens());
@@ -299,12 +301,12 @@ public final class Scheduler {
     }
   }
 
-  private boolean shouldFinish(Sequence seq, int tokenId) {
+  private boolean shouldFinish(final Sequence seq, final int tokenId) {
     return (!seq.ignoreEos() && this.stopTokenIds.contains(tokenId))
         || seq.numCompletionTokens() == seq.maxTokens();
   }
 
-  private void finishSequence(Sequence seq) {
+  private void finishSequence(final Sequence seq) {
     seq.setStatus(Sequence.Status.FINISHED);
     this.blockManager.deallocate(seq);
     this.running.remove(seq);

@@ -28,7 +28,7 @@ final class TextPreprocessor {
   /**
    * Turns raw document text into model-ready passages (optional {@code Section — sentence}).
    */
-  static List<String> passages(String raw) {
+  static List<String> passages(final String raw) {
     if (raw == null || raw.isBlank()) {
       return List.of();
     }
@@ -62,11 +62,11 @@ final class TextPreprocessor {
     return List.copyOf(out);
   }
 
-  static String normalize(String raw) {
+  static String normalize(final String raw) {
     return String.join("\n\n", passages(raw));
   }
 
-  static List<String> units(String normalized) {
+  static List<String> units(final String normalized) {
     requireNonNull(normalized, "normalized");
     if (normalized.isBlank()) {
       return List.of();
@@ -74,7 +74,8 @@ final class TextPreprocessor {
     return passages(normalized);
   }
 
-  private static void flushParagraph(StringBuilder paragraph, String section, List<String> out) {
+  private static void flushParagraph(final StringBuilder paragraph, final String section,
+                                     final List<String> out) {
     if (paragraph.isEmpty()) {
       return;
     }
@@ -92,7 +93,7 @@ final class TextPreprocessor {
     }
   }
 
-  private static String cleanInline(String line) {
+  private static String cleanInline(final String line) {
     String text = IMAGE.matcher(line).replaceAll("");
     text = LINK.matcher(text).replaceAll("$1");
     text = INLINE_CODE.matcher(text).replaceAll("$1");

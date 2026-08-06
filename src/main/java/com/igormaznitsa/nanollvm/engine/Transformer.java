@@ -27,11 +27,11 @@ public final class Transformer implements AutoCloseable {
   private final KvCacheArena kvCache;
   private final Sampler sampler = new Sampler();
 
-  public Transformer(Model model, Config config) {
+  public Transformer(final Model model, final Config config) {
     this(model, config, EngineIo.silent());
   }
 
-  public Transformer(Model model, Config config, EngineIo io) {
+  public Transformer(final Model model, final Config config, final EngineIo io) {
     this.config = config;
     final EngineIo io1 = io == null ? EngineIo.silent() : io;
     this.blockSize = config.kvcacheBlockSize();
@@ -45,7 +45,7 @@ public final class Transformer implements AutoCloseable {
         (System.nanoTime() - tKv) / 1e9);
   }
 
-  private static Tensor toTensor1d(List<Integer> values) {
+  private static Tensor toTensor1d(final List<Integer> values) {
     float[] data = new float[values.size()];
     for (int i = 0; i < values.size(); i++) {
       data[i] = values.get(i);
@@ -56,7 +56,7 @@ public final class Transformer implements AutoCloseable {
   /**
    * One forward+sample over a scheduled batch (prefill or decode).
    */
-  public List<Integer> step(List<Sequence> seqs, boolean isPrefill) {
+  public List<Integer> step(final List<Sequence> seqs, final boolean isPrefill) {
     Context.bindKvCache(this.kvCache);
 
     PreparedInputs prepared = this.prepareInputs(seqs, isPrefill);
@@ -70,24 +70,24 @@ public final class Transformer implements AutoCloseable {
     return tokenIds;
   }
 
-  private Tensor forwardHidden(PreparedInputs prepared) {
+  private Tensor forwardHidden(final PreparedInputs prepared) {
     return this.network.forward(prepared.inputIds(), prepared.positions());
   }
 
-  private Tensor computeLogits(Tensor hidden) {
+  private Tensor computeLogits(final Tensor hidden) {
     return this.network.computeLogits(hidden);
   }
 
-  private List<Integer> sampleTokens(Tensor logits, SamplingControls sampling) {
+  private List<Integer> sampleTokens(final Tensor logits, final SamplingControls sampling) {
     return this.toTokenIdList(this.sampler.forward(
         logits, sampling.temperatures(), sampling.topKs(), sampling.topPs()));
   }
 
-  private PreparedInputs prepareInputs(List<Sequence> seqs, boolean isPrefill) {
+  private PreparedInputs prepareInputs(final List<Sequence> seqs, final boolean isPrefill) {
     return isPrefill ? this.preparePrefill(seqs) : this.prepareDecode(seqs);
   }
 
-  private SamplingControls collectSamplingControls(List<Sequence> seqs) {
+  private SamplingControls collectSamplingControls(final List<Sequence> seqs) {
     float[] temperatures = new float[seqs.size()];
     int[] topKs = new int[seqs.size()];
     float[] topPs = new float[seqs.size()];
@@ -100,7 +100,7 @@ public final class Transformer implements AutoCloseable {
     return new SamplingControls(temperatures, topKs, topPs);
   }
 
-  private List<Integer> toTokenIdList(int[] tokenIds) {
+  private List<Integer> toTokenIdList(final int[] tokenIds) {
     return Arrays.stream(tokenIds).boxed().toList();
   }
 
@@ -131,7 +131,7 @@ public final class Transformer implements AutoCloseable {
         hf.headDim());
   }
 
-  private int[][] prepareBlockTables(List<Sequence> seqs) {
+  private int[][] prepareBlockTables(final List<Sequence> seqs) {
     int maxLen = seqs.stream().mapToInt(seq -> seq.blockTable().size()).max().orElse(0);
     int[][] tables = new int[seqs.size()][maxLen];
     for (int i = 0; i < seqs.size(); i++) {
@@ -143,7 +143,7 @@ public final class Transformer implements AutoCloseable {
     return tables;
   }
 
-  private PreparedInputs preparePrefill(List<Sequence> seqs) {
+  private PreparedInputs preparePrefill(final List<Sequence> seqs) {
     List<Integer> inputIds = new ArrayList<>();
     List<Integer> positions = new ArrayList<>();
     List<Integer> cuSeqlensQ = new ArrayList<>();
@@ -210,7 +210,7 @@ public final class Transformer implements AutoCloseable {
     return new PreparedInputs(toTensor1d(inputIds), toTensor1d(positions));
   }
 
-  private PreparedInputs prepareDecode(List<Sequence> seqs) {
+  private PreparedInputs prepareDecode(final List<Sequence> seqs) {
     int n = seqs.size();
     float[] inputIds = new float[n];
     float[] positions = new float[n];

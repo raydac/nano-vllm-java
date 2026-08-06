@@ -40,7 +40,7 @@ public final class Example {
   private Example() {
   }
 
-  public static void main(String[] args) throws Exception {
+  public static void main(final String[] args) throws Exception {
     try (BufferedReader in = new BufferedReader(
         new InputStreamReader(System.in, StandardCharsets.UTF_8))) {
       Path path = resolveModel(args, in);
@@ -83,7 +83,7 @@ public final class Example {
     }
   }
 
-  private static Optional<PreparedRag> loadPreparedRag(boolean tinyModel) {
+  private static Optional<PreparedRag> loadPreparedRag(final boolean tinyModel) {
     return BundledRag.find().map(root -> {
       System.out.println("Preparing RAG corpus from " + root);
       RagLoadOptions options =
@@ -93,10 +93,10 @@ public final class Example {
   }
 
   private static void runRagChat(
-      BufferedReader in,
-      LLM llm,
-      PreparedRag prepared,
-      boolean color
+      final BufferedReader in,
+      final LLM llm,
+      final PreparedRag prepared,
+      final boolean color
   ) throws Exception {
     boolean gemma = llm.tokenizer().isGemmaChat();
     int maxTokens = gemma ? RAG_MAX_TOKENS_GEMMA : RAG_MAX_TOKENS_DEFAULT;
@@ -137,7 +137,7 @@ public final class Example {
     }
   }
 
-  private static void printRetrievalSummary(java.util.List<RagHit> hits) {
+  private static void printRetrievalSummary(final java.util.List<RagHit> hits) {
     if (hits.isEmpty()) {
       System.out.println("(no RAG hits)");
       System.out.flush();
@@ -151,7 +151,8 @@ public final class Example {
     System.out.flush();
   }
 
-  private static void runPlainChat(BufferedReader in, LLM llm, boolean color) throws Exception {
+  private static void runPlainChat(final BufferedReader in, final LLM llm, final boolean color)
+      throws Exception {
     ChatSession chat = llm.chat(MAX_NEW_TOKENS)
         .streamTo(System.err, System.out, color)
         .diagnostics(System.err::println);
@@ -185,14 +186,14 @@ public final class Example {
   /**
    * CLI / {@code -Dnanovllm.model} / {@code NANOVLLM_MODEL} skip the menu.
    */
-  static Path resolveModel(String[] args, BufferedReader in) throws Exception {
+  static Path resolveModel(final String[] args, final BufferedReader in) throws Exception {
     if (hasExplicitModel(args)) {
       return BundledModels.resolveDefault(args);
     }
     return promptModelChoice(in);
   }
 
-  private static boolean hasExplicitModel(String[] args) {
+  private static boolean hasExplicitModel(final String[] args) {
     if (args != null && args.length > 0 && args[0] != null && !args[0].isBlank()) {
       return true;
     }
@@ -204,7 +205,7 @@ public final class Example {
     return env != null && !env.isBlank();
   }
 
-  private static Path promptModelChoice(BufferedReader in) throws Exception {
+  private static Path promptModelChoice(final BufferedReader in) throws Exception {
     var qwen = BundledModels.find(BundledModels.QWEN3_0_6B);
     var gemma = BundledModels.find(BundledModels.GEMMA3_270M);
 
@@ -237,7 +238,7 @@ public final class Example {
     }
   }
 
-  private static boolean isExit(String user) {
+  private static boolean isExit(final String user) {
     String t = user.toLowerCase(Locale.ROOT);
     return t.equals("/exit") || t.equals("/quit") || t.equals("exit") || t.equals("quit");
   }

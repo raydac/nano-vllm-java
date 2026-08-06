@@ -58,7 +58,7 @@ public final class BundledModels {
     return Path.of("").toAbsolutePath().normalize().resolve(DEFAULT_MODELS_DIR);
   }
 
-  public static Path require(String modelPathOrName) {
+  public static Path require(final String modelPathOrName) {
     return find(modelPathOrName).orElseThrow(() -> new IllegalStateException(
         "model not found: " + modelPathOrName
             + " (expected under " + modelsRoot()
@@ -71,7 +71,7 @@ public final class BundledModels {
    * @param modelPathOrName absolute/relative path, {@code Qwen3-0.6B}, {@code Gemma3-270M},
    *                        or {@code models/…}
    */
-  public static Optional<Path> find(String modelPathOrName) {
+  public static Optional<Path> find(final String modelPathOrName) {
     if (modelPathOrName == null || modelPathOrName.isBlank()) {
       return Optional.empty();
     }
@@ -102,20 +102,20 @@ public final class BundledModels {
     return Optional.empty();
   }
 
-  private static String stripModelsPrefix(String key) {
+  private static String stripModelsPrefix(final String key) {
     if (key.startsWith(DEFAULT_MODELS_DIR + "/")) {
       return key.substring(DEFAULT_MODELS_DIR.length() + 1);
     }
     return key;
   }
 
-  private static boolean isModelDir(Path dir) {
+  private static boolean isModelDir(final Path dir) {
     return Files.isDirectory(dir)
         && Files.isRegularFile(dir.resolve(CONFIG_JSON))
         && hasSafetensors(dir);
   }
 
-  private static boolean hasSafetensors(Path dir) {
+  private static boolean hasSafetensors(final Path dir) {
     try (var stream = Files.list(dir)) {
       return stream.anyMatch(p -> p.getFileName().toString().endsWith(".safetensors"));
     } catch (Exception e) {

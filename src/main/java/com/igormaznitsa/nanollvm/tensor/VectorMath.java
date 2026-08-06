@@ -66,7 +66,8 @@ public final class VectorMath {
    * @return {@code Σ a[i]*b[i]} over the slices
    * @see FloatKernels#dot(float[], int, float[], int, int)
    */
-  public static float dot(float[] a, int aOffset, float[] b, int bOffset, int n) {
+  public static float dot(final float[] a, final int aOffset, final float[] b, final int bOffset,
+                          final int n) {
     return KERNELS.dot(a, aOffset, b, bOffset, n);
   }
 
@@ -79,7 +80,7 @@ public final class VectorMath {
    * @return {@code Σ v*v}
    * @see FloatKernels#sumSquares(float[], int, int)
    */
-  public static float sumSquares(float[] a, int offset, int n) {
+  public static float sumSquares(final float[] a, final int offset, final int n) {
     return KERNELS.sumSquares(a, offset, n);
   }
 
@@ -90,7 +91,8 @@ public final class VectorMath {
    * @see FloatKernels#scaleAdd(float[], int, float[], int, float, float[], int, int)
    */
   public static void scaleAdd(
-      float[] src, int srcOff, float[] weight, int wOff, float scale, float[] dst, int dstOff, int n
+      final float[] src, final int srcOff, final float[] weight, final int wOff, final float scale,
+      final float[] dst, final int dstOff, final int n
   ) {
     KERNELS.scaleAdd(src, srcOff, weight, wOff, scale, dst, dstOff, n);
   }
@@ -134,11 +136,11 @@ public final class VectorMath {
    * @param out     output feature width
    */
   public static void linear(
-      float[] x, int xOffset,
-      float[] w, int wOffset,
-      float[] bias,
-      float[] y, int yOffset,
-      int rows, int in, int out
+      final float[] x, final int xOffset,
+      final float[] w, final int wOffset,
+      final float[] bias,
+      final float[] y, final int yOffset,
+      final int rows, final int in, final int out
   ) {
     for (int r = 0; r < rows; r++) {
       int xBase = xOffset + r * in;

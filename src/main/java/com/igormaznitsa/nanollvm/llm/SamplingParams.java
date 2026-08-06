@@ -27,11 +27,11 @@ public record SamplingParams(
     this(0.7f, 64, false, 0, 0.9f);
   }
 
-  public SamplingParams(float temperature, int maxTokens) {
+  public SamplingParams(final float temperature, final int maxTokens) {
     this(temperature, maxTokens, false, 0, 0.9f);
   }
 
-  public SamplingParams(float temperature, int maxTokens, boolean ignoreEos) {
+  public SamplingParams(final float temperature, final int maxTokens, final boolean ignoreEos) {
     this(temperature, maxTokens, ignoreEos, 0, 0.9f);
   }
 }

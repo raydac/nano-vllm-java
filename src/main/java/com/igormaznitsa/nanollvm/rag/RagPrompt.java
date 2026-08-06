@@ -14,11 +14,12 @@ public final class RagPrompt {
   private RagPrompt() {
   }
 
-  public static String format(List<RagHit> hits, String question) {
+  public static String format(final List<RagHit> hits, final String question) {
     return format(hits, question, Integer.MAX_VALUE, false);
   }
 
-  public static String format(List<RagHit> hits, String question, int maxContextChars) {
+  public static String format(final List<RagHit> hits, final String question,
+                              final int maxContextChars) {
     return format(hits, question, maxContextChars, false);
   }
 
@@ -26,10 +27,10 @@ public final class RagPrompt {
    * @param compact when {@code true}, question first, then short passage lines (tiny models)
    */
   public static String format(
-      List<RagHit> hits,
-      String question,
-      int maxContextChars,
-      boolean compact
+      final List<RagHit> hits,
+      final String question,
+      final int maxContextChars,
+      final boolean compact
   ) {
     requireNonNull(hits, "hits");
     requireNonNull(question, "question");
@@ -62,7 +63,8 @@ public final class RagPrompt {
         """.formatted(context, q).strip();
   }
 
-  private static String truncateContext(List<RagHit> hits, int maxContextChars, boolean compact) {
+  private static String truncateContext(final List<RagHit> hits, final int maxContextChars,
+                                        final boolean compact) {
     if (hits.isEmpty()) {
       return "";
     }

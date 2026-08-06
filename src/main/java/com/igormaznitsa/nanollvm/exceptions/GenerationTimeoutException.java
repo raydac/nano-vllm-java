@@ -6,7 +6,7 @@ public final class GenerationTimeoutException extends NanoLlvmException {
 
   private final Duration timeout;
 
-  public GenerationTimeoutException(Duration timeout) {
+  public GenerationTimeoutException(final Duration timeout) {
     super("generation timed out after " + timeout);
     this.timeout = timeout;
   }

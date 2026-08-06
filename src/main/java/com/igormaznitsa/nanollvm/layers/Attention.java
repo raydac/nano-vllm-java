@@ -18,17 +18,18 @@ public final class Attention {
   private final int slidingWindow;
   private final int layerIndex;
 
-  public Attention(int numHeads, int headDim, float scale, int numKvHeads, int layerIndex) {
+  public Attention(final int numHeads, final int headDim, final float scale, final int numKvHeads,
+                   final int layerIndex) {
     this(numHeads, headDim, scale, numKvHeads, 0, layerIndex);
   }
 
   public Attention(
-      int numHeads,
-      int headDim,
-      float scale,
-      int numKvHeads,
-      int slidingWindow,
-      int layerIndex
+      final int numHeads,
+      final int headDim,
+      final float scale,
+      final int numKvHeads,
+      final int slidingWindow,
+      final int layerIndex
   ) {
     this.numHeads = numHeads;
     this.headDim = headDim;
@@ -43,7 +44,7 @@ public final class Attention {
     return this.layerIndex;
   }
 
-  public Tensor forward(Tensor q, Tensor k, Tensor v) {
+  public Tensor forward(final Tensor q, final Tensor k, final Tensor v) {
     Context ctx = Context.get();
     KvCacheArena arena = requireNonNull(ctx.kvCache(), "KV cache arena not bound in Context");
     Tensor kCache = arena.k(this.layerIndex);
@@ -62,11 +63,11 @@ public final class Attention {
   }
 
   private void storeKvCache(
-      Tensor key,
-      Tensor value,
-      int[] slotMapping,
-      Tensor kCache,
-      Tensor vCache
+      final Tensor key,
+      final Tensor value,
+      final int[] slotMapping,
+      final Tensor kCache,
+      final Tensor vCache
   ) {
     int n = key.size(0);
     int d = this.numKvHeads * this.headDim;
@@ -82,7 +83,7 @@ public final class Attention {
     }
   }
 
-  private Tensor prefillDense(Tensor q, Tensor k, Tensor v, Context ctx) {
+  private Tensor prefillDense(final Tensor q, final Tensor k, final Tensor v, final Context ctx) {
     int[] cuQ = ctx.cuSeqlensQ();
     int[] cuK = ctx.cuSeqlensK();
     int batch = cuQ.length - 1;
@@ -97,7 +98,8 @@ public final class Attention {
     return out;
   }
 
-  private Tensor prefillWithCache(Tensor q, Context ctx, Tensor kCache, Tensor vCache) {
+  private Tensor prefillWithCache(final Tensor q, final Context ctx, final Tensor kCache,
+                                  final Tensor vCache) {
     int[] cuQ = ctx.cuSeqlensQ();
     int[] cuK = ctx.cuSeqlensK();
     int batch = cuQ.length - 1;
@@ -125,7 +127,8 @@ public final class Attention {
     return out;
   }
 
-  private Tensor decode(Tensor q, Context ctx, Tensor kCache, Tensor vCache) {
+  private Tensor decode(final Tensor q, final Context ctx, final Tensor kCache,
+                        final Tensor vCache) {
     int bs = q.size(0);
     int[] contextLens = ctx.contextLens();
     int[][] blockTables = ctx.blockTables();
@@ -151,8 +154,8 @@ public final class Attention {
   }
 
   private void attendRange(
-      Tensor q, Tensor k, Tensor v, Tensor out,
-      int qStart, int qEnd, int kIndexBase, int kLen, boolean causal
+      final Tensor q, final Tensor k, final Tensor v, final Tensor out,
+      final int qStart, final int qEnd, final int kIndexBase, final int kLen, final boolean causal
   ) {
     int qLen = qEnd - qStart;
     int work = qLen * this.numHeads;

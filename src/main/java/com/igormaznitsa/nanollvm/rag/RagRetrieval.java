@@ -23,7 +23,7 @@ final class RagRetrieval {
   private RagRetrieval() {
   }
 
-  static String retrievalQuery(String question, String anchor) {
+  static String retrievalQuery(final String question, final String anchor) {
     requireNonNull(question, "question");
     if (anchor == null || anchor.isBlank() || !needsAnchor(question)) {
       return question;
@@ -31,11 +31,11 @@ final class RagRetrieval {
     return anchor + '\n' + question;
   }
 
-  static boolean needsAnchor(String question) {
+  static boolean needsAnchor(final String question) {
     return Bm25Index.tokenize(question).size() < EXPAND_BELOW_TOKENS;
   }
 
-  static boolean shouldUpdateAnchor(String question) {
+  static boolean shouldUpdateAnchor(final String question) {
     return Bm25Index.tokenize(question).size() >= ANCHOR_MIN_TOKENS;
   }
 
@@ -44,9 +44,9 @@ final class RagRetrieval {
    * competitive — keeps anaphora on the same document instead of a larger dominating file.
    */
   static List<RagHit> preferPriorSource(
-      List<RagHit> candidates,
-      String priorSource,
-      int topK
+      final List<RagHit> candidates,
+      final String priorSource,
+      final int topK
   ) {
     requireNonNull(candidates, "candidates");
     if (candidates.isEmpty()) {
@@ -68,7 +68,7 @@ final class RagRetrieval {
     return clip(candidates, topK);
   }
 
-  private static List<RagHit> clip(List<RagHit> hits, int topK) {
+  private static List<RagHit> clip(final List<RagHit> hits, final int topK) {
     if (hits.size() <= topK) {
       return List.copyOf(hits);
     }

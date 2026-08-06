@@ -29,7 +29,8 @@ public final class ScalarFloatKernels extends FloatKernels {
    * <p>Plain loop: {@code sum += a[aOff+i] * b[bOff+i]}.
    */
   @Override
-  public float dot(float[] a, int aOffset, float[] b, int bOffset, int n) {
+  public float dot(final float[] a, final int aOffset, final float[] b, final int bOffset,
+                   final int n) {
     float sum = 0f;
     for (int i = 0; i < n; i++) {
       sum += a[aOffset + i] * b[bOffset + i];
@@ -43,7 +44,7 @@ public final class ScalarFloatKernels extends FloatKernels {
    * <p>Plain loop: {@code sum += v * v} for each element in the slice.
    */
   @Override
-  public float sumSquares(float[] a, int offset, int n) {
+  public float sumSquares(final float[] a, final int offset, final int n) {
     float sum = 0f;
     for (int i = 0; i < n; i++) {
       float v = a[offset + i];
@@ -59,7 +60,8 @@ public final class ScalarFloatKernels extends FloatKernels {
    */
   @Override
   public void scaleAdd(
-      float[] src, int srcOff, float[] weight, int wOff, float scale, float[] dst, int dstOff, int n
+      final float[] src, final int srcOff, final float[] weight, final int wOff, final float scale,
+      final float[] dst, final int dstOff, final int n
   ) {
     for (int i = 0; i < n; i++) {
       dst[dstOff + i] = src[srcOff + i] * scale * weight[wOff + i];

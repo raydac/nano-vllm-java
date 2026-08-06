@@ -22,7 +22,7 @@ public final class BlockManager {
   private final Deque<Integer> freeBlockIds;
   private final Set<Integer> usedBlockIds;
 
-  public BlockManager(int numBlocks, int blockSize) {
+  public BlockManager(final int numBlocks, final int blockSize) {
     if (numBlocks < 1) {
       throw new IllegalArgumentException("numBlocks must be >= 1");
     }
@@ -37,7 +37,7 @@ public final class BlockManager {
     }
   }
 
-  public static long computeHash(List<Integer> tokenIds, long prefix) {
+  public static long computeHash(final List<Integer> tokenIds, final long prefix) {
     long h = 0xCBF29CE484222325L;
     if (prefix != -1L) {
       h ^= prefix;
@@ -80,7 +80,7 @@ public final class BlockManager {
     return blockId;
   }
 
-  private void deallocateBlock(int blockId) {
+  private void deallocateBlock(final int blockId) {
     if (this.blocks.get(blockId).refCount() != 0) {
       throw new IllegalStateException("cannot free block with refs");
     }
@@ -88,7 +88,7 @@ public final class BlockManager {
     this.freeBlockIds.addLast(blockId);
   }
 
-  public int canAllocate(Sequence seq) {
+  public int canAllocate(final Sequence seq) {
     long h = -1L;
     int numCachedBlocks = 0;
     int numNewBlocks = seq.numBlocks();
@@ -110,7 +110,7 @@ public final class BlockManager {
     return numCachedBlocks;
   }
 
-  public void allocate(Sequence seq, int numCachedBlocks) {
+  public void allocate(final Sequence seq, final int numCachedBlocks) {
     if (!seq.blockTable().isEmpty()) {
       throw new IllegalStateException("sequence already has block table");
     }
@@ -135,7 +135,7 @@ public final class BlockManager {
     seq.setNumCachedTokens(numCachedBlocks * this.blockSize);
   }
 
-  public void deallocate(Sequence seq) {
+  public void deallocate(final Sequence seq) {
     List<Integer> table = seq.blockTable();
     for (int i = table.size() - 1; i >= 0; i--) {
       int blockId = table.get(i);
@@ -149,17 +149,17 @@ public final class BlockManager {
     table.clear();
   }
 
-  public boolean canAppend(Sequence seq) {
+  public boolean canAppend(final Sequence seq) {
     return this.freeBlockIds.size() >= (seq.length() % this.blockSize == 1 ? 1 : 0);
   }
 
-  public void mayAppend(Sequence seq) {
+  public void mayAppend(final Sequence seq) {
     if (seq.length() % this.blockSize == 1) {
       seq.blockTable().add(this.allocateBlock());
     }
   }
 
-  public void hashBlocks(Sequence seq) {
+  public void hashBlocks(final Sequence seq) {
     int start = seq.numCachedTokens() / this.blockSize;
     int end = (seq.numCachedTokens() + seq.numScheduledTokens()) / this.blockSize;
     if (start == end) {
@@ -188,7 +188,7 @@ public final class BlockManager {
       this.tokenIds = List.of();
     }
 
-    void update(long hash, List<Integer> tokenIds) {
+    void update(final long hash, final List<Integer> tokenIds) {
       this.hash = hash;
       this.tokenIds = List.copyOf(tokenIds);
     }
@@ -207,7 +207,7 @@ public final class BlockManager {
       return this.refCount;
     }
 
-    void setRefCount(int refCount) {
+    void setRefCount(final int refCount) {
       this.refCount = refCount;
     }
 

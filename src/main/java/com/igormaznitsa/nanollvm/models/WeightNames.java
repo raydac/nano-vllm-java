@@ -40,15 +40,15 @@ public final class WeightNames {
   private WeightNames() {
   }
 
-  public static String layer(int layerIndex) {
+  public static String layer(final int layerIndex) {
     return "model.layers." + layerIndex + ".";
   }
 
-  public static String selfAttn(int layerIndex) {
+  public static String selfAttn(final int layerIndex) {
     return layer(layerIndex) + "self_attn.";
   }
 
-  public static String mlp(int layerIndex) {
+  public static String mlp(final int layerIndex) {
     return layer(layerIndex) + "mlp.";
   }
 }

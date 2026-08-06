@@ -31,21 +31,21 @@ public final class ChatSession {
   private Consumer<String> diagnostics = message -> {
   };
 
-  public ChatSession(LLM llm) {
+  public ChatSession(final LLM llm) {
     this(llm, llm.defaultSampling());
   }
 
-  public ChatSession(LLM llm, SamplingParams samplingParams) {
+  public ChatSession(final LLM llm, final SamplingParams samplingParams) {
     this.llm = requireNonNull(llm, "llm");
     this.samplingParams = requireNonNull(samplingParams, "samplingParams");
     this.history = new ArrayList<>(llm.newConversation());
   }
 
-  public static ChatSession open(LLM llm, int maxTokens) {
+  public static ChatSession open(final LLM llm, final int maxTokens) {
     return new ChatSession(llm, SamplingDefaults.forTokenizer(llm.tokenizer(), maxTokens));
   }
 
-  public ChatSession sampling(SamplingParams samplingParams) {
+  public ChatSession sampling(final SamplingParams samplingParams) {
     this.samplingParams = requireNonNull(samplingParams, "samplingParams");
     return this;
   }
@@ -54,12 +54,13 @@ public final class ChatSession {
     return this.samplingParams;
   }
 
-  public ChatSession timeout(Duration timeout) {
+  public ChatSession timeout(final Duration timeout) {
     this.timeout = timeout == null ? Duration.ZERO : timeout;
     return this;
   }
 
-  public ChatSession streamTo(PrintStream thinkOut, PrintStream answerOut, boolean color) {
+  public ChatSession streamTo(final PrintStream thinkOut, final PrintStream answerOut,
+                              final boolean color) {
     this.thinkOut = thinkOut;
     this.answerOut = answerOut;
     this.color = color;
@@ -71,12 +72,12 @@ public final class ChatSession {
    * models skip long chain-of-thought (important for RAG token budgets). {@code null}/unset keeps
    * the default: off for Gemma, on for other chat templates.
    */
-  public ChatSession enableThinking(boolean enableThinking) {
+  public ChatSession enableThinking(final boolean enableThinking) {
     this.enableThinking = enableThinking;
     return this;
   }
 
-  public ChatSession diagnostics(Consumer<String> diagnostics) {
+  public ChatSession diagnostics(final Consumer<String> diagnostics) {
     this.diagnostics = diagnostics == null ? message -> {
     } : diagnostics;
     return this;
@@ -91,7 +92,7 @@ public final class ChatSession {
     this.history.addAll(this.llm.newConversation());
   }
 
-  public ChatReply send(String userText) {
+  public ChatReply send(final String userText) {
     requireNonNull(userText, "userText");
     return this.sendPrepared(userText, userText);
   }
@@ -101,7 +102,7 @@ public final class ChatSession {
    * the last user turn were {@code modelUserText} (used by RAG to keep a short history while
    * injecting retrieved context for generation only).
    */
-  public ChatReply sendPrepared(String historyUserText, String modelUserText) {
+  public ChatReply sendPrepared(final String historyUserText, final String modelUserText) {
     return this.sendPrepared(historyUserText, modelUserText, false);
   }
 
@@ -111,9 +112,9 @@ public final class ChatSession {
    *                          for the app, but not fed into this generate (avoids tiny-model latch)
    */
   public ChatReply sendPrepared(
-      String historyUserText,
-      String modelUserText,
-      boolean isolateGeneration
+      final String historyUserText,
+      final String modelUserText,
+      final boolean isolateGeneration
   ) {
     requireNonNull(historyUserText, "historyUserText");
     requireNonNull(modelUserText, "modelUserText");
@@ -157,9 +158,9 @@ public final class ChatSession {
   }
 
   private ChatReply generateTurn(
-      StreamPrinter printer,
-      String lastUserOverride,
-      boolean isolateGeneration
+      final StreamPrinter printer,
+      final String lastUserOverride,
+      final boolean isolateGeneration
   ) {
     Tokenizer tokenizer = this.llm.tokenizer();
     boolean gemmaChat = tokenizer.isGemmaChat();
@@ -188,17 +189,17 @@ public final class ChatSession {
         AssistantParts.parse(tokenizer.decode(outputs.getFirst().tokenIds(), gemmaChat)));
   }
 
-  private boolean thinkingEnabled(boolean gemmaChat) {
+  private boolean thinkingEnabled(final boolean gemmaChat) {
     return this.enableThinking != null ? this.enableThinking : !gemmaChat;
   }
 
-  private List<ChatMessage> isolatedTurn(String modelUserText) {
+  private List<ChatMessage> isolatedTurn(final String modelUserText) {
     List<ChatMessage> turn = new ArrayList<>(this.llm.newConversation());
     turn.add(ChatMessage.user(modelUserText));
     return turn;
   }
 
-  private List<ChatMessage> historyForTemplate(String lastUserOverride) {
+  private List<ChatMessage> historyForTemplate(final String lastUserOverride) {
     if (this.history.isEmpty()) {
       return List.of();
     }
@@ -211,7 +212,7 @@ public final class ChatSession {
     return copy;
   }
 
-  private ChatReply finishTurn(ChatReply reply, StreamPrinter printer) {
+  private ChatReply finishTurn(final ChatReply reply, final StreamPrinter printer) {
     String answer = reply.answer().strip();
     String thinking = reply.thinking();
     boolean thinkOpen = reply.thinkOpen();
@@ -236,7 +237,7 @@ public final class ChatSession {
     return finished;
   }
 
-  private boolean shouldSalvageAnswer(String answer, String thinking) {
+  private boolean shouldSalvageAnswer(final String answer, final String thinking) {
     if (thinking.isBlank()) {
       return false;
     }

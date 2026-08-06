@@ -7,7 +7,8 @@ import java.util.concurrent.ThreadLocalRandom;
 
 public final class Sampler {
 
-  public int[] forward(Tensor logits, float[] temperatures, int[] topKs, float[] topPs) {
+  public int[] forward(final Tensor logits, final float[] temperatures, final int[] topKs,
+                       final float[] topPs) {
     int rows = logits.size(0);
     int vocab = logits.size(1);
     int[] out = new int[rows];
@@ -20,15 +21,16 @@ public final class Sampler {
     return out;
   }
 
-  public int[] forward(Tensor logits, float[] temperatures) {
+  public int[] forward(final Tensor logits, final float[] temperatures) {
     int[] topKs = new int[temperatures.length];
     float[] topPs = new float[temperatures.length];
     Arrays.fill(topPs, 1f);
     return this.forward(logits, temperatures, topKs, topPs);
   }
 
-  private int sampleRow(Tensor logits, int row, int vocab, float temperature, int topK,
-                        float topP) {
+  private int sampleRow(final Tensor logits, final int row, final int vocab,
+                        final float temperature, final int topK,
+                        final float topP) {
     float[] scores = new float[vocab];
     int base = logits.offset() + row * vocab;
     float max = Float.NEGATIVE_INFINITY;
@@ -89,7 +91,7 @@ public final class Sampler {
     return best;
   }
 
-  private void renormalize(float[] scores) {
+  private void renormalize(final float[] scores) {
     float sum = 0f;
     for (float s : scores) {
       sum += s;
@@ -103,7 +105,7 @@ public final class Sampler {
     }
   }
 
-  private int[] sortedIndicesDesc(float[] scores) {
+  private int[] sortedIndicesDesc(final float[] scores) {
     int n = scores.length;
     Integer[] idx = new Integer[n];
     for (int i = 0; i < n; i++) {

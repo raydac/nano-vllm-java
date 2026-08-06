@@ -15,13 +15,13 @@ final class TextChunker {
   }
 
   static List<TextChunk> split(
-      String baseId,
-      String source,
-      String text,
-      int maxChunkChars,
-      int overlap,
-      boolean preprocess,
-      boolean atomicSentences
+      final String baseId,
+      final String source,
+      final String text,
+      final int maxChunkChars,
+      final int overlap,
+      final boolean preprocess,
+      final boolean atomicSentences
   ) {
     requireNonNull(baseId, "baseId");
     requireNonNull(source, "source");
@@ -40,10 +40,10 @@ final class TextChunker {
   }
 
   private static List<TextChunk> atomicSplit(
-      String baseId,
-      String source,
-      List<String> units,
-      int maxChunkChars
+      final String baseId,
+      final String source,
+      final List<String> units,
+      final int maxChunkChars
   ) {
     List<TextChunk> chunks = new ArrayList<>();
     int part = 0;
@@ -67,10 +67,10 @@ final class TextChunker {
   }
 
   private static List<TextChunk> packUnits(
-      String baseId,
-      String source,
-      List<String> units,
-      int maxChunkChars
+      final String baseId,
+      final String source,
+      final List<String> units,
+      final int maxChunkChars
   ) {
     List<TextChunk> chunks = new ArrayList<>();
     StringBuilder buf = new StringBuilder();
@@ -101,10 +101,10 @@ final class TextChunker {
   }
 
   private static void emitPacked(
-      StringBuilder buf,
-      String baseId,
-      String source,
-      List<TextChunk> chunks
+      final StringBuilder buf,
+      final String baseId,
+      final String source,
+      final List<TextChunk> chunks
   ) {
     if (buf.isEmpty()) {
       return;
@@ -115,11 +115,11 @@ final class TextChunker {
   }
 
   private static List<TextChunk> windowSplit(
-      String baseId,
-      String source,
-      String body,
-      int maxChunkChars,
-      int overlap
+      final String baseId,
+      final String source,
+      final String body,
+      final int maxChunkChars,
+      final int overlap
   ) {
     if (body.length() <= maxChunkChars) {
       return List.of(new TextChunk(baseId, source, body));
@@ -148,7 +148,7 @@ final class TextChunker {
     return List.copyOf(chunks);
   }
 
-  private static int preferBreak(String body, int start, int end) {
+  private static int preferBreak(final String body, final int start, final int end) {
     int windowStart = Math.max(start + (end - start) / 2, start);
     int nl = body.lastIndexOf('\n', end - 1);
     if (nl >= windowStart) {

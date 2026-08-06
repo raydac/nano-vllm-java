@@ -20,19 +20,19 @@ public final class Context {
     return CURRENT.get();
   }
 
-  public static void bindKvCache(KvCacheArena arena) {
+  public static void bindKvCache(final KvCacheArena arena) {
     CURRENT.get().kvCache = arena;
   }
 
   public static void set(
-      boolean isPrefill,
-      int[] cuSeqlensQ,
-      int[] cuSeqlensK,
-      int maxSeqlenQ,
-      int maxSeqlenK,
-      int[] slotMapping,
-      int[] contextLens,
-      int[][] blockTables
+      final boolean isPrefill,
+      final int[] cuSeqlensQ,
+      final int[] cuSeqlensK,
+      final int maxSeqlenQ,
+      final int maxSeqlenK,
+      final int[] slotMapping,
+      final int[] contextLens,
+      final int[][] blockTables
   ) {
     Context ctx = CURRENT.get();
     ctx.prefill = isPrefill;

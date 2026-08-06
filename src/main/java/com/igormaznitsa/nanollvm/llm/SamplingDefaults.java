@@ -12,11 +12,11 @@ public final class SamplingDefaults {
   private SamplingDefaults() {
   }
 
-  public static SamplingParams forTokenizer(Tokenizer tokenizer) {
+  public static SamplingParams forTokenizer(final Tokenizer tokenizer) {
     return forTokenizer(tokenizer, DEFAULT_MAX_TOKENS);
   }
 
-  public static SamplingParams forTokenizer(Tokenizer tokenizer, int maxTokens) {
+  public static SamplingParams forTokenizer(final Tokenizer tokenizer, final int maxTokens) {
     if (tokenizer != null && tokenizer.isGemmaChat()) {
       return new SamplingParams(0.6f, maxTokens, false, 64, 0.95f);
     }

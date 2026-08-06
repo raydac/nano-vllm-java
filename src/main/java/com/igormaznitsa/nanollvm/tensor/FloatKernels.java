@@ -79,7 +79,8 @@ public abstract class FloatKernels {
    * @param n       number of paired elements to multiply-add
    * @return the scalar sum of products
    */
-  public abstract float dot(float[] a, int aOffset, float[] b, int bOffset, int n);
+  public abstract float dot(final float[] a, final int aOffset, final float[] b, final int bOffset,
+                            final int n);
 
   /**
    * Sum of squares over one slice: {@code Σ<sub>i=0..n-1</sub> a[offset+i]<sup>2</sup>}.
@@ -93,7 +94,7 @@ public abstract class FloatKernels {
    * @param n      number of elements
    * @return {@code Σ v*v} over the slice
    */
-  public abstract float sumSquares(float[] a, int offset, int n);
+  public abstract float sumSquares(final float[] a, final int offset, final int n);
 
   /**
    * Elementwise {@code dst[dstOff+i] = src[srcOff+i] * scale * weight[wOff+i]} for {@code i in [0,n)}.
@@ -113,6 +114,7 @@ public abstract class FloatKernels {
    * @param n      number of elements to write
    */
   public abstract void scaleAdd(
-      float[] src, int srcOff, float[] weight, int wOff, float scale, float[] dst, int dstOff, int n
+      final float[] src, final int srcOff, final float[] weight, final int wOff, final float scale,
+      final float[] dst, final int dstOff, final int n
   );
 }

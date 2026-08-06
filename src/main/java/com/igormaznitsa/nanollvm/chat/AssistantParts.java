@@ -16,7 +16,7 @@ public record AssistantParts(String thinking, String answer, boolean thinkOpen) 
       "<think>", "</think>"
   );
 
-  public static AssistantParts parse(String raw) {
+  public static AssistantParts parse(final String raw) {
     if (raw == null || raw.isBlank()) {
       return new AssistantParts("", "", false);
     }
@@ -54,15 +54,15 @@ public record AssistantParts(String thinking, String answer, boolean thinkOpen) 
     return new AssistantParts(stripChatMarkup(thinking), sanitizeAnswer(after), open);
   }
 
-  private static Remainder splitRemainder(String after) {
-    after = holdIncompleteMarkupSuffix(after);
-    int start = after.indexOf("<think>");
+  private static Remainder splitRemainder(final String after) {
+    final String text = holdIncompleteMarkupSuffix(after);
+    int start = text.indexOf("<think>");
     if (start < 0) {
-      return new Remainder("", after, false);
+      return new Remainder("", text, false);
     }
 
-    String before = after.substring(0, start);
-    String fromThink = after.substring(start + "<think>".length());
+    String before = text.substring(0, start);
+    String fromThink = text.substring(start + "<think>".length());
     int end = fromThink.indexOf("</think>");
     if (end < 0) {
       return new Remainder(fromThink, before, true);
@@ -76,7 +76,7 @@ public record AssistantParts(String thinking, String answer, boolean thinkOpen) 
         nested.open());
   }
 
-  private static String joinThink(String first, String second) {
+  private static String joinThink(final String first, final String second) {
     String a = first == null ? "" : first.strip();
     String b = second == null ? "" : second.strip();
     if (a.isEmpty()) {
@@ -88,7 +88,7 @@ public record AssistantParts(String thinking, String answer, boolean thinkOpen) 
     return a + "\n" + b;
   }
 
-  private static String joinAnswer(String first, String second) {
+  private static String joinAnswer(final String first, final String second) {
     String a = first == null ? "" : first;
     String b = second == null ? "" : second;
     if (a.isBlank()) {
@@ -100,18 +100,18 @@ public record AssistantParts(String thinking, String answer, boolean thinkOpen) 
     return a.stripTrailing() + "\n" + b.stripLeading();
   }
 
-  private static String sanitizeAnswer(String text) {
-    text = holdIncompleteMarkupSuffix(text);
+  private static String sanitizeAnswer(final String text) {
+    String cleaned = holdIncompleteMarkupSuffix(text);
     for (String marker : CHAT_MARKUP) {
-      int at = text.indexOf(marker);
+      int at = cleaned.indexOf(marker);
       if (at >= 0) {
-        text = text.substring(0, at);
+        cleaned = cleaned.substring(0, at);
       }
     }
-    return finishSanitize(text);
+    return finishSanitize(cleaned);
   }
 
-  public static String stripChatMarkup(String text) {
+  public static String stripChatMarkup(final String text) {
     if (text == null || text.isEmpty()) {
       return "";
     }
@@ -122,26 +122,26 @@ public record AssistantParts(String thinking, String answer, boolean thinkOpen) 
     return finishSanitize(s);
   }
 
-  private static String finishSanitize(String text) {
-    text = SPECIAL_TOKEN.matcher(text).replaceAll("");
-    return LEADING_ASSISTANT.matcher(text).replaceFirst("").strip();
+  private static String finishSanitize(final String text) {
+    final String withoutTokens = SPECIAL_TOKEN.matcher(text).replaceAll("");
+    return LEADING_ASSISTANT.matcher(withoutTokens).replaceFirst("").strip();
   }
 
-  static String stripSpecialTokens(String raw) {
+  static String stripSpecialTokens(final String raw) {
     return stripChatMarkup(raw);
   }
 
-  public static String cleanAssistantText(String raw) {
+  public static String cleanAssistantText(final String raw) {
     AssistantParts parts = parse(raw);
     String answer = parts.answer();
     return answer.isEmpty() ? salvageFromThinking(parts.thinking()) : answer;
   }
 
-  public static String streamDisplayText(String raw) {
+  public static String streamDisplayText(final String raw) {
     return cleanAssistantText(raw);
   }
 
-  public static String salvageFromThinking(String thinking) {
+  public static String salvageFromThinking(final String thinking) {
     if (thinking == null || thinking.isBlank()) {
       return "";
     }
@@ -176,11 +176,11 @@ public record AssistantParts(String thinking, String answer, boolean thinkOpen) 
     return one.length() > 200 ? one.substring(0, 200).strip() + "…" : one;
   }
 
-  private static boolean isBriefAnswerLine(String line) {
+  private static boolean isBriefAnswerLine(final String line) {
     return line.length() <= 32 && !looksLikeReasoning(line);
   }
 
-  private static boolean looksLikeReasoning(String line) {
+  private static boolean looksLikeReasoning(final String line) {
     String lower = line.toLowerCase();
     return lower.startsWith("okay")
         || lower.startsWith("wait")
@@ -196,7 +196,7 @@ public record AssistantParts(String thinking, String answer, boolean thinkOpen) 
    * Drop a trailing incomplete chat/think marker so streamed decode does not leak
    * fragments like {@code <think} into the answer channel.
    */
-  static String holdIncompleteMarkupSuffix(String text) {
+  static String holdIncompleteMarkupSuffix(final String text) {
     if (text == null || text.isEmpty()) {
       return "";
     }
@@ -208,7 +208,7 @@ public record AssistantParts(String thinking, String answer, boolean thinkOpen) 
     return isStrictPrefixOfMarkup(suffix) ? text.substring(0, at) : text;
   }
 
-  private static boolean isStrictPrefixOfMarkup(String suffix) {
+  private static boolean isStrictPrefixOfMarkup(final String suffix) {
     for (String marker : CHAT_MARKUP) {
       if (marker.startsWith(suffix) && !marker.equals(suffix)) {
         return true;

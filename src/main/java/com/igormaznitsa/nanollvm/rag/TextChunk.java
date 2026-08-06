@@ -16,7 +16,7 @@ public record TextChunk(String id, String source, String text) {
     }
   }
 
-  public static TextChunk of(String id, String text) {
+  public static TextChunk of(final String id, final String text) {
     return new TextChunk(id, id, text);
   }
 

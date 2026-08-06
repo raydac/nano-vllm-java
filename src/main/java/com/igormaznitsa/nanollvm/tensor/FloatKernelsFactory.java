@@ -43,7 +43,7 @@ public final class FloatKernelsFactory {
   /**
    * @param mode {@code auto} (default), {@code vector}/{@code simd}, or {@code scalar}/{@code plain}
    */
-  public static FloatKernels create(String mode) {
+  public static FloatKernels create(final String mode) {
     String selected = normalizeMode(mode);
     return switch (selected) {
       case "scalar" -> new ScalarFloatKernels();
@@ -88,7 +88,7 @@ public final class FloatKernelsFactory {
     }
   }
 
-  private static String normalizeMode(String mode) {
+  private static String normalizeMode(final String mode) {
     if (mode == null || mode.isBlank()) {
       return "auto";
     }

@@ -18,7 +18,7 @@ public final class CausalLMFactory {
   private CausalLMFactory() {
   }
 
-  public static CausalLM create(Config.HfConfig config, WeightBag weights) {
+  public static CausalLM create(final Config.HfConfig config, final WeightBag weights) {
     String forced = System.getProperty(PROP_ARCH, "").strip().toLowerCase(ROOT);
     String arch = forced.isEmpty() ? detect(config) : normalize(forced);
     return switch (arch) {
@@ -30,13 +30,13 @@ public final class CausalLMFactory {
     };
   }
 
-  public static WeightSchema schema(Config.HfConfig config) {
+  public static WeightSchema schema(final Config.HfConfig config) {
     String forced = System.getProperty(PROP_ARCH, "").strip().toLowerCase(ROOT);
     String arch = forced.isEmpty() ? detect(config) : normalize(forced);
     return WeightSchema.forArchitecture(arch, config);
   }
 
-  public static String detect(Config.HfConfig config) {
+  public static String detect(final Config.HfConfig config) {
     if (config.modelType() != null) {
       String mt = config.modelType().toLowerCase(ROOT);
       if (mt.contains("gemma")) {
@@ -64,7 +64,7 @@ public final class CausalLMFactory {
     return ARCH_QWEN3;
   }
 
-  private static String normalize(String arch) {
+  private static String normalize(final String arch) {
     return switch (arch) {
       case "gemma", ARCH_GEMMA3, "gemma3_text" -> ARCH_GEMMA3;
       case "qwen", ARCH_QWEN3 -> ARCH_QWEN3;

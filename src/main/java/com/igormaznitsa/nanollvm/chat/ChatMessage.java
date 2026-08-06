@@ -12,19 +12,19 @@ public record ChatMessage(ChatRole role, String content) {
     content = content == null ? "" : content;
   }
 
-  public static ChatMessage system(String content) {
+  public static ChatMessage system(final String content) {
     return new ChatMessage(ChatRole.SYSTEM, content);
   }
 
-  public static ChatMessage user(String content) {
+  public static ChatMessage user(final String content) {
     return new ChatMessage(ChatRole.USER, content);
   }
 
-  public static ChatMessage assistant(String content) {
+  public static ChatMessage assistant(final String content) {
     return new ChatMessage(ChatRole.ASSISTANT, content);
   }
 
-  public static ChatMessage fromMap(Map<String, String> map) {
+  public static ChatMessage fromMap(final Map<String, String> map) {
     requireNonNull(map, "map");
     return new ChatMessage(
         ChatRole.fromWire(map.get("role")),

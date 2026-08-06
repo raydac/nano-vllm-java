@@ -24,15 +24,15 @@ public final class ModelFactory {
   private ModelFactory() {
   }
 
-  public static Model make(Path modelDir) {
+  public static Model make(final Path modelDir) {
     return make(modelDir, EngineIo.silent());
   }
 
-  public static Model make(String modelPath) {
+  public static Model make(final String modelPath) {
     return make(Path.of(requireNonNull(modelPath, "modelPath")));
   }
 
-  public static Model make(Path modelDir, EngineIo io) {
+  public static Model make(final Path modelDir, final EngineIo io) {
     requireNonNull(modelDir, "modelDir");
     EngineIo streams = io == null ? EngineIo.silent() : io;
     Path path = modelDir.toAbsolutePath().normalize();
@@ -49,7 +49,7 @@ public final class ModelFactory {
     }
   }
 
-  private static Model load(Path path, EngineIo io) throws IOException {
+  private static Model load(final Path path, final EngineIo io) throws IOException {
     long t0 = System.nanoTime();
     io.info("CPU backend: " + VectorMath.backendInfo());
 

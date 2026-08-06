@@ -16,13 +16,14 @@ public final class StreamPrinter {
   private boolean thinkClosed;
   private boolean answerStarted;
 
-  public StreamPrinter(PrintStream thinkOut, PrintStream answerOut, boolean color) {
+  public StreamPrinter(final PrintStream thinkOut, final PrintStream answerOut,
+                       final boolean color) {
     this.thinkOut = thinkOut;
     this.answerOut = answerOut;
     this.color = color;
   }
 
-  public void update(AssistantParts parts) {
+  public void update(final AssistantParts parts) {
     this.emitThink(parts.thinking());
     if (!parts.thinkOpen() && this.thinkStarted && !this.thinkClosed) {
       this.closeThinkLine();
@@ -44,7 +45,7 @@ public final class StreamPrinter {
     this.answerOut.flush();
   }
 
-  private void emitThink(String think) {
+  private void emitThink(final String think) {
     if (think.isEmpty()) {
       return;
     }
@@ -90,7 +91,7 @@ public final class StreamPrinter {
     this.thinkClosed = true;
   }
 
-  private void emitAnswer(String answer) {
+  private void emitAnswer(final String answer) {
     if (answer.isEmpty()) {
       return;
     }

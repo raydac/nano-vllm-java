@@ -51,7 +51,8 @@ public final class VectorFloatKernels extends FloatKernels {
    * {@code reduceLanes(ADD)}, then scalar multiply-add for the tail.
    */
   @Override
-  public float dot(float[] a, int aOffset, float[] b, int bOffset, int n) {
+  public float dot(final float[] a, final int aOffset, final float[] b, final int bOffset,
+                   final int n) {
     int i = 0;
     FloatVector acc = FloatVector.zero(SPECIES);
     int upper = SPECIES.loopBound(n);
@@ -74,7 +75,7 @@ public final class VectorFloatKernels extends FloatKernels {
    * mirrors the scalar backend.
    */
   @Override
-  public float sumSquares(float[] a, int offset, int n) {
+  public float sumSquares(final float[] a, final int offset, final int n) {
     int i = 0;
     FloatVector acc = FloatVector.zero(SPECIES);
     int upper = SPECIES.loopBound(n);
@@ -100,7 +101,8 @@ public final class VectorFloatKernels extends FloatKernels {
    */
   @Override
   public void scaleAdd(
-      float[] src, int srcOff, float[] weight, int wOff, float scale, float[] dst, int dstOff, int n
+      final float[] src, final int srcOff, final float[] weight, final int wOff, final float scale,
+      final float[] dst, final int dstOff, final int n
   ) {
     int i = 0;
     FloatVector vScale = FloatVector.broadcast(SPECIES, scale);

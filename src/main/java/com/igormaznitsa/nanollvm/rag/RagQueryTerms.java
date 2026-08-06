@@ -20,7 +20,8 @@ final class RagQueryTerms {
   private RagQueryTerms() {
   }
 
-  static List<String> select(Map<String, Integer> docFreq, int docCount, String query) {
+  static List<String> select(final Map<String, Integer> docFreq, final int docCount,
+                             final String query) {
     requireNonNull(docFreq, "docFreq");
     requireNonNull(query, "query");
     if (docCount <= 0) {
@@ -47,7 +48,8 @@ final class RagQueryTerms {
    * Many distinct query tokens never appear in the corpus — e.g. a coding request against a
    * fairy-tale index ({@code java}, {@code program}, {@code file}, …).
    */
-  static boolean queryOutsideCorpus(Map<String, Integer> docFreq, List<String> rawDistinct) {
+  static boolean queryOutsideCorpus(final Map<String, Integer> docFreq,
+                                    final List<String> rawDistinct) {
     requireNonNull(docFreq, "docFreq");
     requireNonNull(rawDistinct, "rawDistinct");
     if (rawDistinct.size() < 4) {
@@ -57,11 +59,12 @@ final class RagQueryTerms {
     return unknown >= 2 && unknown * 2 >= rawDistinct.size();
   }
 
-  static boolean queryTooBroadForCorpus(int rawDistinctTerms, List<String> selectedTerms) {
+  static boolean queryTooBroadForCorpus(final int rawDistinctTerms,
+                                        final List<String> selectedTerms) {
     return rawDistinctTerms >= 3 && selectedTerms.isEmpty();
   }
 
-  static boolean qualifies(PreparedPassage passage, List<String> selectedTerms) {
+  static boolean qualifies(final PreparedPassage passage, final List<String> selectedTerms) {
     requireNonNull(passage, "passage");
     requireNonNull(selectedTerms, "selectedTerms");
     if (selectedTerms.isEmpty()) {

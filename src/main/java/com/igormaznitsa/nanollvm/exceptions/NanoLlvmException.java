@@ -2,11 +2,11 @@ package com.igormaznitsa.nanollvm.exceptions;
 
 public class NanoLlvmException extends RuntimeException {
 
-  public NanoLlvmException(String message) {
+  public NanoLlvmException(final String message) {
     super(message);
   }
 
-  public NanoLlvmException(String message, Throwable cause) {
+  public NanoLlvmException(final String message, final Throwable cause) {
     super(message, cause);
   }
 

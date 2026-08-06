@@ -32,11 +32,11 @@ public final class TextCorpus {
 
   private final List<TextChunk> chunks;
 
-  private TextCorpus(List<TextChunk> chunks) {
+  private TextCorpus(final List<TextChunk> chunks) {
     this.chunks = List.copyOf(chunks);
   }
 
-  static TextCorpus ofChunks(List<TextChunk> chunks) {
+  static TextCorpus ofChunks(final List<TextChunk> chunks) {
     return new TextCorpus(chunks);
   }
 
@@ -52,11 +52,11 @@ public final class TextCorpus {
     return b.build();
   }
 
-  public static TextCorpus fromFile(Path file) {
+  public static TextCorpus fromFile(final Path file) {
     return builder().addFile(file).build();
   }
 
-  public static TextCorpus fromFolder(Path folder) {
+  public static TextCorpus fromFolder(final Path folder) {
     return builder().addFolder(folder).build();
   }
 
@@ -83,11 +83,11 @@ public final class TextCorpus {
     private boolean dedupe = true;
     private Set<String> folderExtensions = DEFAULT_EXTENSIONS;
 
-    private static String fingerprint(String text) {
+    private static String fingerprint(final String text) {
       return text.toLowerCase(Locale.ROOT).replaceAll("\\s+", " ").strip();
     }
 
-    public Builder maxChunkChars(int maxChunkChars) {
+    public Builder maxChunkChars(final int maxChunkChars) {
       if (maxChunkChars < 64) {
         throw new IllegalArgumentException("maxChunkChars must be >= 64");
       }
@@ -95,7 +95,7 @@ public final class TextCorpus {
       return this;
     }
 
-    public Builder chunkOverlap(int chunkOverlap) {
+    public Builder chunkOverlap(final int chunkOverlap) {
       if (chunkOverlap < 0) {
         throw new IllegalArgumentException("chunkOverlap must be >= 0");
       }
@@ -103,22 +103,22 @@ public final class TextCorpus {
       return this;
     }
 
-    public Builder preprocess(boolean preprocess) {
+    public Builder preprocess(final boolean preprocess) {
       this.preprocess = preprocess;
       return this;
     }
 
-    public Builder atomicSentences(boolean atomicSentences) {
+    public Builder atomicSentences(final boolean atomicSentences) {
       this.atomicSentences = atomicSentences;
       return this;
     }
 
-    public Builder dedupe(boolean dedupe) {
+    public Builder dedupe(final boolean dedupe) {
       this.dedupe = dedupe;
       return this;
     }
 
-    public Builder apply(RagLoadOptions options) {
+    public Builder apply(final RagLoadOptions options) {
       requireNonNull(options, "options");
       return this.maxChunkChars(options.maxChunkChars())
           .chunkOverlap(options.chunkOverlap())
@@ -127,7 +127,7 @@ public final class TextCorpus {
           .dedupe(options.dedupe());
     }
 
-    public Builder folderExtensions(Set<String> extensions) {
+    public Builder folderExtensions(final Set<String> extensions) {
       requireNonNull(extensions, "extensions");
       this.folderExtensions = extensions.stream()
           .map(ext -> ext.startsWith(".") ? ext.toLowerCase(Locale.ROOT)
@@ -136,15 +136,15 @@ public final class TextCorpus {
       return this;
     }
 
-    public Builder add(String text) {
+    public Builder add(final String text) {
       return this.add("text-" + this.anon.incrementAndGet(), text);
     }
 
-    public Builder add(String id, String text) {
+    public Builder add(final String id, final String text) {
       return this.add(id, id, text);
     }
 
-    public Builder add(String id, String source, String text) {
+    public Builder add(final String id, final String source, final String text) {
       requireNonNull(id, "id");
       requireNonNull(source, "source");
       this.pending.addAll(TextChunker.split(
@@ -158,7 +158,7 @@ public final class TextCorpus {
       return this;
     }
 
-    public Builder addAll(Iterable<String> texts) {
+    public Builder addAll(final Iterable<String> texts) {
       requireNonNull(texts, "texts");
       for (String text : texts) {
         this.add(text);
@@ -166,7 +166,7 @@ public final class TextCorpus {
       return this;
     }
 
-    public Builder addFile(Path file) {
+    public Builder addFile(final Path file) {
       requireNonNull(file, "file");
       Path path = file.toAbsolutePath().normalize();
       if (!Files.isRegularFile(path)) {
@@ -197,7 +197,7 @@ public final class TextCorpus {
       return this;
     }
 
-    public Builder addFolder(Path folder) {
+    public Builder addFolder(final Path folder) {
       requireNonNull(folder, "folder");
       Path root = folder.toAbsolutePath().normalize();
       if (!Files.isDirectory(root)) {
@@ -206,7 +206,7 @@ public final class TextCorpus {
       try {
         Files.walkFileTree(root, new SimpleFileVisitor<>() {
           @Override
-          public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) {
+          public FileVisitResult visitFile(final Path file, final BasicFileAttributes attrs) {
             if (attrs.isRegularFile() && Builder.this.isIndexedFile(file)) {
               Builder.this.addFile(file);
             }
@@ -229,7 +229,7 @@ public final class TextCorpus {
       return new TextCorpus(prepared);
     }
 
-    private List<TextChunk> dedupeChunks(List<TextChunk> chunks) {
+    private List<TextChunk> dedupeChunks(final List<TextChunk> chunks) {
       Map<String, TextChunk> unique = new LinkedHashMap<>();
       for (TextChunk chunk : chunks) {
         if (chunk.isBlank()) {
@@ -240,7 +240,7 @@ public final class TextCorpus {
       return List.copyOf(unique.values());
     }
 
-    private boolean isIndexedFile(Path file) {
+    private boolean isIndexedFile(final Path file) {
       String name = file.getFileName().toString().toLowerCase(Locale.ROOT);
       if (name.equals("readme.md") || name.equals("readme.txt") || name.equals("readme.markdown")) {
         return false;

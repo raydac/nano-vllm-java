@@ -37,21 +37,20 @@ public final class ChatPrompts {
   private ChatPrompts() {
   }
 
-  public static String systemFor(boolean gemmaChat) {
+  public static String systemFor(final boolean gemmaChat) {
     return gemmaChat ? GEMMA_CHAT_SYSTEM : CHAT_SYSTEM;
   }
 
-  public static String gemmaUserContent(String system, String userContent, boolean firstUser) {
-    if (userContent == null) {
-      userContent = "";
-    }
+  public static String gemmaUserContent(final String system, final String userContent,
+                                        final boolean firstUser) {
+    final String content = userContent == null ? "" : userContent;
     if (!firstUser || system == null || system.isBlank()) {
-      return userContent;
+      return content;
     }
-    return system + "\n\n" + userContent;
+    return system + "\n\n" + content;
   }
 
-  public static boolean isSetupBoilerplate(String reply) {
+  public static boolean isSetupBoilerplate(final String reply) {
     if (reply == null || reply.isBlank()) {
       return false;
     }

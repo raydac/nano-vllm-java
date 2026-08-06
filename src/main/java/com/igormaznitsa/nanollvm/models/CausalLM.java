@@ -11,9 +11,9 @@ import java.util.List;
  */
 public interface CausalLM {
 
-  Tensor forward(Tensor inputIds, Tensor positions);
+  Tensor forward(final Tensor inputIds, final Tensor positions);
 
-  Tensor computeLogits(Tensor hiddenStates);
+  Tensor computeLogits(final Tensor hiddenStates);
 
   List<Attention> attentionLayers();
 

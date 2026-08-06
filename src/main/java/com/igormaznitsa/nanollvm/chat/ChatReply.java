@@ -7,7 +7,7 @@ public record ChatReply(String thinking, String answer, boolean thinkOpen) {
     answer = answer == null ? "" : answer;
   }
 
-  public static ChatReply from(AssistantParts parts) {
+  public static ChatReply from(final AssistantParts parts) {
     return new ChatReply(parts.thinking(), parts.answer(), parts.thinkOpen());
   }
 

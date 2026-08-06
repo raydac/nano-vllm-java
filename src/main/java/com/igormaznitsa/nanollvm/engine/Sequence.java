@@ -24,7 +24,8 @@ public final class Sequence {
   private int numCachedTokens;
   private int numScheduledTokens;
   private boolean prefill;
-  public Sequence(List<Integer> tokenIds, SamplingParams samplingParams) {
+
+  public Sequence(final List<Integer> tokenIds, final SamplingParams samplingParams) {
     if (tokenIds == null || tokenIds.isEmpty()) {
       throw new IllegalArgumentException("tokenIds must not be empty");
     }
@@ -46,7 +47,7 @@ public final class Sequence {
     this.topP = sp.topP();
   }
 
-  public static void setBlockSize(int size) {
+  public static void setBlockSize(final int size) {
     blockSize = size;
   }
 
@@ -62,7 +63,7 @@ public final class Sequence {
     return this.status;
   }
 
-  public void setStatus(Status status) {
+  public void setStatus(final Status status) {
     this.status = status;
   }
 
@@ -70,7 +71,7 @@ public final class Sequence {
     return this.tokenIds;
   }
 
-  public int tokenAt(int index) {
+  public int tokenAt(final int index) {
     return this.tokenIds.get(index);
   }
 
@@ -90,11 +91,11 @@ public final class Sequence {
     return this.numCachedTokens;
   }
 
-  public void setNumCachedTokens(int n) {
+  public void setNumCachedTokens(final int n) {
     this.numCachedTokens = n;
   }
 
-  public void addCachedTokens(int n) {
+  public void addCachedTokens(final int n) {
     this.numCachedTokens += n;
   }
 
@@ -102,7 +103,7 @@ public final class Sequence {
     return this.numScheduledTokens;
   }
 
-  public void setNumScheduledTokens(int n) {
+  public void setNumScheduledTokens(final int n) {
     this.numScheduledTokens = n;
   }
 
@@ -110,7 +111,7 @@ public final class Sequence {
     return this.prefill;
   }
 
-  public void setPrefill(boolean prefill) {
+  public void setPrefill(final boolean prefill) {
     this.prefill = prefill;
   }
 
@@ -158,7 +159,7 @@ public final class Sequence {
     return this.numTokens - (this.numBlocks() - 1) * blockSize;
   }
 
-  public List<Integer> block(int i) {
+  public List<Integer> block(final int i) {
     if (i < 0 || i >= this.numBlocks()) {
       throw new IndexOutOfBoundsException("block " + i);
     }
@@ -167,7 +168,7 @@ public final class Sequence {
     return List.copyOf(this.tokenIds.subList(from, to));
   }
 
-  public void appendToken(int tokenId) {
+  public void appendToken(final int tokenId) {
     this.tokenIds.add(tokenId);
     this.lastToken = tokenId;
     this.numTokens++;

@@ -95,7 +95,7 @@ public final class LLM implements AutoCloseable {
    *
    * @throws ModelLoadException if the model cannot be loaded
    */
-  public LLM(String modelPath) {
+  public LLM(final String modelPath) {
     this(builder(modelPath));
   }
 
@@ -104,18 +104,18 @@ public final class LLM implements AutoCloseable {
    *
    * @throws ModelLoadException if the model cannot be loaded
    */
-  public LLM(Path modelPath) {
+  public LLM(final Path modelPath) {
     this(builder(modelPath));
   }
 
   /**
    * Binds a shared immutable {@link Model} with default builder settings.
    */
-  public LLM(Model model) {
+  public LLM(final Model model) {
     this(builder(model));
   }
 
-  private LLM(Builder builder) {
+  private LLM(final Builder builder) {
     requireNonNull(builder, "builder");
     try {
       // Business load path: resolve Model → engine config → KV/scheduler
@@ -149,7 +149,7 @@ public final class LLM implements AutoCloseable {
   /**
    * Starts a fluent configurator for a shared immutable {@link Model}.
    */
-  public static Builder builder(Model model) {
+  public static Builder builder(final Model model) {
     return new Builder(requireNonNull(model, "model"));
   }
 
@@ -158,7 +158,7 @@ public final class LLM implements AutoCloseable {
    *
    * @param model directory containing {@code config.json}, tokenizer files, and weights
    */
-  public static Builder builder(Path model) {
+  public static Builder builder(final Path model) {
     return new Builder(model);
   }
 
@@ -167,7 +167,7 @@ public final class LLM implements AutoCloseable {
    *
    * @param modelPath path to the model directory
    */
-  public static Builder builder(String modelPath) {
+  public static Builder builder(final String modelPath) {
     return new Builder(Path.of(requireNonNull(modelPath, "modelPath")));
   }
 
@@ -201,7 +201,7 @@ public final class LLM implements AutoCloseable {
    * Enqueues a text prompt (tokenized with this model's tokenizer) for a later {@link #step()}.
    * Prefer {@link #generate} or {@link #chat()} unless driving the scheduler manually.
    */
-  public void addRequest(String prompt, SamplingParams samplingParams) {
+  public void addRequest(final String prompt, final SamplingParams samplingParams) {
     // Business: string prompt → token ids → waiting queue
     this.addRequest(this.tokenizer.encode(prompt), samplingParams);
   }
@@ -209,7 +209,7 @@ public final class LLM implements AutoCloseable {
   /**
    * Enqueues pre-tokenized ids for a later {@link #step()}.
    */
-  public void addRequest(List<Integer> promptTokenIds, SamplingParams samplingParams) {
+  public void addRequest(final List<Integer> promptTokenIds, final SamplingParams samplingParams) {
     // Business: register one generation sequence with the scheduler
     this.scheduler.add(new Sequence(promptTokenIds, samplingParams));
   }
@@ -237,14 +237,14 @@ public final class LLM implements AutoCloseable {
         this.measureStepWorkload(scheduled));
   }
 
-  private List<Integer> runForwardAndSample(Scheduler.ScheduleResult scheduled) {
+  private List<Integer> runForwardAndSample(final Scheduler.ScheduleResult scheduled) {
     // Internal: Transformer.step → CausalLM forward → logits → Sampler
     return this.transformer.step(scheduled.sequences(), scheduled.prefill());
   }
 
   private List<int[]> applySchedulerPostprocess(
-      Scheduler.ScheduleResult scheduled,
-      List<Integer> nextTokenIds
+      final Scheduler.ScheduleResult scheduled,
+      final List<Integer> nextTokenIds
   ) {
     // Internal: write sampled ids into sequences; collect (seqId, tokenId) for streaming
     List<int[]> appendedTokens = new ArrayList<>();
@@ -253,7 +253,7 @@ public final class LLM implements AutoCloseable {
     return appendedTokens;
   }
 
-  private List<FinishedOutput> collectFinishedOutputs(List<Sequence> sequences) {
+  private List<FinishedOutput> collectFinishedOutputs(final List<Sequence> sequences) {
     // Internal: only sequences that reached stop / maxTokens on this tick
     return sequences.stream()
         .filter(Sequence::isFinished)
@@ -261,14 +261,14 @@ public final class LLM implements AutoCloseable {
         .toList();
   }
 
-  private List<TokenEvent> toTokenEvents(List<int[]> appendedTokens) {
+  private List<TokenEvent> toTokenEvents(final List<int[]> appendedTokens) {
     // Internal: raw [seqId, tokenId] pairs → typed stream events
     return appendedTokens.stream()
         .map(pair -> new TokenEvent(pair[0], pair[1]))
         .toList();
   }
 
-  private int measureStepWorkload(Scheduler.ScheduleResult scheduled) {
+  private int measureStepWorkload(final Scheduler.ScheduleResult scheduled) {
     // Internal: +token count for prefill; −batch size for decode (progress convention)
     return scheduled.prefill()
         ? scheduled.sequences().stream().mapToInt(Sequence::numScheduledTokens).sum()
@@ -297,14 +297,16 @@ public final class LLM implements AutoCloseable {
    * @param samplingParams  shared sampling settings for all prompts
    * @throws GenerationCancelledException if {@link #cancel()} was called
    */
-  public List<GenerationOutput> generate(List<?> prompts, SamplingParams samplingParams) {
+  public List<GenerationOutput> generate(final List<?> prompts,
+                                         final SamplingParams samplingParams) {
     return this.generate(prompts, samplingParams, false, Duration.ZERO, null);
   }
 
   /**
    * @param useTqdm when {@code true} and I/O is not silent, prints batch progress to {@link EngineIo#out()}
    */
-  public List<GenerationOutput> generate(List<?> prompts, Object samplingParams, boolean useTqdm) {
+  public List<GenerationOutput> generate(final List<?> prompts, final Object samplingParams,
+                                         final boolean useTqdm) {
     return this.generate(prompts, samplingParams, useTqdm, Duration.ZERO, null);
   }
 
@@ -312,10 +314,10 @@ public final class LLM implements AutoCloseable {
    * @param onToken invoked for each newly decoded token id (optional; may be {@code null})
    */
   public List<GenerationOutput> generate(
-      List<?> prompts,
-      Object samplingParams,
-      boolean useTqdm,
-      java.util.function.IntConsumer onToken
+      final List<?> prompts,
+      final Object samplingParams,
+      final boolean useTqdm,
+      final java.util.function.IntConsumer onToken
   ) {
     return this.generate(prompts, samplingParams, useTqdm, Duration.ZERO, onToken);
   }
@@ -333,11 +335,11 @@ public final class LLM implements AutoCloseable {
    * @throws IllegalArgumentException     if prompt or samplingParams types are invalid
    */
   public List<GenerationOutput> generate(
-      List<?> prompts,
-      Object samplingParams,
-      boolean useTqdm,
-      Duration timeout,
-      java.util.function.IntConsumer onToken
+      final List<?> prompts,
+      final Object samplingParams,
+      final boolean useTqdm,
+      final Duration timeout,
+      final java.util.function.IntConsumer onToken
   ) {
     // Business: turn prompts into decoded completions under cancel / timeout / optional streaming
     synchronized (this.generateLock) {
@@ -388,13 +390,13 @@ public final class LLM implements AutoCloseable {
     this.cancelRequested.set(false);
   }
 
-  private void enqueueAllPrompts(List<?> prompts, List<SamplingParams> params) {
+  private void enqueueAllPrompts(final List<?> prompts, final List<SamplingParams> params) {
     // Internal: one Sequence per prompt, paired with its SamplingParams
     IntStream.range(0, prompts.size())
         .forEach(i -> this.enqueuePrompt(prompts.get(i), params.get(i)));
   }
 
-  private void enqueuePrompt(Object prompt, SamplingParams samplingParams) {
+  private void enqueuePrompt(final Object prompt, final SamplingParams samplingParams) {
     // Internal: accept either raw text (tokenize) or pre-tokenized ids
     if (prompt instanceof String text) {
       this.addRequest(text, samplingParams);
@@ -407,7 +409,7 @@ public final class LLM implements AutoCloseable {
     throw new IllegalArgumentException("prompt must be String or List<Integer>");
   }
 
-  private List<Integer> toTokenIdList(List<?> ids) {
+  private List<Integer> toTokenIdList(final List<?> ids) {
     // Internal: untyped List<?> from the public generate API → List<Integer>
     return ids.stream()
         .map(id -> ((Number) id).intValue())
@@ -415,13 +417,13 @@ public final class LLM implements AutoCloseable {
   }
 
   private void driveUntilSchedulerIdle(
-      Duration timeout,
-      long deadlineNanos,
-      java.util.function.IntConsumer onToken,
-      boolean showProgress,
-      int totalPrompts,
-      long startedAtNanos,
-      Map<Integer, List<Integer>> outputsBySeqId
+      final Duration timeout,
+      final long deadlineNanos,
+      final java.util.function.IntConsumer onToken,
+      final boolean showProgress,
+      final int totalPrompts,
+      final long startedAtNanos,
+      final Map<Integer, List<Integer>> outputsBySeqId
   ) {
     // Business loop: keep producing tokens until every sequence is finished or aborted
     int completed = 0;
@@ -441,7 +443,7 @@ public final class LLM implements AutoCloseable {
     }
   }
 
-  private void requireGenerationAllowed(Duration timeout, long deadlineNanos) {
+  private void requireGenerationAllowed(final Duration timeout, final long deadlineNanos) {
     // Internal: both guards must pass before the next tick
     this.requireNotCancelled();
     this.requireWithinDeadline(timeout, deadlineNanos);
@@ -454,14 +456,15 @@ public final class LLM implements AutoCloseable {
     }
   }
 
-  private void requireWithinDeadline(Duration timeout, long deadlineNanos) {
+  private void requireWithinDeadline(final Duration timeout, final long deadlineNanos) {
     // Internal: Long.MAX_VALUE means “no timeout”
     if (System.nanoTime() > deadlineNanos) {
       throw new GenerationTimeoutException(timeout);
     }
   }
 
-  private void dispatchTokenEvents(StepResult step, java.util.function.IntConsumer onToken) {
+  private void dispatchTokenEvents(final StepResult step,
+                                   final java.util.function.IntConsumer onToken) {
     // Internal: skip when the caller did not request streaming
     if (onToken == null) {
       return;
@@ -472,12 +475,12 @@ public final class LLM implements AutoCloseable {
   }
 
   private int recordFinishedOutputs(
-      StepResult step,
-      Map<Integer, List<Integer>> outputsBySeqId,
-      int completed,
-      boolean showProgress,
-      int totalPrompts,
-      long startedAtNanos
+      final StepResult step,
+      final Map<Integer, List<Integer>> outputsBySeqId,
+      final int completed,
+      final boolean showProgress,
+      final int totalPrompts,
+      final long startedAtNanos
   ) {
     // Internal: stash completion token ids by seqId; progress counts finished prompts
     int nextCompleted = completed;
@@ -490,10 +493,10 @@ public final class LLM implements AutoCloseable {
   }
 
   private void reportProgressIfNeeded(
-      boolean showProgress,
-      int completed,
-      int totalPrompts,
-      long startedAtNanos
+      final boolean showProgress,
+      final int completed,
+      final int totalPrompts,
+      final long startedAtNanos
   ) {
     // Internal: CLI-style progress only when requested and EngineIo is not silent
     if (!showProgress) {
@@ -503,14 +506,14 @@ public final class LLM implements AutoCloseable {
     this.io.progressf("\rGenerating %d/%d (%.1fs)", completed, totalPrompts, elapsedSeconds);
   }
 
-  private void finishProgressLine(boolean showProgress) {
+  private void finishProgressLine(final boolean showProgress) {
     // Internal: move past the \r progress line before returning text
     if (showProgress) {
       this.io.out().println();
     }
   }
 
-  private long resolveDeadlineNanos(Duration timeout, long startedAtNanos) {
+  private long resolveDeadlineNanos(final Duration timeout, final long startedAtNanos) {
     // Internal: null / zero / negative Duration → unbounded generate
     if (timeout == null || timeout.isZero() || timeout.isNegative()) {
       return Long.MAX_VALUE;
@@ -518,13 +521,13 @@ public final class LLM implements AutoCloseable {
     return startedAtNanos + timeout.toNanos();
   }
 
-  private boolean shouldShowProgress(boolean useTqdm) {
+  private boolean shouldShowProgress(final boolean useTqdm) {
     // Internal: never spam progress into silent (library-default) I/O
     return useTqdm && !this.io.isSilent();
   }
 
   private List<GenerationOutput> decodeCompletedOutputs(
-      Map<Integer, List<Integer>> outputsBySeqId) {
+      final Map<Integer, List<Integer>> outputsBySeqId) {
     // Internal: stable seqId order → GenerationOutput(text, tokenIds) for each prompt
     return outputsBySeqId.keySet().stream()
         .sorted()
@@ -535,7 +538,8 @@ public final class LLM implements AutoCloseable {
         .toList();
   }
 
-  private List<SamplingParams> resolveSamplingParams(List<?> prompts, Object samplingParams) {
+  private List<SamplingParams> resolveSamplingParams(final List<?> prompts,
+                                                     final Object samplingParams) {
     // Internal: one shared SamplingParams, or one per prompt (sizes must match)
     if (samplingParams instanceof SamplingParams shared) {
       return java.util.Collections.nCopies(prompts.size(), shared);
@@ -564,7 +568,7 @@ public final class LLM implements AutoCloseable {
   /**
    * Model-aware defaults with a custom max new-token budget.
    */
-  public SamplingParams defaultSampling(int maxTokens) {
+  public SamplingParams defaultSampling(final int maxTokens) {
     return SamplingDefaults.forTokenizer(this.tokenizer, maxTokens);
   }
 
@@ -579,14 +583,14 @@ public final class LLM implements AutoCloseable {
   /**
    * Opens a multi-turn session with explicit sampling.
    */
-  public ChatSession chat(SamplingParams samplingParams) {
+  public ChatSession chat(final SamplingParams samplingParams) {
     return new ChatSession(this, samplingParams);
   }
 
   /**
    * Opens a multi-turn session with model-aware sampling limited to {@code maxTokens}.
    */
-  public ChatSession chat(int maxTokens) {
+  public ChatSession chat(final int maxTokens) {
     return ChatSession.open(this, maxTokens);
   }
 
@@ -594,14 +598,14 @@ public final class LLM implements AutoCloseable {
    * Opens a retrieval-augmented session over {@code index}
    * (a {@link PreparedRag} from {@link RagFactory}, or any {@link RagIndex}).
    */
-  public RagSession rag(RagIndex index) {
+  public RagSession rag(final RagIndex index) {
     return RagSession.open(this, index);
   }
 
   /**
    * Opens a RAG session with model-aware sampling limited to {@code maxTokens}.
    */
-  public RagSession rag(RagIndex index, int maxTokens) {
+  public RagSession rag(final RagIndex index, final int maxTokens) {
     return RagSession.open(this, index, maxTokens);
   }
 
@@ -610,7 +614,7 @@ public final class LLM implements AutoCloseable {
    *
    * @return decoded completion text for the single prompt
    */
-  public String complete(String prompt) {
+  public String complete(final String prompt) {
     return this.complete(prompt, this.defaultSampling());
   }
 
@@ -621,7 +625,7 @@ public final class LLM implements AutoCloseable {
    * @param samplingParams sampling controls
    * @return decoded completion text
    */
-  public String complete(String prompt, SamplingParams samplingParams) {
+  public String complete(final String prompt, final SamplingParams samplingParams) {
     // Business: raw continuation (no chat template) → single decoded string
     requireNonNull(prompt, "prompt");
     List<GenerationOutput> outputs = this.generate(List.of(prompt), samplingParams);
@@ -632,14 +636,14 @@ public final class LLM implements AutoCloseable {
    * Single-turn chat: system prompt (if any) + one user message, then the assistant answer text.
    * Uses {@link #defaultSampling()}.
    */
-  public String chatOnce(String userMessage) {
+  public String chatOnce(final String userMessage) {
     return this.chatOnce(userMessage, this.defaultSampling());
   }
 
   /**
    * Single-turn chat with explicit sampling. History is not retained after the call.
    */
-  public String chatOnce(String userMessage, SamplingParams samplingParams) {
+  public String chatOnce(final String userMessage, final SamplingParams samplingParams) {
     // Business: one ChatSession turn; return visible answer only (thinking stripped by session)
     ChatReply reply = this.chat(samplingParams).send(userMessage);
     return reply.answer();
@@ -721,12 +725,12 @@ public final class LLM implements AutoCloseable {
      */
     private String systemPromptOverride = null;
 
-    private Builder(Model model) {
+    private Builder(final Model model) {
       this.sharedModel = requireNonNull(model, "model");
       this.modelDir = model.path();
     }
 
-    private Builder(Path modelDir) {
+    private Builder(final Path modelDir) {
       this.sharedModel = null;
       this.modelDir = requireNonNull(modelDir, "model");
     }
@@ -734,7 +738,7 @@ public final class LLM implements AutoCloseable {
     /**
      * Custom status streams; {@code null} is treated as {@link EngineIo#silent()}.
      */
-    public Builder io(EngineIo io) {
+    public Builder io(final EngineIo io) {
       this.io = io == null ? EngineIo.silent() : io;
       return this;
     }
@@ -757,7 +761,7 @@ public final class LLM implements AutoCloseable {
      * Sets the chat system prompt. {@code null} becomes blank (no system turn).
      * Omit this method entirely to keep the model default from {@link ChatPrompts}.
      */
-    public Builder systemPrompt(String prompt) {
+    public Builder systemPrompt(final String prompt) {
       this.systemPromptOverride = prompt == null ? "" : prompt;
       return this;
     }
@@ -780,7 +784,7 @@ public final class LLM implements AutoCloseable {
     /**
      * Max tokens across a prefill batch. Default {@code 16384}.
      */
-    public Builder maxNumBatchedTokens(int value) {
+    public Builder maxNumBatchedTokens(final int value) {
       this.maxNumBatchedTokens = value;
       return this;
     }
@@ -788,7 +792,7 @@ public final class LLM implements AutoCloseable {
     /**
      * Max concurrent sequences in the scheduler. Default {@code 512}.
      */
-    public Builder maxNumSeqs(int value) {
+    public Builder maxNumSeqs(final int value) {
       this.maxNumSeqs = value;
       return this;
     }
@@ -797,7 +801,7 @@ public final class LLM implements AutoCloseable {
      * Max context length in tokens (capped by the model's {@code max_position_embeddings}).
      * Default {@code 4096}.
      */
-    public Builder maxModelLen(int value) {
+    public Builder maxModelLen(final int value) {
       this.maxModelLen = value;
       return this;
     }
@@ -806,7 +810,7 @@ public final class LLM implements AutoCloseable {
      * Fraction of heap used when estimating KV-cache size. Default {@code 0.9}.
      * (Named for upstream parity; this port is CPU/heap-based.)
      */
-    public Builder gpuMemoryUtilization(float value) {
+    public Builder gpuMemoryUtilization(final float value) {
       this.gpuMemoryUtilization = value;
       return this;
     }
@@ -814,7 +818,7 @@ public final class LLM implements AutoCloseable {
     /**
      * Currently only {@code 1} is supported.
      */
-    public Builder tensorParallelSize(int value) {
+    public Builder tensorParallelSize(final int value) {
       this.tensorParallelSize = value;
       return this;
     }
@@ -823,7 +827,7 @@ public final class LLM implements AutoCloseable {
      * When {@code true} (default), runs eager forward passes only (no CUDA-graph style capture).
      * Required {@code true} on this CPU port.
      */
-    public Builder enforceEager(boolean value) {
+    public Builder enforceEager(final boolean value) {
       this.enforceEager = value;
       return this;
     }
@@ -831,7 +835,7 @@ public final class LLM implements AutoCloseable {
     /**
      * KV block size in tokens; must be a multiple of 256. Default {@code 256}.
      */
-    public Builder kvcacheBlockSize(int value) {
+    public Builder kvcacheBlockSize(final int value) {
       this.kvcacheBlockSize = value;
       return this;
     }
@@ -839,7 +843,7 @@ public final class LLM implements AutoCloseable {
     /**
      * Number of KV blocks to allocate. {@code -1} (default) estimates from heap and config.
      */
-    public Builder numKvcacheBlocks(int value) {
+    public Builder numKvcacheBlocks(final int value) {
       this.numKvcacheBlocks = value;
       return this;
     }
@@ -847,7 +851,7 @@ public final class LLM implements AutoCloseable {
     /**
      * When {@code true} (default), runs a short generate after load to warm JIT / caches.
      */
-    public Builder warmup(boolean value) {
+    public Builder warmup(final boolean value) {
       this.warmup = value;
       return this;
     }
@@ -879,7 +883,7 @@ public final class LLM implements AutoCloseable {
       return this.sharedModel != null ? this.sharedModel.path() : this.modelDir;
     }
 
-    private Config toConfig(Model model) {
+    private Config toConfig(final Model model) {
       return Config.builder(model)
           .maxNumBatchedTokens(this.maxNumBatchedTokens)
           .maxNumSeqs(this.maxNumSeqs)
@@ -904,7 +908,7 @@ public final class LLM implements AutoCloseable {
   /** Result of a single {@link LLM#step()}. */
   public record StepResult(List<FinishedOutput> outputs, List<TokenEvent> tokenEvents,
                            int numTokens) {
-    public StepResult(List<FinishedOutput> outputs, int numTokens) {
+    public StepResult(final List<FinishedOutput> outputs, final int numTokens) {
       this(outputs, List.of(), numTokens);
     }
   }

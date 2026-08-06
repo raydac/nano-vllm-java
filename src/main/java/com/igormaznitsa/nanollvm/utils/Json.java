@@ -11,11 +11,11 @@ public final class Json {
   private Json() {
   }
 
-  public static Object parse(String text) {
+  public static Object parse(final String text) {
     return new Parser(text).parse();
   }
 
-  public static Map<String, Object> parseObject(String text) {
+  public static Map<String, Object> parseObject(final String text) {
     Object parsed = parse(text);
     if (!(parsed instanceof Map<?, ?> map)) {
       throw new IllegalArgumentException("expected JSON object");
@@ -23,11 +23,11 @@ public final class Json {
     return castObjectMap(map);
   }
 
-  public static String asString(Object value) {
+  public static String asString(final Object value) {
     return value == null ? null : String.valueOf(value);
   }
 
-  public static int asInt(Object value, int defaultValue) {
+  public static int asInt(final Object value, final int defaultValue) {
     if (value == null) {
       return defaultValue;
     }
@@ -37,7 +37,7 @@ public final class Json {
     return Integer.parseInt(value.toString());
   }
 
-  public static long asLong(Object value, long defaultValue) {
+  public static long asLong(final Object value, final long defaultValue) {
     if (value == null) {
       return defaultValue;
     }
@@ -47,7 +47,7 @@ public final class Json {
     return Long.parseLong(value.toString());
   }
 
-  public static float asFloat(Object value, float defaultValue) {
+  public static float asFloat(final Object value, final float defaultValue) {
     if (value == null) {
       return defaultValue;
     }
@@ -57,7 +57,7 @@ public final class Json {
     return Float.parseFloat(value.toString());
   }
 
-  public static double asDouble(Object value, double defaultValue) {
+  public static double asDouble(final Object value, final double defaultValue) {
     if (value == null) {
       return defaultValue;
     }
@@ -67,7 +67,7 @@ public final class Json {
     return Double.parseDouble(value.toString());
   }
 
-  public static boolean asBoolean(Object value, boolean defaultValue) {
+  public static boolean asBoolean(final Object value, final boolean defaultValue) {
     if (value == null) {
       return defaultValue;
     }
@@ -78,17 +78,17 @@ public final class Json {
   }
 
   @SuppressWarnings("unchecked")
-  public static Map<String, Object> asObject(Object value) {
+  public static Map<String, Object> asObject(final Object value) {
     return value instanceof Map<?, ?> m ? (Map<String, Object>) m : null;
   }
 
   @SuppressWarnings("unchecked")
-  public static List<Object> asArray(Object value) {
+  public static List<Object> asArray(final Object value) {
     return value instanceof List<?> l ? (List<Object>) l : null;
   }
 
   @SuppressWarnings("unchecked")
-  private static Map<String, Object> castObjectMap(Map<?, ?> map) {
+  private static Map<String, Object> castObjectMap(final Map<?, ?> map) {
     return (Map<String, Object>) map;
   }
 
@@ -96,7 +96,7 @@ public final class Json {
     private final String text;
     private int pos;
 
-    private Parser(String text) {
+    private Parser(final String text) {
       this.text = text == null ? "null" : text;
     }
 
@@ -302,14 +302,14 @@ public final class Json {
       return null;
     }
 
-    private void expectWord(String word) {
+    private void expectWord(final String word) {
       if (this.pos + word.length() > this.text.length() || !this.text.startsWith(word, this.pos)) {
         throw this.error("unexpected token");
       }
       this.pos += word.length();
     }
 
-    private void expect(char expected) {
+    private void expect(final char expected) {
       this.skipWhitespace();
       if (this.atEnd() || this.current() != expected) {
         throw this.error("expected '" + expected + "'");
@@ -317,7 +317,7 @@ public final class Json {
       this.pos++;
     }
 
-    private boolean tryConsume(char token) {
+    private boolean tryConsume(final char token) {
       this.skipWhitespace();
       if (!this.atEnd() && this.current() == token) {
         this.pos++;
@@ -336,7 +336,7 @@ public final class Json {
       }
     }
 
-    private boolean isDigit(char ch) {
+    private boolean isDigit(final char ch) {
       return ch >= '0' && ch <= '9';
     }
 
@@ -348,7 +348,7 @@ public final class Json {
       return this.pos >= this.text.length();
     }
 
-    private IllegalArgumentException error(String message) {
+    private IllegalArgumentException error(final String message) {
       return new IllegalArgumentException(message + " at position " + this.pos);
     }
   }

@@ -14,7 +14,7 @@ public class Linear {
   protected final Tensor weight;
   protected final Tensor bias;
 
-  public Linear(Tensor weight, Tensor bias) {
+  public Linear(final Tensor weight, final Tensor bias) {
     this.weight = requireNonNull(weight, "weight");
     this.bias = bias;
   }
@@ -27,22 +27,22 @@ public class Linear {
     return this.bias;
   }
 
-  public Tensor forward(Tensor x) {
+  public Tensor forward(final Tensor x) {
     return Ops.linear(x, this.weight, this.bias);
   }
 
   public static class Column extends Linear {
-    public Column(Tensor weight, Tensor bias) {
+    public Column(final Tensor weight, final Tensor bias) {
       super(weight, bias);
     }
   }
 
   public static final class Row extends Linear {
-    public Row(Tensor weight) {
+    public Row(final Tensor weight) {
       super(weight, null);
     }
 
-    public Row(Tensor weight, Tensor bias) {
+    public Row(final Tensor weight, final Tensor bias) {
       super(weight, bias);
     }
   }
@@ -51,18 +51,18 @@ public class Linear {
    * Packed gate+up projection; {@code weight} shape {@code [2*intermediate, hidden]}.
    */
   public static final class Merged extends Column {
-    public Merged(Tensor weight) {
+    public Merged(final Tensor weight) {
       super(weight, null);
     }
   }
 
   /** Packed Q/K/V projection; {@code weight} shape {@code [(nH+2nKV)*d, hidden]}. */
   public static final class Qkv extends Column {
-    public Qkv(Tensor weight, Tensor bias) {
+    public Qkv(final Tensor weight, final Tensor bias) {
       super(weight, bias);
     }
 
-    public Qkv(Tensor weight) {
+    public Qkv(final Tensor weight) {
       this(weight, null);
     }
   }
