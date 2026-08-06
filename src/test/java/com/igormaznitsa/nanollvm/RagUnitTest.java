@@ -99,9 +99,19 @@ class RagUnitTest {
     assertTrue(prompt.contains("The Nile is a major river in Africa."));
     assertTrue(prompt.contains("what is Nile?"));
     assertTrue(prompt.indexOf("what is Nile?") < prompt.indexOf("The Nile is a major river"));
-    assertTrue(prompt.contains("Notes (use only if relevant"));
-    assertFalse(prompt.contains("If the context is insufficient"));
+    assertTrue(prompt.contains("Context (use only these"));
+    assertTrue(prompt.contains("say you do not know"));
+    assertFalse(prompt.contains("answer the request normally"));
     assertFalse(prompt.contains("previous answer was wrong"));
+  }
+
+  @Test
+  void groundedPromptForbidsInventingDetails() {
+    Bm25Index index = Bm25Index.of("Jacob Grimm was born in 1785.");
+    List<RagHit> hits = index.retrieve("Jacob Grimm born", 1);
+    String prompt = RagPrompt.format(hits, "When was Jacob born?");
+    assertTrue(prompt.contains("Do not invent"));
+    assertTrue(prompt.contains("say you do not know"));
   }
 
   @Test

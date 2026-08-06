@@ -2740,8 +2740,8 @@ Bm25Index.retrieve(query, topK)  →  List<RagHit>
    │
    ▼
 RagPrompt.format(hits, user text, maxContextChars, compact?)
-   │  compact (tiny chat models): passage lines + question, minimal wrapper
-   │  default: short “Context / Question” framing
+   │  compact (tiny chat models): question first, then “Context (use only these…)”
+   │  default: Context / Question + “do not invent… say you do not know”
    ▼
 ChatSession.sendPrepared(historyUser = original text,
                          modelUser   = RAG prompt,
@@ -2755,18 +2755,23 @@ ChatSession.sendPrepared(historyUser = original text,
 History keeps what the **human typed**. The **model** sees the retrieved passages on that turn. That split matters:
 the conversation log stays readable; the generator gets the cards.
 
+When competitive shorter passages exist, `RagRetrieval.preferCompactPassages` prefers them over long
+chapters — dense grounding without corpus-specific filename rules. Grounded turns also clamp sampling
+temperature.
+
 Very short follow-ups (token **count**, not a word list) expand the **retrieval** string with the previous longer user
 turn so a one-word reply does not become a random lexical hunt through the corpus. The model still receives the current
 user text in history; chat context does the conversational work.
 
-**In the code (query):** `RagSession.send` → `RagIndex.retrieve` → `RagPrompt.format` →
+**In the code (query):** `RagSession.send` → `RagIndex.retrieve` → `preferCompactPassages` → `RagPrompt.format` →
 `ChatSession.sendPrepared`. `LLM.rag(PreparedRag)` / `rag(index, maxTokens)` open the session.
 
 ### How this works *with* the model
 
-RAG does not change attention math, the KV cache, or sampling. It only changes the **token ids of the last user
-message** (and thus the prefill). Everything in chapters 8–12 still applies: longer RAG context means a heavier prefill;
-tiny models still hallucinate if they ignore the cards; Gemma still prefers short prompts
+RAG does not change attention math, the KV cache, or sampling math itself. It only changes the **token ids of the last
+user message** (and thus the prefill), plus a temperature clamp on grounded turns. Everything in chapters 8–12 still
+applies: longer RAG context means a heavier prefill; tiny models can still ignore instructions, so the stack prefers
+short dense passages, strict “use only these / say you do not know” wording, isolation, and low temperature
 (`RagLoadOptions.forTinyModels()`, small `topK`, compact formatting in `Example`).
 
 Think of three layers again:

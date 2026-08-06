@@ -15,6 +15,8 @@ import java.util.Set;
  */
 public final class PreparedRag implements RagIndex {
 
+  private static final double SHORT_PASSAGE_CHARS = 200.0;
+
   private final List<PreparedPassage> passages;
   private final TextCorpus corpus;
   private final Bm25Index index;
@@ -36,8 +38,8 @@ public final class PreparedRag implements RagIndex {
 
   /**
    * Fraction of distinct query terms that appear in the passage (0..1).
-   * Favors fact cards that mention {@code fairy}/{@code fable}/… over long narration
-   * that only matches the story title tokens.
+   * Favors passages that mention more of the query over long text that only
+   * shares a title token.
    */
   static double termCoverage(final String passageText, final List<String> queryTerms) {
     if (queryTerms.isEmpty()) {
@@ -46,6 +48,17 @@ public final class PreparedRag implements RagIndex {
     Set<String> passageTerms = new LinkedHashSet<>(Bm25Index.tokenize(passageText));
     long hit = queryTerms.stream().filter(passageTerms::contains).count();
     return hit / (double) queryTerms.size();
+  }
+
+  /**
+   * Mild length density: shorter passages score higher when coverage is equal.
+   * Corpus-agnostic — no filename or topic rules.
+   */
+  static double groundedScore(final RagHit hit, final List<String> queryTerms) {
+    double coverage = 1.0 + termCoverage(hit.chunk().text(), queryTerms);
+    int len = Math.max(hit.chunk().text().length(), 1);
+    double density = 1.0 + (SHORT_PASSAGE_CHARS / (SHORT_PASSAGE_CHARS + len));
+    return hit.score() * coverage * density;
   }
 
   public List<PreparedPassage> passages() {
@@ -77,8 +90,7 @@ public final class PreparedRag implements RagIndex {
     List<String> terms = this.index.selectedQueryTerms(query);
     List<RagHit> hits = this.index.retrieve(query, Math.max(topK * 4, topK));
     return hits.stream()
-        .map(hit -> new RagHit(hit.chunk(),
-            hit.score() * (1.0 + termCoverage(hit.chunk().text(), terms))))
+        .map(hit -> new RagHit(hit.chunk(), groundedScore(hit, terms)))
         .sorted(Comparator
             .comparingDouble(RagHit::score).reversed()
             .thenComparingInt(hit -> hit.chunk().text().length()))

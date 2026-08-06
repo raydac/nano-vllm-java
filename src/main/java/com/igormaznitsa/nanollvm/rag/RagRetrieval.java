@@ -2,11 +2,13 @@ package com.igormaznitsa.nanollvm.rag;
 
 import static java.util.Objects.requireNonNull;
 
+import java.util.Comparator;
 import java.util.List;
 
 /**
- * Structural retrieval-query rules: when to keep the previous user turn as an anchor.
- * Uses token counts only — not reply dictionaries or language-specific words.
+ * Structural retrieval-query rules: anchor expansion for short follow-ups,
+ * prior-source continuity, and compact-passage preference for the prompt.
+ * Uses token counts and passage length only — no corpus-specific filenames or topics.
  */
 final class RagRetrieval {
 
@@ -19,6 +21,9 @@ final class RagRetrieval {
    * Only turns at least this long replace the retrieval anchor.
    */
   static final int ANCHOR_MIN_TOKENS = 5;
+
+  private static final double PRIOR_SOURCE_COMPETITIVE = 0.55;
+  private static final double COMPACT_COMPETITIVE = 0.55;
 
   private RagRetrieval() {
   }
@@ -37,6 +42,33 @@ final class RagRetrieval {
 
   static boolean shouldUpdateAnchor(final String question) {
     return Bm25Index.tokenize(question).size() >= ANCHOR_MIN_TOKENS;
+  }
+
+  /**
+   * Among score-competitive hits, prefer shorter passages for the prompt.
+   * Dense notes beat long chapters on any corpus without naming conventions.
+   */
+  static List<RagHit> preferCompactPassages(final List<RagHit> candidates, final int topK) {
+    requireNonNull(candidates, "candidates");
+    if (candidates.isEmpty()) {
+      return List.of();
+    }
+    RagHit bestHit = candidates.getFirst();
+    double floor = bestHit.score() * COMPACT_COMPETITIVE;
+    int bestLen = bestHit.chunk().text().length();
+
+    List<RagHit> compact = candidates.stream()
+      .filter(hit -> hit.score() >= floor)
+      .filter(hit -> hit.chunk().text().length() * 2 <= bestLen)
+      .sorted(Comparator
+        .comparingDouble(RagHit::score).reversed()
+        .thenComparingInt(hit -> hit.chunk().text().length()))
+      .toList();
+
+    if (!compact.isEmpty()) {
+      return clip(compact, topK);
+    }
+    return clip(candidates, topK);
   }
 
   /**
@@ -62,7 +94,7 @@ final class RagRetrieval {
       return clip(candidates, topK);
     }
     double best = candidates.getFirst().score();
-    if (same.getFirst().score() >= best * 0.55) {
+    if (same.getFirst().score() >= best * PRIOR_SOURCE_COMPETITIVE) {
       return clip(same, topK);
     }
     return clip(candidates, topK);

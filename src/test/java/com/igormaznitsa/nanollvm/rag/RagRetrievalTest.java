@@ -35,6 +35,37 @@ class RagRetrievalTest {
   }
 
   @Test
+  void preferCompactPassagesKeepsShorterCompetitiveHit() {
+    TextChunk longPass = new TextChunk(
+      "long",
+      "/docs/chapter.txt",
+      "A".repeat(400) + " capital city of France is discussed across many pages of history.");
+    TextChunk shortPass = new TextChunk(
+      "short",
+      "/docs/notes.txt",
+      "Paris is the capital of France.");
+    List<RagHit> candidates = List.of(
+      new RagHit(longPass, 1.0),
+      new RagHit(shortPass, 0.7));
+    List<RagHit> preferred = RagRetrieval.preferCompactPassages(candidates, 2);
+    assertEquals(1, preferred.size());
+    assertTrue(preferred.getFirst().chunk().text().contains("Paris"));
+  }
+
+  @Test
+  void preparedRagPrefersShorterDensePassage() {
+    PreparedRag prepared = RagFactory.builder()
+      .options(RagLoadOptions.forTinyModels())
+      .add("chapter.txt",
+        "The capital of France appears in a long travelogue about rivers, kings, and museums.")
+      .add("notes.txt", "Paris is the capital of France.")
+      .build();
+    List<RagHit> hits = prepared.retrieve("capital of France Paris", 1);
+    assertFalse(hits.isEmpty());
+    assertTrue(hits.getFirst().chunk().text().contains("Paris is the capital"));
+  }
+
+  @Test
   void offTopicCodingRequestDoesNotRetrieveOnWeakCorpusOverlap() {
     Bm25Index index = Bm25Index.of(
         "In 1829 the position should have been awarded by Jacob Grimm, "

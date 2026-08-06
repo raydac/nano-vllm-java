@@ -16,10 +16,12 @@ import java.util.function.Consumer;
  *
  * <p>History stores the original user text; the model sees a context-augmented last turn.
  * Short follow-ups expand retrieval with the previous longer user turn and may prefer the
- * same source document (structural continuity). {@link #isolateGeneration(boolean)} omits
- * prior assistant answers from grounded (hit) generates only; no-hit turns keep history so
- * conversational follow-ups still work. Thinking is off by default so small
- * max-token budgets are not spent on {@code <think>} blocks. Not thread-safe.
+ * same source document (structural continuity). Among competitive hits, shorter passages
+ * are preferred so the prompt stays dense on any corpus. {@link #isolateGeneration(boolean)}
+ * omits prior assistant answers from grounded (hit) generates only; no-hit turns keep
+ * history so conversational follow-ups still work. Thinking is off by default so small
+ * max-token budgets are not spent on {@code <think>} blocks. Grounded turns also clamp
+ * sampling temperature. Not thread-safe.
  *
  * <pre>{@code
  * PreparedRag rag = RagFactory.make(Path.of("docs"));
@@ -27,6 +29,8 @@ import java.util.function.Consumer;
  * }</pre>
  */
 public final class RagSession {
+
+  private static final float GROUNDED_TEMPERATURE_CAP = 0.15f;
 
   private final LLM llm;
   private final ChatSession chat;
@@ -173,16 +177,21 @@ public final class RagSession {
     SamplingParams base = this.baseSampling != null
         ? this.baseSampling
         : this.chat.samplingParams();
-    if (this.lastHits.isEmpty() && this.maxTokensWhenNoHits > base.maxTokens()) {
-      this.chat.sampling(new SamplingParams(
-          base.temperature(),
-          this.maxTokensWhenNoHits,
-          base.ignoreEos(),
-          base.topK(),
-          base.topP()));
-    } else {
-      this.chat.sampling(base);
+    int maxTokens = base.maxTokens();
+    float temperature = base.temperature();
+    if (this.lastHits.isEmpty()) {
+      if (this.maxTokensWhenNoHits > maxTokens) {
+        maxTokens = this.maxTokensWhenNoHits;
+      }
+    } else if (temperature > GROUNDED_TEMPERATURE_CAP) {
+      temperature = GROUNDED_TEMPERATURE_CAP;
     }
+    this.chat.sampling(new SamplingParams(
+      temperature,
+      maxTokens,
+      base.ignoreEos(),
+      base.topK(),
+      base.topP()));
   }
 
   public String ask(final String question) {
@@ -196,12 +205,13 @@ public final class RagSession {
     String retrievalQuery = RagRetrieval.retrievalQuery(question, this.anchorQuery);
     int pool = Math.max(this.topK * 4, this.topK);
     List<RagHit> candidates = this.index.retrieve(retrievalQuery, pool);
+    List<RagHit> grounded = RagRetrieval.preferCompactPassages(candidates, pool);
     if (RagRetrieval.needsAnchor(question) && !this.lastSource.isEmpty()) {
-      return RagRetrieval.preferPriorSource(candidates, this.lastSource, this.topK);
+      return RagRetrieval.preferPriorSource(grounded, this.lastSource, this.topK);
     }
-    return candidates.size() <= this.topK
-        ? List.copyOf(candidates)
-        : List.copyOf(candidates.subList(0, this.topK));
+    return grounded.size() <= this.topK
+      ? List.copyOf(grounded)
+      : List.copyOf(grounded.subList(0, this.topK));
   }
 
   private boolean isOutsideCorpus(final String question) {

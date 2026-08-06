@@ -32,11 +32,12 @@
 - **Pure Java JSON:** removed Gson; `utils.Json` now has an in-project recursive-descent parser (objects/arrays/strings/escapes/numbers/bool/null, BigInteger fallback for huge ints)
 - **Text RAG:** `RagFactory` → `PassagePreparser` (model/search text, pre-TF) → inverted `Bm25Index` in shareable `PreparedRag`
 - Query path scores only posting-list candidates; load once, share across LLMs
-- Query-term coverage rerank + question-first compact prompt; rich fact cards for Grimm + Red Riding Hood
+- Query-term coverage + length-density rerank (corpus-agnostic); demo corpus may still ship short fact files
 - Short follow-ups (<6 tokens) expand BM25 with prior user turn and prefer same source when competitive — **skipped** when the bare question is out-of-corpus (so “write a Java program…” after Grimm does not inherit the Grimm anchor)
 - RAG query terms: out-of-corpus OOV ratio (≥ half unknown) + ≥2-term overlap; BM25 IDF weights frequency — no DF stop-list (that dropped `grimm` in Grimm-heavy corpora)
-- Compact prompt = question then passages; Gemma: topK=2, isolateGeneration only when hits (no-hit follow-ups keep history), mild sampling; **96** new tokens when grounded, **768** when no hits
-- RAG disables thinking by default (Qwen was burning maxTokens on `<think>`, leaving stub answers like "The")
+- **Anti-hallucination (domain-agnostic):** grounded prompts forbid inventing (“use only these / say you do not know”); `preferCompactPassages` prefers shorter competitive hits; grounded turns clamp temperature ≤0.15; Gemma: topK=2, isolateGeneration when hits, thinking off, **96** tokens; Qwen Example: thinking on to show process, **768** tokens
+- Compact prompt = question then Context lines (not “answer normally”)
+- `RagSession` still defaults thinking off (library-safe); **Example** enables thinking for Qwen RAG (`.enableThinking(!gemma)`) with **768** tokens so `<think>` + answer fit; Gemma stays thinking-off + short budget
 - Project `rag/` via `RagFactory.make`; override `-Dnanovllm.rag.dir` / `NANOVLLM_RAG_DIR`
 - Demo fact files: `facts-brothers-grimm.md`, `facts-little-red-riding-hood.md` (+ long tale/bio texts)
 
@@ -65,19 +66,21 @@
 ## 4. Current Work In Progress
 - Educational docs: maintain academic-accessible English `description.md`
 - Engine readability: LLM / Transformer / Scheduler DSL pass done; `ModelRunner` renamed to `Transformer` (prepare → forward → logits → sample)
+- RAG anti-hallucination stays domain-agnostic (prompt + length density, not filename conventions)
 
 
 ## 5. Known Issues & Limitations
 - CPU-only; large float32 heap; weights not in git
 - `Bench` used to hardcode `numKvcacheBlocks(256)` (~14 GiB KV for Qwen3-0.6B) → OOM at start; now sizes blocks from `numSeqs × ceil(maxModelLen/blockSize)` and skips warmup — still needs `MAVEN_OPTS=-Xmx8g` for the weights
 - Gemma3-270M weak knowledge / paraphrase; first chat turn can be slow
-- Tiny Gemma can still invent facts not in retrieved passages; multi-turn latch mitigated by `RagSession.isolateGeneration`
+- Tiny Gemma can still invent facts not in retrieved passages (mitigated: strict grounded prompt, compact-passage preference, temp clamp, isolateGeneration) — not eliminated on 270M
 - Off-topic RAG replies (Java → Grimm class names) were weak BM25 leftovers (`one`/`by`/`text`) after OOV drop — mitigated by out-of-corpus gate (`unknown > known`) + overlap
-- Qwen RAG with thinking on + low maxTokens truncates answers after long `<think>` — mitigated by thinking-off default + stub salvage
+- Qwen RAG with thinking on + low maxTokens can truncate after long `<think>` — Example uses 768 for Qwen; stub salvage remains in ChatSession
 
 
 ## 6. Open Questions & Pending Decisions
 - Whether to fold Sampler deeper into Transformer bricks next
+- Whether BM25F field weights would help further on multi-field documents
 
 
 ## 7. Useful References

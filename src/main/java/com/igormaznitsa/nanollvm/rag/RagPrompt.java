@@ -8,6 +8,7 @@ import java.util.List;
 /**
  * Formats retrieved passages plus the user question into one model-facing user message.
  * Compact layout puts the question first so tiny models answer instead of continuing a story.
+ * When passages are present, wording forbids inventing details outside them.
  */
 public final class RagPrompt {
 
@@ -48,18 +49,19 @@ public final class RagPrompt {
     }
     if (compact) {
       return q + """
-          
-          
-          Notes (use only if relevant; otherwise answer the request normally):
+
+
+        Context (use only these; if they do not answer, say you do not know):
           """ + context;
     }
     return """
         Context:
         %s
-        
+
         Question: %s
-        
-        Answer using only the context. Be concise.
+
+      Answer using only the context. Do not invent names, dates, or other details.
+      If the context does not contain the answer, say you do not know. Be concise.
         """.formatted(context, q).strip();
   }
 

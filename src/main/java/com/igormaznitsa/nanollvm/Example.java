@@ -30,7 +30,7 @@ import java.util.stream.Collectors;
 public final class Example {
 
   private static final int MAX_NEW_TOKENS = 768;
-  private static final int RAG_MAX_TOKENS_DEFAULT = 384;
+  private static final int RAG_MAX_TOKENS_DEFAULT = 768;
   private static final int RAG_MAX_TOKENS_GEMMA = 96;
   private static final int RAG_TOP_K_DEFAULT = 4;
   private static final int RAG_TOP_K_GEMMA = 2;
@@ -104,8 +104,9 @@ public final class Example {
         .maxTokensWhenNoHits(gemma ? MAX_NEW_TOKENS : RAG_MAX_TOKENS_DEFAULT)
         .topK(gemma ? RAG_TOP_K_GEMMA : RAG_TOP_K_DEFAULT)
         .maxContextChars(gemma ? RAG_CONTEXT_CHARS_GEMMA : RAG_CONTEXT_CHARS_DEFAULT)
-        .sampling(new SamplingParams(gemma ? 0.2f : 0.6f, maxTokens, false, gemma ? 40 : 0,
-            gemma ? 0.85f : 0.9f))
+      .enableThinking(!gemma)
+      .sampling(new SamplingParams(gemma ? 0.1f : 0.4f, maxTokens, false, gemma ? 30 : 0,
+        gemma ? 0.8f : 0.85f))
         .streamTo(System.err, System.out, color)
         .diagnostics(System.err::println);
 
