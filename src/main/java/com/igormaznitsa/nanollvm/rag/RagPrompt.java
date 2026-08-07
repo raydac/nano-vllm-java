@@ -2,6 +2,7 @@ package com.igormaznitsa.nanollvm.rag;
 
 import static java.util.Objects.requireNonNull;
 
+import com.igormaznitsa.nanollvm.prompts.RagPrompts;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -46,45 +47,10 @@ public final class RagPrompt {
 
     String context = truncateContext(hits, maxContextChars, compact);
     if (context.isBlank()) {
-      return noHitPrompt(q, compact);
+      return compact ? RagPrompts.compactNoHit(q) : RagPrompts.fullNoHit(q);
     }
-    if (compact) {
-      // Positive instruction last — tiny models latch onto "say you do not know" if it leads
-      return q + """
-
-
-        Context:
-        """ + context + """
-
-        Answer in one short sentence using names and facts from the Context above.
-        """;
-    }
-    return """
-        Context:
-        %s
-
-        Question: %s
-
-      Answer using only the context. Do not invent names, dates, or other details.
-      If the context does not contain the answer, say you do not know. Be concise.
-      """.formatted(context, q).strip();
-  }
-
-  private static String noHitPrompt(final String question, final boolean compact) {
-    if (compact) {
-      return question + """
-
-
-        No context documents were found for this question.
-        Reply with exactly: I do not know.
-        Do not invent places, names, or stories.
-        """;
-    }
-    return """
-      Question: %s
-
-      No context documents were retrieved. Say you do not know. Do not invent facts.
-      """.formatted(question).strip();
+    // Positive instruction last in compact — tiny models latch onto abstain priming if it leads
+    return compact ? RagPrompts.compactHit(q, context) : RagPrompts.fullHit(q, context);
   }
 
   private static String truncateContext(final List<RagHit> hits, final int maxContextChars,

@@ -47,8 +47,9 @@ public final class StreamPrinter {
   }
 
   /**
-   * Writes completed advisor notes to the thinking stream before the main generate starts.
-   * Each note is a full line so the main model's incremental {@code thinking>} state stays clean.
+   * Writes advisor notes to the thinking stream before the main generate starts.
+   * Slot indices match configured subagents; blank/discarded replies show as
+   * {@code (no usable note)}.
    */
   public void emitAdvisorNotes(final List<String> notes) {
     if (notes == null || notes.isEmpty()) {
@@ -56,14 +57,12 @@ public final class StreamPrinter {
     }
     for (int i = 0; i < notes.size(); i++) {
       String note = notes.get(i) == null ? "" : notes.get(i).strip();
-      if (note.isEmpty()) {
-        continue;
-      }
+      String body = note.isEmpty() ? "(no usable note)" : note;
       this.thinkOut.print("thinking> ");
       if (this.color) {
         this.thinkOut.print(ANSI_THINK);
       }
-      this.thinkOut.print("[subagent %d] %s".formatted(i + 1, note));
+      this.thinkOut.print("[subagent %d] %s".formatted(i + 1, body));
       if (this.color) {
         this.thinkOut.print(ANSI_RESET);
       }

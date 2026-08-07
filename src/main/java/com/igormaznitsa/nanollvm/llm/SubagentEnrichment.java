@@ -5,21 +5,47 @@ import static java.util.Objects.requireNonNull;
 import java.util.List;
 
 /**
- * Result of the optional subagent pass: enriched user text plus the advisor notes that were mixed
- * in (empty when no subagents ran or all answers were discarded).
+ * Result of the optional subagent pass: enriched user text, raw advisor answers for the thinking
+ * stream, and Context-grounded notes that were actually mixed into the main prompt.
  */
-public record SubagentEnrichment(String modelUserText, List<String> advisorNotes) {
+public record SubagentEnrichment(
+  String modelUserText,
+  List<String> advisorNotes,
+  List<String> groundedNotes
+) {
 
   public SubagentEnrichment {
     requireNonNull(modelUserText, "modelUserText");
     advisorNotes = List.copyOf(requireNonNull(advisorNotes, "advisorNotes"));
+    groundedNotes = List.copyOf(requireNonNull(groundedNotes, "groundedNotes"));
   }
 
   public static SubagentEnrichment passthrough(final String modelUserText) {
-    return new SubagentEnrichment(requireNonNull(modelUserText, "modelUserText"), List.of());
+    return new SubagentEnrichment(
+      requireNonNull(modelUserText, "modelUserText"), List.of(), List.of());
   }
 
   public boolean hasAdvisorNotes() {
-    return !this.advisorNotes.isEmpty();
+    return this.advisorNotes.stream().anyMatch(note -> note != null && !note.isBlank());
+  }
+
+  public boolean hasGroundedNotes() {
+    return this.groundedNotes.stream().anyMatch(note -> note != null && !note.isBlank());
+  }
+
+  public int groundedMixedCount() {
+    return (int) this.groundedNotes.stream()
+      .map(note -> note == null ? "" : note.strip())
+      .filter(note -> !note.isEmpty())
+      .count();
+  }
+
+  public int droppedUngroundedCount() {
+    long raw = this.advisorNotes.stream()
+      .map(note -> note == null ? "" : note.strip())
+      .filter(note -> !note.isEmpty())
+      .filter(note -> !SubagentPrompt.isAbstention(note))
+      .count();
+    return (int) Math.max(0, raw - this.groundedMixedCount());
   }
 }

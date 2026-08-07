@@ -147,6 +147,11 @@ public final class ChatSession {
     if (printer != null) {
       printer.emitAdvisorNotes(enrichment.advisorNotes());
     }
+    if (enrichment.droppedUngroundedCount() > 0) {
+      this.diagnostics.accept(
+        "(dropped %d ungrounded subagent claim(s) from mix)".formatted(
+          enrichment.droppedUngroundedCount()));
+    }
 
     ChatReply reply = this.generateTurn(printer, enrichment.modelUserText(), isolateGeneration);
 
@@ -164,9 +169,12 @@ public final class ChatSession {
   }
 
   private ChatReply boilerplateFallback(final SubagentEnrichment enrichment) {
-    if (enrichment.hasAdvisorNotes()) {
-      String salvage = enrichment.advisorNotes().stream().collect(joining(" "));
-      this.diagnostics.accept("(setup boilerplate — used subagent notes as answer)");
+    if (enrichment.hasGroundedNotes()) {
+      String salvage = enrichment.groundedNotes().stream()
+        .map(note -> note == null ? "" : note.strip())
+        .filter(note -> !note.isEmpty())
+        .collect(joining(" "));
+      this.diagnostics.accept("(setup boilerplate — used grounded subagent notes as answer)");
       return new ChatReply("", salvage.strip(), false);
     }
     this.diagnostics.accept("(setup boilerplate — used plain greeting fallback)");

@@ -7,6 +7,7 @@ import com.igormaznitsa.nanollvm.chat.ChatMessage;
 import com.igormaznitsa.nanollvm.chat.ChatMessages;
 import com.igormaznitsa.nanollvm.llm.LLM;
 import com.igormaznitsa.nanollvm.llm.SamplingParams;
+import com.igormaznitsa.nanollvm.prompts.RagPrompts;
 import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
@@ -33,21 +34,9 @@ final class RagQueryRewrite {
     }
     String prior = priorContext == null ? "" : priorContext.strip();
     if (prior.isEmpty()) {
-      return """
-        Rewrite the question as a short keyword search for a document index.
-        Reply with only the search keywords, or NONE if nothing can be searched.
-
-        Question: %s
-        """.formatted(follow).strip();
+      return RagPrompts.rewriteStandalone(follow);
     }
-    return """
-      Rewrite the follow-up as a short keyword search for a document index.
-      Use Prior to resolve pronouns and missing names.
-      Reply with only the search keywords, or NONE if nothing can be searched.
-
-      Prior: %s
-      Follow-up: %s
-      """.formatted(prior, follow).strip();
+    return RagPrompts.rewriteFollowUp(prior, follow);
   }
 
   /**

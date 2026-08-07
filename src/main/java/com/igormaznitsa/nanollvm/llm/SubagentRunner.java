@@ -45,10 +45,11 @@ public final class SubagentRunner {
     List<String> answers = llm.subagentMode() == SubagentMode.PARALLEL
       ? runParallel(llm, prompts, sampling)
       : runSequential(llm, prompts, sampling);
-    List<String> notes = SubagentPrompt.usableNotes(answers);
+    List<String> grounded = SubagentPrompt.retainContextGrounded(modelUserText, answers);
     return new SubagentEnrichment(
-      SubagentPrompt.mix(modelUserText, notes, compact),
-      notes);
+      SubagentPrompt.mix(modelUserText, grounded, compact),
+      answers,
+      grounded);
   }
 
   private static List<String> runParallel(
