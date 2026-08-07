@@ -9,6 +9,7 @@ import static java.nio.file.Files.writeString;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.igormaznitsa.nanollvm.chat.AssistantParts;
@@ -22,6 +23,7 @@ import com.igormaznitsa.nanollvm.llm.EngineIo;
 import com.igormaznitsa.nanollvm.llm.LLM;
 import com.igormaznitsa.nanollvm.llm.SamplingDefaults;
 import com.igormaznitsa.nanollvm.llm.SamplingParams;
+import com.igormaznitsa.nanollvm.llm.SubagentMode;
 import com.igormaznitsa.nanollvm.models.Model;
 import com.igormaznitsa.nanollvm.models.ModelFactory;
 import com.igormaznitsa.nanollvm.prompts.ChatPrompts;
@@ -87,6 +89,34 @@ class CoreUnitTest {
       assertSame(model.tokenizer(), a.tokenizer());
       assertSame(model.tokenizer(), b.tokenizer());
       assertEquals(model.architectureName(), a.model().architectureName());
+    }
+  }
+
+  @Test
+  void setSubagentsStoresModeAndPromptsWhenWeightsPresent() {
+    var path = BundledModels.find(BundledModels.QWEN3_0_6B);
+    org.junit.jupiter.api.Assumptions.assumeTrue(path.isPresent(), "Qwen3-0.6B not downloaded");
+
+    Model model = ModelFactory.make(path.get());
+    try (LLM llm = LLM.builder(model).maxModelLen(256).numKvcacheBlocks(32).skipWarmup().build()) {
+      assertTrue(llm.subagentPrompts().isEmpty());
+      assertEquals(SubagentMode.SEQUENTIAL, llm.subagentMode());
+
+      llm.setSubagents(SubagentMode.PARALLEL, "  Fact check  ", "Argue risks");
+      assertEquals(SubagentMode.PARALLEL, llm.subagentMode());
+      assertEquals(List.of("Fact check", "Argue risks"), llm.subagentPrompts());
+
+      assertThrows(
+        IllegalArgumentException.class,
+        () -> llm.setSubagents(SubagentMode.SEQUENTIAL, "ok", "  "));
+
+      llm.setSubagents(SubagentMode.SEQUENTIAL, "   ", "");
+      assertTrue(llm.subagentPrompts().isEmpty());
+      assertEquals(SubagentMode.SEQUENTIAL, llm.subagentMode());
+
+      llm.setSubagents(SubagentMode.PARALLEL, "only");
+      llm.setSubagents();
+      assertTrue(llm.subagentPrompts().isEmpty());
     }
   }
 

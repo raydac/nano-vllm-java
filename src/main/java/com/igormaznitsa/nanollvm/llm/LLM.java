@@ -25,6 +25,7 @@ import com.igormaznitsa.nanollvm.utils.NanoVllmProps;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -41,6 +42,9 @@ import java.util.stream.IntStream;
  *         .maxModelLen(2048)
  *         .systemPrompt("Answer briefly.")  // optional
  *         .build()) {
+ *     llm.setSubagents(SubagentMode.PARALLEL,
+ *         "List key facts from the request.",
+ *         "Note risks or contradictions.");
  *     String reply = llm.chat(256).send("Hello").answer();
  *     String once = llm.chatOnce("What is 2+2?");
  *     String raw = llm.complete("The capital of France is");
@@ -91,6 +95,9 @@ public final class LLM implements AutoCloseable {
   private final Scheduler scheduler;
   private final Object generateLock = new Object();
   private final AtomicBoolean cancelRequested = new AtomicBoolean();
+  private final Object subagentLock = new Object();
+  private List<String> subagentPrompts = List.of();
+  private SubagentMode subagentMode = SubagentMode.SEQUENTIAL;
 
   /**
    * Loads {@code modelPath} with default builder settings (quiet I/O, warmup on).
@@ -683,6 +690,67 @@ public final class LLM implements AutoCloseable {
       return this.systemPromptOverride;
     }
     return ChatPrompts.systemFor(this.tokenizer);
+  }
+
+  /**
+   * Clears configured subagents. Chat / RAG turns then skip the advisor pass.
+   */
+  public void setSubagents() {
+    synchronized (this.subagentLock) {
+      this.subagentPrompts = List.of();
+      this.subagentMode = SubagentMode.SEQUENTIAL;
+    }
+  }
+
+  /**
+   * Configures isolated advisor prompts run on this {@code LLM} before each chat turn.
+   * Empty varargs or blank-only prompts clear the configuration. Non-blank lists are trimmed;
+   * any blank entry among them is rejected.
+   *
+   * <p>{@link SubagentMode#PARALLEL} batches all advisors in one {@link #generate};
+   * {@link SubagentMode#SEQUENTIAL} runs one generate per advisor.
+   */
+  public void setSubagents(final SubagentMode mode, final String... prompts) {
+    requireNonNull(mode, "mode");
+    requireNonNull(prompts, "prompts");
+    if (prompts.length == 0) {
+      this.setSubagents();
+      return;
+    }
+
+    List<String> cleaned = Arrays.stream(prompts)
+      .map(prompt -> requireNonNull(prompt, "prompt").strip())
+      .toList();
+    if (cleaned.stream().allMatch(String::isEmpty)) {
+      this.setSubagents();
+      return;
+    }
+    if (cleaned.stream().anyMatch(String::isEmpty)) {
+      throw new IllegalArgumentException("subagent prompts must not be blank");
+    }
+
+    synchronized (this.subagentLock) {
+      this.subagentMode = mode;
+      this.subagentPrompts = List.copyOf(cleaned);
+    }
+  }
+
+  /**
+   * Immutable snapshot of configured subagent role prompts (empty when none).
+   */
+  public List<String> subagentPrompts() {
+    synchronized (this.subagentLock) {
+      return this.subagentPrompts;
+    }
+  }
+
+  /**
+   * Execution mode for {@link #subagentPrompts()}; defaults to {@link SubagentMode#SEQUENTIAL}.
+   */
+  public SubagentMode subagentMode() {
+    synchronized (this.subagentLock) {
+      return this.subagentMode;
+    }
   }
 
   /**

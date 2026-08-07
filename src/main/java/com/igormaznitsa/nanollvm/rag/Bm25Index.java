@@ -124,7 +124,7 @@ public final class Bm25Index implements RagIndex {
 
   boolean isOutsideCorpus(final String query) {
     List<String> raw = List.copyOf(new LinkedHashSet<>(PassagePreparser.tokenize(query)));
-    return RagQueryTerms.queryOutsideCorpus(this.docFreq, raw);
+    return RagQueryTerms.queryOutsideCorpus(this.docFreq, this.docCount, raw);
   }
 
   public List<PreparedPassage> passages() {

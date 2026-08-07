@@ -73,6 +73,16 @@ class RagRetrievalTest {
   }
 
   @Test
+  void offTopicProperNameDoesNotRetrieveFairyTaleNoise() {
+    Bm25Index index = Bm25Index.of(
+      "Little Red Riding Hood met a wolf. Oh grandmother, what big ears you have! "
+        + "She did not know what a wicked animal he was, and was not afraid of him.");
+    assertTrue(index.isOutsideCorpus("what do you think about estonia?"));
+    assertTrue(index.retrieve("what do you think about estonia?", 3).isEmpty());
+    assertFalse(index.retrieve("Little Red Riding Hood wolf grandmother", 2).isEmpty());
+  }
+
+  @Test
   void offTopicCodingRequestDoesNotRetrieveOnWeakCorpusOverlap() {
     Bm25Index index = Bm25Index.of(
         "In 1829 the position should have been awarded by Jacob Grimm, "

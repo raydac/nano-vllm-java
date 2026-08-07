@@ -1,10 +1,13 @@
 package com.igormaznitsa.nanollvm.chat;
 
 import static java.util.Objects.requireNonNull;
+import static java.util.stream.Collectors.joining;
 
 import com.igormaznitsa.nanollvm.llm.LLM;
 import com.igormaznitsa.nanollvm.llm.SamplingDefaults;
 import com.igormaznitsa.nanollvm.llm.SamplingParams;
+import com.igormaznitsa.nanollvm.llm.SubagentEnrichment;
+import com.igormaznitsa.nanollvm.llm.SubagentRunner;
 import com.igormaznitsa.nanollvm.prompts.ChatPrompts;
 import com.igormaznitsa.nanollvm.tokenizer.Tokenizer;
 
@@ -139,20 +142,35 @@ public final class ChatSession {
 
     boolean gemmaChat = tokenizer.isGemmaChat();
     StreamPrinter printer = this.newPrinter();
-    ChatReply reply = this.generateTurn(printer, modelUser, isolateGeneration);
+    SubagentEnrichment enrichment =
+        SubagentRunner.enrich(this.llm, modelUser, this.samplingParams);
+    if (printer != null) {
+      printer.emitAdvisorNotes(enrichment.advisorNotes());
+    }
+
+    ChatReply reply = this.generateTurn(printer, enrichment.modelUserText(), isolateGeneration);
 
     if (gemmaChat && ChatPrompts.isSetupBoilerplate(reply.answer())) {
       ChatMessages.scrubSetupBoilerplateTurns(this.history);
       this.diagnostics.accept("(setup boilerplate — retrying without filler history)");
       printer = this.newPrinter();
-      reply = this.generateTurn(printer, modelUser, isolateGeneration);
+      reply = this.generateTurn(printer, enrichment.modelUserText(), isolateGeneration);
       if (ChatPrompts.isSetupBoilerplate(reply.answer())) {
-        reply = new ChatReply("", "Hello! What would you like to know?", false);
-        this.diagnostics.accept("(setup boilerplate — used plain greeting fallback)");
+        reply = this.boilerplateFallback(enrichment);
       }
     }
 
     return this.finishTurn(reply, printer);
+  }
+
+  private ChatReply boilerplateFallback(final SubagentEnrichment enrichment) {
+    if (enrichment.hasAdvisorNotes()) {
+      String salvage = enrichment.advisorNotes().stream().collect(joining(" "));
+      this.diagnostics.accept("(setup boilerplate — used subagent notes as answer)");
+      return new ChatReply("", salvage.strip(), false);
+    }
+    this.diagnostics.accept("(setup boilerplate — used plain greeting fallback)");
+    return new ChatReply("", "Hello! What would you like to know?", false);
   }
 
   private StreamPrinter newPrinter() {

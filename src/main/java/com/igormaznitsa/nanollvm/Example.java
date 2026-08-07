@@ -8,6 +8,7 @@ import com.igormaznitsa.nanollvm.chat.ChatSession;
 import com.igormaznitsa.nanollvm.llm.EngineIo;
 import com.igormaznitsa.nanollvm.llm.LLM;
 import com.igormaznitsa.nanollvm.llm.SamplingParams;
+import com.igormaznitsa.nanollvm.llm.SubagentMode;
 import com.igormaznitsa.nanollvm.rag.PreparedRag;
 import com.igormaznitsa.nanollvm.rag.RagFactory;
 import com.igormaznitsa.nanollvm.rag.RagHit;
@@ -37,6 +38,16 @@ public final class Example {
   private static final int RAG_TOP_K_GEMMA = 3;
   private static final int RAG_CONTEXT_CHARS_DEFAULT = 3500;
   private static final int RAG_CONTEXT_CHARS_GEMMA = 900;
+
+  private static final String SUBAGENT_PRACTICAL = """
+    Practical advisor only. Give concrete steps, constraints, and trade-offs.
+    2–4 short sentences. No greetings. Do not write the final user answer.
+    """.strip();
+
+  private static final String SUBAGENT_ABSTRACT = """
+    Abstract advisor only. Give concepts, principles, and underlying structure.
+    2–4 short sentences. No greetings. Do not write the final user answer.
+    """.strip();
 
   private Example() {
   }
@@ -75,6 +86,8 @@ public final class Example {
       }
       System.out.println("Type a message and press Enter. Commands: /exit  /quit  /clear");
       System.out.println("Thinking → stderr (dim cyan); reply → stdout.");
+      System.out.println(
+        "Subagents: practical + abstract advisors (PARALLEL batch) mix notes into each turn.");
       System.out.println();
 
       boolean color = useColor();
@@ -85,6 +98,7 @@ public final class Example {
           .maxModelLen(2048)
           .withSystemIo()
           .build()) {
+        llm.setSubagents(SubagentMode.PARALLEL, SUBAGENT_PRACTICAL, SUBAGENT_ABSTRACT);
         if (preparedRag.isPresent()) {
           runRagChat(in, llm, preparedRag.get(), color);
         } else {

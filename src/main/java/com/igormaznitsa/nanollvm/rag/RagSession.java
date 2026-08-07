@@ -253,11 +253,11 @@ public final class RagSession {
     if (this.llm != null && RagRetrieval.needsRewrite(question) && !this.anchorQuery.isBlank()) {
       return RagQueryRewrite.rewrite(this.llm, this.anchorQuery, question);
     }
-    if (this.llm != null) {
-      return Optional.of(question);
-    }
     if (this.isOutsideCorpus(question)) {
       return Optional.empty();
+    }
+    if (this.llm != null) {
+      return Optional.of(question);
     }
     return Optional.of(RagRetrieval.retrievalQuery(question, this.anchorQuery));
   }

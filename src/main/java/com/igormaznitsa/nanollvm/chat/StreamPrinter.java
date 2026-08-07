@@ -1,6 +1,7 @@
 package com.igormaznitsa.nanollvm.chat;
 
 import java.io.PrintStream;
+import java.util.List;
 
 public final class StreamPrinter {
 
@@ -43,6 +44,32 @@ public final class StreamPrinter {
     }
     this.answerOut.println();
     this.answerOut.flush();
+  }
+
+  /**
+   * Writes completed advisor notes to the thinking stream before the main generate starts.
+   * Each note is a full line so the main model's incremental {@code thinking>} state stays clean.
+   */
+  public void emitAdvisorNotes(final List<String> notes) {
+    if (notes == null || notes.isEmpty()) {
+      return;
+    }
+    for (int i = 0; i < notes.size(); i++) {
+      String note = notes.get(i) == null ? "" : notes.get(i).strip();
+      if (note.isEmpty()) {
+        continue;
+      }
+      this.thinkOut.print("thinking> ");
+      if (this.color) {
+        this.thinkOut.print(ANSI_THINK);
+      }
+      this.thinkOut.print("[subagent %d] %s".formatted(i + 1, note));
+      if (this.color) {
+        this.thinkOut.print(ANSI_RESET);
+      }
+      this.thinkOut.println();
+    }
+    this.thinkOut.flush();
   }
 
   private void emitThink(final String think) {

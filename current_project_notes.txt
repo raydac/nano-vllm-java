@@ -3,6 +3,7 @@
 - CausalLM: Qwen3 + Gemma3 + LFM2 (GGUF); tokenizers GPT-2 BPE / Metaspace / GGUF-embedded
 - **GGUF:** `*.gguf` → `internal.Gguf*` → FP32 `WeightBag` → `Lfm2ForCausalLM` (Q4_K/Q4_0/Q6_K/Q8_0/F16/BF16/F32); ShortConv + `ConvStateArena`; download `models/download-lfm2.5-2.6b-gguf.sh`; Example menu #3; ~16 GiB heap for 2.6B
 - Library: `ModelFactory.make` → shared immutable `Model`; `LLM.Builder`; `ChatSession` / typed chat; helpers `chat`/`chatOnce`/`complete`; `cancel` + generate timeout; `exceptions.*`
+- **Subagents:** `LLM.setSubagents(SubagentMode, String…)` — isolated advisor generates (no history) before main chat/RAG turn; answers mixed into `modelUserText`; `SEQUENTIAL` = N generates, `PARALLEL` = one batch on same LLM; hook in `ChatSession.sendPrepared` via `SubagentRunner`; Example wires practical + abstract PARALLEL advisors
 - Engine: `Transformer` (prepare → forward → logits → sample) owns per-LLM `KvCacheArena` (+ optional `ConvStateArena`); `Scheduler` continuous batching; CPU matmul default = all processors (`cpuThreads` / prop `nanovllm.cpu.threads`)
 - Immutable split: weights/tokenizer on `Model`; runtime KV/scheduler/lock on `LLM`; CausalLM layers are `record`s; constants in `WeightNames` / `NanoVllmProps`
 - JPMS: loaders/GGUF/`Context` in non-exported `internal`; pure-Java `utils.Json` (no Gson)
@@ -13,6 +14,7 @@
 
 ## 2. Architecture & Technical Discoveries
 - Share one `Model` / `PreparedRag` across many `LLM`s; one LLM not concurrent-safe for generate (`cancel()` is cross-thread); `Scheduler.clear()` on cancel/timeout
+- Subagents reuse the same `LLM.generate` (lock); recursion-safe because advisors call `generate` directly, not `ChatSession.send*`; Gemma folds subagent system into first user via existing chat template; advisor notes emit to thinking stream (`thinking> [subagent N] …`); Gemma uses compact mix + drops setup-boilerplate advisor replies
 - Exports: root, models, llm, chat, rag, exceptions, tokenizer, prompts, utils; private: engine, layers, tensor, internal
 - `Model.network()` → `CausalLM` for same-module `Transformer` (exported but non-stable)
 - GGUF→FP32: Q4_K_M mixes Q4_K+Q6_K; 2D dims → HF `[out,in]`; LFM2 norm `token_embd_norm`; conv state by `seqId`; `head_count_kv` per-layer (0=conv) → max>0 as GQA heads
@@ -30,10 +32,11 @@
 - `Sequence.setBlockSize` still static (breaks if LLMs differ on block size)
 - `description.md` still cites `utils.SafetensorsReader` / `ModelLoader` / `Context` → should be `internal.*`
 - LFM2 GGUF tokenizer heuristics may need per-export tuning
+- Subagents add N extra generates per turn (latency); Example demos practical+abstract PARALLEL advisors
 
 
 ## 4. Current Work In Progress
-- Keep `description.md` in sync with code (§7a GGUF; §17 RAG rewrite + PDF)
+- Keep `description.md` in sync with code (§7a GGUF; §17 RAG rewrite + PDF; subagents API)
 - RAG: watch tiny-model rewrite quality (NONE vs keywords) on short anaphoric follow-ups
 
 
@@ -43,9 +46,10 @@
 - Bench auto-sizes KV blocks (was hardcoded OOM); still needs `MAVEN_OPTS=-Xmx8g` for weights
 - Gemma RAG: compact prompt answers from Context (avoid “say you do not know” priming); no-hit turns force “I do not know” / no invention; Example Gemma topK=3, 128 tok, 900 context chars
 - Demo `rag/` is English Grimm/LRRH only — Russian queries correctly get no hits unless local PDFs are added
-- Off-topic RAG mitigated by DF/OOV ratio + overlap; short off-topic follow-ups rely on rewrite → NONE
+- Off-topic RAG mitigated by DF/OOV ratio + overlap; contentful OOV (len≥5, e.g. estonia) forces no-hit even when stopwords match fairy-tale text; short off-topic follow-ups rely on rewrite → NONE
 - Qwen RAG + thinking + low maxTokens truncates after `<think>` — Example uses 768; ChatSession stub salvage remains
 - Extra generate per short RAG follow-up (rewrite) — latency ~2× on those turns only
+- Subagents multiply turn latency by advisor count (SEQUENTIAL) or share one batch (PARALLEL)
 
 
 ## 6. Open Questions & Pending Decisions
@@ -60,6 +64,7 @@
 - Build: `mvn -q test` / `MAVEN_OPTS="-Xmx8g" mvn -q exec:java -Dexec.mainClass=com.igormaznitsa.nanollvm.Example`
 - LFM2: `./models/download-lfm2.5-2.6b-gguf.sh` then `mvn -q exec:java -Dexec.args=models/LFM2.5-2.6B-Q4_K_M.gguf`
 - Library: `ModelFactory.make(path)` → `LLM.builder(model)…`; RAG: `RagFactory.make(dir)` → `llm.rag(rag)`
+- Subagents: `llm.setSubagents(SubagentMode.PARALLEL, "…", "…")` then `llm.chat()` / `llm.rag(…)`
 - CLI progress: `.withSystemIo()`; heap/vector: `.mvn/jvm.config` (`jdk.incubator.vector`, `-Xmx16g`); surefire uses `jvm.module.args`
 - Plugins: compiler 3.15.0, surefire 3.5.5, jar 3.5.0, exec 3.6.3; JUnit 6.0.2
 - RAG dir: project `rag/` or `-Dnanovllm.rag.dir` / `NANOVLLM_RAG_DIR`; shipped demo = Grimm / Little Red Riding Hood `.md`/`.txt` only (`rag/*.pdf` gitignored)

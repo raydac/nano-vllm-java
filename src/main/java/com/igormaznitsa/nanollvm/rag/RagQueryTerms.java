@@ -31,7 +31,7 @@ final class RagQueryTerms {
     if (rawDistinct.isEmpty()) {
       return List.of();
     }
-    if (queryOutsideCorpus(docFreq, rawDistinct)) {
+    if (queryOutsideCorpus(docFreq, docCount, rawDistinct)) {
       return List.of();
     }
 
@@ -50,6 +50,11 @@ final class RagQueryTerms {
       return List.copyOf(discriminative);
     }
 
+    boolean hasOov = rawDistinct.stream().anyMatch(term -> docFreq.getOrDefault(term, 0) == 0);
+    if (hasOov) {
+      return List.of();
+    }
+
     return known.stream()
       .sorted(Comparator.comparingInt(term -> docFreq.getOrDefault(term, 0)))
       .limit(Math.min(3, known.size()))
@@ -64,18 +69,70 @@ final class RagQueryTerms {
   }
 
   /**
+   * Rare enough to count as topical grounding (not fairy-tale stopword noise).
+   */
+  static int maxRareDocFreq(final int docCount) {
+    return Math.max(2, docCount / 10);
+  }
+
+  /**
    * Many distinct query tokens never appear in the corpus — e.g. a coding request against a
    * fairy-tale index. Pure DF/OOV ratio; no language word lists.
+   *
+   * <p>Contentful OOV tokens (length ≥ 5, no inflection hit) reject the query unless another
+   * query token is rare in the corpus (e.g. {@code Paris}/{@code France} keeps a capitals-style
+   * ask; lone {@code estonia} with only {@code think}/{@code about} does not).
    */
   static boolean queryOutsideCorpus(final Map<String, Integer> docFreq,
+                                    final int docCount,
                                     final List<String> rawDistinct) {
     requireNonNull(docFreq, "docFreq");
     requireNonNull(rawDistinct, "rawDistinct");
+    if (rawDistinct.isEmpty() || docCount <= 0) {
+      return false;
+    }
+    if (hasUngroundedContentfulOov(docFreq, docCount, rawDistinct)) {
+      return true;
+    }
     if (rawDistinct.size() < 4) {
       return false;
     }
     long unknown = rawDistinct.stream().filter(term -> docFreq.getOrDefault(term, 0) == 0).count();
     return unknown >= 2 && unknown * 2 >= rawDistinct.size();
+  }
+
+  private static boolean hasUngroundedContentfulOov(
+    final Map<String, Integer> docFreq,
+    final int docCount,
+    final List<String> rawDistinct
+  ) {
+    boolean contentfulOov = rawDistinct.stream().anyMatch(term -> isContentfulOov(docFreq, term));
+    if (!contentfulOov) {
+      return false;
+    }
+    return !hasRareKnownContent(docFreq, docCount, rawDistinct);
+  }
+
+  private static boolean hasRareKnownContent(
+    final Map<String, Integer> docFreq,
+    final int docCount,
+    final List<String> rawDistinct
+  ) {
+    int rareDf = maxRareDocFreq(docCount);
+    return rawDistinct.stream()
+      .flatMap(term -> PassagePreparser.tokenize(term).stream())
+      .anyMatch(key -> {
+        int df = docFreq.getOrDefault(key, 0);
+        return key.length() >= 4 && df > 0 && df <= rareDf;
+      });
+  }
+
+  private static boolean isContentfulOov(final Map<String, Integer> docFreq, final String term) {
+    if (term.length() < 5 || docFreq.getOrDefault(term, 0) > 0) {
+      return false;
+    }
+    return PassagePreparser.tokenize(term).stream()
+      .noneMatch(key -> docFreq.getOrDefault(key, 0) > 0);
   }
 
   static boolean queryTooBroadForCorpus(final int rawDistinctTerms,
