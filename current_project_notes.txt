@@ -61,7 +61,7 @@
 
 
 ## 7. Useful References
-- `description.md` — how it works; `README.md` — build/download/CLI/RAG/library
+- `README.md` — build/download/CLI/library samples audited (GGUF, streaming, subagents, RAG follow-ups, Example menu Qwen/Gemma/LFM)
 - Demo GIF: `assets/java_nano_llvm_session_1.gif` (README RAG section)
 - Build: `mvn -q test` / `MAVEN_OPTS="-Xmx8g" mvn -q exec:java -Dexec.mainClass=com.igormaznitsa.nanollvm.Example`
 - LFM2: `./models/download-lfm2.5-2.6b-gguf.sh` then `mvn -q exec:java -Dexec.args=models/LFM2.5-2.6B-Q4_K_M.gguf`

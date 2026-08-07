@@ -20,9 +20,10 @@ For a guided tour of the design (scheduler, attention, tensors, RAG), see [`desc
 - Continuous batching scheduler with paged KV cache and prefix caching
 - **Qwen3** (default), **Gemma3**, and **LFM2** (hybrid short-conv + GQA) causal LMs
 - Loads HF `config.json` + `.safetensors`, or a single **`.gguf`** file (dequantized to float32)
-- Optional multi-thread CPU matmul (`cpuThreads`); defaults to `Runtime.availableProcessors()` for all models
+- Optional multi-thread CPU matmul (`cpuThreads`); defaults to `Runtime.availableProcessors()`
 - GPT-2 byte BPE, Gemma Metaspace BPE, and GGUF-embedded tokenizers
 - Optional **BM25 text RAG** over a local `rag/` corpus (used automatically by the Example CLI)
+- Optional **subagent** advisors before each chat/RAG turn (`LLM.setSubagents`)
 
 ## Requirements
 
@@ -68,6 +69,9 @@ On the module path:
 requires com.igormaznitsa.nanollvm;
 ```
 
+Public API packages: `models`, `llm`, `chat`, `rag`, `tokenizer`, `prompts`, `utils`, `exceptions`.
+Loaders / GGUF / inference slot maps live in `internal` (used by `ModelFactory`; not a stable app API).
+
 ## Download and load models
 
 Weights are **not** committed to git. They live under the project-root `models/` directory (see [
@@ -94,9 +98,7 @@ safetensors, and constructs the tokenizer. Architecture is inferred from `model_
 
 A single `.gguf` file is also valid. Example: LiquidAI [LFM2.5-2.6B-GGUF](https://huggingface.co/LiquidAI/LFM2.5-2.6B-GGUF)
 `Q4_K_M` (~1.67 GB on disk). Weights are **dequantized to float32** at load (~10 GB weights alone; plan on
-**~16 GB heap** with KV/JVM) and run on the same CPU kernels; there is no quantized matmul path. For GGUF, dense
-matmul defaults to **`Runtime.availableProcessors()`**
-(`LLM.Builder.cpuThreads(N)` / `.allCpuThreads()`, or `-Dnanovllm.cpu.threads=N`).
+**~16 GB heap** with KV/JVM) and run on the same CPU kernels; there is no quantized matmul path.
 
 ```bash
 ./models/download-lfm2.5-2.6b-gguf.sh
@@ -126,7 +128,9 @@ export HF_TOKEN=hf_…   # or: huggingface-cli login
 ./models/download-gemma3-270m.sh
 ```
 
-**Windows:** `.\models\download-qwen3-0.6b.ps1` / `.cmd` and the matching Gemma scripts.
+**LFM2.5 GGUF** — see [GGUF (LFM2)](#gguf-lfm2) above.
+
+**Windows:** `.\models\download-qwen3-0.6b.ps1` / `.cmd` and the matching Gemma / LFM scripts under `models/`.
 
 You can also point the engine at **any** local HF-style directory (your own path or another download).
 
@@ -149,8 +153,9 @@ The models root itself defaults to `./models`, overridable with `-Dnanovllm.mode
 | Models root        | `-Dnanovllm.models.dir=/opt/models`                                 |
 | Force architecture | `-Dnanovllm.arch=gemma3` (when auto-detect is wrong)                |
 | RAG corpus dir     | `-Dnanovllm.rag.dir=./docs` or `NANOVLLM_RAG_DIR` (default `./rag`) |
+| CPU matmul threads | `-Dnanovllm.cpu.threads=N` (default: all processors)                |
 
-If you start **without** any of (1)– (3), the Example CLI shows an interactive menu (Qwen / Gemma / exit).
+If you start **without** any of (1)–(3), the Example CLI shows an interactive menu (**Qwen3 / Gemma3 / LFM2 / Exit**).
 
 ## Run from the CLI
 
@@ -174,19 +179,28 @@ mvn -q exec:java -Dexec.args="models/Gemma3-270M"
 NANOVLLM_MODEL=models/Qwen3-0.6B mvn -q exec:java
 ```
 
-**RAG mode:** if the directory `rag/` exists (the repo includes sample fairy-tale texts and fact cards), Example builds
-a shared BM25 index and uses the `rag?>` prompt. Otherwise it uses plain chat (`?>`).
+**RAG mode:** if the directory `rag/` exists (the repo ships Grimm / Little Red Riding Hood `.txt` and fact cards),
+Example builds a shared BM25 index and uses the `rag?>` prompt. Otherwise it uses plain chat (`?>`).
 
-Example session:
+**Subagents (Example only):** after load, advisors are wired by architecture — **Gemma** 3 roles (PARALLEL), **Qwen**
+2 roles (PARALLEL), **LFM** none. Advisor notes appear on the thinking stream; grounded RAG mixes only Context-supported
+hints into the main prompt.
+
+Example session (ask about the demo corpus):
 
 ```text
 Loading model from …/models/Qwen3-0.6B
 RAG: prepared BM25 over …/rag (… chunks, shared index)
+Subagents: 2 (practical, abstract) PARALLEL for Qwen.
 Type a message and press Enter. Commands: /exit  /quit  /clear
 
-rag?> What does nano-vllm-java run on?
+rag?> who are the grimm brothers?
 assistant> …
-(retrieved 2 chunk(s): facts-….md)
+(retrieved 3 chunk(s): facts-brothers-grimm.md)
+
+rag?> who was their father?
+assistant> …
+(retrieved … chunk(s): …)
 
 rag?> /clear
 (conversation cleared; RAG index kept)
@@ -237,26 +251,27 @@ Second argument is the number of concurrent sequences (default `8`).
 
 ## Library quick start
 
-Load once, share `Model` across many `LLM` instances; generation is not concurrent on a single `LLM` (use one instance
-per thread or call sequentially).
+Load once, share `Model` across many `LLM` instances. One `LLM` is **not** safe for concurrent `generate` / chat —
+use one instance per thread, or call sequentially. `LLM.cancel()` is safe from another thread.
+
+### Chat, one-shot, and completion
 
 ```java
 import com.igormaznitsa.nanollvm.models.Model;
 import com.igormaznitsa.nanollvm.models.ModelFactory;
-import com.igormaznitsa.nanollvm.llm.EngineIo;
 import com.igormaznitsa.nanollvm.llm.LLM;
 import com.igormaznitsa.nanollvm.utils.BundledModels;
+
 import java.nio.file.Path;
 
 Path modelDir = BundledModels.resolveDefault(); // or Path.of("models/Qwen3-0.6B")
-Model model = ModelFactory.make(modelDir);      // quiet; use EngineIo.system() for progress
+Model model = ModelFactory.make(modelDir);      // quiet; ModelFactory.make(dir, EngineIo.system()) for progress
 
-try(
-LLM llm = LLM.builder(model)
+try (LLM llm = LLM.builder(model)
     .enforceEager(true)
     .maxModelLen(2048)
-    .systemPrompt("Answer briefly and factually.")
-    .build()){
+    .systemPrompt("Answer briefly and factually.") // Qwen-style; prefer .noSystemPrompt() on Gemma
+    .build()) {
 
   String reply = llm.chat(256).send("Hello.").answer();
   String once = llm.chatOnce("What is 2+2?");
@@ -264,21 +279,134 @@ LLM llm = LLM.builder(model)
 }
 ```
 
-**RAG:** index documents once (UTF-8 text/markup and `.pdf` via `PdfTextExtractor`), attach to any LLM:
+Path convenience (private `Model` inside the builder):
+
+```java
+import com.igormaznitsa.nanollvm.llm.LLM;
+import com.igormaznitsa.nanollvm.models.ModelFactory;
+
+import java.nio.file.Path;
+
+try (LLM llm = LLM.builder(Path.of("models/Qwen3-0.6B")).withSystemIo().build()) {
+  System.out.println(llm.chatOnce("Say hi in one sentence."));
+}
+```
+
+### GGUF / LFM2
 
 ```java
 import com.igormaznitsa.nanollvm.llm.EngineIo;
 import com.igormaznitsa.nanollvm.llm.LLM;
-import com.igormaznitsa.nanollvm.rag.*;
+import com.igormaznitsa.nanollvm.models.Model;
+import com.igormaznitsa.nanollvm.models.ModelFactory;
 
-PreparedRag rag = RagFactory.make(Path.of("rag"), RagLoadOptions.defaults(), EngineIo.system());
-// silent by default: RagFactory.make(Path.of("rag"));
-try(
-  LLM llm = LLM.builder(model).build()){
-  String answer = llm.rag(rag).topK(4).ask("Your question");
+import java.nio.file.Path;
+
+Model model = ModelFactory.make(Path.of("models/LFM2.5-2.6B-Q4_K_M.gguf"), EngineIo.system());
+try (LLM llm = LLM.builder(model)
+    .maxModelLen(2048)
+    .allCpuThreads()
+    .build()) {
+  System.out.println(llm.chatOnce("Hello"));
 }
 ```
 
-See [`description.md`](description.md) §17 and package `com.igormaznitsa.nanollvm.rag` for retrieval options.
-`PreparedRag` embeds BM25 and passage prep; prompt assembly uses `RagSession.formatUserMessage` (templates in
-`prompts.RagPrompts`).
+### Streaming chat
+
+```java
+try (LLM llm = LLM.builder(model).build()) {
+  llm.chat(256)
+      .streamTo(System.err, System.out, true)  // thinking → stderr, answer → stdout
+      .send("Explain paged KV cache in one short paragraph.");
+}
+```
+
+### Cancel and timeout
+
+```java
+import java.time.Duration;
+
+try (LLM llm = LLM.builder(model).build()) {
+  var chat = llm.chat(512).timeout(Duration.ofSeconds(30));
+  // from another thread while generate runs:
+  // llm.cancel();
+  chat.send("Write a long answer…");
+}
+```
+
+### Subagents
+
+Isolated advisor generates run **before** each chat/RAG turn (no history). Notes show on the thinking stream; for RAG
+hits, only Context-grounded notes are mixed into the main prompt.
+
+```java
+import com.igormaznitsa.nanollvm.llm.SubagentMode;
+import com.igormaznitsa.nanollvm.prompts.SubagentPrompts;
+
+try (LLM llm = LLM.builder(model).build()) {
+  llm.setSubagents(SubagentMode.PARALLEL, SubagentPrompts.demoRolesQwen());
+  // Gemma: SubagentPrompts.demoRolesGemma() — three roles
+  // Clear: llm.setSubagents();
+
+  System.out.println(llm.chat(256).send("Summarize the user question briefly.").answer());
+}
+```
+
+`PARALLEL` batches all advisors in one `generate`; `SEQUENTIAL` runs one generate per role (slower, same `LLM` lock).
+
+### Text RAG
+
+Index documents once (UTF-8 `.txt` / `.md` / … and `.pdf` via `PdfTextExtractor`), share `PreparedRag` across LLMs:
+
+```java
+import com.igormaznitsa.nanollvm.llm.EngineIo;
+import com.igormaznitsa.nanollvm.llm.LLM;
+import com.igormaznitsa.nanollvm.rag.PreparedRag;
+import com.igormaznitsa.nanollvm.rag.RagFactory;
+import com.igormaznitsa.nanollvm.rag.RagLoadOptions;
+
+import java.nio.file.Path;
+
+PreparedRag rag = RagFactory.make(Path.of("rag")); // silent
+// progress: RagFactory.make(Path.of("rag"), RagLoadOptions.defaults(), EngineIo.system());
+// tiny models: RagFactory.make(Path.of("rag"), RagLoadOptions.forTinyModels());
+
+try (LLM llm = LLM.builder(model).build()) {
+  String answer = llm.rag(rag)
+      .topK(4)
+      .maxContextChars(3500)
+      .ask("Who are the Grimm brothers?");
+
+  var session = llm.rag(rag, 256).topK(3);
+  session.send("Who are the Grimm brothers?");
+  session.send("Who was their father?"); // short follow-up: rewrite / Prior fallback
+  System.out.println(session.lastHits());
+}
+```
+
+Inline corpus without files:
+
+```java
+PreparedRag rag = RagFactory.of(
+    "Paris is the capital of France.",
+    "Berlin is the capital of Germany.");
+```
+
+Retrieval is **lexical BM25** (no embedding model). Short anaphoric follow-ups may rewrite to keywords; if the rewrite
+returns `NONE`, the session falls back to Prior + follow-up instead of aborting. Off-topic queries with contentful
+out-of-vocabulary terms tend to yield no hits.
+
+See [`description.md`](description.md) §17 and package `com.igormaznitsa.nanollvm.rag`. Prompt wording lives in
+`prompts.RagPrompts`; `RagSession.formatUserMessage` builds the model-facing turn.
+
+## Further reading
+
+| Doc | Contents |
+|-----|----------|
+| [`description.md`](description.md) | Design tour: attention, tensors, scheduler, GGUF, call chain, RAG |
+| [`models/README.md`](models/README.md) | Download scripts and model layout |
+| [`rag/`](rag/) | Demo corpus (fairy tales + fact cards) |
+
+## License
+
+Apache License 2.0 — see [LICENSE](LICENSE) (or the badge at the top of this page).
