@@ -173,7 +173,7 @@ public final class GgufDequant {
       for (int block = 0; block < QK_K; block += 128) {
         for (int l = 0; l < 32; l++) {
           int is = l / 16;
-          int q1 = (ql[qlOff + l] & 0x0F) | (((qh[qhOff + l] >> 0) & 3) << 4);
+          int q1 = (ql[qlOff + l] & 0x0F) | ((qh[qhOff + l] & 3) << 4);
           int q2 = (ql[qlOff + l + 32] & 0x0F) | (((qh[qhOff + l] >> 2) & 3) << 4);
           int q3 = ((ql[qlOff + l] & 0xFF) >> 4) | (((qh[qhOff + l] >> 4) & 3) << 4);
           int q4 = ((ql[qlOff + l + 32] & 0xFF) >> 4) | (((qh[qhOff + l] >> 6) & 3) << 4);

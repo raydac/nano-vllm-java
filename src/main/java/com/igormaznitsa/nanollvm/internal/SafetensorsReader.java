@@ -105,9 +105,7 @@ public final class SafetensorsReader implements AutoCloseable {
     ByteBuffer buf = this.map.duplicate().order(ByteOrder.LITTLE_ENDIAN);
     buf.position((int) abs);
     switch (info.dtype) {
-      case "F32" -> {
-        buf.asFloatBuffer().get(data);
-      }
+      case "F32" -> buf.asFloatBuffer().get(data);
       case "F16" -> {
         short[] tmp = new short[numel];
         buf.asShortBuffer().get(tmp);
