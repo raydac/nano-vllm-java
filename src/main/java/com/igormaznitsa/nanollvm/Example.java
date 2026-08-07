@@ -5,6 +5,7 @@ import static com.igormaznitsa.nanollvm.utils.NanoVllmProps.PROP_COLOR;
 import static com.igormaznitsa.nanollvm.utils.NanoVllmProps.PROP_MODEL;
 
 import com.igormaznitsa.nanollvm.chat.ChatSession;
+import com.igormaznitsa.nanollvm.llm.EngineIo;
 import com.igormaznitsa.nanollvm.llm.LLM;
 import com.igormaznitsa.nanollvm.llm.SamplingParams;
 import com.igormaznitsa.nanollvm.rag.PreparedRag;
@@ -98,7 +99,7 @@ public final class Example {
       System.out.println("Preparing RAG corpus from " + root);
       RagLoadOptions options =
           tinyModel ? RagLoadOptions.forTinyModels() : RagLoadOptions.defaults();
-      return RagFactory.make(root, options);
+      return RagFactory.make(root, options, EngineIo.system());
     });
   }
 

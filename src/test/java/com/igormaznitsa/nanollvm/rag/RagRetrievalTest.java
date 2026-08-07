@@ -1,11 +1,18 @@
 package com.igormaznitsa.nanollvm.rag;
 
+import static java.nio.charset.StandardCharsets.UTF_8;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.igormaznitsa.nanollvm.llm.EngineIo;
+import java.io.ByteArrayOutputStream;
+import java.io.PrintStream;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.List;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 class RagRetrievalTest {
 
@@ -93,5 +100,38 @@ class RagRetrievalTest {
     assertTrue(rag.bm25().isOutsideCorpus("write a Java program without explanation"));
     assertFalse(rag.bm25().isOutsideCorpus("what are their names?"));
     assertFalse(rag.retrieve("Jacob Wilhelm Grimm brothers names", 2).isEmpty());
+  }
+
+  @Test
+  void cyrillicInflectionKeysMatchCaseVariantsWithoutExternalCorpus() {
+    PreparedRag rag = RagFactory.of(
+      RagLoadOptions.defaults(),
+      "Сказка о колобке и о бабе яге из русских народных сказок.");
+
+    assertFalse(rag.retrieve("колобок", 2).isEmpty());
+    assertFalse(rag.retrieve("Баба Яга", 2).isEmpty());
+  }
+
+  @Test
+  void ragLoadReportsPerFileExtractionStats(@TempDir final Path tempDir) throws Exception {
+    Path note = tempDir.resolve("notes.txt");
+    Files.writeString(note, "Paris is the capital of France.", UTF_8);
+
+    ByteArrayOutputStream err = new ByteArrayOutputStream();
+    PrintStream sink = new PrintStream(err, true, UTF_8);
+    EngineIo io = EngineIo.of(sink, sink);
+
+    PreparedRag prepared = RagFactory.builder()
+      .options(RagLoadOptions.forTinyModels())
+      .io(io)
+      .addFile(note)
+      .build();
+
+    String log = err.toString(UTF_8);
+    assertTrue(log.contains("notes.txt"));
+    assertTrue(log.contains("char(s)"));
+    assertTrue(log.contains("chunk(s)"));
+    assertTrue(log.contains("RAG ready"));
+    assertFalse(prepared.retrieve("Paris France capital", 1).isEmpty());
   }
 }

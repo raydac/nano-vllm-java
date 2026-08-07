@@ -12,5 +12,9 @@ target/
 models/Qwen3-0.6B/
 models/Gemma3-270M/
 models/*.gguf
+
+# Local-only / temporary RAG PDFs — demo corpus is .md/.txt only
+rag/*.pdf
+
 /current_project_notes.txt
 /.editorconfig

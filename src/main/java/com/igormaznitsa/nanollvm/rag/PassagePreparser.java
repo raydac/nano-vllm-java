@@ -96,11 +96,36 @@ public final class PassagePreparser {
     var matcher = TOKEN.matcher(text.toLowerCase(Locale.ROOT));
     while (matcher.find()) {
       String token = matcher.group();
-      if (token.length() > 1) {
-        tokens.add(token);
+      if (token.length() <= 1) {
+        continue;
       }
+      tokens.add(token);
+      addInflectionKeys(token, tokens);
     }
     return tokens;
+  }
+
+  /**
+   * Extra keys so Russian case endings still hit ({@code колобок} ↔ {@code колобке}).
+   * Applied only to Cyrillic tokens so English query-length heuristics stay stable.
+   */
+  private static void addInflectionKeys(final String token, final List<String> tokens) {
+    if (!isCyrillicToken(token)) {
+      return;
+    }
+    if (token.length() >= 4) {
+      tokens.add(token.substring(0, token.length() - 1));
+    }
+    if (token.length() >= 5) {
+      String prefix = token.substring(0, 5);
+      if (!prefix.equals(token)) {
+        tokens.add(prefix);
+      }
+    }
+  }
+
+  private static boolean isCyrillicToken(final String token) {
+    return token.chars().anyMatch(c -> c >= 0x0400 && c <= 0x04FF);
   }
 
   static Map<String, Integer> termFrequencies(final String text) {

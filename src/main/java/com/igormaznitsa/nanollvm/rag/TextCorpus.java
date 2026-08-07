@@ -3,6 +3,7 @@ package com.igormaznitsa.nanollvm.rag;
 import static java.nio.charset.StandardCharsets.UTF_8;
 import static java.util.Objects.requireNonNull;
 
+import com.igormaznitsa.nanollvm.llm.EngineIo;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.file.FileVisitResult;
@@ -22,13 +23,15 @@ import java.util.concurrent.atomic.AtomicInteger;
  * Immutable bag of {@link TextChunk}s built from strings, files, and/or a folder tree.
  *
  * <p>With preprocessing, documents become section-aware sentence passages; optional atomic
- * mode keeps one sentence per chunk for small models.
+ * mode keeps one sentence per chunk for small models. {@code .pdf} files are converted to
+ * plain text via {@link PdfTextExtractor} before chunking.
  */
 public final class TextCorpus {
 
   private static final Set<String> DEFAULT_EXTENSIONS = Set.of(
       ".txt", ".md", ".markdown", ".rst", ".csv", ".tsv", ".json", ".xml", ".html", ".htm",
-      ".properties", ".yml", ".yaml", ".log", ".java", ".kt", ".py", ".js", ".ts", ".css");
+    ".properties", ".yml", ".yaml", ".log", ".java", ".kt", ".py", ".js", ".ts", ".css",
+    ".pdf");
 
   private final List<TextChunk> chunks;
 
@@ -82,6 +85,8 @@ public final class TextCorpus {
     private boolean atomicSentences = false;
     private boolean dedupe = true;
     private Set<String> folderExtensions = DEFAULT_EXTENSIONS;
+    private EngineIo io = EngineIo.silent();
+    private Path reportRoot;
 
     private static String fingerprint(final String text) {
       return text.toLowerCase(Locale.ROOT).replaceAll("\\s+", " ").strip();
@@ -115,6 +120,14 @@ public final class TextCorpus {
 
     public Builder dedupe(final boolean dedupe) {
       this.dedupe = dedupe;
+      return this;
+    }
+
+    /**
+     * Progress sink for per-file load lines. {@code null} → {@link EngineIo#silent()}.
+     */
+    public Builder io(final EngineIo io) {
+      this.io = io == null ? EngineIo.silent() : io;
       return this;
     }
 
@@ -173,20 +186,28 @@ public final class TextCorpus {
         throw new IllegalArgumentException("not a regular file: " + path);
       }
       try {
-        String body = Files.readString(path, UTF_8);
+        String body = this.readFileText(path);
         String source = path.toString();
-        this.pending.addAll(TextChunker.split(
+        List<TextChunk> chunks = TextChunker.split(
             source,
             source,
             body,
             this.maxChunkChars,
             this.chunkOverlap,
             this.preprocess,
-            this.atomicSentences));
+          this.atomicSentences);
+        this.pending.addAll(chunks);
+        this.reportFileProcessed(path, body, chunks.size());
       } catch (IOException e) {
         throw new UncheckedIOException("failed to read " + path, e);
       }
       return this;
+    }
+
+    private String readFileText(final Path path) throws IOException {
+      return PdfTextExtractor.isPdf(path)
+        ? PdfTextExtractor.extract(path)
+        : Files.readString(path, UTF_8);
     }
 
     public Builder addFiles(Path... files) {
@@ -203,6 +224,8 @@ public final class TextCorpus {
       if (!Files.isDirectory(root)) {
         throw new IllegalArgumentException("not a directory: " + root);
       }
+      this.reportRoot = root;
+      this.io.infof("RAG scanning %s …%n", root);
       try {
         Files.walkFileTree(root, new SimpleFileVisitor<>() {
           @Override
@@ -227,6 +250,33 @@ public final class TextCorpus {
         throw new IllegalStateException("corpus has no non-blank chunks");
       }
       return new TextCorpus(prepared);
+    }
+
+    private void reportFileProcessed(final Path path, final String body, final int chunkCount) {
+      if (this.io.isSilent()) {
+        return;
+      }
+      int chars = body == null ? 0 : body.length();
+      this.io.infof("RAG %s: %d char(s) → %d chunk(s)%n",
+        this.displayPath(path), chars, chunkCount);
+      if (chars == 0) {
+        this.io.info("RAG warning: no text extracted from " + this.displayPath(path));
+      }
+    }
+
+    private String displayPath(final Path path) {
+      if (this.reportRoot != null) {
+        try {
+          Path relative = this.reportRoot.relativize(path);
+          if (relative.getNameCount() > 0) {
+            return relative.toString();
+          }
+        } catch (IllegalArgumentException ignored) {
+          // different roots — fall through
+        }
+      }
+      Path name = path.getFileName();
+      return name == null ? path.toString() : name.toString();
     }
 
     private List<TextChunk> dedupeChunks(final List<TextChunk> chunks) {

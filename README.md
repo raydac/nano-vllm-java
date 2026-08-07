@@ -263,13 +263,15 @@ LLM llm = LLM.builder(model)
 }
 ```
 
-**RAG:** index documents once, attach to any LLM:
+**RAG:** index documents once (UTF-8 text/markup and `.pdf` via `PdfTextExtractor`), attach to any LLM:
 
 ```java
+import com.igormaznitsa.nanollvm.llm.EngineIo;
 import com.igormaznitsa.nanollvm.llm.LLM;
 import com.igormaznitsa.nanollvm.rag.*;
 
-PreparedRag rag = RagFactory.make(Path.of("rag"));
+PreparedRag rag = RagFactory.make(Path.of("rag"), RagLoadOptions.defaults(), EngineIo.system());
+// silent by default: RagFactory.make(Path.of("rag"));
 try(
   LLM llm = LLM.builder(model).build()){
   String answer = llm.rag(rag).topK(4).ask("Your question");

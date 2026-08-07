@@ -2,6 +2,7 @@ package com.igormaznitsa.nanollvm.rag;
 
 import static java.util.Objects.requireNonNull;
 
+import com.igormaznitsa.nanollvm.llm.EngineIo;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
@@ -13,6 +14,7 @@ import java.util.Set;
  *
  * <p>Preprocessing is document-side only: section titles, sentence passages, load-time
  * preparsing (model vs search text, term frequencies), inverted BM25 — not user-reply rules.
+ * Pass {@link EngineIo#system()} to print per-file extraction stats while loading.
  */
 public final class RagFactory {
 
@@ -20,14 +22,23 @@ public final class RagFactory {
   }
 
   public static PreparedRag make(final Path folderOrFile) {
-    return make(folderOrFile, RagLoadOptions.defaults());
+    return make(folderOrFile, RagLoadOptions.defaults(), EngineIo.silent());
   }
 
   public static PreparedRag make(final Path folderOrFile, final RagLoadOptions options) {
+    return make(folderOrFile, options, EngineIo.silent());
+  }
+
+  public static PreparedRag make(
+    final Path folderOrFile,
+    final RagLoadOptions options,
+    final EngineIo io
+  ) {
     requireNonNull(folderOrFile, "folderOrFile");
     requireNonNull(options, "options");
+    EngineIo streams = io == null ? EngineIo.silent() : io;
     Path path = folderOrFile.toAbsolutePath().normalize();
-    TextCorpus.Builder corpus = TextCorpus.builder().apply(options);
+    TextCorpus.Builder corpus = TextCorpus.builder().apply(options).io(streams);
     if (Files.isDirectory(path)) {
       corpus.addFolder(path);
     } else if (Files.isRegularFile(path)) {
@@ -35,7 +46,7 @@ public final class RagFactory {
     } else {
       throw new IllegalArgumentException("path is not a file or directory: " + path);
     }
-    return seal(corpus.build(), path, options);
+    return seal(corpus.build(), path, options, streams);
   }
 
   public static PreparedRag of(String... texts) {
@@ -49,7 +60,7 @@ public final class RagFactory {
     for (String text : texts) {
       corpus.add(text);
     }
-    return seal(corpus.build(), null, options);
+    return seal(corpus.build(), null, options, EngineIo.silent());
   }
 
   public static PreparedRag of(final List<String> texts) {
@@ -60,10 +71,21 @@ public final class RagFactory {
     return new Builder();
   }
 
-  private static PreparedRag seal(final TextCorpus corpus, final Path sourceRoot,
-                                  final RagLoadOptions options) {
+  private static PreparedRag seal(
+    final TextCorpus corpus,
+    final Path sourceRoot,
+    final RagLoadOptions options,
+    final EngineIo io
+  ) {
     List<PreparedPassage> passages = PassagePreparser.prepare(corpus.chunks());
-    return new PreparedRag(passages, Bm25Index.buildPrepared(passages), sourceRoot, options);
+    PreparedRag prepared = new PreparedRag(
+      passages, Bm25Index.buildPrepared(passages), sourceRoot, options);
+    if (!io.isSilent()) {
+      io.infof("RAG ready: %d chunk(s)%s%n",
+        prepared.size(),
+        sourceRoot == null ? "" : " from " + sourceRoot);
+    }
+    return prepared;
   }
 
   public static final class Builder {
@@ -72,6 +94,7 @@ public final class RagFactory {
     private final TextCorpus.Builder corpus = TextCorpus.builder().apply(this.options);
     private Path sourceRoot;
     private boolean hasContent;
+    private EngineIo io = EngineIo.silent();
 
     public Builder options(final RagLoadOptions options) {
       if (this.hasContent) {
@@ -84,6 +107,15 @@ public final class RagFactory {
 
     public Builder forTinyModels() {
       return this.options(RagLoadOptions.forTinyModels());
+    }
+
+    /**
+     * Progress sink for per-file load lines. {@code null} → {@link EngineIo#silent()}.
+     */
+    public Builder io(final EngineIo io) {
+      this.io = io == null ? EngineIo.silent() : io;
+      this.corpus.io(this.io);
+      return this;
     }
 
     public Builder sourceRoot(final Path sourceRoot) {
@@ -130,7 +162,7 @@ public final class RagFactory {
     }
 
     public PreparedRag build() {
-      return seal(this.corpus.build(), this.sourceRoot, this.options);
+      return seal(this.corpus.build(), this.sourceRoot, this.options, this.io);
     }
 
     @Override

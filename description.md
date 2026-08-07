@@ -2862,8 +2862,9 @@ term, the list of documents that contain it. A query gathers the **union of cand
 only them (Okapi BM25 with standard $k_1$, $b$). Hits far below the best score are dropped so a weak second match does
 not pollute a short prompt.
 
-**In the code (load):** `RagFactory.make` / `of` / `builder` → `TextCorpus` → `PassagePreparser.prepare` →
-`Bm25Index.buildPrepared` → `PreparedRag`. Options live in `RagLoadOptions`.
+**In the code (load):** `RagFactory.make` / `of` / `builder` → `TextCorpus` (UTF-8 text/markup;
+`.pdf` via `PdfTextExtractor`) → `PassagePreparser.prepare` → `Bm25Index.buildPrepared` →
+`PreparedRag`. Options live in `RagLoadOptions`.
 
 ### Query path — one RAG turn
 
