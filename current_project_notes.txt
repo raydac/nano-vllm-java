@@ -19,7 +19,7 @@
 - Ch.10 GitHub math: keep config names (`rope_theta`, …) outside `$…$` / `$$…$$` (no `\texttt{…_…}` in math — MathJax error)
 - Prefer Stream API for filter/map/collect transforms in LLM/engine helpers; keep stateful schedule/prefill and tensor kernels imperative
 - `LLM` business methods (`generate`, `step`, drive loop, load/close) carry `//` stage comments for algorithm readability
-- **`engine.Transformer`** (was `ModelRunner`): named prepare → `CausalLM.forward` → logits → sample; owns per-LLM `KvCacheArena` (+ optional `ConvStateArena`); full class/method JavaDoc (ctors, `step`, prefill/decode prepare)
+- **`engine.Transformer`** (was `ModelRunner`): named prepare → `CausalLM.forward` → logits → sample; owns per-LLM `KvCacheArena` (+ optional `ConvStateArena`); Scheduler-depth class JavaDoc (role / prefill-vs-decode / call chain / lifecycle); method JavaDoc on ctors + all bricks; LLM-style `//` stage comments inside `step`, ctors, prefill/decode prepare, KV allocate
 - `engine.Scheduler` has full class/method JavaDoc (waiting/running, prefill-vs-decode, preemption, postprocess)
 - `tensor.Tensor` has full class/method JavaDoc (shape, offset/view, reshape sharing, data vs toFloatArray)
 - `FloatKernels` (+ scalar/vector backends, factory) JavaDoc: slice contract, SIMD main loop + scalar tail
@@ -70,7 +70,7 @@
 
 ## 4. Current Work In Progress
 - Educational docs: maintain academic-accessible English `description.md`
-- Engine readability: LLM / Transformer / Scheduler DSL pass done; `ModelRunner` renamed to `Transformer` (prepare → forward → logits → sample)
+- Engine readability: LLM / Transformer / Scheduler DSL pass done; `ModelRunner` renamed to `Transformer` (prepare → forward → logits → sample); Transformer JavaDoc + in-method `//` stages aligned with LLM/Scheduler style
 - RAG anti-hallucination stays domain-agnostic (prompt + length density, not filename conventions)
 
 
