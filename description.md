@@ -116,10 +116,9 @@ process): **Qwen3** and **Gemma3**. A third path loads **LFM2** from a **GGUF** 
 You usually need not care which; the program detects which files you pointed it at.
 
 **In the code:** architecture pick is `CausalLMFactory.detect` / `create` → `Qwen3ForCausalLM`,
-`Gemma3ForCausalLM`, or `Lfm2ForCausalLM`; GGUF entry is `ModelFactory` → `GgufModelLoader` / `GgufReader`; one
-next-token step is `Transformer.step` → `CausalLM.forward` / `computeLogits` →
-`Sampler.forward`
-(chapter 16).
+`Gemma3ForCausalLM`, or `Lfm2ForCausalLM`; GGUF entry is `ModelFactory` → `internal.GgufModelLoader` /
+`GgufReader`; one next-token step is `Transformer.step` → `CausalLM.forward` / `computeLogits` →
+`Sampler.forward` (chapter 16).
 
 ---
 
@@ -237,9 +236,9 @@ Think of a librarian preparing a reading desk:
 After this, the **learned shelves stay fixed**. Chat does not rewrite the model files. Only the notebooks and temporary
 worksheets change while answering.
 
-**In the code:** `ModelFactory.make` runs `CausalLMFactory` + `ModelLoader.loadModel` + `Tokenizer.fromPretrained`
-and seals weights into an immutable `Model`. Each `LLM` then allocates its own KV arena via `Transformer`
-(chapter 16).
+**In the code:** `ModelFactory.make` runs `CausalLMFactory` + `internal.ModelLoader.loadWeights` +
+`Tokenizer.fromPretrained` and seals weights into an immutable `Model`. Each `LLM` then allocates its own KV arena via
+`Transformer` (chapter 16).
 
 **Further reading:** Hub layout and `from_pretrained`-style folders are covered in Hugging Face
 [Transformers docs](https://huggingface.co/docs/transformers); this Java port is inspired
@@ -269,8 +268,8 @@ by [nano-vllm](https://github.com/GeeeekExplorer/nano-vllm) and the serving idea
 If loading failed halfway, you would have a building with missing furniture: some rooms empty, answers nonsense or
 crashes. A successful load means: **every expected shelf has its numbers**, dictionary ready, notebooks allocated.
 
-**In the code (shelves):** `ModelLoader.loadWeights` merges shards into a `WeightBag`; `CausalLMFactory.create`
-builds an immutable graph from that bag. Notebooks via per-`LLM` `KvCacheArena` bound into `Context` for
+**In the code (shelves):** `internal.ModelLoader.loadWeights` merges shards into a `WeightBag`; `CausalLMFactory.create`
+builds an immutable graph from that bag. Notebooks via per-`LLM` `KvCacheArena` bound into `internal.Context` for
 `Attention` (chapter 16).
 
 ### Why the first load feels slow and heavy
@@ -843,7 +842,7 @@ ids); encode/decode and `applyChatTemplate` live on `Tokenizer` (chapter 16).
 ## 7. Tensors and `*.safetensors` — parameters on disk
 
 The large files named `model.safetensors` or `model-00001-of-00003.safetensors` hold the **learned parameters** of the
-model. This project reads them with `SafetensorsReader` and copies them into the empty parameter buffers allocated from
+model. This project reads them with `internal.SafetensorsReader` and copies them into the empty parameter buffers allocated from
 `config.json`. Before the file format, it helps to fix what a **tensor** is — because every weight, every activation,
 and every intermediate result in chapters 8–11 is one.
 
@@ -998,9 +997,9 @@ in RAM, expect roughly **~2×** that payload for resident weights alone — plus
 > numeric payload. At load time this port widens elements to float32 and assembles them into a `WeightBag` used to
 > construct the immutable model graph.**
 
-**In the code:** `utils.SafetensorsReader` parses the file; `utils.ModelLoader.loadWeights` matches names (including
-packed `q_proj`/`k_proj`/`v_proj` → `qkv_proj`) and merges into `WeightBag`; `CausalLMFactory.create` builds the graph
-(chapter 16). Conceptual tensor definitions: chapter 10.
+**In the code:** `internal.SafetensorsReader` parses the file; `internal.ModelLoader.loadWeights` matches names
+(including packed `q_proj`/`k_proj`/`v_proj` → `qkv_proj`) and merges into `WeightBag`; `CausalLMFactory.create` builds
+the graph (chapter 16). Conceptual tensor definitions: chapter 10.
 
 **Further reading:** format overview in the
 [Safetensors documentation](https://huggingface.co/docs/safetensors); binary layout notes in the
@@ -1130,8 +1129,9 @@ Dense `VectorMath.linear` can split the output axis across workers. `LLM` defaul
 > HF layout), and wires an LFM2 hybrid graph — same float32 kernels as safetensors after load.**
 
 **In the code:** `internal.GgufReader` / `GgufDequant` / `GgufModelLoader`; `models.Lfm2ForCausalLM`; short-conv state in
-`engine.ConvStateArena` bound from `Transformer` via `Context`; tokenizer via `Tokenizer.fromGguf`; chat defaults via
-`ChatPrompts.systemFor(Tokenizer)` and `Tokenizer.invitesThinking()`; matmul workers via `VectorMath.configureCpuThreads`.
+`engine.ConvStateArena` bound from `Transformer` via `internal.Context`; tokenizer via `Tokenizer.fromGguf`; chat
+defaults via `ChatPrompts.systemFor(Tokenizer)` and `Tokenizer.invitesThinking()`; matmul workers via
+`VectorMath.configureCpuThreads`.
 
 **Further reading:** [GGUF format notes](https://github.com/ggml-org/ggml/blob/master/docs/gguf.md); Liquid
 [LFM2 blog](https://www.liquid.ai/blog/liquid-foundation-models-v2-our-second-series-of-generative-ai-models);
@@ -2241,8 +2241,8 @@ then this path for the **turn**:
 OPEN (once)
   ModelFactory#make (or LLM#builder(path) → make)
       → CausalLMFactory#detect / #create
-      → ModelLoader#loadWeights            (+ SafetensorsReader; merge into WeightBag)
-      → CausalLMFactory#create(hf, bag)    (immutable Qwen3/Gemma3 graph)
+      → internal.ModelLoader#loadWeights   (+ SafetensorsReader; merge into WeightBag)
+      → CausalLMFactory#create(hf, bag)    (immutable Qwen3/Gemma3/LFM2 graph)
       → Tokenizer#fromPretrained
   LLM#builder(Model) → LLM.Builder#build → LLM.<init>
       → Transformer.<init>                 (binds shared Model; allocates KvCacheArena)
@@ -2310,7 +2310,7 @@ ChatReply reply = llm.chat(256).send("What is 2+2?");
 |-----------------|--------------------------------------------------------------------|-----------------------------------------------------------|
 | Blueprint       | `Config.HfConfig#load` (via `ModelFactory`)                        | Read `config.json`                                        |
 | Empty graph     | `CausalLMFactory#detect` → `#create`                               | `Qwen3ForCausalLM` or `Gemma3ForCausalLM`                 |
-| Pour weights    | `ModelLoader#loadWeights` → `WeightBag` → `CausalLMFactory#create` | Merge shards; construct immutable graph                   |
+| Pour weights    | `internal.ModelLoader#loadWeights` → `WeightBag` → `CausalLMFactory#create` | Merge shards; construct immutable graph                   |
 | Seal            | (graph is immutable at construction)                               | No post-load weight mutation                              |
 | Dictionary      | `Tokenizer#fromPretrained`                                         | `tokenizer.json` + chat template / stop ids               |
 | Blank notebooks | `Transformer` → `KvCacheArena`                                     | Per-`LLM` KV pages; bound into `Context` for `Attention`  |
@@ -2579,17 +2579,19 @@ You do not need to read every file. Use the tables to jump, then skim the named 
 
 | Folder / type                                                                          | Role in the story                                    |
 |----------------------------------------------------------------------------------------|------------------------------------------------------|
-| `LLM`, `LLM.Builder`, `Model`, `ModelFactory`, `EngineIo`, `SamplingParams`            | Front door; shared immutable Model; quiet vs CLI I/O |
+| `llm/` — `LLM`, `LLM.Builder`, `Config`, `EngineIo`, `SamplingParams`, `SubagentRunner` | Front door; quiet vs CLI I/O; optional subagents |
+| `models/Model`, `ModelFactory`, `WeightBag`                                          | Shared immutable loaded model + weight bag       |
 | `chat/` — `ChatSession`, `ChatMessage`, `ChatReply`, `AssistantParts`, `StreamPrinter` | Dialog, history, `<think>` split, streaming          |
-| `tokenizer/Tokenizer`                                                                  | `tokenizer.json` → encode / decode / chat template   |
-| `Config`, `Config.HfConfig`                                                            | `config.json` blueprint + per-LLM engine knobs       |
-| `utils/ModelLoader`, `utils/SafetensorsReader`, `utils/BundledModels`                  | Load weights; find default model dir                 |
+| `tokenizer/Tokenizer`                                                                  | `tokenizer.json` / GGUF vocab → encode / decode / chat template   |
+| `Config.HfConfig` (in `llm/Config`)                                                    | `config.json` blueprint + per-LLM engine knobs       |
+| `internal/ModelLoader`, `internal/SafetensorsReader`, `internal/Gguf*`                 | Load safetensors / GGUF weights into `WeightBag`     |
+| `utils/BundledModels`, `utils/BundledRag`, `utils/Json`                                | Find default model/RAG dirs; JSON helpers            |
 | `engine/Scheduler`, `Sequence`, `BlockManager`, `Transformer`, `KvCacheArena`          | Prefill/decode loop, pages, one forward+sample       |
-| `models/CausalLM`, `CausalLMFactory`, `Qwen3ForCausalLM`, `Gemma3ForCausalLM`          | Architecture graph                                   |
+| `models/CausalLM`, `CausalLMFactory`, `Qwen3ForCausalLM`, `Gemma3ForCausalLM`, `Lfm2ForCausalLM` | Architecture graph |
 | `layers/Attention`, `Sampler`, `Linear`, `Norms`, …                                    | Attention, sampling, projections, RMSNorm/RoPE       |
 | `tensor/Tensor`, `Ops`, `VectorMath`                                                   | Arrays and kernels                                   |
-| `prompts/ChatPrompts`                                                                  | Default system text (Qwen vs empty Gemma)            |
-| `rag/` — `RagFactory`, `PreparedRag`, `Bm25Index`, `RagSession`, …                     | Text RAG: prepare docs once, retrieve, chat          |
+| `prompts/ChatPrompts`, `RagPrompts`, `SubagentPrompts`                                 | Default system / RAG / advisor wording               |
+| `rag/` — `RagFactory`, `PreparedRag`, `RagSession`, …                                  | Text RAG: prepare docs once, retrieve, chat          |
 | `Example`, `Bench`                                                                     | Runnable demos                                       |
 
 ### Concept → class → methods
@@ -2603,13 +2605,13 @@ You do not need to read every file. Use the tables to jump, then skim the named 
 | Tokenize                         | `Tokenizer` (on `Model`)                                             | `Model.tokenizer()`; `encode`, `decode`, `applyChatTemplate(…, enableThinking)`                               |
 | Token embedding / RoPE / LM head | `VocabParallelEmbedding`, `Ops`, `RotaryEmbedding`, `ParallelLMHead` | `embedTokens.forward` → `Ops.embedding`; Gemma `scaleEmbed`; `RotaryEmbedding.forward`; tied or separate head |
 | Blueprint                        | `Config.HfConfig`                                                    | `HfConfig.load(config.json)`; `CausalLMFactory.detect/create`                                                 |
-| Pour weights                     | `ModelFactory`, `ModelLoader`, `WeightBag`, `CausalLMFactory`        | `loadWeights` → merge packed shards → `CausalLMFactory.create(hf, bag)`                                       |
+| Pour weights                     | `ModelFactory`, `internal.ModelLoader`, `WeightBag`, `CausalLMFactory` | `loadWeights` → merge packed shards → `CausalLMFactory.create(hf, bag)` |
 | One engine tick                  | `LLM.step`, `Scheduler`, `Transformer`                               | `schedule` → `Transformer.step` → `postprocess`                                                               |
 | Forward + sample                 | `Transformer`, `CausalLM`, `Sampler`                                 | `network.forward` → `computeLogits` → `sampler.forward`                                                       |
-| Attention + KV write             | `Attention`, `KvCacheArena`, `utils.Context`                         | `Context.bindKvCache`; `Attention.forward` by `layerIndex`; prefill/decode helpers                            |
+| Attention + KV write             | `Attention`, `KvCacheArena`, `internal.Context`                      | `Context.bindKvCache`; `Attention.forward` by `layerIndex`; prefill/decode helpers                            |
 | Pages / prefix reuse             | `BlockManager`                                                       | `canAllocate`, `allocate`, `hashBlocks`, `mayAppend`                                                          |
 | Split thinking UI                | `AssistantParts`, `ChatReply`                                        | `AssistantParts.parse`, `salvageFromThinking`                                                                 |
-| Text RAG (prepare + retrieve)    | `RagFactory`, `PreparedRag`, `Bm25Index`, `RagSession`               | `RagFactory.make` → `llm.rag(prepared).send(…)` (chapter 17)                                                  |
+| Text RAG (prepare + retrieve)    | `RagFactory`, `PreparedRag`, `RagSession`                               | `RagFactory.make` → `llm.rag(prepared).send(…)` (chapter 17)                                                  |
 | Math bricks                      | `Ops`                                                                | `linear`, `embedding`, `rmsNorm`, `siluAndMul` / `geluPytorchTanhAndMul`                                      |
 
 ### Sample A — library use (what most apps call)
@@ -2692,14 +2694,14 @@ That is the code behind “write notebooks at prefill; reread them at decode.”
 ```text
 ModelFactory.make(dir):
   Config loads HfConfig from config.json
-  ModelLoader.loadWeights(dir, hf, schema):
+  internal.ModelLoader.loadWeights(dir, hf, schema):
       for each *.safetensors name
           resolve packed q_proj/k_proj/… → qkv_proj (merge into WeightBag)
           SafetensorsReader.getTensor(name)  // BF16/F16 → float[]
-  CausalLMFactory.create(hf, weights) builds immutable Qwen3ForCausalLM or Gemma3ForCausalLM
+  CausalLMFactory.create(hf, weights) builds immutable Qwen3ForCausalLM, Gemma3ForCausalLM, or Lfm2ForCausalLM
   Tokenizer.fromPretrained(dir)
 LLM.builder(model).build():
-  Transformer allocates KvCacheArena (per LLM); Context.bindKvCache on each step
+  Transformer allocates KvCacheArena (per LLM); internal.Context.bindKvCache on each step
 ```
 
 ### Sample E — chat thinking path (Sense C)
@@ -2735,14 +2737,13 @@ MLP: `gateUpProj` → `Ops.siluAndMul` → `downProj` (Gemma uses `geluPytorchTa
 
 ```text
 RagFactory.make(docs) / .of(…) / .builder()…
-    → TextCorpus (+ TextPreprocessor / TextChunker)
-    → PassagePreparser.prepare          // model text vs search text, TF maps
-    → Bm25Index.buildPrepared           // inverted postings + IDF
-    → PreparedRag                       // shareable like Model
+    → CorpusLoader (chunk + Markdown cleanup)
+    → PreparedRag.fromChunks          // passage prep + inverted BM25 + IDF
+    → PreparedRag                     // shareable like Model
 
 llm.rag(prepared).topK(k).send(user)
-    → Bm25Index.retrieve                // score posting-list candidates only
-    → RagPrompt.format(hits, question)
+    → PreparedRag.retrieve            // BM25 + coverage/length re-rank
+    → RagSession.formatUserMessage(…) / UserMessage.format
     → ChatSession.sendPrepared(historyUser, modelUser)
 ```
 
@@ -2752,19 +2753,27 @@ Narrative and design notes: **chapter 17**.
 
 ```text
 src/main/java/com/igormaznitsa/nanollvm/
-  LLM.java                 ← start here for API
-  Example.java             ← start here for CLI chat / RAG demo
-  chat/ChatSession.java    ← dialog + thinking split
-  rag/RagFactory.java      ← prepare documents once
-  rag/PreparedRag.java     ← shareable index
-  rag/Bm25Index.java       ← inverted BM25 retrieve
-  rag/RagSession.java      ← retrieve → prompt → chat
-  engine/Transformer.java  ← forward + sample
-  engine/Scheduler.java    ← prefill/decode batches
-  layers/Attention.java    ← QKV cache + attendRange
-  models/Qwen3ForCausalLM.java / Gemma3ForCausalLM.java
+  Example.java                 ← start here for CLI chat / RAG demo
+  llm/LLM.java                 ← start here for API
+  llm/Config.java / EngineIo.java / SamplingParams.java
+  llm/SubagentRunner.java / SubagentPrompt.java / SubagentMode.java
+  chat/ChatSession.java        ← dialog + thinking split
+  rag/RagFactory.java          ← prepare documents once
+  rag/PreparedRag.java         ← shareable corpus + BM25 index (+ Passage record)
+  rag/RagSession.java          ← retrieve → prompt → chat (UserMessage, QueryRewrite)
+  rag/CorpusLoader.java        ← package-private load/chunk pipeline
+  rag/PdfTextExtractor.java
+  engine/Transformer.java      ← forward + sample
+  engine/Scheduler.java        ← prefill/decode batches
+  layers/Attention.java        ← QKV cache + attendRange
+  models/ModelFactory.java / CausalLMFactory.java
+  models/Qwen3ForCausalLM.java / Gemma3ForCausalLM.java / Lfm2ForCausalLM.java
   tokenizer/Tokenizer.java
-  utils/ModelLoader.java / SafetensorsReader.java
+  prompts/ChatPrompts.java / RagPrompts.java / SubagentPrompts.java
+  internal/ModelLoader.java / SafetensorsReader.java
+  internal/GgufModelLoader.java / GgufReader.java / GgufDequant.java
+  internal/Context.java        ← per-step KV / conv slot maps
+  utils/BundledModels.java / BundledRag.java / Json.java
 ```
 
 ### Threading reminder (API contract)
@@ -2819,52 +2828,38 @@ is short, the same model has a much better chance of quoting or paraphrasing the
 files / strings / folder
         │
         ▼
-  TextCorpus (+ TextChunker)
+  CorpusLoader (package-private)
         │  optional Markdown cleanup, section titles, sentence packing
         │  RagLoadOptions: maxChunkChars, atomicSentences, dedupe, …
         ▼
-  PassagePreparser.prepare
-        │  NFC normalize
-        │  modelText  = what the LLM will see
-        │  searchText = modelText + source-stem tokens (e.g. facts-capitals → capitals)
-        │  termFreqs  = pre-counted tokens for BM25
-        ▼
-  Bm25Index.buildPrepared
-        │  inverted postings: term → (docId, tf)…
-        │  precomputed IDF per term
+  PreparedRag.fromChunks
+        │  NFC normalize; model vs search text; source-stem tokens on searchText
+        │  termFreqs per passage; inverted postings + IDF (inside PreparedRag)
         ▼
   PreparedRag   (passages + index + options; share freely)
 ```
 
 #### Chunking and cleanup
 
-`TextPreprocessor` is **structural**, not linguistic policy: strip code fences and Markdown links, keep heading text as
+Load-time chunking is **structural**, not linguistic policy: strip code fences and Markdown links, keep heading text as
 a section label on following sentences (`Capitals — Paris is…`), split on sentence boundaries (including common CJK
 punctuation). It does **not** maintain dictionaries of user replies like “yes” / “no”.
 
-`TextChunker` turns passages into `TextChunk`s. With `atomicSentences` (see `RagLoadOptions.forTinyModels()`), each
-sentence stays its own chunk — better for tiny generators that drown in long context. Optional **dedupe** drops
-identical normalized passages.
+With `atomicSentences` (see `RagLoadOptions.forTinyModels()`), each sentence stays its own chunk — better for tiny
+generators that drown in long context. Optional **dedupe** drops identical normalized passages.
 
-#### Preparsing (quality and speed at load)
+#### Preparsing and BM25 (inside `PreparedRag`)
 
-`PassagePreparser` does the work you want done **before** anyone asks a question:
+At load, each passage gets:
 
 - **Unicode NFC** and whitespace cleanup for stable tokens.
-- **Split roles:** `modelText` stays readable for the prompt; `searchText` may include **file-name stems** so a query
-  about “capitals” can find `facts-capitals.md` even if the word appears only in the path.
-- **Term frequencies** are counted once per passage and stored on `PreparedPassage`.
+- **Split roles:** model-facing text stays readable for the prompt; **search** text may include **file-name stems** so a
+  query about “capitals” can find `facts-capitals.md` even if the word appears only in the path.
+- **Term frequencies** counted once per passage (`PreparedRag.Passage`).
+- **Inverted BM25:** posting lists per term; queries score only candidate docs (Okapi BM25; weak hits dropped).
 
-#### Inverted BM25 (speed at query)
-
-A naïve loop would score **every** passage against every query. This index instead builds **posting lists**: for each
-term, the list of documents that contain it. A query gathers the **union of candidates** from those lists and scores
-only them (Okapi BM25 with standard $k_1$, $b$). Hits far below the best score are dropped so a weak second match does
-not pollute a short prompt.
-
-**In the code (load):** `RagFactory.make` / `of` / `builder` → `TextCorpus` (UTF-8 text/markup;
-`.pdf` via `PdfTextExtractor`) → `PassagePreparser.prepare` → `Bm25Index.buildPrepared` →
-`PreparedRag`. Options live in `RagLoadOptions`.
+**In the code (load):** `RagFactory.make` / `of` / `builder` → `CorpusLoader` (UTF-8 text/markup;
+`.pdf` via `PdfTextExtractor`) → `PreparedRag.fromChunks`. Options live in `RagLoadOptions`.
 
 ### Query path — one RAG turn
 
@@ -2875,10 +2870,11 @@ user text
    │             retrieval query = prior turn + current   // structural only
    │
    ▼
-Bm25Index.retrieve(query, topK)  →  List<RagHit>
+PreparedRag.retrieve(query, topK)  →  List<RagHit>
    │
    ▼
-RagPrompt.format(hits, user text, maxContextChars, compact?)
+RagSession.formatUserMessage(hits, user text, maxContextChars, compact?)
+   │  (internal: UserMessage.format; wording in prompts.RagPrompts)
    │  compact (tiny chat models): question first, Context lines, then “answer from Context”
    │  no hits: “No context… Reply: I do not know” (blocks free hallucination)
    │  default: Context / Question + “do not invent… say you do not know”
@@ -2895,16 +2891,17 @@ ChatSession.sendPrepared(historyUser = original text,
 History keeps what the **human typed**. The **model** sees the retrieved passages on that turn. That split matters:
 the conversation log stays readable; the generator gets the cards.
 
-When competitive shorter passages exist, `RagRetrieval.preferCompactPassages` prefers them over long
-chapters — dense grounding without corpus-specific filename rules. Grounded turns also clamp sampling
+When several passages match, `PreparedRag.retrieve` re-ranks by query term coverage and passage length — dense
+grounding without corpus-specific filename rules. Grounded turns also clamp sampling
 temperature.
 
 Very short follow-ups (token **count**, not a word list) expand the **retrieval** string with the previous longer user
 turn so a one-word reply does not become a random lexical hunt through the corpus. The model still receives the current
 user text in history; chat context does the conversational work.
 
-**In the code (query):** `RagSession.send` → `RagIndex.retrieve` → `preferCompactPassages` → `RagPrompt.format` →
-`ChatSession.sendPrepared`. `LLM.rag(PreparedRag)` / `rag(index, maxTokens)` open the session.
+**In the code (query):** `RagSession.send` → `RagIndex.retrieve` → `RagSession.formatUserMessage` (or
+`UserMessage.format`) → `ChatSession.sendPrepared`. Short follow-ups may use nested `QueryRewrite` (isolated LLM
+keywords). `LLM.rag(PreparedRag)` / `rag(index, maxTokens)` open the session.
 
 ### How this works *with* the model
 
@@ -2999,8 +2996,8 @@ Short glossary. For the Java home of each idea, prefer the **In the code** notes
 | Weights               | Learned parameter tensors loaded from `.safetensors` or dequantized from `.gguf`                 |
 | Activations           | Ephemeral tensors produced during a forward pass                                                 |
 | RAG                   | Retrieval-augmented generation: look up documents, put them in the prompt, then generate         |
-| `PreparedRag`         | Immutable shareable corpus + BM25 index (load once, like `Model`)                                |
-| `PassagePreparser`    | Load-time split of model text vs search text + precomputed term frequencies                      |
+| `PreparedRag`         | Immutable shareable corpus + BM25 index (`Passage` record; load once, like `Model`)                |
+| `PreparedRag.Passage` | Load-time model text, search text, and term frequencies for one chunk                               |
 | BM25                  | Lexical ranking over passages (this project: inverted index, no embedding model)                 |
 | `RagSession`          | Retrieve → format prompt → `ChatSession.sendPrepared`                                            |
 
@@ -3067,6 +3064,6 @@ and format docs only.
 | Nucleus (top-p) sampling   | [Holtzman et al. (arXiv)](https://arxiv.org/abs/1904.09751)                                                                        |
 | Softmax                    | [Wikipedia](https://en.wikipedia.org/wiki/Softmax_function)                                                                        |
 | BM25 / Okapi ranking       | [Robertson & Zaragoza survey (PDF)](https://www.staff.city.ac.uk/~sbrp622/papers/foundations_bm25_review.pdf)                      |
-| Text RAG in this project   | (this guide ch. 17 — `RagFactory`, `PreparedRag`, inverted `Bm25Index`)                                                            |
+| Text RAG in this project   | (this guide ch. 17 — `RagFactory`, `PreparedRag`, `CorpusLoader`, `RagSession`)                     |
 
 ---

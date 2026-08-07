@@ -8,11 +8,10 @@ import com.igormaznitsa.nanollvm.prompts.RagPrompts;
 import com.igormaznitsa.nanollvm.prompts.SubagentPrompts;
 import com.igormaznitsa.nanollvm.tokenizer.Tokenizer;
 import java.util.ArrayList;
-import java.util.LinkedHashSet;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
-import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.IntStream;
 
@@ -23,6 +22,8 @@ import java.util.stream.IntStream;
 public final class SubagentPrompt {
 
   private static final Pattern TOKEN = Pattern.compile("[\\p{L}\\p{N}]+");
+  private static final int CONTENTFUL_MIN_LEN = 4;
+  private static final double GROUNDING_COVERAGE = 0.6;
 
   private SubagentPrompt() {
   }
@@ -50,43 +51,43 @@ public final class SubagentPrompt {
       throw new IllegalArgumentException("modelUserText must not be blank");
     }
 
-    List<ChatMessage> turn =
-      new ArrayList<>(ChatMessages.newConversation(groundedRole(rolePrompt)));
+    boolean ragNoHits = ragTurnWithoutHits(user);
+    List<ChatMessage> turn = new ArrayList<>(ChatMessages.newConversation(
+      SubagentPrompts.groundedRole(rolePrompt, ragNoHits)));
     turn.add(ChatMessage.user(user));
     return tokenizer.applyChatTemplate(ChatMessages.toTemplateMaps(turn), true, false);
   }
 
   /**
-   * Keeps slot alignment: blanks out abstentions and claims that are not supported by a Context
-   * block (after removing question words). When there is no Context section, answers pass through.
+   * Chooses which advisor notes may enter the main prompt.
+   *
+   * <ul>
+   *   <li>RAG no-hit — none (notes stay on the thinking stream only)</li>
+   *   <li>RAG with Context — drop abstentions and notes that are not lexically grounded in
+   *       Context</li>
+   *   <li>Plain chat — drop abstentions only</li>
+   * </ul>
    */
-  public static List<String> retainContextGrounded(
+  public static List<String> selectNotesForMix(
     final String modelUserText,
-    final List<String> answers
+    final List<String> notes
   ) {
     requireNonNull(modelUserText, "modelUserText");
-    requireNonNull(answers, "answers");
-    String base = modelUserText.strip();
-    if (!hasContextSection(base)) {
-      return answers.stream()
-        .map(answer -> answer == null ? "" : answer.strip())
-        .toList();
+    requireNonNull(notes, "notes");
+    if (ragTurnWithoutHits(modelUserText)) {
+      return List.of();
     }
 
-    Set<String> contextTerms = contentfulTerms(extractContextBlock(base));
-    Set<String> questionTerms = contentfulTerms(extractQuestion(base));
-    if (contextTerms.isEmpty()) {
-      return answers.stream().map(answer -> "").toList();
-    }
+    boolean withContext = hasContextSection(modelUserText);
+    Set<String> contextTerms = withContext
+      ? contentfulTerms(extractContextBlock(modelUserText))
+      : Set.of();
 
-    return answers.stream()
-      .map(answer -> {
-        String note = answer == null ? "" : answer.strip();
-        if (note.isEmpty() || isAbstention(note)) {
-          return "";
-        }
-        return isGroundedInContext(note, contextTerms, questionTerms) ? note : "";
-      })
+    return notes.stream()
+      .map(note -> note == null ? "" : note.strip())
+      .filter(note -> !note.isEmpty())
+      .filter(note -> !isAbstention(note))
+      .filter(note -> !withContext || isGroundedInContext(note, contextTerms))
       .toList();
   }
 
@@ -143,89 +144,102 @@ public final class SubagentPrompt {
     return Integer.toString(index + 1);
   }
 
+  static boolean ragTurnWithoutHits(final String modelUserText) {
+    if (modelUserText == null || modelUserText.isBlank()) {
+      return false;
+    }
+    return modelUserText.contains(RagPrompts.NO_CONTEXT_DOCUMENTS);
+  }
+
   static boolean isAbstention(final String note) {
-    return note != null && SubagentPrompts.ABSTAIN_REPLY.matcher(note.strip()).matches();
+    if (note == null) {
+      return false;
+    }
+    String stripped = note.strip();
+    if (SubagentPrompts.ABSTAIN_REPLY.matcher(stripped).matches()) {
+      return true;
+    }
+    String lower = stripped.toLowerCase(Locale.ROOT);
+    String abstain = RagPrompts.ABSTAIN_REPLY.toLowerCase(Locale.ROOT);
+    if (!lower.startsWith(abstain)) {
+      return false;
+    }
+    if (stripped.length() == abstain.length()) {
+      return true;
+    }
+    char next = stripped.charAt(abstain.length());
+    return next == '.' || next == '!' || next == '?' || Character.isWhitespace(next);
   }
 
   static boolean hasContextSection(final String modelUserText) {
+    if (ragTurnWithoutHits(modelUserText)) {
+      return false;
+    }
     String lower = modelUserText.toLowerCase(Locale.ROOT);
-    return lower.contains(RagPrompts.CONTEXT_HEADING.toLowerCase(Locale.ROOT))
-      || lower.contains(RagPrompts.NO_CONTEXT_DOCUMENTS.toLowerCase(Locale.ROOT));
+    return lower.contains(RagPrompts.CONTEXT_HEADING.toLowerCase(Locale.ROOT));
   }
 
   static String extractContextBlock(final String modelUserText) {
-    String lower = modelUserText.toLowerCase(Locale.ROOT);
-    String noCtx = RagPrompts.NO_CONTEXT_DOCUMENTS.toLowerCase(Locale.ROOT);
-    if (lower.contains(noCtx)) {
+    if (modelUserText == null || modelUserText.isBlank()) {
       return "";
     }
-    String ctxHeading = RagPrompts.CONTEXT_HEADING.toLowerCase(Locale.ROOT);
-    int ctx = lower.indexOf(ctxHeading);
-    if (ctx < 0) {
+    String heading = RagPrompts.CONTEXT_HEADING;
+    int start = indexOfIgnoreCase(modelUserText, heading);
+    if (start < 0) {
       return "";
     }
-    int start = ctx + ctxHeading.length();
+    int bodyStart = start + heading.length();
     int end = modelUserText.length();
     for (String marker : SubagentPrompts.CONTEXT_BLOCK_END_MARKERS) {
-      int at = modelUserText.indexOf(marker, start);
+      int at = modelUserText.indexOf(marker, bodyStart);
       if (at >= 0 && at < end) {
         end = at;
       }
     }
-    return modelUserText.substring(start, end).strip();
+    int questionAt = indexOfIgnoreCase(modelUserText, RagPrompts.QUESTION_HEADING, bodyStart);
+    if (questionAt >= 0 && questionAt < end) {
+      end = questionAt;
+    }
+    return modelUserText.substring(bodyStart, end).strip();
   }
 
-  static String extractQuestion(final String modelUserText) {
-    String lower = modelUserText.toLowerCase(Locale.ROOT);
-    String ctxHeading = RagPrompts.CONTEXT_HEADING.toLowerCase(Locale.ROOT);
-    int ctx = lower.indexOf("\n\n" + ctxHeading);
-    if (ctx < 0) {
-      ctx = lower.indexOf("\n" + ctxHeading);
-    }
-    if (ctx < 0) {
-      String qHeading = RagPrompts.QUESTION_HEADING.toLowerCase(Locale.ROOT);
-      int q = lower.indexOf(qHeading);
-      if (q >= 0) {
-        int start = q + qHeading.length();
-        int end = modelUserText.length();
-        int ctx2 = lower.indexOf(ctxHeading);
-        if (ctx2 > start) {
-          end = ctx2;
-        }
-        return modelUserText.substring(start, end).strip();
-      }
-      return modelUserText.strip();
-    }
-    return modelUserText.substring(0, ctx).strip();
-  }
-
-  static boolean isGroundedInContext(
-    final String claim,
-    final Set<String> contextTerms,
-    final Set<String> questionTerms
-  ) {
-    Set<String> claimTerms = contentfulTerms(claim);
-    claimTerms.removeAll(questionTerms);
-    if (claimTerms.isEmpty()) {
+  static boolean isGroundedInContext(final String note, final Set<String> contextTerms) {
+    if (contextTerms.isEmpty()) {
       return false;
     }
-    long overlap = claimTerms.stream().filter(contextTerms::contains).count();
-    int need = Math.max(1, (claimTerms.size() + 2) / 3);
-    return overlap >= need;
+    Set<String> noteTerms = contentfulTerms(note);
+    if (noteTerms.isEmpty()) {
+      return false;
+    }
+    long hit = noteTerms.stream().filter(contextTerms::contains).count();
+    return hit >= Math.max(1, (int) Math.ceil(noteTerms.size() * GROUNDING_COVERAGE));
   }
 
   static Set<String> contentfulTerms(final String text) {
     if (text == null || text.isBlank()) {
       return Set.of();
     }
-    Set<String> terms = new LinkedHashSet<>();
-    Matcher matcher = TOKEN.matcher(text.toLowerCase(Locale.ROOT));
+    Set<String> terms = new HashSet<>();
+    var matcher = TOKEN.matcher(text.toLowerCase(Locale.ROOT));
     while (matcher.find()) {
       String token = matcher.group();
-      if (token.length() >= 4) {
+      if (token.length() >= CONTENTFUL_MIN_LEN) {
         terms.add(token);
       }
     }
-    return terms;
+    return Set.copyOf(terms);
+  }
+
+  private static int indexOfIgnoreCase(final String haystack, final String needle) {
+    return indexOfIgnoreCase(haystack, needle, 0);
+  }
+
+  private static int indexOfIgnoreCase(
+    final String haystack,
+    final String needle,
+    final int fromIndex
+  ) {
+    return haystack.toLowerCase(Locale.ROOT)
+      .indexOf(needle.toLowerCase(Locale.ROOT), fromIndex);
   }
 }

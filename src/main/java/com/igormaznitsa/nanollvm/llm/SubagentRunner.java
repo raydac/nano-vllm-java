@@ -8,8 +8,9 @@ import com.igormaznitsa.nanollvm.tokenizer.Tokenizer;
 import java.util.List;
 
 /**
- * Runs configured LLM subagents on the same engine (no history, no UI stream) and mixes their
- * answers into the prepared user text for the main generate.
+ * Runs configured LLM subagents on the same engine (no history, no UI stream). Advisor notes
+ * appear on the thinking stream; only grounded, non-conflicting notes are mixed into the main
+ * user text as unverified hints.
  */
 public final class SubagentRunner {
 
@@ -21,7 +22,7 @@ public final class SubagentRunner {
 
   /**
    * When the LLM has no subagent prompts, returns {@code modelUserText} unchanged. Otherwise
-   * consults each subagent and appends advisor notes.
+   * consults each subagent and mixes their notes into the main prompt.
    */
   public static SubagentEnrichment enrich(
     final LLM llm,
@@ -45,11 +46,14 @@ public final class SubagentRunner {
     List<String> answers = llm.subagentMode() == SubagentMode.PARALLEL
       ? runParallel(llm, prompts, sampling)
       : runSequential(llm, prompts, sampling);
-    List<String> grounded = SubagentPrompt.retainContextGrounded(modelUserText, answers);
+    List<String> notes = answers.stream()
+      .map(answer -> answer == null ? "" : answer.strip())
+      .toList();
+    List<String> mixNotes = SubagentPrompt.selectNotesForMix(modelUserText, notes);
     return new SubagentEnrichment(
-      SubagentPrompt.mix(modelUserText, grounded, compact),
-      answers,
-      grounded);
+      SubagentPrompt.mix(modelUserText, mixNotes, compact),
+      notes,
+      mixNotes);
   }
 
   private static List<String> runParallel(

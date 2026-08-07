@@ -6,8 +6,10 @@ import com.igormaznitsa.nanollvm.chat.ChatReply;
 import com.igormaznitsa.nanollvm.chat.ChatSession;
 import com.igormaznitsa.nanollvm.llm.LLM;
 import com.igormaznitsa.nanollvm.llm.SamplingParams;
+import com.igormaznitsa.nanollvm.prompts.RagPrompts;
 import java.io.PrintStream;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.function.Consumer;
@@ -17,14 +19,16 @@ import java.util.function.Consumer;
  *
  * <p>History stores the original user text; the model sees a context-augmented last turn.
  * Short follow-ups with a prior turn are rewritten by an isolated LLM call into standalone
- * search keywords (or no retrieve when the model returns {@code NONE}). Short first turns and
- * longer standalone questions use the raw text for BM25. Without an LLM, retrieval falls back
- * to concatenating the previous longer user turn. Among competitive hits, shorter passages
- * are preferred so the prompt stays dense on any corpus. {@link #isolateGeneration(boolean)}
- * omits prior assistant answers from grounded (hit) generates only; no-hit turns keep
- * history so conversational follow-ups still work. Thinking is off by default so small
- * max-token budgets are not spent on {@code <think>} blocks. Grounded turns also clamp
- * sampling temperature. Not thread-safe.
+ * search keywords. Rewrite is skipped when the follow-up alone already retrieves hits; when the
+ * model returns {@code NONE} or empty, retrieval falls back to Prior+follow-up keywords instead
+ * of aborting. Off-topic follow-ups still skip retrieval via {@link RagIndex#isOutsideCorpus}.
+ * Short first turns and longer standalone questions use the raw text for BM25. Without an LLM,
+ * retrieval falls back to concatenating the previous longer user turn. {@link PreparedRag}
+ * re-ranks hits by term coverage and passage length at retrieve time.
+ * {@link #isolateGeneration(boolean)} omits prior assistant answers from grounded (hit) generates
+ * when on (default for Gemma). No-hit turns always isolate so prior corpus answers cannot latch.
+ * Thinking is off by default so small max-token budgets are not spent on {@code <think>} blocks.
+ * Grounded turns also clamp sampling temperature. Not thread-safe.
  *
  * <pre>{@code
  * PreparedRag rag = RagFactory.make(Path.of("docs"));
@@ -86,14 +90,13 @@ public final class RagSession {
     return this;
   }
 
-  /**
-   * When {@code true}, grounded turns (retrieval hits) see only the RAG-augmented user message,
-   * not earlier assistant replies — avoids tiny-model latch on prior answers. Defaults on for Gemma.
-   * Turns with no hits keep full chat history so follow-ups (“fix the method above”) still work.
-   */
-  public RagSession isolateGeneration(final boolean isolateGeneration) {
-    this.isolateGeneration = isolateGeneration;
-    return this;
+  public static String formatUserMessage(
+    final List<RagHit> hits,
+    final String question,
+    final int maxContextChars,
+    final boolean compact
+  ) {
+    return UserMessage.format(hits, question, maxContextChars, compact);
   }
 
   /**
@@ -156,30 +159,8 @@ public final class RagSession {
     this.lastRetrievalQuery = "";
   }
 
-  public ChatReply send(final String question) {
-    requireNonNull(question, "question");
-    String q = question.strip();
-    if (q.isEmpty()) {
-      throw new IllegalArgumentException("question must not be blank");
-    }
-
-    if (!this.hasCorpus()) {
-      this.lastHits = List.of();
-      this.lastRetrievalQuery = "";
-      return this.chat.send(q);
-    }
-
-    this.lastHits = this.retrieve(q);
-    this.updateAnchorAfterRetrieve(q);
-    if (!this.lastHits.isEmpty()) {
-      this.lastSource = this.lastHits.getFirst().chunk().source();
-    }
-
-    boolean compact = this.llm != null && this.llm.tokenizer().isGemmaChat();
-    String prompt = RagPrompt.format(this.lastHits, q, this.maxContextChars, compact);
-    this.applyTurnSampling();
-    boolean isolate = this.isolateGeneration && !this.lastHits.isEmpty();
-    return this.chat.sendPrepared(q, prompt, isolate);
+  public static String formatUserMessage(final List<RagHit> hits, final String question) {
+    return UserMessage.format(hits, question, Integer.MAX_VALUE, false);
   }
 
   private void applyTurnSampling() {
@@ -215,6 +196,42 @@ public final class RagSession {
     return this.index.size() != 0;
   }
 
+  /**
+   * When {@code true}, grounded turns (retrieval hits) see only the RAG-augmented user message,
+   * not earlier assistant replies — avoids tiny-model latch on prior answers. Defaults on for Gemma.
+   * No-hit turns always isolate regardless of this flag.
+   */
+  public RagSession isolateGeneration(final boolean isolateGeneration) {
+    this.isolateGeneration = isolateGeneration;
+    return this;
+  }
+
+  public ChatReply send(final String question) {
+    requireNonNull(question, "question");
+    String q = question.strip();
+    if (q.isEmpty()) {
+      throw new IllegalArgumentException("question must not be blank");
+    }
+
+    if (!this.hasCorpus()) {
+      this.lastHits = List.of();
+      this.lastRetrievalQuery = "";
+      return this.chat.send(q);
+    }
+
+    this.lastHits = this.retrieve(q);
+    this.updateAnchorAfterRetrieve(q);
+    if (!this.lastHits.isEmpty()) {
+      this.lastSource = this.lastHits.getFirst().chunk().source();
+    }
+
+    boolean compact = this.llm != null && this.llm.tokenizer().isGemmaChat();
+    String prompt = UserMessage.format(this.lastHits, q, this.maxContextChars, compact);
+    this.applyTurnSampling();
+    boolean isolate = this.lastHits.isEmpty() || this.isolateGeneration;
+    return this.chat.sendPrepared(q, prompt, isolate);
+  }
+
   private List<RagHit> retrieve(final String question) {
     Optional<String> retrievalQuery = this.resolveRetrievalQuery(question);
     if (retrievalQuery.isEmpty()) {
@@ -224,49 +241,273 @@ public final class RagSession {
     this.lastRetrievalQuery = retrievalQuery.get();
     int pool = Math.max(this.topK * 4, this.topK);
     List<RagHit> candidates = this.index.retrieve(this.lastRetrievalQuery, pool);
-    List<RagHit> grounded = RagRetrieval.preferCompactPassages(candidates, pool);
-    if (RagRetrieval.needsAnchor(question) && !this.lastSource.isEmpty()) {
-      return RagRetrieval.preferPriorSource(grounded, this.lastSource, this.topK);
+    if (Retrieval.shortFollowUp(question) && !this.lastSource.isEmpty()) {
+      candidates = Retrieval.preferPriorSource(candidates, this.lastSource, this.topK);
+    } else {
+      candidates = Retrieval.clip(candidates, this.topK);
     }
-    return grounded.size() <= this.topK
-      ? List.copyOf(grounded)
-      : List.copyOf(grounded.subList(0, this.topK));
+    return candidates;
   }
 
   private void updateAnchorAfterRetrieve(final String question) {
-    if (this.llm != null && RagRetrieval.needsRewrite(question)) {
+    if (this.llm != null && Retrieval.shortFollowUp(question)) {
       if (!this.lastHits.isEmpty() && !this.lastRetrievalQuery.isBlank()) {
         this.anchorQuery = this.lastRetrievalQuery;
       }
       return;
     }
-    if (RagRetrieval.shouldUpdateAnchor(question)) {
+    if (Retrieval.updatesAnchorFromQuestion(question)) {
       this.anchorQuery = question;
       return;
     }
-    if (this.llm == null && this.anchorQuery.isBlank() && !this.isOutsideCorpus(question)) {
+    if (this.llm == null && this.anchorQuery.isBlank() && !this.index.isOutsideCorpus(question)) {
       this.anchorQuery = question;
     }
   }
 
   private Optional<String> resolveRetrievalQuery(final String question) {
-    if (this.llm != null && RagRetrieval.needsRewrite(question) && !this.anchorQuery.isBlank()) {
-      return RagQueryRewrite.rewrite(this.llm, this.anchorQuery, question);
-    }
-    if (this.isOutsideCorpus(question)) {
+    if (this.index.isOutsideCorpus(question)) {
       return Optional.empty();
     }
+
+    boolean shortWithPrior = this.llm != null
+      && Retrieval.shortFollowUp(question)
+      && !this.anchorQuery.isBlank();
+
+    if (shortWithPrior) {
+      if (Retrieval.hasHits(this.index, question)) {
+        return Optional.of(question);
+      }
+      Optional<String> rewritten = QueryRewrite.rewrite(this.llm, this.anchorQuery, question);
+      return Retrieval.queryAfterRewrite(question, this.anchorQuery, rewritten, this.index);
+    }
+
     if (this.llm != null) {
       return Optional.of(question);
     }
-    return Optional.of(RagRetrieval.retrievalQuery(question, this.anchorQuery));
+    return Optional.of(Retrieval.anchorExpandedQuery(question, this.anchorQuery));
   }
 
-  private boolean isOutsideCorpus(final String question) {
-    return switch (this.index) {
-      case PreparedRag prepared -> prepared.bm25().isOutsideCorpus(question);
-      case Bm25Index bm25 -> bm25.isOutsideCorpus(question);
-      default -> false;
-    };
+  /**
+   * Formats retrieved passages plus the user question into one model-facing user message.
+   */
+  static final class UserMessage {
+
+    private UserMessage() {
+    }
+
+    static String format(
+      final List<RagHit> hits,
+      final String question,
+      final int maxContextChars,
+      final boolean compact
+    ) {
+      requireNonNull(hits, "hits");
+      requireNonNull(question, "question");
+      String q = question.strip();
+      if (q.isEmpty()) {
+        throw new IllegalArgumentException("question must not be blank");
+      }
+      if (maxContextChars < 64) {
+        throw new IllegalArgumentException("maxContextChars must be >= 64");
+      }
+
+      String context = truncateContext(hits, maxContextChars, compact);
+      if (context.isBlank()) {
+        return compact ? RagPrompts.compactNoHit(q) : RagPrompts.fullNoHit(q);
+      }
+      return compact ? RagPrompts.compactHit(q, context) : RagPrompts.fullHit(q, context);
+    }
+
+    private static String truncateContext(
+      final List<RagHit> hits,
+      final int maxContextChars,
+      final boolean compact
+    ) {
+      if (hits.isEmpty()) {
+        return "";
+      }
+      List<String> parts = new ArrayList<>();
+      int used = 0;
+      int n = 0;
+      for (RagHit hit : hits) {
+        n++;
+        String block = compact
+          ? "- " + hit.chunk().text().strip()
+          : "[%d] (%s)%n%s".formatted(n, hit.chunk().source(), hit.chunk().text().strip());
+        int next = used == 0 ? block.length() : used + 2 + block.length();
+        if (next > maxContextChars && used > 0) {
+          break;
+        }
+        if (block.length() > maxContextChars && used == 0) {
+          parts.add(block.substring(0, maxContextChars));
+          break;
+        }
+        parts.add(block);
+        used = next;
+      }
+      return String.join("\n", parts);
+    }
+  }
+
+  /**
+   * Isolated LLM rewrite of short RAG follow-ups into standalone search keywords.
+   */
+  static final class QueryRewrite {
+
+    private static final SamplingParams REWRITE_SAMPLING = new SamplingParams(0.1f, 48);
+    private static final java.util.regex.Pattern SEARCH_PREFIX =
+      java.util.regex.Pattern.compile("(?i)^\\s*(?:search\\s*:\\s*)?");
+    private static final java.util.regex.Pattern WRAP_QUOTES =
+      java.util.regex.Pattern.compile("^[\"'`]+|[\"'`]+$");
+
+    private QueryRewrite() {
+    }
+
+    static String userMessage(final String priorContext, final String followUp) {
+      requireNonNull(followUp, "followUp");
+      String follow = followUp.strip();
+      if (follow.isEmpty()) {
+        throw new IllegalArgumentException("followUp must not be blank");
+      }
+      String prior = priorContext == null ? "" : priorContext.strip();
+      if (prior.isEmpty()) {
+        return RagPrompts.rewriteStandalone(follow);
+      }
+      return RagPrompts.rewriteFollowUp(prior, follow);
+    }
+
+    static Optional<String> parse(final String rawModelText) {
+      if (rawModelText == null || rawModelText.isBlank()) {
+        return Optional.empty();
+      }
+      String answer = com.igormaznitsa.nanollvm.chat.AssistantParts.parse(rawModelText)
+        .answer().strip();
+      if (answer.isEmpty()) {
+        return Optional.empty();
+      }
+      String firstLine = answer.lines()
+        .map(String::strip)
+        .filter(line -> !line.isEmpty())
+        .findFirst()
+        .orElse("");
+      if (firstLine.isEmpty()) {
+        return Optional.empty();
+      }
+      String cleaned = WRAP_QUOTES.matcher(SEARCH_PREFIX.matcher(firstLine).replaceFirst(""))
+        .replaceAll("")
+        .strip();
+      if (cleaned.isEmpty()) {
+        return Optional.empty();
+      }
+      if ("none".equals(cleaned.toLowerCase(java.util.Locale.ROOT))) {
+        return Optional.empty();
+      }
+      if (cleaned.length() > 240) {
+        cleaned = cleaned.substring(0, 240).strip();
+      }
+      return Optional.of(cleaned);
+    }
+
+    static Optional<String> rewrite(
+      final LLM llm,
+      final String priorContext,
+      final String followUp
+    ) {
+      requireNonNull(llm, "llm");
+      String user = userMessage(priorContext, followUp);
+      List<com.igormaznitsa.nanollvm.chat.ChatMessage> turn =
+        List.of(com.igormaznitsa.nanollvm.chat.ChatMessage.user(user));
+      String prompt = llm.tokenizer().applyChatTemplate(
+        com.igormaznitsa.nanollvm.chat.ChatMessages.toTemplateMaps(turn), true, false);
+      String raw = llm.generate(List.of(prompt), REWRITE_SAMPLING).getFirst().text();
+      return parse(raw);
+    }
+  }
+
+  /**
+   * Short-follow-up retrieval helpers (package-visible for tests).
+   */
+  static final class Retrieval {
+
+    static final int SHORT_FOLLOW_UP_MAX_TOKENS = 6;
+
+    private static final double PRIOR_SOURCE_COMPETITIVE = 0.55;
+
+    private Retrieval() {
+    }
+
+    static boolean shortFollowUp(final String question) {
+      return PreparedRag.tokenize(question).size() < SHORT_FOLLOW_UP_MAX_TOKENS;
+    }
+
+    static boolean hasHits(final RagIndex index, final String query) {
+      requireNonNull(index, "index");
+      requireNonNull(query, "query");
+      return !index.retrieve(query, 1).isEmpty();
+    }
+
+    /**
+     * Chooses the BM25 string after an optional rewrite of a short follow-up.
+     * Prefer a usable rewrite; otherwise expand with Prior. Caller must already reject
+     * off-topic follow-ups via {@link RagIndex#isOutsideCorpus(String)}.
+     */
+    static Optional<String> queryAfterRewrite(
+      final String question,
+      final String anchor,
+      final Optional<String> rewritten,
+      final RagIndex index
+    ) {
+      requireNonNull(question, "question");
+      requireNonNull(index, "index");
+      if (rewritten != null
+        && rewritten.isPresent()
+        && !index.isOutsideCorpus(rewritten.get())) {
+        return rewritten;
+      }
+      return Optional.of(anchorExpandedQuery(question, anchor));
+    }
+
+    static boolean updatesAnchorFromQuestion(final String question) {
+      return !shortFollowUp(question);
+    }
+
+    static String anchorExpandedQuery(final String question, final String anchor) {
+      if (anchor == null || anchor.isBlank() || !shortFollowUp(question)) {
+        return question;
+      }
+      return anchor + '\n' + question;
+    }
+
+    static List<RagHit> preferPriorSource(
+      final List<RagHit> candidates,
+      final String priorSource,
+      final int topK
+    ) {
+      if (candidates.isEmpty()) {
+        return List.of();
+      }
+      if (priorSource == null || priorSource.isBlank()) {
+        return clip(candidates, topK);
+      }
+      List<RagHit> same = candidates.stream()
+        .filter(hit -> priorSource.equals(hit.chunk().source()))
+        .toList();
+      if (same.isEmpty()) {
+        return clip(candidates, topK);
+      }
+      double best = candidates.getFirst().score();
+      if (same.getFirst().score() >= best * PRIOR_SOURCE_COMPETITIVE) {
+        return clip(same, topK);
+      }
+      return clip(candidates, topK);
+    }
+
+    static List<RagHit> clip(final List<RagHit> hits, final int topK) {
+      if (hits.size() <= topK) {
+        return List.copyOf(hits);
+      }
+      return List.copyOf(hits.subList(0, topK));
+    }
   }
 }

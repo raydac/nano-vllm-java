@@ -8,16 +8,12 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import com.igormaznitsa.nanollvm.rag.Bm25Index;
-import com.igormaznitsa.nanollvm.rag.PassagePreparser;
-import com.igormaznitsa.nanollvm.rag.PreparedPassage;
 import com.igormaznitsa.nanollvm.rag.PreparedRag;
 import com.igormaznitsa.nanollvm.rag.RagFactory;
 import com.igormaznitsa.nanollvm.rag.RagHit;
 import com.igormaznitsa.nanollvm.rag.RagLoadOptions;
-import com.igormaznitsa.nanollvm.rag.RagPrompt;
+import com.igormaznitsa.nanollvm.rag.RagSession;
 import com.igormaznitsa.nanollvm.rag.TextChunk;
-import com.igormaznitsa.nanollvm.rag.TextCorpus;
 import java.nio.file.Path;
 import java.util.List;
 import org.junit.jupiter.api.Test;
@@ -26,7 +22,7 @@ class RagUnitTest {
 
   @Test
   void bm25PrefersMatchingString() {
-    Bm25Index index = Bm25Index.of(
+    PreparedRag index = RagFactory.of(
         "Paris is the capital of France.",
         "Berlin is a city in Germany.",
         "Tokyo is the capital of Japan.");
@@ -43,11 +39,11 @@ class RagUnitTest {
     writeString(a, "The Nile is a long river in Africa.");
     writeString(b, "Mount Everest is the highest mountain.");
     try {
-      Bm25Index fromFile = Bm25Index.fromFile(a);
+      PreparedRag fromFile = RagFactory.builder().addFile(a).build();
       assertEquals(1, fromFile.size());
       assertTrue(fromFile.retrieve("Nile river", 1).getFirst().chunk().text().contains("Nile"));
 
-      Bm25Index fromFolder = Bm25Index.fromFolder(dir);
+      PreparedRag fromFolder = RagFactory.make(dir);
       assertTrue(fromFolder.size() >= 2);
       assertTrue(fromFolder.retrieve("highest mountain", 1).getFirst().chunk().text()
           .contains("Everest"));
@@ -66,12 +62,11 @@ class RagUnitTest {
     writeString(file, "Mercury is the closest planet to the Sun.");
     writeString(nested, "Venus is the second planet from the Sun.");
     try {
-      TextCorpus corpus = TextCorpus.builder()
+      PreparedRag index = RagFactory.builder()
           .add("id-earth", "Earth is the third planet from the Sun.")
           .addFile(file)
           .addFolder(dir)
           .build();
-      Bm25Index index = Bm25Index.build(corpus);
       assertTrue(index.size() >= 3);
       assertTrue(index.retrieve("third planet", 1).getFirst().chunk().text().contains("Earth"));
     } finally {
@@ -83,9 +78,9 @@ class RagUnitTest {
 
   @Test
   void ragPromptIncludesContextAndQuestion() {
-    Bm25Index index = Bm25Index.of("Cats are mammals.");
+    PreparedRag index = RagFactory.of("Cats are mammals.");
     List<RagHit> hits = index.retrieve("mammals", 1);
-    String prompt = RagPrompt.format(hits, "What are cats?");
+    String prompt = RagSession.formatUserMessage(hits, "What are cats?");
     assertTrue(prompt.contains("Cats are mammals."));
     assertTrue(prompt.contains("What are cats?"));
     assertTrue(prompt.contains("Context:"));
@@ -93,9 +88,9 @@ class RagUnitTest {
 
   @Test
   void compactPromptPutsQuestionBeforePassages() {
-    Bm25Index index = Bm25Index.of("The Nile is a major river in Africa.");
+    PreparedRag index = RagFactory.of("The Nile is a major river in Africa.");
     List<RagHit> hits = index.retrieve("Nile", 1);
-    String prompt = RagPrompt.format(hits, "what is Nile?", 900, true);
+    String prompt = RagSession.formatUserMessage(hits, "what is Nile?", 900, true);
     assertTrue(prompt.contains("The Nile is a major river in Africa."));
     assertTrue(prompt.contains("what is Nile?"));
     assertTrue(prompt.indexOf("what is Nile?") < prompt.indexOf("The Nile is a major river"));
@@ -108,7 +103,7 @@ class RagUnitTest {
 
   @Test
   void compactNoHitPromptForbidsInvention() {
-    String prompt = RagPrompt.format(List.of(), "где живут ведьмы?", 900, true);
+    String prompt = RagSession.formatUserMessage(List.of(), "где живут ведьмы?", 900, true);
     assertTrue(prompt.contains("где живут ведьмы?"));
     assertTrue(prompt.contains("No context documents were found"));
     assertTrue(prompt.contains("I do not know"));
@@ -117,16 +112,16 @@ class RagUnitTest {
 
   @Test
   void groundedPromptForbidsInventingDetails() {
-    Bm25Index index = Bm25Index.of("Jacob Grimm was born in 1785.");
+    PreparedRag index = RagFactory.of("Jacob Grimm was born in 1785.");
     List<RagHit> hits = index.retrieve("Jacob Grimm born", 1);
-    String prompt = RagPrompt.format(hits, "When was Jacob born?");
+    String prompt = RagSession.formatUserMessage(hits, "When was Jacob born?");
     assertTrue(prompt.contains("Do not invent"));
     assertTrue(prompt.contains("say you do not know"));
   }
 
   @Test
   void relativeScoreFilterDropsWeakSecondHit() {
-    Bm25Index index = Bm25Index.of(
+    PreparedRag index = RagFactory.of(
         "Paris is the capital of France. France is a country in Europe.",
         "No CUDA kernels exist in this port of the engine.");
     List<RagHit> france = index.retrieve("france capital paris", 3);
@@ -152,12 +147,12 @@ class RagUnitTest {
         .options(RagLoadOptions.forTinyModels())
         .add("""
             # Capitals
-            
+
             Paris is the capital of France. Berlin is a city in Germany.
             """)
         .build();
-    assertFalse(prepared.corpus().chunks().isEmpty());
-    String joined = prepared.corpus().chunks().stream()
+    assertFalse(prepared.chunks().isEmpty());
+    String joined = prepared.chunks().stream()
         .map(TextChunk::text)
         .collect(java.util.stream.Collectors.joining(" "));
     assertTrue(joined.contains("Capitals —"));
@@ -176,11 +171,10 @@ class RagUnitTest {
 
   @Test
   void preparserInjectsSourceStemIntoSearchText() {
-    TextChunk chunk = new TextChunk(
-        "id",
-        "/docs/facts-capitals.md",
-        "Paris is the capital of France.");
-    PreparedPassage passage = PassagePreparser.prepareOne(chunk);
+    PreparedRag prepared = RagFactory.builder()
+      .add("facts-capitals.md", "Paris is the capital of France.")
+      .build();
+    PreparedRag.Passage passage = prepared.passages().getFirst();
     assertTrue(passage.searchText().contains("capitals"));
     assertTrue(passage.searchText().contains("facts"));
     assertTrue(passage.termFreqs().containsKey("paris"));

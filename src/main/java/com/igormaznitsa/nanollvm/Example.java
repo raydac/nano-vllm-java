@@ -1,5 +1,8 @@
 package com.igormaznitsa.nanollvm;
 
+import static com.igormaznitsa.nanollvm.models.WeightNames.ARCH_GEMMA3;
+import static com.igormaznitsa.nanollvm.models.WeightNames.ARCH_LFM2;
+import static com.igormaznitsa.nanollvm.models.WeightNames.ARCH_QWEN3;
 import static com.igormaznitsa.nanollvm.utils.NanoVllmProps.ENV_MODEL;
 import static com.igormaznitsa.nanollvm.utils.NanoVllmProps.PROP_COLOR;
 import static com.igormaznitsa.nanollvm.utils.NanoVllmProps.PROP_MODEL;
@@ -77,8 +80,6 @@ public final class Example {
       }
       System.out.println("Type a message and press Enter. Commands: /exit  /quit  /clear");
       System.out.println("Thinking → stderr (dim cyan); reply → stdout.");
-      System.out.println(
-        "Subagents: practical + abstract + consequence extractors (PARALLEL, Context-grounded).");
       System.out.println();
 
       boolean color = useColor();
@@ -89,7 +90,7 @@ public final class Example {
           .maxModelLen(2048)
           .withSystemIo()
           .build()) {
-        llm.setSubagents(SubagentMode.PARALLEL, SubagentPrompts.demoRoles());
+        configureDemoSubagents(llm);
         if (preparedRag.isPresent()) {
           runRagChat(in, llm, preparedRag.get(), color);
         } else {
@@ -97,6 +98,26 @@ public final class Example {
         }
       }
     }
+  }
+
+  static void configureDemoSubagents(final LLM llm) {
+    String arch = llm.model().architectureName();
+    if (ARCH_GEMMA3.equals(arch)) {
+      llm.setSubagents(SubagentMode.PARALLEL, SubagentPrompts.demoRolesGemma());
+      System.out.println(
+        "Subagents: 3 (practical, abstract, consequence) PARALLEL for Gemma.");
+      return;
+    }
+    if (ARCH_QWEN3.equals(arch)) {
+      llm.setSubagents(SubagentMode.PARALLEL, SubagentPrompts.demoRolesQwen());
+      System.out.println("Subagents: 2 (practical, abstract) PARALLEL for Qwen.");
+      return;
+    }
+    if (ARCH_LFM2.equals(arch)) {
+      System.out.println("Subagents: off for LFM.");
+      return;
+    }
+    System.out.println("Subagents: off (architecture " + arch + ").");
   }
 
   private static Optional<PreparedRag> loadPreparedRag(final boolean tinyModel) {

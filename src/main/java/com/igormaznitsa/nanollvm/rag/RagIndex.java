@@ -9,6 +9,13 @@ public interface RagIndex {
 
   List<RagHit> retrieve(final String query, final int topK);
 
+  /**
+   * When {@code true}, the query should skip retrieval (mostly OOV / off-topic for this index).
+   */
+  default boolean isOutsideCorpus(final String query) {
+    return false;
+  }
+
   default int size() {
     return -1;
   }

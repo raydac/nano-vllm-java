@@ -61,7 +61,7 @@ public final class RagFactory {
     requireNonNull(options, "options");
     EngineIo streams = io == null ? EngineIo.silent() : io;
     Path path = folderOrFile.toAbsolutePath().normalize();
-    TextCorpus.Builder corpus = TextCorpus.builder().apply(options).io(streams);
+    CorpusLoader.Builder corpus = CorpusLoader.builder().apply(options).io(streams);
     if (Files.isDirectory(path)) {
       corpus.addFolder(path);
     } else if (Files.isRegularFile(path)) {
@@ -90,7 +90,7 @@ public final class RagFactory {
   public static PreparedRag of(final RagLoadOptions options, String... texts) {
     requireNonNull(options, "options");
     requireNonNull(texts, "texts");
-    TextCorpus.Builder corpus = TextCorpus.builder().apply(options);
+    CorpusLoader.Builder corpus = CorpusLoader.builder().apply(options);
     for (String text : texts) {
       corpus.add(text);
     }
@@ -106,14 +106,12 @@ public final class RagFactory {
   }
 
   private static PreparedRag seal(
-    final TextCorpus corpus,
+    final List<TextChunk> chunks,
     final Path sourceRoot,
     final RagLoadOptions options,
     final EngineIo io
   ) {
-    List<PreparedPassage> passages = PassagePreparser.prepare(corpus.chunks());
-    PreparedRag prepared = new PreparedRag(
-      passages, Bm25Index.buildPrepared(passages), sourceRoot, options);
+    PreparedRag prepared = PreparedRag.fromChunks(chunks, sourceRoot, options);
     if (!io.isSilent()) {
       io.infof("RAG ready: %d chunk(s)%s%n",
         prepared.size(),
@@ -125,7 +123,7 @@ public final class RagFactory {
   public static final class Builder {
 
     private RagLoadOptions options = RagLoadOptions.defaults();
-    private final TextCorpus.Builder corpus = TextCorpus.builder().apply(this.options);
+    private final CorpusLoader.Builder corpus = CorpusLoader.builder().apply(this.options);
     private Path sourceRoot;
     private boolean hasContent;
     private EngineIo io = EngineIo.silent();

@@ -147,11 +147,6 @@ public final class ChatSession {
     if (printer != null) {
       printer.emitAdvisorNotes(enrichment.advisorNotes());
     }
-    if (enrichment.droppedUngroundedCount() > 0) {
-      this.diagnostics.accept(
-        "(dropped %d ungrounded subagent claim(s) from mix)".formatted(
-          enrichment.droppedUngroundedCount()));
-    }
 
     ChatReply reply = this.generateTurn(printer, enrichment.modelUserText(), isolateGeneration);
 

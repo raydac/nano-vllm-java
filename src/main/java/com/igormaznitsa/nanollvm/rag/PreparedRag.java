@@ -3,11 +3,17 @@ package com.igormaznitsa.nanollvm.rag;
 import static java.util.Objects.requireNonNull;
 
 import java.nio.file.Path;
+import java.text.Normalizer;
+import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.regex.Pattern;
 
 /**
  * Immutable, shareable RAG corpus: preparsed passages + inverted BM25 index.
@@ -16,24 +22,52 @@ import java.util.Set;
 public final class PreparedRag implements RagIndex {
 
   private static final double SHORT_PASSAGE_CHARS = 200.0;
+  private static final double K1 = 1.2;
+  private static final double B = 0.75;
 
-  private final List<PreparedPassage> passages;
-  private final TextCorpus corpus;
-  private final Bm25Index index;
+  private final List<Passage> passages;
+  private final List<TextChunk> chunks;
+  private final Map<String, List<Posting>> inverted;
+  private final Map<String, Double> idf;
+  private final Map<String, Integer> docFreq;
+  private final double avgDocLen;
+  private final int docCount;
   private final Path sourceRoot;
   private final RagLoadOptions options;
 
-  PreparedRag(
-      List<PreparedPassage> passages,
-      Bm25Index index,
-      Path sourceRoot,
-      RagLoadOptions options
+  private PreparedRag(
+    final List<Passage> passages,
+    final Map<String, List<Posting>> inverted,
+    final Map<String, Double> idf,
+    final Map<String, Integer> docFreq,
+    final double avgDocLen,
+    final Path sourceRoot,
+    final RagLoadOptions options
   ) {
     this.passages = List.copyOf(requireNonNull(passages, "passages"));
-    this.index = requireNonNull(index, "index");
+    this.inverted = Map.copyOf(inverted);
+    this.idf = Map.copyOf(idf);
+    this.docFreq = Map.copyOf(docFreq);
+    this.avgDocLen = avgDocLen;
+    this.docCount = this.passages.size();
     this.sourceRoot = sourceRoot;
     this.options = requireNonNull(options, "options");
-    this.corpus = TextCorpus.ofChunks(this.passages.stream().map(PreparedPassage::chunk).toList());
+    this.chunks = this.passages.stream().map(Passage::chunk).toList();
+  }
+
+  public static PreparedRag fromChunks(
+    final List<TextChunk> chunks,
+    final Path sourceRoot,
+    final RagLoadOptions options
+  ) {
+    requireNonNull(chunks, "chunks");
+    requireNonNull(options, "options");
+    List<Passage> prepared = PassagePrep.prepare(chunks);
+    return buildIndex(prepared, sourceRoot, options);
+  }
+
+  public static List<String> tokenize(final String text) {
+    return Lexicon.tokenize(text);
   }
 
   /**
@@ -45,7 +79,7 @@ public final class PreparedRag implements RagIndex {
     if (queryTerms.isEmpty()) {
       return 0.0;
     }
-    Set<String> passageTerms = new LinkedHashSet<>(Bm25Index.tokenize(passageText));
+    Set<String> passageTerms = new LinkedHashSet<>(PreparedRag.tokenize(passageText));
     long hit = queryTerms.stream().filter(passageTerms::contains).count();
     return hit / (double) queryTerms.size();
   }
@@ -61,16 +95,72 @@ public final class PreparedRag implements RagIndex {
     return hit.score() * coverage * density;
   }
 
-  public List<PreparedPassage> passages() {
+  private static PreparedRag buildIndex(
+    final List<Passage> passages,
+    final Path sourceRoot,
+    final RagLoadOptions options
+  ) {
+    if (passages.isEmpty()) {
+      throw new IllegalArgumentException("passages must not be empty");
+    }
+
+    Map<String, List<Posting>> inverted = new HashMap<>();
+    Map<String, Integer> docFreq = new HashMap<>();
+    long totalTokens = 0L;
+
+    for (int docId = 0; docId < passages.size(); docId++) {
+      Passage passage = passages.get(docId);
+      totalTokens += passage.tokenCount();
+      for (Map.Entry<String, Integer> entry : passage.termFreqs().entrySet()) {
+        String term = entry.getKey();
+        docFreq.merge(term, 1, Integer::sum);
+        inverted.computeIfAbsent(term, key -> new ArrayList<>())
+          .add(new Posting(docId, entry.getValue()));
+      }
+    }
+
+    Map<String, Double> idf = HashMap.newHashMap(docFreq.size());
+    int n = passages.size();
+    for (Map.Entry<String, Integer> entry : docFreq.entrySet()) {
+      int df = entry.getValue();
+      idf.put(entry.getKey(), Math.log(1.0 + (n - df + 0.5) / (df + 0.5)));
+    }
+
+    Map<String, List<Posting>> frozenPostings = HashMap.newHashMap(inverted.size());
+    for (Map.Entry<String, List<Posting>> entry : inverted.entrySet()) {
+      frozenPostings.put(entry.getKey(), List.copyOf(entry.getValue()));
+    }
+
+    double avg = totalTokens / (double) passages.size();
+    return new PreparedRag(
+      passages,
+      frozenPostings,
+      idf,
+      Map.copyOf(docFreq),
+      Math.max(avg, 1.0),
+      sourceRoot,
+      options
+    );
+  }
+
+  private static List<RagHit> keepStrongHits(final List<RagHit> scored, final int topK) {
+    if (scored.isEmpty()) {
+      return List.of();
+    }
+    double best = scored.getFirst().score();
+    double floor = best * 0.45;
+    return scored.stream()
+      .filter(hit -> hit.score() >= floor)
+      .limit(topK)
+      .toList();
+  }
+
+  public List<Passage> passages() {
     return this.passages;
   }
 
-  public TextCorpus corpus() {
-    return this.corpus;
-  }
-
-  public Bm25Index bm25() {
-    return this.index;
+  public List<TextChunk> chunks() {
+    return this.chunks;
   }
 
   public Optional<Path> sourceRoot() {
@@ -81,14 +171,21 @@ public final class PreparedRag implements RagIndex {
     return this.options;
   }
 
+  @Override
   public int size() {
-    return this.index.size();
+    return this.docCount;
+  }
+
+  @Override
+  public boolean isOutsideCorpus(final String query) {
+    List<String> raw = List.copyOf(new LinkedHashSet<>(PreparedRag.tokenize(query)));
+    return QueryTerms.queryOutsideCorpus(this.docFreq, this.docCount, raw);
   }
 
   @Override
   public List<RagHit> retrieve(final String query, final int topK) {
-    List<String> terms = this.index.selectedQueryTerms(query);
-    List<RagHit> hits = this.index.retrieve(query, Math.max(topK * 4, topK));
+    List<String> terms = this.selectedQueryTerms(query);
+    List<RagHit> hits = this.bm25Retrieve(query, Math.max(topK * 4, topK));
     return hits.stream()
         .map(hit -> new RagHit(hit.chunk(), groundedScore(hit, terms)))
         .sorted(Comparator
@@ -103,5 +200,405 @@ public final class PreparedRag implements RagIndex {
     return "PreparedRag{passages=%d, source=%s}".formatted(
         this.size(),
         this.sourceRoot == null ? "inline" : this.sourceRoot);
+  }
+
+  private List<String> selectedQueryTerms(final String query) {
+    return QueryTerms.select(this.docFreq, this.docCount, query);
+  }
+
+  private List<RagHit> bm25Retrieve(final String query, final int topK) {
+    requireNonNull(query, "query");
+    if (topK <= 0) {
+      throw new IllegalArgumentException("topK must be > 0");
+    }
+    List<String> terms = QueryTerms.select(this.docFreq, this.docCount, query);
+    if (terms.isEmpty()) {
+      return List.of();
+    }
+    int rawDistinct = new LinkedHashSet<>(PreparedRag.tokenize(query)).size();
+    if (QueryTerms.queryTooBroadForCorpus(rawDistinct, terms)) {
+      return List.of();
+    }
+
+    Set<Integer> candidates = new LinkedHashSet<>();
+    for (String term : terms) {
+      List<Posting> postings = this.inverted.get(term);
+      if (postings != null) {
+        for (Posting posting : postings) {
+          candidates.add(posting.docId());
+        }
+      }
+    }
+    if (candidates.isEmpty()) {
+      return List.of();
+    }
+
+    List<RagHit> scored = new ArrayList<>(candidates.size());
+    for (int docId : candidates) {
+      Passage passage = this.passages.get(docId);
+      if (!QueryTerms.qualifies(passage, terms)) {
+        continue;
+      }
+      double score = this.scoreDocument(docId, terms);
+      if (score > 0.0) {
+        scored.add(new RagHit(passage.chunk(), score));
+      }
+    }
+    scored.sort(Comparator.comparingDouble(RagHit::score).reversed());
+    return List.copyOf(keepStrongHits(scored, topK));
+  }
+
+  private double scoreDocument(final int docIndex, final List<String> queryTerms) {
+    Passage passage = this.passages.get(docIndex);
+    Map<String, Integer> tf = passage.termFreqs();
+    int docLen = passage.tokenCount();
+    double score = 0.0;
+    for (String term : queryTerms) {
+      int freq = tf.getOrDefault(term, 0);
+      if (freq == 0) {
+        continue;
+      }
+      double termIdf = this.idf.getOrDefault(term, 0.0);
+      double denom = freq + K1 * (1.0 - B + B * docLen / this.avgDocLen);
+      score += termIdf * (freq * (K1 + 1.0)) / denom;
+    }
+    return score;
+  }
+
+  private record Posting(int docId, int tf) {
+  }
+
+  public record Passage(
+    TextChunk chunk,
+    String searchText,
+    Map<String, Integer> termFreqs,
+    int tokenCount
+  ) {
+
+    public Passage {
+      requireNonNull(chunk, "chunk");
+      requireNonNull(searchText, "searchText");
+      termFreqs = Map.copyOf(requireNonNull(termFreqs, "termFreqs"));
+      if (tokenCount < 0) {
+        throw new IllegalArgumentException("tokenCount must be >= 0");
+      }
+    }
+
+    public String id() {
+      return this.chunk.id();
+    }
+
+    public String source() {
+      return this.chunk.source();
+    }
+
+    public String modelText() {
+      return this.chunk.text();
+    }
+  }
+
+  private static final class Lexicon {
+
+    private static final Pattern TOKEN = Pattern.compile("[\\p{L}\\p{N}]+");
+    private static final Pattern STEM_SPLIT = Pattern.compile("[^\\p{L}\\p{N}]+");
+
+    private Lexicon() {
+    }
+
+    static List<String> tokenize(final String text) {
+      List<String> tokens = new ArrayList<>();
+      var matcher = TOKEN.matcher(text.toLowerCase(Locale.ROOT));
+      while (matcher.find()) {
+        String token = matcher.group();
+        if (token.length() <= 1) {
+          continue;
+        }
+        tokens.add(token);
+        addInflectionKeys(token, tokens);
+      }
+      return tokens;
+    }
+
+    static Map<String, Integer> termFrequencies(final String text) {
+      Map<String, Integer> tf = new HashMap<>();
+      for (String token : tokenize(text)) {
+        tf.merge(token, 1, Integer::sum);
+      }
+      return Map.copyOf(tf);
+    }
+
+    private static void addInflectionKeys(final String token, final List<String> tokens) {
+      if (!isCyrillicToken(token)) {
+        return;
+      }
+      if (token.length() >= 4) {
+        tokens.add(token.substring(0, token.length() - 1));
+      }
+      if (token.length() >= 5) {
+        String prefix = token.substring(0, 5);
+        if (!prefix.equals(token)) {
+          tokens.add(prefix);
+        }
+      }
+    }
+
+    private static boolean isCyrillicToken(final String token) {
+      return token.chars().anyMatch(c -> c >= 0x0400 && c <= 0x04FF);
+    }
+
+    static String normalizeModelText(final String raw) {
+      if (raw == null || raw.isBlank()) {
+        return "";
+      }
+      String text = Normalizer.normalize(raw, Normalizer.Form.NFC);
+      return text.replace('\u00A0', ' ').replaceAll("\\s+", " ").strip();
+    }
+
+    static String buildSearchText(
+      final String modelText,
+      final String source,
+      final boolean includeSourceStems
+    ) {
+      StringBuilder search = new StringBuilder(stripSectionPrefix(modelText));
+      if (includeSourceStems) {
+        for (String stemToken : sourceStemTokens(source)) {
+          search.append(' ').append(stemToken);
+        }
+      }
+      return search.toString();
+    }
+
+    static String stripSectionPrefix(final String modelText) {
+      if (modelText == null || modelText.isBlank()) {
+        return "";
+      }
+      int sep = modelText.indexOf(" — ");
+      if (sep > 0 && sep <= 80) {
+        return modelText.substring(sep + 3).strip();
+      }
+      return modelText;
+    }
+
+    static List<String> sourceStemTokens(final String source) {
+      if (source == null || source.isBlank()) {
+        return List.of();
+      }
+      String name;
+      try {
+        Path fileName = Path.of(source).getFileName();
+        name = fileName == null ? source : fileName.toString();
+      } catch (RuntimeException e) {
+        name = source;
+      }
+      int dot = name.lastIndexOf('.');
+      if (dot > 0) {
+        name = name.substring(0, dot);
+      }
+      name = name.toLowerCase(Locale.ROOT);
+      List<String> tokens = new ArrayList<>();
+      for (String part : STEM_SPLIT.split(name)) {
+        if (part.length() > 1) {
+          tokens.add(part);
+        }
+      }
+      if (tokens.isEmpty() && name.length() > 1) {
+        tokens.add(name);
+      }
+      return List.copyOf(tokens);
+    }
+  }
+
+  private static final class PassagePrep {
+
+    private PassagePrep() {
+    }
+
+    static List<Passage> prepare(final List<TextChunk> chunks) {
+      requireNonNull(chunks, "chunks");
+      List<Passage> prepared = new ArrayList<>(chunks.size());
+      Set<String> sourcesWithStems = new LinkedHashSet<>();
+      for (TextChunk chunk : chunks) {
+        if (!chunk.isBlank()) {
+          prepared.add(prepareOne(chunk, sourcesWithStems.add(chunk.source())));
+        }
+      }
+      if (prepared.isEmpty()) {
+        throw new IllegalArgumentException("no non-blank passages to prepare");
+      }
+      return List.copyOf(prepared);
+    }
+
+    private static Passage prepareOne(final TextChunk chunk, final boolean includeSourceStems) {
+      requireNonNull(chunk, "chunk");
+      String modelText = Lexicon.normalizeModelText(chunk.text());
+      TextChunk normalized = new TextChunk(chunk.id(), chunk.source(), modelText);
+      String searchText = Lexicon.buildSearchText(modelText, chunk.source(), includeSourceStems);
+      Map<String, Integer> tf = Lexicon.termFrequencies(searchText);
+      int tokens = tf.values().stream().mapToInt(Integer::intValue).sum();
+      return new Passage(normalized, searchText, tf, tokens);
+    }
+  }
+
+  private static final class QueryTerms {
+
+    private static final int MAX_SELECTED_TERMS = 5;
+
+    private static final Set<String> FUNCTION_WORDS = Set.of(
+      "a", "an", "the", "and", "or", "but", "if", "then", "so", "as", "at", "by", "for",
+      "from", "in", "into", "of", "on", "to", "with", "without", "about", "over", "after",
+      "before", "between", "through", "during", "under", "again", "further",
+      "who", "what", "when", "where", "why", "how", "which", "whom", "whose",
+      "is", "are", "was", "were", "be", "been", "being", "am",
+      "do", "did", "does", "done", "doing",
+      "have", "has", "had", "having",
+      "can", "could", "would", "should", "may", "might", "must", "will", "shall",
+      "their", "they", "them", "theirs", "his", "her", "hers", "its", "itself",
+      "our", "ours", "your", "yours", "my", "mine", "myself", "yourself", "themselves",
+      "this", "that", "these", "those",
+      "i", "you", "he", "she", "we", "it", "me", "him", "us",
+      "not", "no", "nor", "too", "very", "just", "than", "also", "only", "own",
+      "there", "here", "such", "same", "both", "each", "few", "more", "most", "other",
+      "some", "any", "all", "once", "up", "down", "out", "off", "above", "below");
+
+    private QueryTerms() {
+    }
+
+    static List<String> select(
+      final Map<String, Integer> docFreq,
+      final int docCount,
+      final String query
+    ) {
+      requireNonNull(docFreq, "docFreq");
+      requireNonNull(query, "query");
+      if (docCount <= 0) {
+        return List.of();
+      }
+      List<String> rawDistinct = List.copyOf(new LinkedHashSet<>(PreparedRag.tokenize(query)));
+      if (rawDistinct.isEmpty()) {
+        return List.of();
+      }
+      if (queryOutsideCorpus(docFreq, docCount, rawDistinct)) {
+        return List.of();
+      }
+
+      List<String> known = rawDistinct.stream()
+        .filter(term -> !isFunctionWord(term))
+        .filter(term -> docFreq.getOrDefault(term, 0) > 0)
+        .toList();
+      if (known.isEmpty()) {
+        return List.of();
+      }
+
+      int maxDf = maxCommonDocFreq(docCount);
+      List<String> discriminative = known.stream()
+        .filter(term -> docFreq.getOrDefault(term, 0) <= maxDf)
+        .sorted(Comparator
+          .comparingInt((String term) -> docFreq.getOrDefault(term, 0))
+          .thenComparing(Comparator.comparingInt(String::length).reversed()))
+        .limit(MAX_SELECTED_TERMS)
+        .toList();
+      if (!discriminative.isEmpty()) {
+        return List.copyOf(discriminative);
+      }
+
+      boolean hasOov = rawDistinct.stream().anyMatch(term -> docFreq.getOrDefault(term, 0) == 0);
+      if (hasOov) {
+        return List.of();
+      }
+
+      return known.stream()
+        .sorted(Comparator.comparingInt(term -> docFreq.getOrDefault(term, 0)))
+        .limit(Math.min(3, known.size()))
+        .toList();
+    }
+
+    static boolean isFunctionWord(final String term) {
+      return term != null && FUNCTION_WORDS.contains(term);
+    }
+
+    static int maxCommonDocFreq(final int docCount) {
+      return Math.max(3, docCount / 2);
+    }
+
+    static int maxRareDocFreq(final int docCount) {
+      return Math.max(2, docCount / 10);
+    }
+
+    static boolean queryOutsideCorpus(
+      final Map<String, Integer> docFreq,
+      final int docCount,
+      final List<String> rawDistinct
+    ) {
+      requireNonNull(docFreq, "docFreq");
+      requireNonNull(rawDistinct, "rawDistinct");
+      if (rawDistinct.isEmpty() || docCount <= 0) {
+        return false;
+      }
+      if (hasUngroundedContentfulOov(docFreq, docCount, rawDistinct)) {
+        return true;
+      }
+      List<String> contentful = rawDistinct.stream()
+        .filter(term -> !isFunctionWord(term))
+        .toList();
+      if (contentful.size() < 4) {
+        return false;
+      }
+      long unknown = contentful.stream().filter(term -> docFreq.getOrDefault(term, 0) == 0).count();
+      return unknown >= 2 && unknown * 2 >= contentful.size();
+    }
+
+    static boolean queryTooBroadForCorpus(
+      final int rawDistinctTerms,
+      final List<String> selectedTerms
+    ) {
+      return rawDistinctTerms >= 3 && selectedTerms.isEmpty();
+    }
+
+    static boolean qualifies(final Passage passage, final List<String> selectedTerms) {
+      requireNonNull(passage, "passage");
+      requireNonNull(selectedTerms, "selectedTerms");
+      if (selectedTerms.isEmpty()) {
+        return false;
+      }
+      Set<String> passageTerms = new LinkedHashSet<>(passage.termFreqs().keySet());
+      long matched = selectedTerms.stream().filter(passageTerms::contains).count();
+      int need = Math.max(1, Math.min(2, (selectedTerms.size() + 1) / 2));
+      return matched >= need;
+    }
+
+    private static boolean hasUngroundedContentfulOov(
+      final Map<String, Integer> docFreq,
+      final int docCount,
+      final List<String> rawDistinct
+    ) {
+      boolean contentfulOov = rawDistinct.stream().anyMatch(term -> isContentfulOov(docFreq, term));
+      if (!contentfulOov) {
+        return false;
+      }
+      return !hasRareKnownContent(docFreq, docCount, rawDistinct);
+    }
+
+    private static boolean hasRareKnownContent(
+      final Map<String, Integer> docFreq,
+      final int docCount,
+      final List<String> rawDistinct
+    ) {
+      int rareDf = maxRareDocFreq(docCount);
+      return rawDistinct.stream()
+        .filter(term -> !isFunctionWord(term))
+        .flatMap(term -> PreparedRag.tokenize(term).stream())
+        .anyMatch(key -> {
+          int df = docFreq.getOrDefault(key, 0);
+          return key.length() >= 4 && df > 0 && df <= rareDf;
+        });
+    }
+
+    private static boolean isContentfulOov(final Map<String, Integer> docFreq, final String term) {
+      if (isFunctionWord(term) || term.length() < 5 || docFreq.getOrDefault(term, 0) > 0) {
+        return false;
+      }
+      return PreparedRag.tokenize(term).stream()
+        .noneMatch(key -> docFreq.getOrDefault(key, 0) > 0);
+    }
   }
 }

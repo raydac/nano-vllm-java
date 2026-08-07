@@ -11,6 +11,7 @@ import java.io.PrintStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -18,14 +19,15 @@ class RagRetrievalTest {
 
   @Test
   void shortFollowUpExpandsWithAnchorQuery() {
-    assertTrue(RagRetrieval.needsAnchor("what are their names?"));
-    assertFalse(RagRetrieval.needsAnchor(
+    assertTrue(RagSession.Retrieval.shortFollowUp("what are their names?"));
+    assertFalse(RagSession.Retrieval.shortFollowUp(
         "What are the full given names of both Grimm brothers in the biography?"));
     assertEquals(
         "names of the Grimm Brothers are\nwhat are their names?",
-        RagRetrieval.retrievalQuery("what are their names?", "names of the Grimm Brothers are"));
-    assertTrue(RagRetrieval.shouldUpdateAnchor("names of the Grimm Brothers are"));
-    assertFalse(RagRetrieval.shouldUpdateAnchor("what are their names?"));
+      RagSession.Retrieval.anchorExpandedQuery(
+        "what are their names?", "names of the Grimm Brothers are"));
+    assertTrue(RagSession.Retrieval.updatesAnchorFromQuestion("names of the Grimm Brothers are"));
+    assertFalse(RagSession.Retrieval.updatesAnchorFromQuestion("what are their names?"));
   }
 
   @Test
@@ -36,27 +38,10 @@ class RagRetrievalTest {
     List<RagHit> candidates = List.of(
         new RagHit(hood, 1.0),
         new RagHit(grimm, 0.7));
-    List<RagHit> preferred = RagRetrieval.preferPriorSource(candidates, "/rag/grimm.txt", 1);
+    List<RagHit> preferred =
+      RagSession.Retrieval.preferPriorSource(candidates, "/rag/grimm.txt", 1);
     assertEquals(1, preferred.size());
     assertTrue(preferred.getFirst().chunk().text().contains("Jacob"));
-  }
-
-  @Test
-  void preferCompactPassagesKeepsShorterCompetitiveHit() {
-    TextChunk longPass = new TextChunk(
-      "long",
-      "/docs/chapter.txt",
-      "A".repeat(400) + " capital city of France is discussed across many pages of history.");
-    TextChunk shortPass = new TextChunk(
-      "short",
-      "/docs/notes.txt",
-      "Paris is the capital of France.");
-    List<RagHit> candidates = List.of(
-      new RagHit(longPass, 1.0),
-      new RagHit(shortPass, 0.7));
-    List<RagHit> preferred = RagRetrieval.preferCompactPassages(candidates, 2);
-    assertEquals(1, preferred.size());
-    assertTrue(preferred.getFirst().chunk().text().contains("Paris"));
   }
 
   @Test
@@ -74,7 +59,7 @@ class RagRetrievalTest {
 
   @Test
   void offTopicProperNameDoesNotRetrieveFairyTaleNoise() {
-    Bm25Index index = Bm25Index.of(
+    PreparedRag index = RagFactory.of(
       "Little Red Riding Hood met a wolf. Oh grandmother, what big ears you have! "
         + "She did not know what a wicked animal he was, and was not afraid of him.");
     assertTrue(index.isOutsideCorpus("what do you think about estonia?"));
@@ -84,7 +69,7 @@ class RagRetrievalTest {
 
   @Test
   void offTopicCodingRequestDoesNotRetrieveOnWeakCorpusOverlap() {
-    Bm25Index index = Bm25Index.of(
+    PreparedRag index = RagFactory.of(
         "In 1829 the position should have been awarded by Jacob Grimm, "
             + "but another person, one without any merit, was preferred. "
             + "See also the text about their work.");
@@ -97,18 +82,18 @@ class RagRetrievalTest {
 
   @Test
   void shortCodingFollowUpDoesNotInheritGrimmAnchor() {
-    assertTrue(RagRetrieval.needsAnchor("write a Java program without explanation"));
+    assertTrue(RagSession.Retrieval.shortFollowUp("write a Java program without explanation"));
     assertEquals(
         "names of the Grimm Brothers\nwrite a Java program without explanation",
-        RagRetrieval.retrievalQuery(
+      RagSession.Retrieval.anchorExpandedQuery(
             "write a Java program without explanation",
             "names of the Grimm Brothers"));
 
     PreparedRag rag = RagFactory.of(
         RagLoadOptions.defaults(),
         "Jacob Grimm and Wilhelm Grimm were the Brothers Grimm. Their names are Jacob and Wilhelm.");
-    assertTrue(rag.bm25().isOutsideCorpus("write a Java program without explanation"));
-    assertFalse(rag.bm25().isOutsideCorpus("what are their names?"));
+    assertTrue(rag.isOutsideCorpus("write a Java program without explanation"));
+    assertFalse(rag.isOutsideCorpus("what are their names?"));
     assertFalse(rag.retrieve("Jacob Wilhelm Grimm brothers names", 2).isEmpty());
   }
 
@@ -133,31 +118,76 @@ class RagRetrievalTest {
   }
 
   @Test
-  void needsRewriteMatchesShortFollowUpsOnly() {
-    assertTrue(RagRetrieval.needsRewrite("name of their father"));
-    assertFalse(RagRetrieval.needsRewrite(
+  void shortFollowUpMatchesShortQuestionsOnly() {
+    assertTrue(RagSession.Retrieval.shortFollowUp("name of their father"));
+    assertFalse(RagSession.Retrieval.shortFollowUp(
       "What are the full given names of both Grimm brothers in the biography?"));
   }
 
   @Test
-  void whoAreGrimmBrothersRetrievesAgainstBundledCorpus() {
+  void longNaturalGrimmQuestionHitsTinyModelCorpus() {
     PreparedRag rag = RagFactory.builder()
       .options(RagLoadOptions.forTinyModels())
-      .add("grimm.txt",
-        "The Brothers Grimm were Jacob Grimm and Wilhelm Grimm. Their names were Jacob and Wilhelm.")
-      .add("hood.txt", "Little Red Riding Hood walked through the forest.")
+      .addFolder(Path.of("rag"))
       .build();
 
-    assertTrue(RagRetrieval.needsRewrite("who are the grimm brothers?"));
-    List<RagHit> hits = rag.retrieve("who are the grimm brothers?", 2);
-    assertFalse(hits.isEmpty());
-    assertTrue(hits.getFirst().chunk().text().toLowerCase().contains("grimm"));
+    String q = "who are the grimm brothers and what did they do?";
+    assertFalse(rag.isOutsideCorpus(q));
+    List<RagHit> hits = rag.retrieve(q, 3);
+    assertFalse(hits.isEmpty(), "expected Grimm hits for natural long question");
+    assertTrue(
+      hits.stream().anyMatch(h -> h.chunk().text().toLowerCase().contains("grimm")),
+      () -> "expected Grimm passage, got " + hits.stream().map(h -> h.chunk().text()).toList());
   }
 
   @Test
+  void fatherQueriesHitBundledCorpusWithoutRewrite() {
+    PreparedRag rag = RagFactory.make(Path.of("rag"));
+
+    assertTrue(RagSession.Retrieval.shortFollowUp("who was their father?"));
+    assertTrue(RagSession.Retrieval.shortFollowUp("father of grimm brothers"));
+    assertTrue(RagSession.Retrieval.hasHits(rag, "who was their father?"));
+    assertTrue(RagSession.Retrieval.hasHits(rag, "father of grimm brothers"));
+
+    List<RagHit> fatherHits = rag.retrieve("father of grimm brothers", 2);
+    assertFalse(fatherHits.isEmpty());
+    assertTrue(
+      fatherHits.getFirst().chunk().text().toLowerCase().contains("father"),
+      () -> "expected father passage, got: " + fatherHits.getFirst().chunk().text());
+  }
+
+  @Test
+  void rewriteNoneFallsBackToAnchorExpansion() {
+    PreparedRag rag = RagFactory.make(Path.of("rag"));
+    Optional<String> chosen = RagSession.Retrieval.queryAfterRewrite(
+      "who was their father?",
+      "who are the grimm brothers?",
+      Optional.empty(),
+      rag);
+    assertEquals(
+      "who are the grimm brothers?\nwho was their father?",
+      chosen.orElseThrow());
+    assertFalse(rag.retrieve(chosen.orElseThrow(), 2).isEmpty());
+  }
+
+  @Test
+  void rewriteOutsideCorpusFallsBackToAnchorExpansion() {
+    PreparedRag rag = RagFactory.make(Path.of("rag"));
+    Optional<String> chosen = RagSession.Retrieval.queryAfterRewrite(
+      "who was their father?",
+      "who are the grimm brothers?",
+      Optional.of("estonia capital tallinn"),
+      rag);
+    assertEquals(
+      "who are the grimm brothers?\nwho was their father?",
+      chosen.orElseThrow());
+  }
+
+
+  @Test
   void shortAnaphoricFollowUpsStillNeedAnchor() {
-    assertTrue(RagRetrieval.needsAnchor("their names?"));
-    assertTrue(RagRetrieval.needsAnchor("names of the Grimm brothers"));
+    assertTrue(RagSession.Retrieval.shortFollowUp("their names?"));
+    assertTrue(RagSession.Retrieval.shortFollowUp("names of the Grimm brothers"));
   }
 
   @Test

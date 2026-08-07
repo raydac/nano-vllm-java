@@ -5,8 +5,8 @@ import static java.util.Objects.requireNonNull;
 import java.util.List;
 
 /**
- * Result of the optional subagent pass: enriched user text, raw advisor answers for the thinking
- * stream, and Context-grounded notes that were actually mixed into the main prompt.
+ * Result of the optional subagent pass: enriched user text, raw advisor notes for the thinking
+ * stream, and the filtered notes actually mixed into the main prompt.
  */
 public record SubagentEnrichment(
   String modelUserText,
@@ -38,14 +38,5 @@ public record SubagentEnrichment(
       .map(note -> note == null ? "" : note.strip())
       .filter(note -> !note.isEmpty())
       .count();
-  }
-
-  public int droppedUngroundedCount() {
-    long raw = this.advisorNotes.stream()
-      .map(note -> note == null ? "" : note.strip())
-      .filter(note -> !note.isEmpty())
-      .filter(note -> !SubagentPrompt.isAbstention(note))
-      .count();
-    return (int) Math.max(0, raw - this.groundedMixedCount());
   }
 }

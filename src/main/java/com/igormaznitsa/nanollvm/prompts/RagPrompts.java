@@ -38,7 +38,8 @@ public final class RagPrompts {
   public static final String REWRITE_FOLLOW_UP = """
     Rewrite the follow-up as a short keyword search for a document index.
     Use Prior to resolve pronouns and missing names.
-    Reply with only the search keywords, or NONE if nothing can be searched.
+    Reply with only the search keywords.
+    Reply NONE only when the follow-up is unrelated to Prior.
 
     Prior: %s
     Follow-up: %s

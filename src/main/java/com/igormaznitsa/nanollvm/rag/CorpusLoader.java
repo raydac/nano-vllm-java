@@ -18,64 +18,28 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
- * Immutable bag of {@link TextChunk}s built from strings, files, and/or a folder tree.
- *
- * <p>With preprocessing, documents become section-aware sentence passages; optional atomic
- * mode keeps one sentence per chunk for small models. {@code .pdf} files are converted to
- * plain text via {@link PdfTextExtractor} before chunking.
+ * Loads strings, files, and folder trees into {@link TextChunk}s (preprocess + chunk). Used only
+ * from {@link RagFactory}.
  */
-public final class TextCorpus {
+final class CorpusLoader {
 
   private static final Set<String> DEFAULT_EXTENSIONS = Set.of(
       ".txt", ".md", ".markdown", ".rst", ".csv", ".tsv", ".json", ".xml", ".html", ".htm",
     ".properties", ".yml", ".yaml", ".log", ".java", ".kt", ".py", ".js", ".ts", ".css",
     ".pdf");
 
-  private final List<TextChunk> chunks;
-
-  private TextCorpus(final List<TextChunk> chunks) {
-    this.chunks = List.copyOf(chunks);
+  private CorpusLoader() {
   }
 
-  static TextCorpus ofChunks(final List<TextChunk> chunks) {
-    return new TextCorpus(chunks);
-  }
-
-  public static Builder builder() {
+  static Builder builder() {
     return new Builder();
   }
 
-  public static TextCorpus ofStrings(String... texts) {
-    Builder b = builder();
-    for (String text : texts) {
-      b.add(text);
-    }
-    return b.build();
-  }
-
-  public static TextCorpus fromFile(final Path file) {
-    return builder().addFile(file).build();
-  }
-
-  public static TextCorpus fromFolder(final Path folder) {
-    return builder().addFolder(folder).build();
-  }
-
-  public List<TextChunk> chunks() {
-    return this.chunks;
-  }
-
-  public int size() {
-    return this.chunks.size();
-  }
-
-  public boolean isEmpty() {
-    return this.chunks.isEmpty();
-  }
-
-  public static final class Builder {
+  static final class Builder {
 
     private final List<TextChunk> pending = new ArrayList<>();
     private final AtomicInteger anon = new AtomicInteger();
@@ -160,7 +124,7 @@ public final class TextCorpus {
     public Builder add(final String id, final String source, final String text) {
       requireNonNull(id, "id");
       requireNonNull(source, "source");
-      this.pending.addAll(TextChunker.split(
+      this.pending.addAll(Chunking.split(
           id,
           source,
           text,
@@ -188,7 +152,7 @@ public final class TextCorpus {
       try {
         String body = this.readFileText(path);
         String source = path.toString();
-        List<TextChunk> chunks = TextChunker.split(
+        List<TextChunk> chunks = Chunking.split(
             source,
             source,
             body,
@@ -242,14 +206,14 @@ public final class TextCorpus {
       return this;
     }
 
-    public TextCorpus build() {
+    List<TextChunk> build() {
       List<TextChunk> prepared = this.dedupe
           ? this.dedupeChunks(this.pending)
           : this.pending.stream().filter(chunk -> !chunk.isBlank()).toList();
       if (prepared.isEmpty()) {
         throw new IllegalStateException("corpus has no non-blank chunks");
       }
-      return new TextCorpus(prepared);
+      return List.copyOf(prepared);
     }
 
     private void reportFileProcessed(final Path path, final String body, final int chunkCount) {
@@ -300,6 +264,235 @@ public final class TextCorpus {
         return false;
       }
       return this.folderExtensions.contains(name.substring(dot));
+    }
+  }
+
+  private static final class DocumentCleanup {
+
+    private static final Pattern HEADING_LINE = Pattern.compile("^#{1,6}\\s+(.+?)\\s*$");
+    private static final Pattern LINK = Pattern.compile("\\[([^\\]]+)]\\([^)]*\\)");
+    private static final Pattern IMAGE = Pattern.compile("!\\[[^\\]]*]\\([^)]*\\)");
+    private static final Pattern CODE_FENCE = Pattern.compile("(?s)```.*?```");
+    private static final Pattern INLINE_CODE = Pattern.compile("`([^`]+)`");
+    private static final Pattern BULLET = Pattern.compile("^\\s*[-*+]\\s+");
+    private static final Pattern SENTENCE_END =
+      Pattern.compile("(?<=[.!?。！？])\\s+(?=[\\p{L}\\p{N}\"'(«])");
+
+    private DocumentCleanup() {
+    }
+
+    static List<String> passages(final String raw) {
+      if (raw == null || raw.isBlank()) {
+        return List.of();
+      }
+      String text =
+        CODE_FENCE.matcher(raw.replace("\r\n", "\n").replace('\r', '\n')).replaceAll("\n");
+      String section = "";
+      StringBuilder paragraph = new StringBuilder();
+      List<String> out = new ArrayList<>();
+
+      for (String line : text.split("\n", -1)) {
+        Matcher heading = HEADING_LINE.matcher(line.strip());
+        if (heading.matches()) {
+          flushParagraph(paragraph, section, out);
+          section = cleanInline(heading.group(1)).strip();
+          continue;
+        }
+        if (line.isBlank()) {
+          flushParagraph(paragraph, section, out);
+          continue;
+        }
+        String cleaned = cleanInline(BULLET.matcher(line).replaceFirst("")).strip();
+        if (cleaned.isEmpty()) {
+          continue;
+        }
+        if (!paragraph.isEmpty()) {
+          paragraph.append(' ');
+        }
+        paragraph.append(cleaned);
+      }
+      flushParagraph(paragraph, section, out);
+      return List.copyOf(out);
+    }
+
+    private static void flushParagraph(final StringBuilder paragraph, final String section,
+                                       final List<String> out) {
+      if (paragraph.isEmpty()) {
+        return;
+      }
+      String body = paragraph.toString().replaceAll(" +", " ").strip();
+      paragraph.setLength(0);
+      if (body.isEmpty()) {
+        return;
+      }
+      for (String sentence : SENTENCE_END.split(body)) {
+        String s = sentence.strip();
+        if (s.isEmpty()) {
+          continue;
+        }
+        out.add(section.isBlank() ? s : section + " — " + s);
+      }
+    }
+
+    private static String cleanInline(final String line) {
+      String text = IMAGE.matcher(line).replaceAll("");
+      text = LINK.matcher(text).replaceAll("$1");
+      text = INLINE_CODE.matcher(text).replaceAll("$1");
+      text = text.replace('\t', ' ').replaceAll("[ ]{2,}", " ");
+      return text;
+    }
+  }
+
+  private static final class Chunking {
+
+    private Chunking() {
+    }
+
+    static List<TextChunk> split(
+      final String baseId,
+      final String source,
+      final String text,
+      final int maxChunkChars,
+      final int overlap,
+      final boolean preprocess,
+      final boolean atomicSentences
+    ) {
+      requireNonNull(baseId, "baseId");
+      requireNonNull(source, "source");
+      if (text == null || text.isBlank()) {
+        return List.of();
+      }
+      if (preprocess) {
+        List<String> units = DocumentCleanup.passages(text);
+        if (!units.isEmpty()) {
+          return atomicSentences
+            ? atomicSplit(baseId, source, units, maxChunkChars)
+            : packUnits(baseId, source, units, maxChunkChars);
+        }
+      }
+      return windowSplit(baseId, source, text.strip(), maxChunkChars, overlap);
+    }
+
+    private static List<TextChunk> atomicSplit(
+      final String baseId,
+      final String source,
+      final List<String> units,
+      final int maxChunkChars
+    ) {
+      List<TextChunk> chunks = new ArrayList<>();
+      int part = 0;
+      for (String unit : units) {
+        if (unit.length() <= maxChunkChars) {
+          part++;
+          chunks.add(new TextChunk(baseId + "#" + part, source, unit));
+          continue;
+        }
+        List<TextChunk> windows =
+          windowSplit(baseId + "#" + (part + 1), source, unit, maxChunkChars, 0);
+        for (TextChunk window : windows) {
+          part++;
+          chunks.add(new TextChunk(baseId + "#" + part, source, window.text()));
+        }
+      }
+      if (chunks.size() == 1) {
+        return List.of(new TextChunk(baseId, source, chunks.getFirst().text()));
+      }
+      return List.copyOf(chunks);
+    }
+
+    private static List<TextChunk> packUnits(
+      final String baseId,
+      final String source,
+      final List<String> units,
+      final int maxChunkChars
+    ) {
+      List<TextChunk> chunks = new ArrayList<>();
+      StringBuilder buf = new StringBuilder();
+      for (String unit : units) {
+        if (unit.length() > maxChunkChars) {
+          emitPacked(buf, baseId, source, chunks);
+          chunks.addAll(
+            windowSplit(baseId + "#w" + (chunks.size() + 1), source, unit, maxChunkChars, 40));
+          continue;
+        }
+        if (buf.isEmpty()) {
+          buf.append(unit);
+          continue;
+        }
+        if (buf.length() + 1 + unit.length() <= maxChunkChars) {
+          buf.append(' ').append(unit);
+          continue;
+        }
+        emitPacked(buf, baseId, source, chunks);
+        buf.append(unit);
+      }
+      emitPacked(buf, baseId, source, chunks);
+      if (chunks.size() == 1) {
+        TextChunk only = chunks.getFirst();
+        return List.of(new TextChunk(baseId, only.source(), only.text()));
+      }
+      return List.copyOf(chunks);
+    }
+
+    private static void emitPacked(
+      final StringBuilder buf,
+      final String baseId,
+      final String source,
+      final List<TextChunk> chunks
+    ) {
+      if (buf.isEmpty()) {
+        return;
+      }
+      int part = chunks.size() + 1;
+      chunks.add(new TextChunk(baseId + "#" + part, source, buf.toString()));
+      buf.setLength(0);
+    }
+
+    private static List<TextChunk> windowSplit(
+      final String baseId,
+      final String source,
+      final String body,
+      final int maxChunkChars,
+      final int overlap
+    ) {
+      if (body.length() <= maxChunkChars) {
+        return List.of(new TextChunk(baseId, source, body));
+      }
+      int step = Math.max(1, maxChunkChars - Math.min(overlap, maxChunkChars - 1));
+      List<TextChunk> chunks = new ArrayList<>();
+      int start = 0;
+      int part = 0;
+      while (start < body.length()) {
+        int end = Math.min(body.length(), start + maxChunkChars);
+        if (end < body.length()) {
+          end = preferBreak(body, start, end);
+        }
+        String slice = body.substring(start, end).strip();
+        if (!slice.isEmpty()) {
+          part++;
+          String id = part == 1 && end >= body.length() ? baseId : baseId + "#" + part;
+          chunks.add(new TextChunk(id, source, slice));
+        }
+        if (end >= body.length()) {
+          break;
+        }
+        start = Math.max(start + 1, end - (maxChunkChars - step));
+        start = Math.min(start, end);
+      }
+      return List.copyOf(chunks);
+    }
+
+    private static int preferBreak(final String body, final int start, final int end) {
+      int windowStart = Math.max(start + (end - start) / 2, start);
+      int nl = body.lastIndexOf('\n', end - 1);
+      if (nl >= windowStart) {
+        return nl + 1;
+      }
+      int space = body.lastIndexOf(' ', end - 1);
+      if (space >= windowStart) {
+        return space + 1;
+      }
+      return end;
     }
   }
 }

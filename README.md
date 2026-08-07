@@ -279,3 +279,5 @@ try(
 ```
 
 See [`description.md`](description.md) §17 and package `com.igormaznitsa.nanollvm.rag` for retrieval options.
+`PreparedRag` embeds BM25 and passage prep; prompt assembly uses `RagSession.formatUserMessage` (templates in
+`prompts.RagPrompts`).

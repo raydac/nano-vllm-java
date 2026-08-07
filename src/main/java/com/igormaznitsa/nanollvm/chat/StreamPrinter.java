@@ -62,7 +62,7 @@ public final class StreamPrinter {
       if (this.color) {
         this.thinkOut.print(ANSI_THINK);
       }
-      this.thinkOut.print("[subagent %d] %s".formatted(i + 1, body));
+      this.thinkOut.printf("[subagent %d] %s", i + 1, body);
       if (this.color) {
         this.thinkOut.print(ANSI_RESET);
       }
