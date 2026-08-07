@@ -1,120 +1,73 @@
 ## 1. Implementation Progress
-- Maven version set to `1.0.0-SNAPSHOT`
-- Enforcer: Java `[21,)` and Maven `[3.9,)`
-- CPU matmul workers default to `Runtime.availableProcessors()` for all models (`cpuThreads` / `.allCpuThreads()` / `-Dnanovllm.cpu.threads=N`); SIMD Vector API kept
-- CausalLM: Qwen3 + Gemma3 + **LFM2** (GGUF); tokenizer GPT-2 BPE / Metaspace / GGUF-embedded
-- **GGUF:** `ModelFactory` accepts `*.gguf` → `GgufReader`/`GgufDequant`/`GgufModelLoader` → FP32 `WeightBag` → `Lfm2ForCausalLM` (Q4_K/Q4_0/Q6_K/Q8_0/F16/BF16/F32); ShortConv + `ConvStateArena`; download `models/download-lfm2.5-2.6b-gguf.sh`; Example menu #3; ~16g heap for 2.6B
-- Library API: `models.ModelFactory.make(path)` → immutable shared `Model`; `llm.LLM.Builder(Model|Path)`, `llm.EngineIo` (quiet default), `.systemPrompt()`, `ChatSession`, typed `ChatMessage`/`ChatRole`/`ChatReply`
-- Helpers: `llm.chat()`, `chatOnce()`, `complete()`, `SamplingDefaults`, `cancel()` / generate timeout
-- Errors: `exceptions` package — `NanoLlvmException` base; `ModelLoadException`, `GenerationCancelledException`, `GenerationTimeoutException`
-- Example uses `ChatSession` with streamTo; Gemma empty system + boilerplate scrub inside session
-- package-info documents public vs internal surface; **LLM** has library JavaDoc; **module-info.java** (`com.igormaznitsa.nanollvm`)
-- Root Java package + JPMS module: `com.igormaznitsa.nanollvm` (was `io.nanovllm`)
-- Educational walkthrough: `description.md` (English; academic-accessible tone); **§17 Text RAG**; **§7a GGUF/LFM2**
-- Every narrative chapter has **In the code** class/method signposts; §16 is the full map + Samples A–G; §17 RAG
-- §15 (“2+2”): master call chain + per-stage `Class#method` tables (send → generate → step → Attention → parse)
-- Ch.7 opens with tensor definition (rank/shape/weights vs activations) then safetensors format
-- Ch.10 rewritten: tensors (notation + `tensor.Tensor`), embeddings ($E\in\mathbb{R}^{V\times H}$, gather, tied head, RoPE kinds), linear/softmax
-- Ch.10 expanded to full **math catalog**: decoder-layer map, RMSNorm, causal attention scores, RoPE rotation, SiLU/GELU-tanh MLP, sampling (top-k/p, Gumbel-style), SIMD dots — matched to `Ops` / `Attention` / `Sampler`
-- Ch.10 GitHub math: keep config names (`rope_theta`, …) outside `$…$` / `$$…$$` (no `\texttt{…_…}` in math — MathJax error)
-- Prefer Stream API for filter/map/collect transforms in LLM/engine helpers; keep stateful schedule/prefill and tensor kernels imperative
-- `LLM` business methods (`generate`, `step`, drive loop, load/close) carry `//` stage comments for algorithm readability
-- **`engine.Transformer`** (was `ModelRunner`): named prepare → `CausalLM.forward` → logits → sample; owns per-LLM `KvCacheArena` (+ optional `ConvStateArena`); Scheduler-depth class JavaDoc (role / prefill-vs-decode / call chain / lifecycle); method JavaDoc on ctors + all bricks; LLM-style `//` stage comments inside `step`, ctors, prefill/decode prepare, KV allocate
-- `engine.Scheduler` has full class/method JavaDoc (waiting/running, prefill-vs-decode, preemption, postprocess)
-- `tensor.Tensor` has full class/method JavaDoc (shape, offset/view, reshape sharing, data vs toFloatArray)
-- `FloatKernels` (+ scalar/vector backends, factory) JavaDoc: slice contract, SIMD main loop + scalar tail
-- `Ops` JavaDoc: layout conventions, linear/embedding/gates/softmax/RMSNorm/addRmsNorm/splitLast hard parts
-- `VectorMath` JavaDoc: FloatKernels facade + tiled linear (TILE_N/TILE_K) loop order
-- **Immutable Model split:** weights/tokenizer on `Model`; per-`LLM` `KvCacheArena` via `Context.bindKvCache`; `Attention` uses `layerIndex` only
-- **Immutable CausalLM graph:** `ModelLoader.loadWeights` → `WeightBag`; layers (`Linear`/`RMSNorm`/`Embedding`) take final tensors in ctors only; no WeightSlot/seal/setters
-- Qwen3/Gemma3/LFM2 (+ nested Attention/MLP/DecoderLayer/Model) are `record`s with identity equals; factory ctors assemble then delegate to canonical
-- **Shared constants:** `models.WeightNames` (HF paths, arch ids, packed-module map, GGUF names); `utils.NanoVllmProps` (sys props/env/`config.json`)
-- **JPMS:** `ModelLoader`/`SafetensorsReader`/`Gguf*`/`Context` moved to non-exported `internal` (utils export no longer leaks models/tensor/engine types)
-- **Pure Java JSON:** removed Gson; `utils.Json` now has an in-project recursive-descent parser (objects/arrays/strings/escapes/numbers/bool/null, BigInteger fallback for huge ints)
-- **Text RAG:** `RagFactory` → `PassagePreparser` (model/search text, pre-TF) → inverted `Bm25Index` in shareable `PreparedRag`
-- Query path scores only posting-list candidates; load once, share across LLMs
-- Query-term coverage + length-density rerank (corpus-agnostic); demo corpus may still ship short fact files
-- Short follow-ups (<6 tokens) expand BM25 with prior user turn and prefer same source when competitive — **skipped** when the bare question is out-of-corpus (so “write a Java program…” after Grimm does not inherit the Grimm anchor)
-- RAG query terms: out-of-corpus OOV ratio (≥ half unknown) + ≥2-term overlap; BM25 IDF weights frequency — no DF stop-list (that dropped `grimm` in Grimm-heavy corpora)
-- **Anti-hallucination (domain-agnostic):** grounded prompts forbid inventing (“use only these / say you do not know”); `preferCompactPassages` prefers shorter competitive hits; grounded turns clamp temperature ≤0.15; Gemma: topK=2, isolateGeneration when hits, thinking off, **96** tokens; Qwen Example: thinking on to show process, **768** tokens
-- Compact prompt = question then Context lines (not “answer normally”)
-- `RagSession` still defaults thinking off (library-safe); **Example** enables thinking for Qwen RAG (`.enableThinking(!gemma)`) with **768** tokens so `<think>` + answer fit; Gemma stays thinking-off + short budget
-- Project `rag/` via `RagFactory.make`; override `-Dnanovllm.rag.dir` / `NANOVLLM_RAG_DIR`
-- Demo fact files: `facts-brothers-grimm.md`, `facts-little-red-riding-hood.md` (+ long tale/bio texts)
-
+- Maven `1.0.0-SNAPSHOT`; enforcer Java `[21,)`, Maven `[3.9,)`; JPMS module `com.igormaznitsa.nanollvm`
+- CausalLM: Qwen3 + Gemma3 + LFM2 (GGUF); tokenizers GPT-2 BPE / Metaspace / GGUF-embedded
+- **GGUF:** `*.gguf` → `internal.Gguf*` → FP32 `WeightBag` → `Lfm2ForCausalLM` (Q4_K/Q4_0/Q6_K/Q8_0/F16/BF16/F32); ShortConv + `ConvStateArena`; download `models/download-lfm2.5-2.6b-gguf.sh`; Example menu #3; ~16 GiB heap for 2.6B
+- Library: `ModelFactory.make` → shared immutable `Model`; `LLM.Builder`; `ChatSession` / typed chat; helpers `chat`/`chatOnce`/`complete`; `cancel` + generate timeout; `exceptions.*`
+- Engine: `Transformer` (prepare → forward → logits → sample) owns per-LLM `KvCacheArena` (+ optional `ConvStateArena`); `Scheduler` continuous batching; CPU matmul default = all processors (`cpuThreads` / prop `nanovllm.cpu.threads`)
+- Immutable split: weights/tokenizer on `Model`; runtime KV/scheduler/lock on `LLM`; CausalLM layers are `record`s; constants in `WeightNames` / `NanoVllmProps`
+- JPMS: loaders/GGUF/`Context` in non-exported `internal`; pure-Java `utils.Json` (no Gson)
+- **RAG:** `RagFactory` → shareable `PreparedRag` (preparse + inverted BM25); posting-list query; coverage + length-density rerank; short follow-ups expand prior turn unless out-of-corpus; grounded anti-hallucination (strict prompt, compact passages, temp ≤0.15); Example: Gemma 96 tok / thinking off; Qwen 768 / thinking on
+- Docs: English `description.md` (§7a GGUF, §15 call chain, §16 map, §17 RAG, ch.10 math); engine/tensor/Ops JavaDoc + LLM/`Transformer` `//` stage comments
+- Review cleanup: compacted notes (merged dupes, dropped finished WIP/history noise)
 
 
 ## 2. Architecture & Technical Discoveries
-- Engine status via `EngineIo`; chat UI via `StreamPrinter` / session `streamTo`
-- Gemma: no system role by default; long system+hello latches setup boilerplate
-- Scheduler.`clear()` aborts in-flight seqs on cancel/timeout
-- One LLM instance is not concurrent-safe for generate; `cancel()` is cross-thread
-- Share one `Model` across many `LLM`s; each LLM owns KV + scheduler; closing LLM does not unload Model
-- Share one `PreparedRag` across many LLMs; `PassagePreparser` + inverted BM25 run at load, not per query
-- Exported packages: root (Example/Bench), models, llm, chat, rag, exceptions, tokenizer, prompts, utils (`BundledModels`/`BundledRag`/`Json`/`NanoVllmProps`)
-- Module-private: engine, layers, tensor, **internal** (loader/safetensors/gguf/Context); `models` also holds graph types (`CausalLM`, …) alongside public `Model` / `ModelFactory`
-- `Model.network()` still returns `CausalLM` for same-module `Transformer` (documented non-stable; `models` package is exported)
-- **GGUF→FP32:** Q4_K_M mixes Q4_K+Q6_K; 2D GGUF dims reversed to HF `[out,in]`; LFM2 norm is `token_embd_norm`; shortconv state keyed by `seqId`; `head_count_kv` is a per-layer array (0=conv) — use max>0 as GQA kv heads (not scalar fallback to 32)
-- **CPU matmul parallel:** `VectorMath.configureCpuThreads(N)` splits `out` axis; default = `Runtime.availableProcessors()` for all models; `.cpuThreads(N)` / `.allCpuThreads()` / prop `nanovllm.cpu.threads`
-- **LFM2 chat:** GGUF often omits `chat_template` — use ChatML when vocab has `<|im_start|>`; `invitesThinking=false` + `PLAIN_CHAT_SYSTEM` (Qwen think rules cause format-narration)
+- Share one `Model` / `PreparedRag` across many `LLM`s; one LLM not concurrent-safe for generate (`cancel()` is cross-thread); `Scheduler.clear()` on cancel/timeout
+- Exports: root, models, llm, chat, rag, exceptions, tokenizer, prompts, utils; private: engine, layers, tensor, internal
+- `Model.network()` → `CausalLM` for same-module `Transformer` (exported but non-stable)
+- GGUF→FP32: Q4_K_M mixes Q4_K+Q6_K; 2D dims → HF `[out,in]`; LFM2 norm `token_embd_norm`; conv state by `seqId`; `head_count_kv` per-layer (0=conv) → max>0 as GQA heads
+- LFM2 chat: no `chat_template` in many GGUFs → ChatML if `<|im_start|>` in vocab; `invitesThinking=false` + `PLAIN_CHAT_SYSTEM` (Qwen think rules cause format-narration)
+- Gemma: no system role by default; long system+hello latches boilerplate
+- EngineIo for status; `StreamPrinter` / `streamTo` for chat UI
 
 
 ## 3. Technical Debt & Refactoring
-- Attention O(n²); no float16 / TP / CUDA graphs; GGUF is dequant-on-load only (no quantized matmul)
-- Metaspace BPE simplified; optional chat_template.jinja in download
+- Attention O(n²); no float16 / TP / CUDA; GGUF dequant-on-load only (no quantized matmul)
+- Metaspace BPE simplified; optional `chat_template.jinja` in download
 - Optional repetition penalty for tiny IT models
-- `Sequence.setBlockSize` is still static (problem if LLMs use different block sizes)
-- `description.md` still mentions `utils.SafetensorsReader` / `utils.ModelLoader` / `utils.Context` — update signposts to `internal.*`
+- `Sequence.setBlockSize` still static (breaks if LLMs differ on block size)
+- `description.md` still cites `utils.SafetensorsReader` / `ModelLoader` / `Context` → should be `internal.*`
 - LFM2 GGUF tokenizer heuristics may need per-export tuning
-- LFM2: no embedded chat_template in Q4_K_M GGUF — detect ChatML via `<|im_start|>` vocab; do **not** inject Qwen `<think>` system rules (model narrates the format)
+
 
 ## 4. Current Work In Progress
-- Educational docs: maintain academic-accessible English `description.md`
-- Engine readability: LLM / Transformer / Scheduler DSL pass done; `ModelRunner` renamed to `Transformer` (prepare → forward → logits → sample); Transformer JavaDoc + in-method `//` stages aligned with LLM/Scheduler style
-- RAG anti-hallucination stays domain-agnostic (prompt + length density, not filename conventions)
+- Keep `description.md` in sync with code (§7a GGUF format + chat/heap/cpuThreads)
+- RAG anti-hallucination stays domain-agnostic (prompt + length density, not filenames)
 
 
 ## 5. Known Issues & Limitations
 - CPU-only; large float32 heap; weights not in git
-- LFM2.5-2.6B GGUF needs ~16 GiB heap after Q4→FP32 (+ KV/JVM); default `-Xmx16g` in `.mvn/jvm.config`
-- `Bench` used to hardcode `numKvcacheBlocks(256)` (~14 GiB KV for Qwen3-0.6B) → OOM at start; now sizes blocks from `numSeqs × ceil(maxModelLen/blockSize)` and skips warmup — still needs `MAVEN_OPTS=-Xmx8g` for the weights
-- Gemma3-270M weak knowledge / paraphrase; first chat turn can be slow
-- Tiny Gemma can still invent facts not in retrieved passages (mitigated: strict grounded prompt, compact-passage preference, temp clamp, isolateGeneration) — not eliminated on 270M
-- Off-topic RAG replies (Java → Grimm class names) were weak BM25 leftovers (`one`/`by`/`text`) after OOV drop — mitigated by out-of-corpus gate (`unknown > known`) + overlap
-- Qwen RAG with thinking on + low maxTokens can truncate after long `<think>` — Example uses 768 for Qwen; stub salvage remains in ChatSession
+- LFM2.5-2.6B needs ~16 GiB after Q4→FP32; default `-Xmx16g` in `.mvn/jvm.config`
+- Bench auto-sizes KV blocks (was hardcoded OOM); still needs `MAVEN_OPTS=-Xmx8g` for weights
+- Gemma3-270M: weak knowledge; can still invent RAG facts (mitigated, not eliminated); first chat turn slow
+- Off-topic RAG (weak BM25 leftovers) mitigated by OOV gate + overlap — watch regressions
+- Qwen RAG + thinking + low maxTokens truncates after `<think>` — Example uses 768; ChatSession stub salvage remains
 
 
 ## 6. Open Questions & Pending Decisions
-- Whether to fold Sampler deeper into Transformer bricks next
-- Whether BM25F field weights would help further on multi-field documents
-- Whether HF safetensors LFM2 directory load is worth adding beside GGUF
+- Fold Sampler deeper into Transformer bricks?
+- BM25F field weights for multi-field docs?
+- HF safetensors LFM2 directory load beside GGUF?
 
 
 ## 7. Useful References
-- How it works: `description.md` (academic-accessible; ch.10 math catalog; ch.7–10 tensors; **§7a GGUF/LFM2**; §16 map/samples; **§17 text RAG**; §20 reading index)
-- **README.md:** build, model download/load resolution order, Example/Bench/JAR CLI, RAG commands, library snippet (publication-oriented)
-- Session demo asset: `assets/java_nano_llvm_session_1.gif` (Gemma3 load + RAG questions about Grimm brothers/father), embedded in README RAG section
-- Maven: `com.igormaznitsa:nano-vllm-java:1.0.0-SNAPSHOT`; JPMS module `com.igormaznitsa.nanollvm`
+- `description.md` — how it works; `README.md` — build/download/CLI/RAG/library
+- Demo GIF: `assets/java_nano_llvm_session_1.gif` (README RAG section)
 - Build: `mvn -q test` / `MAVEN_OPTS="-Xmx8g" mvn -q exec:java -Dexec.mainClass=com.igormaznitsa.nanollvm.Example`
-- LFM2 GGUF: `./models/download-lfm2.5-2.6b-gguf.sh` then `mvn -q exec:java -Dexec.args=models/LFM2.5-2.6B-Q4_K_M.gguf` (heap from `.mvn/jvm.config`)
-- Library: `Model model = ModelFactory.make(path)` in `models`; `LLM.builder(model).systemPrompt(…).build()` in `llm`; RAG: `PreparedRag rag = RagFactory.make(dir); llm.rag(rag)` (shareable like Model)
-
-- CLI progress: `.withSystemIo()`
-- Plugins (pom): compiler 3.15.0, surefire 3.5.5, jar 3.5.0, exec 3.6.3; JUnit 6.0.2
-- `module-info`: exports `com.igormaznitsa.nanollvm`, `models`, `llm`, `chat`, `rag`, `exceptions`, `tokenizer`, `prompts`, `utils`; requires `static jdk.incubator.vector`; private: `engine`/`layers`/`tensor`/`internal`
-- Vector flags + heap: `.mvn/jvm.config` (`--add-modules=jdk.incubator.vector`, `-Xmx16g`) for Maven/`exec:java`; surefire uses `jvm.module.args` (exec:java has no `jvmArgs` in 3.6.x)
+- LFM2: `./models/download-lfm2.5-2.6b-gguf.sh` then `mvn -q exec:java -Dexec.args=models/LFM2.5-2.6B-Q4_K_M.gguf`
+- Library: `ModelFactory.make(path)` → `LLM.builder(model)…`; RAG: `RagFactory.make(dir)` → `llm.rag(rag)`
+- CLI progress: `.withSystemIo()`; heap/vector: `.mvn/jvm.config` (`jdk.incubator.vector`, `-Xmx16g`); surefire uses `jvm.module.args`
+- Plugins: compiler 3.15.0, surefire 3.5.5, jar 3.5.0, exec 3.6.3; JUnit 6.0.2
+- RAG dir: project `rag/` or `-Dnanovllm.rag.dir` / `NANOVLLM_RAG_DIR`; demo facts Grimm / Little Red Riding Hood
 
 
 ## 8. User Advice and Recommendations
-- Document Maven as `mvn` (portable); on this machine the agent may invoke `mvn22`
-- Prefer `ChatSession` for dialog; keep raw `generate` for completions
-- Do not stack long Gemma system prompts — latch risk
-- Keep I/O out of Config
-- Educational guide: English `description.md` only — do not revive a Russian translation; keep §7a GGUF **format** (layout/dtypes) + chat/heap/cpuThreads in sync with code
-- Prefer Stream API for declarative filter/map/collect; keep stateful scheduler/prefill and numeric kernels as loops
-- LFM2 quality pass: drop unused ShortConv/ConvStateArena accessors; Lfm2MLP uses `Ops.siluAndMul(gate,up)` + `Ops.add`; GGUF vocab from token array (not bogus metaInt); rms eps via first present key
-- User preference (global Java senior rule): Stream-first for collection work when a clear pipeline exists
-- In `LLM`, keep `//` comments on business orchestration methods and their internal stage calls (generate/step/drive)
-- Model = immutable loaded data; all thread/runtime state on LLM (`KvCacheArena`, scheduler, generate lock)
-- IntelliJ “Reformat code” before commit can break fenced samples in `description.md` — project `.editorconfig` sets `ij_formatter_enabled = false` for `*.md` (EditorConfig support must stay enabled in IDEA)
-- Method/constructor parameters that are not reassigned must be `final` — in global `java-senior` rule; applied across `src/` (generics second pass); record headers excluded; reassigned params refactored to locals (`AssistantParts`, `Gemma3`/`Qwen3` decoder, `ChatPrompts`)
+- Document Maven as `mvn` (portable); agent on this machine may use `mvn22`
+- Prefer `ChatSession` for dialog; raw `generate` for completions; keep I/O out of Config
+- Do not stack long Gemma system prompts (latch risk)
+- English `description.md` only — no Russian translation revive
+- Stream-first for filter/map/collect; keep scheduler/prefill and numeric kernels as loops
+- Keep `//` stage comments on LLM / Transformer orchestration methods
+- Model = immutable data; all runtime state on LLM
+- IntelliJ reformat can break `description.md` fences — `.editorconfig` disables markdown formatter (`ij_formatter_enabled = false`)
+- Unreassigned method/ctor params must be `final` (java-senior rule; records excluded)
