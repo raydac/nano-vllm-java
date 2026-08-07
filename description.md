@@ -2879,7 +2879,8 @@ Bm25Index.retrieve(query, topK)  →  List<RagHit>
    │
    ▼
 RagPrompt.format(hits, user text, maxContextChars, compact?)
-   │  compact (tiny chat models): question first, then “Context (use only these…)”
+   │  compact (tiny chat models): question first, Context lines, then “answer from Context”
+   │  no hits: “No context… Reply: I do not know” (blocks free hallucination)
    │  default: Context / Question + “do not invent… say you do not know”
    ▼
 ChatSession.sendPrepared(historyUser = original text,
@@ -2910,7 +2911,8 @@ user text in history; chat context does the conversational work.
 RAG does not change attention math, the KV cache, or sampling math itself. It only changes the **token ids of the last
 user message** (and thus the prefill), plus a temperature clamp on grounded turns. Everything in chapters 8–12 still
 applies: longer RAG context means a heavier prefill; tiny models can still ignore instructions, so the stack prefers
-short dense passages, strict “use only these / say you do not know” wording, isolation, and low temperature
+short dense passages, compact “answer from Context” wording (no leading “say you do not know” priming),
+no-hit refusal, isolation, and low temperature
 (`RagLoadOptions.forTinyModels()`, small `topK`, compact formatting in `Example`).
 
 Think of three layers again:

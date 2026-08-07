@@ -103,6 +103,54 @@ class RagRetrievalTest {
   }
 
   @Test
+  void rewrittenGrimmKeywordsPreferGrimmSourceOverHoodKnowWhatNoise() {
+    PreparedRag rag = RagFactory.builder()
+      .options(RagLoadOptions.forTinyModels())
+      .add("grimm.txt",
+        "The Brothers Grimm were Jacob Grimm and Wilhelm Grimm. Their names were Jacob and Wilhelm.")
+      .add("hood.txt",
+        "She did not know what a wicked animal he was, and was not afraid of him. "
+          + "You must know the place, said Little Red Riding Hood. "
+          + "Oh grandmother, what big ears you have!")
+      .build();
+
+    List<RagHit> hits = rag.retrieve("Grimm brothers Jacob Wilhelm", 2);
+
+    assertFalse(hits.isEmpty());
+    assertTrue(
+      hits.getFirst().chunk().source().contains("grimm"),
+      () -> "expected Grimm source, got " + hits.stream().map(h -> h.chunk().source()).toList());
+  }
+
+  @Test
+  void needsRewriteMatchesShortFollowUpsOnly() {
+    assertTrue(RagRetrieval.needsRewrite("name of their father"));
+    assertFalse(RagRetrieval.needsRewrite(
+      "What are the full given names of both Grimm brothers in the biography?"));
+  }
+
+  @Test
+  void whoAreGrimmBrothersRetrievesAgainstBundledCorpus() {
+    PreparedRag rag = RagFactory.builder()
+      .options(RagLoadOptions.forTinyModels())
+      .add("grimm.txt",
+        "The Brothers Grimm were Jacob Grimm and Wilhelm Grimm. Their names were Jacob and Wilhelm.")
+      .add("hood.txt", "Little Red Riding Hood walked through the forest.")
+      .build();
+
+    assertTrue(RagRetrieval.needsRewrite("who are the grimm brothers?"));
+    List<RagHit> hits = rag.retrieve("who are the grimm brothers?", 2);
+    assertFalse(hits.isEmpty());
+    assertTrue(hits.getFirst().chunk().text().toLowerCase().contains("grimm"));
+  }
+
+  @Test
+  void shortAnaphoricFollowUpsStillNeedAnchor() {
+    assertTrue(RagRetrieval.needsAnchor("their names?"));
+    assertTrue(RagRetrieval.needsAnchor("names of the Grimm brothers"));
+  }
+
+  @Test
   void cyrillicInflectionKeysMatchCaseVariantsWithoutExternalCorpus() {
     PreparedRag rag = RagFactory.of(
       RagLoadOptions.defaults(),
@@ -110,6 +158,17 @@ class RagRetrievalTest {
 
     assertFalse(rag.retrieve("колобок", 2).isEmpty());
     assertFalse(rag.retrieve("Баба Яга", 2).isEmpty());
+  }
+
+  @Test
+  void tryMakeReturnsEmptyForEmptyFolder(@TempDir final Path tempDir) {
+    assertTrue(RagFactory.tryMake(tempDir).isEmpty());
+  }
+
+  @Test
+  void tryMakeReturnsEmptyWhenOnlyReadmePresent(@TempDir final Path tempDir) throws Exception {
+    Files.writeString(tempDir.resolve("README.md"), "# notes\n", UTF_8);
+    assertTrue(RagFactory.tryMake(tempDir).isEmpty());
   }
 
   @Test

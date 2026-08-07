@@ -2,18 +2,18 @@ package com.igormaznitsa.nanollvm.rag;
 
 import static java.util.Objects.requireNonNull;
 
-import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
 /**
- * Query-side term selection and hit qualification — no fixed stopword lists.
+ * Lexical query-term selection for BM25 — no language stop-lists or paraphrase maps.
+ * Linguistic rewriting for short follow-ups belongs in {@link RagQueryRewrite} / {@link RagSession}.
  *
- * <p>Queries whose tokens are mostly absent from the index are treated as out-of-corpus and
- * return no hits. Otherwise every query token that occurs in the corpus is kept; BM25 IDF
- * down-weights frequent terms. A hit must share enough selected tokens with the passage.
+ * <p>Terms absent from the index are dropped. Queries whose distinct tokens are mostly
+ * out-of-vocabulary (corpus DF statistics only) return no terms.
  */
 final class RagQueryTerms {
 
@@ -35,18 +35,37 @@ final class RagQueryTerms {
       return List.of();
     }
 
-    List<String> known = new ArrayList<>();
-    for (String term : rawDistinct) {
-      if (docFreq.getOrDefault(term, 0) > 0) {
-        known.add(term);
-      }
+    List<String> known = rawDistinct.stream()
+      .filter(term -> docFreq.getOrDefault(term, 0) > 0)
+      .toList();
+    if (known.isEmpty()) {
+      return List.of();
     }
-    return List.copyOf(known);
+
+    int maxDf = maxCommonDocFreq(docCount);
+    List<String> discriminative = known.stream()
+      .filter(term -> docFreq.getOrDefault(term, 0) <= maxDf)
+      .toList();
+    if (!discriminative.isEmpty()) {
+      return List.copyOf(discriminative);
+    }
+
+    return known.stream()
+      .sorted(Comparator.comparingInt(term -> docFreq.getOrDefault(term, 0)))
+      .limit(Math.min(3, known.size()))
+      .toList();
+  }
+
+  /**
+   * Terms in more passages than this are treated as overly common for selection.
+   */
+  static int maxCommonDocFreq(final int docCount) {
+    return Math.max(3, (docCount * 2) / 3);
   }
 
   /**
    * Many distinct query tokens never appear in the corpus — e.g. a coding request against a
-   * fairy-tale index ({@code java}, {@code program}, {@code file}, …).
+   * fairy-tale index. Pure DF/OOV ratio; no language word lists.
    */
   static boolean queryOutsideCorpus(final Map<String, Integer> docFreq,
                                     final List<String> rawDistinct) {
@@ -72,9 +91,7 @@ final class RagQueryTerms {
     }
     Set<String> passageTerms = new LinkedHashSet<>(passage.termFreqs().keySet());
     long matched = selectedTerms.stream().filter(passageTerms::contains).count();
-    if (selectedTerms.size() == 1) {
-      return matched >= 1;
-    }
-    return matched >= 2;
+    int need = Math.max(1, (selectedTerms.size() + 1) / 2);
+    return matched >= need;
   }
 }

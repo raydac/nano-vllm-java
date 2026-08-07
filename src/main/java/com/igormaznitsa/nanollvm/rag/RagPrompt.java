@@ -8,7 +8,8 @@ import java.util.List;
 /**
  * Formats retrieved passages plus the user question into one model-facing user message.
  * Compact layout puts the question first so tiny models answer instead of continuing a story.
- * When passages are present, wording forbids inventing details outside them.
+ * When passages are present, the prompt asks for a short answer from those lines; when none
+ * are present, it forbids invention (tiny models otherwise hallucinate freely).
  */
 public final class RagPrompt {
 
@@ -45,14 +46,18 @@ public final class RagPrompt {
 
     String context = truncateContext(hits, maxContextChars, compact);
     if (context.isBlank()) {
-      return q;
+      return noHitPrompt(q, compact);
     }
     if (compact) {
+      // Positive instruction last — tiny models latch onto "say you do not know" if it leads
       return q + """
 
 
-        Context (use only these; if they do not answer, say you do not know):
-        """ + context;
+        Context:
+        """ + context + """
+
+        Answer in one short sentence using names and facts from the Context above.
+        """;
     }
     return """
         Context:
@@ -63,6 +68,23 @@ public final class RagPrompt {
       Answer using only the context. Do not invent names, dates, or other details.
       If the context does not contain the answer, say you do not know. Be concise.
       """.formatted(context, q).strip();
+  }
+
+  private static String noHitPrompt(final String question, final boolean compact) {
+    if (compact) {
+      return question + """
+
+
+        No context documents were found for this question.
+        Reply with exactly: I do not know.
+        Do not invent places, names, or stories.
+        """;
+    }
+    return """
+      Question: %s
+
+      No context documents were retrieved. Say you do not know. Do not invent facts.
+      """.formatted(question).strip();
   }
 
   private static String truncateContext(final List<RagHit> hits, final int maxContextChars,

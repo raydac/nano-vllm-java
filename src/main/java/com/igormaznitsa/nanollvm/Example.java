@@ -25,18 +25,18 @@ import java.util.Optional;
 import java.util.stream.Collectors;
 
 /**
- * Interactive chat using {@link RagSession} when {@code ./rag} (or override) is present,
- * otherwise plain {@link ChatSession}.
+ * Interactive chat using {@link RagSession} when {@code ./rag} (or override) has indexable
+ * documents, otherwise plain {@link ChatSession}.
  */
 public final class Example {
 
   private static final int MAX_NEW_TOKENS = 768;
   private static final int RAG_MAX_TOKENS_DEFAULT = 768;
-  private static final int RAG_MAX_TOKENS_GEMMA = 96;
+  private static final int RAG_MAX_TOKENS_GEMMA = 128;
   private static final int RAG_TOP_K_DEFAULT = 4;
-  private static final int RAG_TOP_K_GEMMA = 2;
+  private static final int RAG_TOP_K_GEMMA = 3;
   private static final int RAG_CONTEXT_CHARS_DEFAULT = 3500;
-  private static final int RAG_CONTEXT_CHARS_GEMMA = 700;
+  private static final int RAG_CONTEXT_CHARS_GEMMA = 900;
 
   private Example() {
   }
@@ -71,7 +71,7 @@ public final class Example {
             + " (" + rag.size() + " chunks, shared index)");
         System.out.println("Ask about the docs in rag/ (engine, models, Nile, capitals, …).");
       } else {
-        System.out.println("RAG: no corpus at " + BundledRag.ragRoot() + " — plain chat.");
+        System.out.println("RAG: no usable corpus at " + BundledRag.ragRoot() + " — plain chat.");
       }
       System.out.println("Type a message and press Enter. Commands: /exit  /quit  /clear");
       System.out.println("Thinking → stderr (dim cyan); reply → stdout.");
@@ -95,12 +95,18 @@ public final class Example {
   }
 
   private static Optional<PreparedRag> loadPreparedRag(final boolean tinyModel) {
-    return BundledRag.find().map(root -> {
-      System.out.println("Preparing RAG corpus from " + root);
-      RagLoadOptions options =
-          tinyModel ? RagLoadOptions.forTinyModels() : RagLoadOptions.defaults();
-      return RagFactory.make(root, options, EngineIo.system());
-    });
+    Optional<Path> root = BundledRag.find();
+    if (root.isEmpty()) {
+      return Optional.empty();
+    }
+    System.out.println("Preparing RAG corpus from " + root.get());
+    RagLoadOptions options =
+      tinyModel ? RagLoadOptions.forTinyModels() : RagLoadOptions.defaults();
+    Optional<PreparedRag> prepared = RagFactory.tryMake(root.get(), options, EngineIo.system());
+    if (prepared.isEmpty()) {
+      System.out.println("RAG: no documents in " + root.get() + " — plain chat.");
+    }
+    return prepared;
   }
 
   private static void runRagChat(

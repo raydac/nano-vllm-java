@@ -99,10 +99,20 @@ class RagUnitTest {
     assertTrue(prompt.contains("The Nile is a major river in Africa."));
     assertTrue(prompt.contains("what is Nile?"));
     assertTrue(prompt.indexOf("what is Nile?") < prompt.indexOf("The Nile is a major river"));
-    assertTrue(prompt.contains("Context (use only these"));
-    assertTrue(prompt.contains("say you do not know"));
+    assertTrue(prompt.contains("Context:"));
+    assertTrue(prompt.contains("Answer in one short sentence"));
+    assertFalse(prompt.contains("say you do not know"));
     assertFalse(prompt.contains("answer the request normally"));
     assertFalse(prompt.contains("previous answer was wrong"));
+  }
+
+  @Test
+  void compactNoHitPromptForbidsInvention() {
+    String prompt = RagPrompt.format(List.of(), "где живут ведьмы?", 900, true);
+    assertTrue(prompt.contains("где живут ведьмы?"));
+    assertTrue(prompt.contains("No context documents were found"));
+    assertTrue(prompt.contains("I do not know"));
+    assertTrue(prompt.contains("Do not invent"));
   }
 
   @Test

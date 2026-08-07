@@ -9,14 +9,17 @@ import com.igormaznitsa.nanollvm.llm.SamplingParams;
 import java.io.PrintStream;
 import java.time.Duration;
 import java.util.List;
+import java.util.Optional;
 import java.util.function.Consumer;
 
 /**
  * Retrieval-augmented chat over an {@link LLM}: {@link RagIndex} → prompt → generate.
  *
  * <p>History stores the original user text; the model sees a context-augmented last turn.
- * Short follow-ups expand retrieval with the previous longer user turn and may prefer the
- * same source document (structural continuity). Among competitive hits, shorter passages
+ * Short follow-ups with a prior turn are rewritten by an isolated LLM call into standalone
+ * search keywords (or no retrieve when the model returns {@code NONE}). Short first turns and
+ * longer standalone questions use the raw text for BM25. Without an LLM, retrieval falls back
+ * to concatenating the previous longer user turn. Among competitive hits, shorter passages
  * are preferred so the prompt stays dense on any corpus. {@link #isolateGeneration(boolean)}
  * omits prior assistant answers from grounded (hit) generates only; no-hit turns keep
  * history so conversational follow-ups still work. Thinking is off by default so small
@@ -43,6 +46,7 @@ public final class RagSession {
   private List<RagHit> lastHits = List.of();
   private String anchorQuery = "";
   private String lastSource = "";
+  private String lastRetrievalQuery = "";
 
   private RagSession(final LLM llm, final ChatSession chat, final RagIndex index) {
     this.llm = llm;
@@ -149,6 +153,7 @@ public final class RagSession {
     this.lastHits = List.of();
     this.anchorQuery = "";
     this.lastSource = "";
+    this.lastRetrievalQuery = "";
   }
 
   public ChatReply send(final String question) {
@@ -158,10 +163,14 @@ public final class RagSession {
       throw new IllegalArgumentException("question must not be blank");
     }
 
-    this.lastHits = this.retrieve(q);
-    if (!this.isOutsideCorpus(q) && RagRetrieval.shouldUpdateAnchor(q)) {
-      this.anchorQuery = q;
+    if (!this.hasCorpus()) {
+      this.lastHits = List.of();
+      this.lastRetrievalQuery = "";
+      return this.chat.send(q);
     }
+
+    this.lastHits = this.retrieve(q);
+    this.updateAnchorAfterRetrieve(q);
     if (!this.lastHits.isEmpty()) {
       this.lastSource = this.lastHits.getFirst().chunk().source();
     }
@@ -198,13 +207,23 @@ public final class RagSession {
     return this.send(question).answer();
   }
 
+  /**
+   * {@code false} when the index reports zero passages — skip rewrite, retrieve, and RAG prompts.
+   * Unknown sizes ({@link RagIndex#size()} {@code < 0}) still use the RAG path.
+   */
+  private boolean hasCorpus() {
+    return this.index.size() != 0;
+  }
+
   private List<RagHit> retrieve(final String question) {
-    if (this.isOutsideCorpus(question)) {
+    Optional<String> retrievalQuery = this.resolveRetrievalQuery(question);
+    if (retrievalQuery.isEmpty()) {
+      this.lastRetrievalQuery = "";
       return List.of();
     }
-    String retrievalQuery = RagRetrieval.retrievalQuery(question, this.anchorQuery);
+    this.lastRetrievalQuery = retrievalQuery.get();
     int pool = Math.max(this.topK * 4, this.topK);
-    List<RagHit> candidates = this.index.retrieve(retrievalQuery, pool);
+    List<RagHit> candidates = this.index.retrieve(this.lastRetrievalQuery, pool);
     List<RagHit> grounded = RagRetrieval.preferCompactPassages(candidates, pool);
     if (RagRetrieval.needsAnchor(question) && !this.lastSource.isEmpty()) {
       return RagRetrieval.preferPriorSource(grounded, this.lastSource, this.topK);
@@ -212,6 +231,35 @@ public final class RagSession {
     return grounded.size() <= this.topK
       ? List.copyOf(grounded)
       : List.copyOf(grounded.subList(0, this.topK));
+  }
+
+  private void updateAnchorAfterRetrieve(final String question) {
+    if (this.llm != null && RagRetrieval.needsRewrite(question)) {
+      if (!this.lastHits.isEmpty() && !this.lastRetrievalQuery.isBlank()) {
+        this.anchorQuery = this.lastRetrievalQuery;
+      }
+      return;
+    }
+    if (RagRetrieval.shouldUpdateAnchor(question)) {
+      this.anchorQuery = question;
+      return;
+    }
+    if (this.llm == null && this.anchorQuery.isBlank() && !this.isOutsideCorpus(question)) {
+      this.anchorQuery = question;
+    }
+  }
+
+  private Optional<String> resolveRetrievalQuery(final String question) {
+    if (this.llm != null && RagRetrieval.needsRewrite(question) && !this.anchorQuery.isBlank()) {
+      return RagQueryRewrite.rewrite(this.llm, this.anchorQuery, question);
+    }
+    if (this.llm != null) {
+      return Optional.of(question);
+    }
+    if (this.isOutsideCorpus(question)) {
+      return Optional.empty();
+    }
+    return Optional.of(RagRetrieval.retrievalQuery(question, this.anchorQuery));
   }
 
   private boolean isOutsideCorpus(final String question) {

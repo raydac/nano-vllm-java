@@ -6,21 +6,16 @@ import java.util.Comparator;
 import java.util.List;
 
 /**
- * Structural retrieval-query rules: anchor expansion for short follow-ups,
- * prior-source continuity, and compact-passage preference for the prompt.
+ * Structural retrieval-query rules: when short follow-ups need rewrite / anchor
+ * expansion, prior-source continuity, and compact-passage preference for the prompt.
  * Uses token counts and passage length only — no corpus-specific filenames or topics.
  */
 final class RagRetrieval {
 
   /**
-   * Follow-ups shorter than this reuse {@code anchor + question} for BM25.
+   * Follow-ups shorter than this need LLM rewrite (or, without an LLM, {@code anchor + question}).
    */
   static final int EXPAND_BELOW_TOKENS = 6;
-
-  /**
-   * Only turns at least this long replace the retrieval anchor.
-   */
-  static final int ANCHOR_MIN_TOKENS = 5;
 
   private static final double PRIOR_SOURCE_COMPETITIVE = 0.55;
   private static final double COMPACT_COMPETITIVE = 0.55;
@@ -40,8 +35,20 @@ final class RagRetrieval {
     return Bm25Index.tokenize(question).size() < EXPAND_BELOW_TOKENS;
   }
 
+  /**
+   * Short follow-ups need linguistic rewrite when prior context exists (LLM), or structural
+   * anchor concat (no LLM). First short turns with no prior use the raw question.
+   */
+  static boolean needsRewrite(final String question) {
+    return needsAnchor(question);
+  }
+
+  /**
+   * Standalone (non-short) user turns may replace the retrieval prior with the raw question.
+   * Short turns update the prior from rewrite keywords in {@link RagSession} instead.
+   */
   static boolean shouldUpdateAnchor(final String question) {
-    return Bm25Index.tokenize(question).size() >= ANCHOR_MIN_TOKENS;
+    return !needsAnchor(question);
   }
 
   /**

@@ -6,9 +6,11 @@ import java.nio.file.Path;
 import java.text.Normalizer;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.regex.Pattern;
 
 /**
@@ -26,9 +28,10 @@ public final class PassagePreparser {
   public static List<PreparedPassage> prepare(final List<TextChunk> chunks) {
     requireNonNull(chunks, "chunks");
     List<PreparedPassage> prepared = new ArrayList<>(chunks.size());
+    Set<String> sourcesWithStems = new LinkedHashSet<>();
     for (TextChunk chunk : chunks) {
       if (!chunk.isBlank()) {
-        prepared.add(prepareOne(chunk));
+        prepared.add(prepareOne(chunk, sourcesWithStems.add(chunk.source())));
       }
     }
     if (prepared.isEmpty()) {
@@ -38,10 +41,15 @@ public final class PassagePreparser {
   }
 
   public static PreparedPassage prepareOne(final TextChunk chunk) {
+    return prepareOne(chunk, true);
+  }
+
+  private static PreparedPassage prepareOne(final TextChunk chunk,
+                                            final boolean includeSourceStems) {
     requireNonNull(chunk, "chunk");
     String modelText = normalizeModelText(chunk.text());
     TextChunk normalized = new TextChunk(chunk.id(), chunk.source(), modelText);
-    String searchText = buildSearchText(modelText, chunk.source());
+    String searchText = buildSearchText(modelText, chunk.source(), includeSourceStems);
     Map<String, Integer> tf = termFrequencies(searchText);
     int tokens = tf.values().stream().mapToInt(Integer::intValue).sum();
     return new PreparedPassage(normalized, searchText, tf, tokens);
@@ -56,11 +64,34 @@ public final class PassagePreparser {
   }
 
   static String buildSearchText(final String modelText, final String source) {
-    StringBuilder search = new StringBuilder(modelText);
-    for (String stemToken : sourceStemTokens(source)) {
-      search.append(' ').append(stemToken);
+    return buildSearchText(modelText, source, true);
+  }
+
+  static String buildSearchText(
+    final String modelText,
+    final String source,
+    final boolean includeSourceStems
+  ) {
+    // Section titles are repeated on every atomic sentence for the model prompt; keep them
+    // out of BM25 so topic words do not look artificially common across the index.
+    StringBuilder search = new StringBuilder(stripSectionPrefix(modelText));
+    if (includeSourceStems) {
+      for (String stemToken : sourceStemTokens(source)) {
+        search.append(' ').append(stemToken);
+      }
     }
     return search.toString();
+  }
+
+  static String stripSectionPrefix(final String modelText) {
+    if (modelText == null || modelText.isBlank()) {
+      return "";
+    }
+    int sep = modelText.indexOf(" — ");
+    if (sep > 0 && sep <= 80) {
+      return modelText.substring(sep + 3).strip();
+    }
+    return modelText;
   }
 
   static List<String> sourceStemTokens(final String source) {

@@ -6,6 +6,7 @@ import com.igormaznitsa.nanollvm.llm.EngineIo;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 
 /**
@@ -34,6 +35,28 @@ public final class RagFactory {
     final RagLoadOptions options,
     final EngineIo io
   ) {
+    return tryMake(folderOrFile, options, io).orElseThrow(() -> new IllegalStateException(
+      "corpus has no non-blank chunks: " + folderOrFile.toAbsolutePath().normalize()));
+  }
+
+  /**
+   * Like {@link #make(Path, RagLoadOptions, EngineIo)} but returns empty when the path exists
+   * yet yields no indexable text (empty folder, only README, blank files).
+   */
+  public static Optional<PreparedRag> tryMake(final Path folderOrFile) {
+    return tryMake(folderOrFile, RagLoadOptions.defaults(), EngineIo.silent());
+  }
+
+  public static Optional<PreparedRag> tryMake(final Path folderOrFile,
+                                              final RagLoadOptions options) {
+    return tryMake(folderOrFile, options, EngineIo.silent());
+  }
+
+  public static Optional<PreparedRag> tryMake(
+    final Path folderOrFile,
+    final RagLoadOptions options,
+    final EngineIo io
+  ) {
     requireNonNull(folderOrFile, "folderOrFile");
     requireNonNull(options, "options");
     EngineIo streams = io == null ? EngineIo.silent() : io;
@@ -46,7 +69,18 @@ public final class RagFactory {
     } else {
       throw new IllegalArgumentException("path is not a file or directory: " + path);
     }
-    return seal(corpus.build(), path, options, streams);
+    try {
+      return Optional.of(seal(corpus.build(), path, options, streams));
+    } catch (IllegalStateException emptyCorpus) {
+      String message = emptyCorpus.getMessage();
+      if (message == null || !message.startsWith("corpus has no")) {
+        throw emptyCorpus;
+      }
+      if (!streams.isSilent()) {
+        streams.infof("RAG skipped: no indexable text at %s%n", path);
+      }
+      return Optional.empty();
+    }
   }
 
   public static PreparedRag of(String... texts) {

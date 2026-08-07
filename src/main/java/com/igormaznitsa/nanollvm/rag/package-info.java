@@ -4,8 +4,10 @@
  * <p>{@link RagFactory} loads documents once into a shareable {@link PreparedRag}:
  * section-aware sentences, {@link PassagePreparser} (model vs search text, pre-tokenized TF),
  * and an inverted {@link Bm25Index}. Sessions only query that prepared index.
- * Plain-text and markup files are read as UTF-8; {@code .pdf} files go through
- * {@link PdfTextExtractor} (pure Java; no OCR).
+ * Short follow-ups with prior context are rewritten by an isolated LLM call into search
+ * keywords; first turns and long questions stay lexical. Index-only {@code retrieve}
+ * stays lexical. Plain-text and markup files are read as UTF-8; {@code .pdf} files go
+ * through {@link PdfTextExtractor} (pure Java; no OCR).
  */
 
 package com.igormaznitsa.nanollvm.rag;
