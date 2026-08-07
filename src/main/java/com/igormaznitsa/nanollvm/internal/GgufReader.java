@@ -4,7 +4,7 @@ import static java.nio.charset.StandardCharsets.UTF_8;
 import static java.util.Objects.requireNonNull;
 
 import com.igormaznitsa.nanollvm.tensor.Tensor;
-
+import com.igormaznitsa.nanollvm.tokenizer.GgufTokenizerSource;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
@@ -20,7 +20,7 @@ import java.util.stream.LongStream;
 /**
  * Memory-mapped GGUF v2/v3 reader: metadata KV map + named tensors dequantized to float32.
  */
-public final class GgufReader implements AutoCloseable {
+public final class GgufReader implements AutoCloseable, GgufTokenizerSource {
 
   private static final int GGUF_MAGIC = 0x46554747;
   private static final int DEFAULT_ALIGNMENT = 32;

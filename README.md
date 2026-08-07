@@ -7,13 +7,97 @@
 
 # Nano-vLLM Java
 
-Pure **Java 21+** LLM inference engine: continuous batching, paged KV cache, and Hugging Face–compatible weight loading
-on **CPU only** — no CUDA, PyTorch, or third-party runtime libraries.
+Pure **Java 21+** LLM inference library: continuous batching, paged KV cache, and Hugging Face–compatible weight
+loading on **CPU only** — no CUDA, PyTorch, or native runtime bindings. Add it to a Maven or Gradle app and call it
+from ordinary Java.
 
 Ideas in this project were inspired by the Python [nano-vllm](https://github.com/GeeeekExplorer/nano-vllm) educational
 engine.
 
 For a guided tour of the design (scheduler, attention, tensors, RAG), see [`description.md`](description.md).
+
+## Hello World — Gemma3 log triage in your app
+
+This is the usual path for library users: declare the dependency, point at a **local Gemma3** folder (any path you
+choose), ask a short business question, print the answer.
+
+### 1. Add the dependency
+
+**Maven**
+
+```xml
+<dependency>
+  <groupId>com.igormaznitsa</groupId>
+  <artifactId>nano-vllm-java</artifactId>
+  <version>1.0.0-SNAPSHOT</version>
+</dependency>
+```
+
+**Gradle (Groovy)**
+
+```gradle
+implementation 'com.igormaznitsa:nano-vllm-java:1.0.0-SNAPSHOT'
+```
+
+JPMS module name: `com.igormaznitsa.nanollvm` (`requires com.igormaznitsa.nanollvm;`).
+Runtime: **JDK 21+**, enough heap for the checkpoint (Gemma3-270M is typically fine with a few GB).
+
+Download a Gemma3 instruct snapshot once (HF license + token), for example into `/opt/models/Gemma3-270M` — see
+[Download scripts](#download-scripts) or Hugging Face
+[google/gemma-3-270m-it](https://huggingface.co/google/gemma-3-270m-it).
+
+### 2. Load Gemma3 from your path and triage a log snippet
+
+```java
+import com.igormaznitsa.nanollvm.llm.LLM;
+import com.igormaznitsa.nanollvm.models.Model;
+import com.igormaznitsa.nanollvm.models.ModelFactory;
+
+import java.nio.file.Path;
+
+public final class LogTriageHelloWorld {
+
+  public static void main(String[] args) {
+    // Custom install location — not tied to this repo's ./models layout
+    Path gemmaDir = Path.of("/opt/models/Gemma3-270M");
+
+    Model model = ModelFactory.make(gemmaDir);
+
+    String logExcerpt = """
+        2026-08-07 22:14:01 WARN  payment-api - retry 1/3 for order=99102 cause=SocketTimeoutException
+        2026-08-07 22:14:04 WARN  payment-api - retry 2/3 for order=99102 cause=SocketTimeoutException
+        2026-08-07 22:14:08 ERROR payment-api - give up order=99102 after 3 timeouts upstream=billing-svc:8443
+        2026-08-07 22:14:08 INFO  payment-api - marked order=99102 status=PAYMENT_FAILED
+        """;
+
+    String prompt = """
+        You are helping an on-call engineer. Read the log lines and reply in three short bullets:
+        1) what failed
+        2) likely cause
+        3) one concrete next check
+        Do not invent hosts or error codes that are not in the log.
+
+        Log:
+        %s
+        """.formatted(logExcerpt);
+
+    try (LLM llm = LLM.builder(model)
+        .noSystemPrompt()          // Gemma chat path: keep the system role empty
+        .maxModelLen(2048)
+        .build()) {
+
+      String advice = llm.chat(128).send(prompt).answer();
+      System.out.println(advice);
+    }
+  }
+}
+```
+
+What this shows: **pure Java** in / out, **your** model directory, one `ModelFactory.make` + `LLM.builder` +
+`chat(…).send(…).answer()` — no Python sidecar. Swap the path for another Gemma3 layout or use Qwen3 the same way
+(with `.systemPrompt(…)` if you want a fixed role).
+
+More API samples (streaming, RAG, GGUF, subagents) are in [Library quick start](#library-quick-start).
 
 ## Key features
 
@@ -55,6 +139,9 @@ Tests use the Vector incubator module (`jvm.module.args` in the POM). Production
 
 ### Use as a dependency
 
+See [Hello World](#hello-world--gemma3-log-triage-in-your-app) for Maven / Gradle coordinates and a complete Gemma3
+example. Snapshot builds from this repository still use version `1.0.0-SNAPSHOT` until you publish.
+
 ```xml
 <dependency>
   <groupId>com.igormaznitsa</groupId>
@@ -69,8 +156,9 @@ On the module path:
 requires com.igormaznitsa.nanollvm;
 ```
 
-Public API packages: `models`, `llm`, `chat`, `rag`, `tokenizer`, `prompts`, `utils`, `exceptions`.
-Loaders / GGUF / inference slot maps live in `internal` (used by `ModelFactory`; not a stable app API).
+Public API packages: `models`, `llm`, `chat`, `rag`, `tokenizer`, `prompts`, `utils`, `exceptions`
+(plus the root package for `Example` / `Bench`). `engine`, `layers`, `tensor`, and `internal` are
+**not** exported — use `ModelFactory` / `LLM` / `RagFactory` from application code.
 
 ## Download and load models
 

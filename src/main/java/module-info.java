@@ -1,12 +1,22 @@
 /**
  * JPMS module for the nano-vllm-java library.
  *
- * <p>Public API packages are exported ({@code models}, {@code llm}, {@code chat}, {@code rag},
- * {@code exceptions},
- * {@code tokenizer},
- * {@code prompts}, {@code utils} for Bundled* / Json / NanoVllmProps). Engine, tensor,
- * layers, and {@code internal} (loader / safetensors / GGUF / inference Context) stay module-private.
- * Consumers that use the Vector API path need {@code jdk.incubator.vector} on the module path
+ * <p><b>Exported (application API):</b> root ({@code Example}, {@code Bench}), {@code models},
+ * {@code llm}, {@code chat}, {@code rag}, {@code exceptions}, {@code tokenizer}, {@code prompts},
+ * {@code utils}.
+ *
+ * <p><b>Not exported (module-private):</b> {@code engine}, {@code layers}, {@code tensor}
+ * (and {@code tensor.scalar} / {@code tensor.vector}), {@code internal} (safetensors / GGUF loaders,
+ * inference {@code Context}). Application code should use {@code ModelFactory} / {@code LLM} /
+ * {@code RagFactory} rather than loaders or the network graph.
+ *
+ * <p>{@link com.igormaznitsa.nanollvm.models.CausalLM} and {@link com.igormaznitsa.nanollvm.models.WeightBag}
+ * mention {@code tensor}/{@code layers} types in some signatures for in-module engine use;
+ * {@link com.igormaznitsa.nanollvm.models.Model#network()} is not a stable app surface.
+ * GGUF tokenizer build uses exported {@link com.igormaznitsa.nanollvm.tokenizer.GgufTokenizerSource}
+ * (implemented by the private GGUF reader).
+ *
+ * <p>Consumers that use the Vector API path need {@code jdk.incubator.vector} on the module path
  * (optional at runtime — scalar kernels are used when it is absent).
  */
 module com.igormaznitsa.nanollvm {
@@ -21,5 +31,4 @@ module com.igormaznitsa.nanollvm {
   exports com.igormaznitsa.nanollvm.tokenizer;
   exports com.igormaznitsa.nanollvm.prompts;
   exports com.igormaznitsa.nanollvm.utils;
-  exports com.igormaznitsa.nanollvm.internal;
 }

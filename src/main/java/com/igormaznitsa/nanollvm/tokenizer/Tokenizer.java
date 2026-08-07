@@ -2,8 +2,8 @@ package com.igormaznitsa.nanollvm.tokenizer;
 
 import static com.igormaznitsa.nanollvm.utils.NanoVllmProps.CONFIG_JSON;
 import static java.nio.charset.StandardCharsets.UTF_8;
+import static java.util.Objects.requireNonNull;
 
-import com.igormaznitsa.nanollvm.internal.GgufReader;
 import com.igormaznitsa.nanollvm.prompts.ChatPrompts;
 import com.igormaznitsa.nanollvm.utils.Json;
 
@@ -238,9 +238,11 @@ public final class Tokenizer {
 
   /**
    * Builds a tokenizer from GGUF {@code tokenizer.ggml.*} metadata (LFM2 and similar).
+   * Prefer {@link com.igormaznitsa.nanollvm.models.ModelFactory} for application load paths.
    */
-  public static Tokenizer fromGguf(final GgufReader reader) {
-    List<String> tokens = reader.metaStringArray("tokenizer.ggml.tokens");
+  public static Tokenizer fromGguf(final GgufTokenizerSource source) {
+    requireNonNull(source, "source");
+    List<String> tokens = source.metaStringArray("tokenizer.ggml.tokens");
     if (tokens.isEmpty()) {
       throw new IllegalStateException("GGUF missing tokenizer.ggml.tokens");
     }
@@ -257,12 +259,12 @@ public final class Tokenizer {
     }
 
     Map<String, Integer> merges = new HashMap<>();
-    List<String> mergeList = reader.metaStringArray("tokenizer.ggml.merges");
+    List<String> mergeList = source.metaStringArray("tokenizer.ggml.merges");
     for (int i = 0; i < mergeList.size(); i++) {
       merges.put(mergeList.get(i), i);
     }
 
-    String ggmlModel = reader.metaString("tokenizer.ggml.model", "gpt2").toLowerCase(Locale.ROOT);
+    String ggmlModel = source.metaString("tokenizer.ggml.model", "gpt2").toLowerCase(Locale.ROOT);
     boolean metaspace =
       tokens.stream().limit(4000).filter(t -> t.startsWith(META_SPACE)).count() > 200
         || ggmlModel.contains("llama")
@@ -270,26 +272,26 @@ public final class Tokenizer {
     Style style = metaspace ? Style.METASPACE_BPE : Style.GPT2_BYTE_BPE;
     boolean prependMetaSpace = metaspace && !ggmlModel.contains("lfm");
 
-    int eos = reader.metaInt("tokenizer.ggml.eos_token_id", -1);
+    int eos = source.metaInt("tokenizer.ggml.eos_token_id", -1);
     if (eos < 0) {
       eos = resolveEos(vocab, null, false);
     }
-    int pad = reader.metaInt("tokenizer.ggml.padding_token_id", -1);
+    int pad = source.metaInt("tokenizer.ggml.padding_token_id", -1);
     if (pad < 0) {
       pad = resolvePad(vocab, null, eos);
     }
     List<Integer> stopIds = new ArrayList<>();
     stopIds.add(eos);
-    int eot = reader.metaInt("tokenizer.ggml.eot_token_id", -1);
+    int eot = source.metaInt("tokenizer.ggml.eot_token_id", -1);
     if (eot >= 0 && !stopIds.contains(eot)) {
       stopIds.add(eot);
     }
     addStopIfPresent(vocab, stopIds, "<|im_end|>");
     addStopIfPresent(vocab, stopIds, "<|endoftext|>");
 
-    String chatTemplate = reader.metaString("tokenizer.chat_template", null);
+    String chatTemplate = source.metaString("tokenizer.chat_template", null);
     if (chatTemplate == null) {
-      chatTemplate = reader.metaString("tokenizer.ggml.chat_template", null);
+      chatTemplate = source.metaString("tokenizer.ggml.chat_template", null);
     }
     if (chatTemplate == null && vocab.containsKey("<|im_start|>")) {
       chatTemplate = "<|im_start|>";
