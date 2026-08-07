@@ -1,8 +1,8 @@
-package com.igormaznitsa.nanollvm;
+package com.igormaznitsa.nanollvm.samples;
 
 import com.igormaznitsa.nanollvm.llm.LLM;
 import com.igormaznitsa.nanollvm.llm.SamplingParams;
-import com.igormaznitsa.nanollvm.utils.BundledModels;
+import com.igormaznitsa.nanollvm.samples.utils.BundledModels;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
@@ -21,7 +21,8 @@ import java.util.concurrent.ThreadLocalRandom;
  * argument — number of concurrent sequences (default {@code 8}).
  *
  * <p>Typical launch (weights + KV need a large heap; use at least {@code -Xmx8g} for Qwen3-0.6B):
- * {@code MAVEN_OPTS="-Xmx8g" mvn -q exec:java -Dexec.mainClass=com.igormaznitsa.nanollvm.Bench
+ * {@code MAVEN_OPTS="-Xmx8g" mvn -q exec:java
+ * -Dexec.mainClass=com.igormaznitsa.nanollvm.samples.Bench
  * -Dexec.args="models/Qwen3-0.6B 8"}
  */
 public final class Bench {

@@ -50,8 +50,8 @@ Download a Gemma3 instruct snapshot once (HF license + token), for example into 
 
 ```java
 import com.igormaznitsa.nanollvm.llm.LLM;
-import com.igormaznitsa.nanollvm.models.Model;
-import com.igormaznitsa.nanollvm.models.ModelFactory;
+import com.igormaznitsa.nanollvm.models.LlmModel;
+import com.igormaznitsa.nanollvm.models.LlmModelFactory;
 
 import java.nio.file.Path;
 
@@ -61,7 +61,7 @@ public final class LogTriageHelloWorld {
     // Custom install location — not tied to this repo's ./models layout
     Path gemmaDir = Path.of("/opt/models/Gemma3-270M");
 
-    Model model = ModelFactory.make(gemmaDir);
+    LlmModel model = LlmModelFactory.make(gemmaDir);
 
     String logExcerpt = """
         2026-08-07 22:14:01 WARN  payment-api - retry 1/3 for order=99102 cause=SocketTimeoutException
@@ -93,9 +93,18 @@ public final class LogTriageHelloWorld {
 }
 ```
 
-What this shows: **pure Java** in / out, **your** model directory, one `ModelFactory.make` + `LLM.builder` +
+What this shows: **pure Java** in / out, **your** model directory, one `LlmModelFactory.make` + `LLM.builder` +
 `chat(…).send(…).answer()` — no Python sidecar. Swap the path for another Gemma3 layout or use Qwen3 the same way
 (with `.systemPrompt(…)` if you want a fixed role).
+
+In this repository the same program lives as non-exported
+`com.igormaznitsa.nanollvm.samples.LogTriageHelloWorld` (defaults to `models/Gemma3-270M` via
+`samples.utils.BundledModels`; optional first arg overrides the path):
+
+```bash
+mvn -q exec:java -Dexec.mainClass=com.igormaznitsa.nanollvm.samples.LogTriageHelloWorld
+# or: … -Dexec.args=/opt/models/Gemma3-270M
+```
 
 More API samples (streaming, RAG, GGUF, subagents) are in [Library quick start](#library-quick-start).
 
@@ -104,7 +113,7 @@ More API samples (streaming, RAG, GGUF, subagents) are in [Library quick start](
 - Continuous batching scheduler with paged KV cache and prefix caching
 - **Qwen3** (default), **Gemma3**, and **LFM2** (hybrid short-conv + GQA) causal LMs
 - Loads HF `config.json` + `.safetensors`, or a single **`.gguf`** file (dequantized to float32)
-- Optional multi-thread CPU matmul (`cpuThreads`); defaults to `Runtime.availableProcessors()`
+- Optional multi-thread CPU matmul (`cpuThreads` / `allCpuThreads` / `disableMultiCpu`); default = all processors
 - GPT-2 byte BPE, Gemma Metaspace BPE, and GGUF-embedded tokenizers
 - Optional **BM25 text RAG** over a local `rag/` corpus (used automatically by the Example CLI)
 - Optional **subagent** advisors before each chat/RAG turn (`LLM.setSubagents`)
@@ -156,9 +165,11 @@ On the module path:
 requires com.igormaznitsa.nanollvm;
 ```
 
-Public API packages: `models`, `llm`, `chat`, `rag`, `tokenizer`, `prompts`, `utils`, `exceptions`
-(plus the root package for `Example` / `Bench`). `engine`, `layers`, `tensor`, and `internal` are
-**not** exported — use `ModelFactory` / `LLM` / `RagFactory` from application code.
+Public API packages: `models`, `llm`, `chat`, `rag`, `tokenizer`, `prompts`, `utils`, `exceptions`.
+`samples` (`Example`, `Bench`, `LogTriageHelloWorld`, `samples.utils`), `engine`, `layers`, `tensor`, and
+`internal` are **not** exported — use `LlmModelFactory` / `LLM` / `RagFactory` from application code. Demos
+remain runnable as main classes
+(`mvn exec:java` or `java -m com.igormaznitsa.nanollvm/com.igormaznitsa.nanollvm.samples.Example`).
 
 ## Download and load models
 
@@ -178,7 +189,7 @@ models/Qwen3-0.6B/
   …                          # merges.txt / vocab.json as needed
 ```
 
-At load time, `ModelFactory` reads `config.json`, builds the graph (Qwen3 or Gemma3), merges packed weights from
+At load time, `LlmModelFactory` reads `config.json`, builds the graph (Qwen3 or Gemma3), merges packed weights from
 safetensors, and constructs the tokenizer. Architecture is inferred from `model_type` / `architectures` unless you set
 `-Dnanovllm.arch=qwen3|gemma3|lfm2`.
 
@@ -191,7 +202,7 @@ A single `.gguf` file is also valid. Example: LiquidAI [LFM2.5-2.6B-GGUF](https:
 ```bash
 ./models/download-lfm2.5-2.6b-gguf.sh
 mvn -q exec:java \
-  -Dexec.mainClass=com.igormaznitsa.nanollvm.Example \
+  -Dexec.mainClass=com.igormaznitsa.nanollvm.samples.Example \
   -Dexec.args=models/LFM2.5-2.6B-Q4_K_M.gguf
 ```
 
@@ -224,7 +235,7 @@ You can also point the engine at **any** local HF-style directory (your own path
 
 ### How the default model path is chosen
 
-`BundledModels.resolveDefault()` (used by `Example` and `Bench`) picks the model in this order:
+`samples.utils.BundledModels.resolveDefault()` (used by `Example` and `Bench`; not a library API) picks the model in this order:
 
 1. **First CLI argument** — model path or name (e.g. `models/Gemma3-270M`)
 2. **System property** `-Dnanovllm.model=…`
@@ -241,7 +252,7 @@ The models root itself defaults to `./models`, overridable with `-Dnanovllm.mode
 | Models root        | `-Dnanovllm.models.dir=/opt/models`                                 |
 | Force architecture | `-Dnanovllm.arch=gemma3` (when auto-detect is wrong)                |
 | RAG corpus dir     | `-Dnanovllm.rag.dir=./docs` or `NANOVLLM_RAG_DIR` (default `./rag`) |
-| CPU matmul threads | `-Dnanovllm.cpu.threads=N` (default: all processors)                |
+| CPU matmul threads | `-Dnanovllm.cpu.threads=N` or `.cpuThreads(N)` / `.allCpuThreads()` / `.disableMultiCpu()` |
 
 If you start **without** any of (1)–(3), the Example CLI shows an interactive menu (**Qwen3 / Gemma3 / LFM2 / Exit**).
 
@@ -319,11 +330,11 @@ After `mvn package`:
 java --add-modules jdk.incubator.vector \
   -Xmx16g \
   -p target/nano-vllm-java-1.0.0-SNAPSHOT.jar \
-  -m com.igormaznitsa.nanollvm/com.igormaznitsa.nanollvm.Example \
+  -m com.igormaznitsa.nanollvm/com.igormaznitsa.nanollvm.samples.Example \
   models/Qwen3-0.6B
 ```
 
-Replace the main class with `com.igormaznitsa.nanollvm.Bench` for throughput smoke tests.
+Replace the main class with `com.igormaznitsa.nanollvm.samples.Bench` for throughput smoke tests.
 
 ### Benchmark (`Bench`)
 
@@ -331,7 +342,7 @@ Loads the same default model and runs random token-id batches (scheduler / KV st
 
 ```bash
 mvn -q exec:java \
-  -Dexec.mainClass=com.igormaznitsa.nanollvm.Bench \
+  -Dexec.mainClass=com.igormaznitsa.nanollvm.samples.Bench \
   -Dexec.args="models/Qwen3-0.6B 8"
 ```
 
@@ -339,21 +350,20 @@ Second argument is the number of concurrent sequences (default `8`).
 
 ## Library quick start
 
-Load once, share `Model` across many `LLM` instances. One `LLM` is **not** safe for concurrent `generate` / chat —
+Load once, share `LlmModel` across many `LLM` instances. One `LLM` is **not** safe for concurrent `generate` / chat —
 use one instance per thread, or call sequentially. `LLM.cancel()` is safe from another thread.
 
 ### Chat, one-shot, and completion
 
 ```java
-import com.igormaznitsa.nanollvm.models.Model;
-import com.igormaznitsa.nanollvm.models.ModelFactory;
+import com.igormaznitsa.nanollvm.models.LlmModel;
+import com.igormaznitsa.nanollvm.models.LlmModelFactory;
 import com.igormaznitsa.nanollvm.llm.LLM;
-import com.igormaznitsa.nanollvm.utils.BundledModels;
 
 import java.nio.file.Path;
 
-Path modelDir = BundledModels.resolveDefault(); // or Path.of("models/Qwen3-0.6B")
-Model model = ModelFactory.make(modelDir);      // quiet; ModelFactory.make(dir, EngineIo.system()) for progress
+Path modelDir = Path.of("models/Qwen3-0.6B"); // your local HF (or .gguf) path
+LlmModel model = LlmModelFactory.make(modelDir);    // quiet; LlmModelFactory.make(dir, EngineIo.system()) for progress
 
 try (LLM llm = LLM.builder(model)
     .enforceEager(true)
@@ -367,11 +377,11 @@ try (LLM llm = LLM.builder(model)
 }
 ```
 
-Path convenience (private `Model` inside the builder):
+Path convenience (private `LlmModel` inside the builder):
 
 ```java
 import com.igormaznitsa.nanollvm.llm.LLM;
-import com.igormaznitsa.nanollvm.models.ModelFactory;
+import com.igormaznitsa.nanollvm.models.LlmModelFactory;
 
 import java.nio.file.Path;
 
@@ -385,12 +395,12 @@ try (LLM llm = LLM.builder(Path.of("models/Qwen3-0.6B")).withSystemIo().build())
 ```java
 import com.igormaznitsa.nanollvm.llm.EngineIo;
 import com.igormaznitsa.nanollvm.llm.LLM;
-import com.igormaznitsa.nanollvm.models.Model;
-import com.igormaznitsa.nanollvm.models.ModelFactory;
+import com.igormaznitsa.nanollvm.models.LlmModel;
+import com.igormaznitsa.nanollvm.models.LlmModelFactory;
 
 import java.nio.file.Path;
 
-Model model = ModelFactory.make(Path.of("models/LFM2.5-2.6B-Q4_K_M.gguf"), EngineIo.system());
+LlmModel model = LlmModelFactory.make(Path.of("models/LFM2.5-2.6B-Q4_K_M.gguf"), EngineIo.system());
 try (LLM llm = LLM.builder(model)
     .maxModelLen(2048)
     .allCpuThreads()

@@ -113,7 +113,7 @@
                 <configuration>
                     <archive>
                         <manifest>
-                            <mainClass>com.igormaznitsa.nanollvm.Example</mainClass>
+                            <mainClass>com.igormaznitsa.nanollvm.samples.Example</mainClass>
                         </manifest>
                     </archive>
                 </configuration>
@@ -123,7 +123,7 @@
                 <artifactId>exec-maven-plugin</artifactId>
                 <version>3.6.3</version>
                 <configuration>
-                    <mainClass>com.igormaznitsa.nanollvm.Example</mainClass>
+                    <mainClass>com.igormaznitsa.nanollvm.samples.Example</mainClass>
                 </configuration>
             </plugin>
         </plugins>

@@ -19,24 +19,24 @@ import java.nio.file.Path;
 import java.util.Locale;
 
 /**
- * Loads an immutable {@link Model} from a HuggingFace model directory or a {@code .gguf} file.
+ * Loads an immutable {@link LlmModel} from a HuggingFace model directory or a {@code .gguf} file.
  *
- * <p>One {@link Model} may be reused by any number of {@link LLM} instances.
+ * <p>One {@link LlmModel} may be reused by any number of {@link LLM} instances.
  */
-public final class ModelFactory {
+public final class LlmModelFactory {
 
-  private ModelFactory() {
+  private LlmModelFactory() {
   }
 
-  public static Model make(final Path modelDir) {
+  public static LlmModel make(final Path modelDir) {
     return make(modelDir, EngineIo.silent());
   }
 
-  public static Model make(final String modelPath) {
+  public static LlmModel make(final String modelPath) {
     return make(Path.of(requireNonNull(modelPath, "modelPath")));
   }
 
-  public static Model make(final Path modelPath, final EngineIo io) {
+  public static LlmModel make(final Path modelPath, final EngineIo io) {
     requireNonNull(modelPath, "modelPath");
     EngineIo streams = io == null ? EngineIo.silent() : io;
     Path path = modelPath.toAbsolutePath().normalize();
@@ -56,7 +56,7 @@ public final class ModelFactory {
     }
   }
 
-  private static Model loadHf(final Path path, final EngineIo io) throws IOException {
+  private static LlmModel loadHf(final Path path, final EngineIo io) throws IOException {
     long t0 = System.nanoTime();
     io.info("CPU backend: " + VectorMath.backendInfo());
 
@@ -75,10 +75,10 @@ public final class ModelFactory {
 
     Tokenizer tokenizer = Tokenizer.fromPretrained(path);
     io.infof("Model loaded in %.1fs%n", (System.nanoTime() - t0) / 1e9);
-    return new Model(path, hfConfig, network, tokenizer);
+    return new LlmModel(path, hfConfig, network, tokenizer);
   }
 
-  private static Model loadGguf(final Path path, final EngineIo io) throws IOException {
+  private static LlmModel loadGguf(final Path path, final EngineIo io) throws IOException {
     long t0 = System.nanoTime();
     io.info("CPU backend: " + VectorMath.backendInfo());
     io.info(
@@ -101,7 +101,7 @@ public final class ModelFactory {
 
       Tokenizer tokenizer = Tokenizer.fromGguf(reader);
       io.infof("Model loaded in %.1fs%n", (System.nanoTime() - t0) / 1e9);
-      return new Model(path, loaded.config(), network, tokenizer);
+      return new LlmModel(path, loaded.config(), network, tokenizer);
     }
   }
 }

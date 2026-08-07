@@ -14,20 +14,20 @@ import java.nio.file.Path;
  * <p>Safe to share across threads and across many {@link LLM} instances. Mutable inference
  * state (KV cache, scheduler, sampling) lives on each {@link LLM}, not here.
  *
- * <p>Construct via {@link ModelFactory#make(Path)}. Closing an {@link LLM} does not unload
+ * <p>Construct via {@link LlmModelFactory#make(Path)}. Closing an {@link LLM} does not unload
  * this model.
  *
- * @see ModelFactory
+ * @see LlmModelFactory
  * @see LLM
  */
-public final class Model {
+public final class LlmModel {
 
   private final Path path;
   private final Config.HfConfig hfConfig;
   private final CausalLM network;
   private final Tokenizer tokenizer;
 
-  Model(Path path, Config.HfConfig hfConfig, CausalLM network, Tokenizer tokenizer) {
+  LlmModel(Path path, Config.HfConfig hfConfig, CausalLM network, Tokenizer tokenizer) {
     this.path = requireNonNull(path, "path").toAbsolutePath().normalize();
     this.hfConfig = requireNonNull(hfConfig, "hfConfig");
     this.network = requireNonNull(network, "network");

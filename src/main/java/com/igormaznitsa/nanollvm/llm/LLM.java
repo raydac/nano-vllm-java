@@ -12,8 +12,8 @@ import com.igormaznitsa.nanollvm.engine.Transformer;
 import com.igormaznitsa.nanollvm.exceptions.GenerationCancelledException;
 import com.igormaznitsa.nanollvm.exceptions.GenerationTimeoutException;
 import com.igormaznitsa.nanollvm.exceptions.ModelLoadException;
-import com.igormaznitsa.nanollvm.models.Model;
-import com.igormaznitsa.nanollvm.models.ModelFactory;
+import com.igormaznitsa.nanollvm.models.LlmModel;
+import com.igormaznitsa.nanollvm.models.LlmModelFactory;
 import com.igormaznitsa.nanollvm.prompts.ChatPrompts;
 import com.igormaznitsa.nanollvm.rag.PreparedRag;
 import com.igormaznitsa.nanollvm.rag.RagFactory;
@@ -37,7 +37,7 @@ import java.util.stream.IntStream;
  *
  * <h2>Typical use</h2>
  * <pre>{@code
- * Model model = ModelFactory.make(modelDir);  // load once, share freely
+ * LlmModel model = LlmModelFactory.make(modelDir);  // load once, share freely
  * try (LLM llm = LLM.builder(model)
  *         .maxModelLen(2048)
  *         .systemPrompt("Answer briefly.")  // optional
@@ -51,7 +51,7 @@ import java.util.stream.IntStream;
  * }
  * }</pre>
  *
- * <p>Path convenience {@code LLM.builder(path)} still loads a private {@link Model} internally.
+ * <p>Path convenience {@code LLM.builder(path)} still loads a private {@link LlmModel} internally.
  *
  * <h2>Layers</h2>
  * <ul>
@@ -68,13 +68,13 @@ import java.util.stream.IntStream;
  *
  * <h2>Thread safety</h2>
  * One instance must not run concurrent {@link #generate} or chat calls. Prefer one instance
- * per thread, or external locking. Share one immutable {@link Model} across many {@code LLM}s.
+ * per thread, or external locking. Share one immutable {@link LlmModel} across many {@code LLM}s.
  * {@link #cancel()} is safe from another thread and aborts an in-flight generate with
  * {@link GenerationCancelledException}.
  *
  * @see Builder
- * @see Model
- * @see ModelFactory
+ * @see LlmModel
+ * @see LlmModelFactory
  * @see ChatSession
  * @see EngineIo
  * @see SamplingParams
@@ -86,7 +86,7 @@ public final class LLM implements AutoCloseable {
   private static final int WARMUP_PREFILL_TOKENS = 64;
   private static final int WARMUP_DECODE_TOKENS = 16;
 
-  private final Model model;
+  private final LlmModel model;
   private final Config config;
   private final EngineIo io;
   private final String systemPromptOverride;
@@ -118,16 +118,16 @@ public final class LLM implements AutoCloseable {
   }
 
   /**
-   * Binds a shared immutable {@link Model} with default builder settings.
+   * Binds a shared immutable {@link LlmModel} with default builder settings.
    */
-  public LLM(final Model model) {
+  public LLM(final LlmModel model) {
     this(builder(model));
   }
 
   private LLM(final Builder builder) {
     requireNonNull(builder, "builder");
     try {
-      // Business load path: resolve Model → engine config → KV/scheduler
+      // Business load path: resolve LlmModel → engine config → KV/scheduler
       int cpuThreads = builder.resolveCpuThreads();
       VectorMath.configureCpuThreads(cpuThreads);
       this.model = builder.resolveModel();
@@ -159,9 +159,9 @@ public final class LLM implements AutoCloseable {
   }
 
   /**
-   * Starts a fluent configurator for a shared immutable {@link Model}.
+   * Starts a fluent configurator for a shared immutable {@link LlmModel}.
    */
-  public static Builder builder(final Model model) {
+  public static Builder builder(final LlmModel model) {
     return new Builder(requireNonNull(model, "model"));
   }
 
@@ -186,7 +186,7 @@ public final class LLM implements AutoCloseable {
   /**
    * The immutable loaded model bound to this engine (may be shared with other {@code LLM}s).
    */
-  public Model model() {
+  public LlmModel model() {
     return this.model;
   }
 
@@ -778,12 +778,12 @@ public final class LLM implements AutoCloseable {
    * <p>Defaults: {@link EngineIo#silent()}, eager execution, warmup enabled, no system-prompt
    * override (model default via {@link ChatPrompts}).
    *
-   * <p>Provide either a shared {@link Model} via {@link LLM#builder(Model)} or a model directory
+   * <p>Provide either a shared {@link LlmModel} via {@link LLM#builder(LlmModel)} or a model directory
    * via {@link LLM#builder(Path)}. Call {@link #build()} last.
    */
   public static final class Builder {
 
-    private final Model sharedModel;
+    private final LlmModel sharedModel;
     private final Path modelDir;
     private EngineIo io = EngineIo.silent();
     private int maxNumBatchedTokens = 16384;
@@ -801,7 +801,7 @@ public final class LLM implements AutoCloseable {
      */
     private String systemPromptOverride = null;
 
-    private Builder(final Model model) {
+    private Builder(final LlmModel model) {
       this.sharedModel = requireNonNull(model, "model");
       this.modelDir = model.path();
     }
@@ -930,6 +930,13 @@ public final class LLM implements AutoCloseable {
     }
 
     /**
+     * Sequential dense matmul ({@code cpuThreads(1)}); no worker pool.
+     */
+    public Builder disableMultiCpu() {
+      return this.cpuThreads(1);
+    }
+
+    /**
      * KV block size in tokens; must be a multiple of 256. Default {@code 256}.
      */
     public Builder kvcacheBlockSize(final int value) {
@@ -961,7 +968,7 @@ public final class LLM implements AutoCloseable {
     }
 
     /**
-     * Returns a ready {@link LLM} bound to the resolved {@link Model}.
+     * Returns a ready {@link LLM} bound to the resolved {@link LlmModel}.
      *
      * @throws ModelLoadException if the model directory, config, or weights are unusable
      */
@@ -969,18 +976,18 @@ public final class LLM implements AutoCloseable {
       return new LLM(this);
     }
 
-    private Model resolveModel() {
+    private LlmModel resolveModel() {
       if (this.sharedModel != null) {
         return this.sharedModel;
       }
-      return ModelFactory.make(this.modelDir, this.io);
+      return LlmModelFactory.make(this.modelDir, this.io);
     }
 
     private Path modelPath() {
       return this.sharedModel != null ? this.sharedModel.path() : this.modelDir;
     }
 
-    private Config toConfig(final Model model, final int cpuThreads) {
+    private Config toConfig(final LlmModel model, final int cpuThreads) {
       return Config.builder(model)
           .maxNumBatchedTokens(this.maxNumBatchedTokens)
           .maxNumSeqs(this.maxNumSeqs)

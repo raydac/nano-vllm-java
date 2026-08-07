@@ -1,4 +1,4 @@
-package com.igormaznitsa.nanollvm.utils;
+package com.igormaznitsa.nanollvm.samples.utils;
 
 import static com.igormaznitsa.nanollvm.utils.NanoVllmProps.ENV_RAG_DIR;
 import static com.igormaznitsa.nanollvm.utils.NanoVllmProps.PROP_RAG_DIR;

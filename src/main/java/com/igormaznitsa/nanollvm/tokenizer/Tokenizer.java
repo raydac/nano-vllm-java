@@ -238,7 +238,7 @@ public final class Tokenizer {
 
   /**
    * Builds a tokenizer from GGUF {@code tokenizer.ggml.*} metadata (LFM2 and similar).
-   * Prefer {@link com.igormaznitsa.nanollvm.models.ModelFactory} for application load paths.
+   * Prefer {@link com.igormaznitsa.nanollvm.models.LlmModelFactory} for application load paths.
    */
   public static Tokenizer fromGguf(final GgufTokenizerSource source) {
     requireNonNull(source, "source");

@@ -5,7 +5,7 @@ import com.igormaznitsa.nanollvm.layers.Sampler;
 import com.igormaznitsa.nanollvm.llm.Config;
 import com.igormaznitsa.nanollvm.llm.EngineIo;
 import com.igormaznitsa.nanollvm.models.CausalLM;
-import com.igormaznitsa.nanollvm.models.Model;
+import com.igormaznitsa.nanollvm.models.LlmModel;
 import com.igormaznitsa.nanollvm.tensor.Tensor;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -15,7 +15,7 @@ import java.util.List;
  * Named home for one transformer tick: prepare batch tensors → {@link CausalLM#forward} →
  * logits → sample. Owns the per-{@code LLM} {@link KvCacheArena} (and optional
  * {@link ConvStateArena} for short-conv architectures); the immutable network graph lives on
- * {@link Model}/{@link CausalLM}.
+ * {@link LlmModel}/{@link CausalLM}.
  *
  * <h2>Role in the engine</h2>
  * Driven by {@link com.igormaznitsa.nanollvm.llm.LLM#step}: the {@link Scheduler} picks a prefill
@@ -40,8 +40,8 @@ import java.util.List;
  * from the scheduled {@link Sequence}s.
  *
  * <h2>Lifecycle</h2>
- * Constructed once per {@code LLM} with a shared immutable {@link Model}. {@link #close()} only
- * clears thread-local {@link Context} bindings; the {@link Model} and weight tensors are not owned
+ * Constructed once per {@code LLM} with a shared immutable {@link LlmModel}. {@link #close()} only
+ * clears thread-local {@link Context} bindings; the {@link LlmModel} and weight tensors are not owned
  * here and are not released.
  *
  * <p><strong>Thread safety:</strong> not concurrent-safe; one transformer per {@code LLM}, used on
@@ -67,7 +67,7 @@ public final class Transformer implements AutoCloseable {
    * @param model  immutable loaded graph + weights (shared across LLMs)
    * @param config engine limits used to size the KV arena
    */
-  public Transformer(final Model model, final Config config) {
+  public Transformer(final LlmModel model, final Config config) {
     this(model, config, EngineIo.silent());
   }
 
@@ -79,7 +79,7 @@ public final class Transformer implements AutoCloseable {
    * @param config engine limits used to size the KV arena
    * @param io     progress sink for KV / conv allocation messages; {@code null} → silent
    */
-  public Transformer(final Model model, final Config config, final EngineIo io) {
+  public Transformer(final LlmModel model, final Config config, final EngineIo io) {
     // Capture engine config and resolve progress sink (null → silent)
     this.config = config;
     final EngineIo io1 = io == null ? EngineIo.silent() : io;
@@ -211,7 +211,7 @@ public final class Transformer implements AutoCloseable {
   }
 
   /**
-   * Clears thread-local {@link Context} bindings. Does not free the {@link Model} or weight heap.
+   * Clears thread-local {@link Context} bindings. Does not free the {@link LlmModel} or weight heap.
    */
   @Override
   public void close() {

@@ -24,14 +24,14 @@ import com.igormaznitsa.nanollvm.llm.LLM;
 import com.igormaznitsa.nanollvm.llm.SamplingDefaults;
 import com.igormaznitsa.nanollvm.llm.SamplingParams;
 import com.igormaznitsa.nanollvm.llm.SubagentMode;
-import com.igormaznitsa.nanollvm.models.Model;
-import com.igormaznitsa.nanollvm.models.ModelFactory;
+import com.igormaznitsa.nanollvm.models.LlmModel;
+import com.igormaznitsa.nanollvm.models.LlmModelFactory;
 import com.igormaznitsa.nanollvm.prompts.ChatPrompts;
+import com.igormaznitsa.nanollvm.samples.utils.BundledModels;
 import com.igormaznitsa.nanollvm.tensor.FloatKernels;
 import com.igormaznitsa.nanollvm.tensor.FloatKernelsFactory;
 import com.igormaznitsa.nanollvm.tensor.Ops;
 import com.igormaznitsa.nanollvm.tensor.Tensor;
-import com.igormaznitsa.nanollvm.utils.BundledModels;
 import com.igormaznitsa.nanollvm.utils.Json;
 import java.io.IOException;
 import java.io.UncheckedIOException;
@@ -81,7 +81,7 @@ class CoreUnitTest {
     var path = BundledModels.find(BundledModels.QWEN3_0_6B);
     org.junit.jupiter.api.Assumptions.assumeTrue(path.isPresent(), "Qwen3-0.6B not downloaded");
 
-    Model model = ModelFactory.make(path.get());
+    LlmModel model = LlmModelFactory.make(path.get());
     try (LLM a = LLM.builder(model).maxModelLen(256).numKvcacheBlocks(32).skipWarmup().build();
          LLM b = LLM.builder(model).maxModelLen(256).numKvcacheBlocks(32).skipWarmup().build()) {
       assertSame(model, a.model());
@@ -97,7 +97,7 @@ class CoreUnitTest {
     var path = BundledModels.find(BundledModels.QWEN3_0_6B);
     org.junit.jupiter.api.Assumptions.assumeTrue(path.isPresent(), "Qwen3-0.6B not downloaded");
 
-    Model model = ModelFactory.make(path.get());
+    LlmModel model = LlmModelFactory.make(path.get());
     try (LLM llm = LLM.builder(model).maxModelLen(256).numKvcacheBlocks(32).skipWarmup().build()) {
       assertTrue(llm.subagentPrompts().isEmpty());
       assertEquals(SubagentMode.SEQUENTIAL, llm.subagentMode());
@@ -212,8 +212,8 @@ class CoreUnitTest {
 
   @Test
   void bundledQwenModelIsPresent() {
-    var path = com.igormaznitsa.nanollvm.utils.BundledModels.find(
-        com.igormaznitsa.nanollvm.utils.BundledModels.QWEN3_0_6B);
+    var path = com.igormaznitsa.nanollvm.samples.utils.BundledModels.find(
+      com.igormaznitsa.nanollvm.samples.utils.BundledModels.QWEN3_0_6B);
     assertTrue(path.isPresent(), "run models/download-qwen3-0.6b.sh");
     assertTrue(isRegularFile(path.get().resolve("config.json")));
     assertTrue(isRegularFile(path.get().resolve("model.safetensors")));
@@ -345,8 +345,8 @@ class CoreUnitTest {
     assertEquals("ащ", com.igormaznitsa.nanollvm.tokenizer.Tokenizer.decodeUtf8Complete(
       "ащ".getBytes(java.nio.charset.StandardCharsets.UTF_8)));
 
-    var path = com.igormaznitsa.nanollvm.utils.BundledModels.require(
-        com.igormaznitsa.nanollvm.utils.BundledModels.QWEN3_0_6B);
+    var path = com.igormaznitsa.nanollvm.samples.utils.BundledModels.require(
+      com.igormaznitsa.nanollvm.samples.utils.BundledModels.QWEN3_0_6B);
     var tok = com.igormaznitsa.nanollvm.tokenizer.Tokenizer.fromPretrained(path);
     List<Integer> ids = tok.encode("обычное средство щелочное");
     for (int n = 1; n <= ids.size(); n++) {
@@ -358,8 +358,8 @@ class CoreUnitTest {
 
   @Test
   void tokenizerEncodesSpecialTokensAtomically() {
-    var path = com.igormaznitsa.nanollvm.utils.BundledModels.require(
-        com.igormaznitsa.nanollvm.utils.BundledModels.QWEN3_0_6B);
+    var path = com.igormaznitsa.nanollvm.samples.utils.BundledModels.require(
+      com.igormaznitsa.nanollvm.samples.utils.BundledModels.QWEN3_0_6B);
     var tok = com.igormaznitsa.nanollvm.tokenizer.Tokenizer.fromPretrained(path);
     List<Integer> ids = tok.encode(
         "<|im_start|>user\nhello<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n");
@@ -528,8 +528,8 @@ class CoreUnitTest {
 
   @Test
   void qwenTokenizerIsNotGemmaChat() {
-    var path = com.igormaznitsa.nanollvm.utils.BundledModels.require(
-        com.igormaznitsa.nanollvm.utils.BundledModels.QWEN3_0_6B);
+    var path = com.igormaznitsa.nanollvm.samples.utils.BundledModels.require(
+      com.igormaznitsa.nanollvm.samples.utils.BundledModels.QWEN3_0_6B);
     var tok = com.igormaznitsa.nanollvm.tokenizer.Tokenizer.fromPretrained(path);
     assertFalse(tok.isGemmaChat());
     assertTrue(tok.invitesThinking());
@@ -594,8 +594,8 @@ class CoreUnitTest {
 
   @Test
   void gemmaSmokeWhenWeightsPresent() {
-    var path = com.igormaznitsa.nanollvm.utils.BundledModels.find(
-        com.igormaznitsa.nanollvm.utils.BundledModels.GEMMA3_270M);
+    var path = com.igormaznitsa.nanollvm.samples.utils.BundledModels.find(
+      com.igormaznitsa.nanollvm.samples.utils.BundledModels.GEMMA3_270M);
     org.junit.jupiter.api.Assumptions.assumeTrue(path.isPresent(), "Gemma3-270M not downloaded");
     var tok = com.igormaznitsa.nanollvm.tokenizer.Tokenizer.fromPretrained(path.get());
     assertTrue(tok.isGemmaChat());
@@ -632,28 +632,5 @@ class CoreUnitTest {
     assertEquals("Hi", AssistantParts.stripChatMarkup("Hi<end_of_turn>"));
     assertEquals("model\nplan",
         AssistantParts.stripChatMarkup("<start_of_turn>model\nplan<end_of_turn>"));
-  }
-
-  @Test
-  void exampleModelMenuSelectsBundledPaths() throws Exception {
-    var qwen = BundledModels.find(BundledModels.QWEN3_0_6B);
-    org.junit.jupiter.api.Assumptions.assumeTrue(qwen.isPresent());
-    Path chosen = Example.resolveModel(
-        new String[0],
-        new java.io.BufferedReader(new java.io.StringReader("1\n")));
-    assertEquals(qwen.get(), chosen);
-
-    assertTrue(Example.resolveModel(
-        new String[0],
-      new java.io.BufferedReader(new java.io.StringReader("4\n"))) == null);
-  }
-
-  @Test
-  void exampleSkipsMenuWhenCliPathGiven() throws Exception {
-    var qwen = BundledModels.require(BundledModels.QWEN3_0_6B);
-    Path chosen = Example.resolveModel(
-        new String[] {qwen.toString()},
-        new java.io.BufferedReader(new java.io.StringReader("2\n")));
-    assertEquals(qwen.toAbsolutePath().normalize(), chosen.toAbsolutePath().normalize());
   }
 }

@@ -1,4 +1,4 @@
-package com.igormaznitsa.nanollvm;
+package com.igormaznitsa.nanollvm.samples;
 
 import static com.igormaznitsa.nanollvm.models.WeightNames.ARCH_GEMMA3;
 import static com.igormaznitsa.nanollvm.models.WeightNames.ARCH_LFM2;
@@ -18,8 +18,8 @@ import com.igormaznitsa.nanollvm.rag.RagFactory;
 import com.igormaznitsa.nanollvm.rag.RagHit;
 import com.igormaznitsa.nanollvm.rag.RagLoadOptions;
 import com.igormaznitsa.nanollvm.rag.RagSession;
-import com.igormaznitsa.nanollvm.utils.BundledModels;
-import com.igormaznitsa.nanollvm.utils.BundledRag;
+import com.igormaznitsa.nanollvm.samples.utils.BundledModels;
+import com.igormaznitsa.nanollvm.samples.utils.BundledRag;
 
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
@@ -100,7 +100,7 @@ public final class Example {
     }
   }
 
-  static void configureDemoSubagents(final LLM llm) {
+  private static void configureDemoSubagents(final LLM llm) {
     String arch = llm.model().architectureName();
     if (ARCH_GEMMA3.equals(arch)) {
       llm.setSubagents(SubagentMode.PARALLEL, SubagentPrompts.demoRolesGemma());
@@ -227,9 +227,6 @@ public final class Example {
     }
   }
 
-  /**
-   * CLI / {@code -Dnanovllm.model} / {@code NANOVLLM_MODEL} skip the menu.
-   */
   static Path resolveModel(final String[] args, final BufferedReader in) throws Exception {
     if (hasExplicitModel(args)) {
       return BundledModels.resolveDefault(args);

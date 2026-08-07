@@ -3,7 +3,7 @@ package com.igormaznitsa.nanollvm.llm;
 import static com.igormaznitsa.nanollvm.utils.NanoVllmProps.CONFIG_JSON;
 import static java.util.Objects.requireNonNull;
 
-import com.igormaznitsa.nanollvm.models.Model;
+import com.igormaznitsa.nanollvm.models.LlmModel;
 import com.igormaznitsa.nanollvm.utils.Json;
 import java.io.IOException;
 import java.nio.file.Files;
@@ -78,7 +78,7 @@ public final class Config {
     return new Builder(model);
   }
 
-  public static Builder builder(final Model model) {
+  public static Builder builder(final LlmModel model) {
     requireNonNull(model, "model");
     return new Builder(model.path(), model.hfConfig());
   }

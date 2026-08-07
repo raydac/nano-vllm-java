@@ -27,4 +27,4 @@ if ($LASTEXITCODE -ne 0) {
 
 Write-Host "Installed to $Dest"
 Get-Item $Dest | Format-Table Name, Length, LastWriteTime
-Write-Host "Hint: mvn -q exec:java -Dexec.mainClass=com.igormaznitsa.nanollvm.Example -Dexec.args=$Dest"
+Write-Host "Hint: mvn -q exec:java -Dexec.mainClass=com.igormaznitsa.nanollvm.samples.Example -Dexec.args=$Dest"

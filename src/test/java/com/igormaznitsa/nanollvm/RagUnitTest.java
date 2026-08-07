@@ -204,7 +204,7 @@ class RagUnitTest {
 
   @Test
   void bundledRagFranceQueryPrefersCapitals() {
-    var root = com.igormaznitsa.nanollvm.utils.BundledRag.find();
+    var root = com.igormaznitsa.nanollvm.samples.utils.BundledRag.find();
     org.junit.jupiter.api.Assumptions.assumeTrue(root.isPresent(), "run tests from project root");
     PreparedRag prepared = RagFactory.make(root.get(), RagLoadOptions.forTinyModels());
     assertTrue(prepared.size() > 0);

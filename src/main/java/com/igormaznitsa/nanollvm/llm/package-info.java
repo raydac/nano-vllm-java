@@ -1,8 +1,8 @@
 /**
  * Inference engine API: {@link LLM}, runtime {@link Config}, {@link EngineIo}, and {@link SamplingParams}.
  * <p>
- * Load weights via {@link com.igormaznitsa.nanollvm.models.ModelFactory} into a shared {@link com.igormaznitsa.nanollvm.models.Model},
- * then {@link LLM#builder(com.igormaznitsa.nanollvm.models.Model)} (or path convenience
+ * Load weights via {@link com.igormaznitsa.nanollvm.models.LlmModelFactory} into a shared {@link com.igormaznitsa.nanollvm.models.LlmModel},
+ * then {@link LLM#builder(com.igormaznitsa.nanollvm.models.LlmModel)} (or path convenience
  * {@link LLM#builder(java.nio.file.Path)}). Chat helpers live in {@code chat}; retrieval in {@code rag}.
  * <p>
  * A single {@link LLM} instance is not safe for concurrent generation; {@link LLM#cancel()} may interrupt

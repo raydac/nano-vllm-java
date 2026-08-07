@@ -1,4 +1,4 @@
-package com.igormaznitsa.nanollvm.utils;
+package com.igormaznitsa.nanollvm.samples.utils;
 
 import static com.igormaznitsa.nanollvm.utils.NanoVllmProps.CONFIG_JSON;
 import static com.igormaznitsa.nanollvm.utils.NanoVllmProps.ENV_MODEL;

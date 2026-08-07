@@ -4,7 +4,7 @@ import java.util.List;
 
 /**
  * GGUF metadata needed by {@link Tokenizer#fromGguf(GgufTokenizerSource)}. Implemented inside the
- * module by the GGUF reader; apps normally load via {@code ModelFactory}.
+ * module by the GGUF reader; apps normally load via {@code LlmModelFactory}.
  */
 public interface GgufTokenizerSource {
 
