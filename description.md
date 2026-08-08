@@ -335,7 +335,7 @@ A Gemma file adds things like `layer_types`, `sliding_window`, `hidden_activatio
 | `model_type`    | Short family name (`qwen3`, `gemma3_text`, …)                                         | Auto-detect Qwen3 vs Gemma3 graph (`CausalLMFactory`) | Fall through to `architectures`, else assume Qwen3 |
 | `architectures` | List of class-style names from Hugging Face (`Qwen3ForCausalLM`, `Gemma3ForCausalLM`) | Same detection if `model_type` is unclear             | Optional                                           |
 
-You can override detection with `-Dnanovllm.arch=qwen3` or `gemma3` without editing the file.
+You can override detection with `-Dnanollvm.arch=qwen3` or `gemma3` without editing the file.
 
 **Examples from real folders**
 
@@ -623,7 +623,7 @@ consult it.
 | Comes from `config.json`                  | Comes from this program’s builder / runtime                                         |
 |-------------------------------------------|-------------------------------------------------------------------------------------|
 | Layer count, widths, heads, RoPE, windows | `maxModelLen` (capped by blueprint), KV page size, number of KV pages, batch limits |
-| Which recipe (Qwen/Gemma)                 | `-Dnanovllm.arch=…` override                                                        |
+| Which recipe (Qwen/Gemma)                 | `-Dnanollvm.arch=…` override                                                        |
 | `torch_dtype` hint                        | Always float32 compute after load                                                   |
 
 The blueprint says what the **model is**. The builder says how hard you ask your **machine** to run it.
@@ -1128,7 +1128,7 @@ hello
 
 Dense `MatmulRuntime` / `FloatKernels.dot` can split the output axis across workers. `LLM` defaults to
 `Runtime.availableProcessors()` for all models (`LLM.Builder.cpuThreads(N)` / `.allCpuThreads()` /
-`.disableMultiCpu()`, or `-Dnanollvm.cpu.threads=N`; legacy `nanovllm.cpu.threads` still accepted). This helps
+`.disableMultiCpu()`, or `-Dnanollvm.cpu.threads=N`). This helps
 multi-core decode; GGUF weight RAM stays near packed size (KV / activations are still float32).
 
 ### Summary
@@ -2603,7 +2603,7 @@ You do not need to read every file. Use the tables to jump, then skim the named 
 | `tokenizer/Tokenizer`                                                                  | `tokenizer.json` / GGUF vocab → encode / decode / chat template   |
 | `Config.HfConfig` (in `llm/Config`)                                                    | `config.json` blueprint + per-LLM engine knobs       |
 | `internal/ModelLoader`, `internal/SafetensorsReader`, `internal/Gguf*`                 | Load safetensors / GGUF weights into `WeightBag`     |
-| `utils/Json`, `utils/NanoLlvmProps`                                                    | JSON helpers; property/env knobs (`nanollvm.*`, legacy `nanovllm.*`) |
+| `utils/Json`, `utils/NanoLlvmProps`                                                    | JSON helpers; property/env knobs (`nanollvm.*` / `NANOLLVM_*`) |
 | `samples/utils/BundledModels`, `samples/utils/BundledRag` (not exported)               | Resolve local `models/` / `rag/` for demos & tests   |
 | `engine/Scheduler`, `Sequence`, `BlockManager`, `Transformer`, `KvCacheArena`          | Prefill/decode loop, pages, one forward+sample       |
 | `models/CausalLM`, `CausalLMFactory`, `Qwen3ForCausalLM`, `Gemma3ForCausalLM`, `Lfm2ForCausalLM` | Architecture graph |
@@ -2958,7 +2958,7 @@ Think of three layers again:
 ### Project demo corpus
 
 The repository folder `rag/` holds sample Markdown (engine notes, geography facts). `samples.Example` loads it through
-`samples.utils.BundledRag` when present (`-Dnanovllm.rag.dir` / `NANOVLLM_RAG_DIR` override the path), builds one `PreparedRag`, and
+`samples.utils.BundledRag` when present (`-Dnanollvm.rag.dir` / `NANOLLVM_RAG_DIR` override the path), builds one `PreparedRag`, and
 runs `rag?>` instead of plain `?>`.
 
 ### What this RAG is *not*

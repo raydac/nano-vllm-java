@@ -6,7 +6,7 @@ import com.igormaznitsa.nanollvm.tensor.FloatKernels;
  * Portable {@link FloatKernels} backend: one Java scalar loop per operation.
  *
  * <p>No Vector API / SIMD dependency. Used when the incubator module is unavailable, when
- * {@code -Dnanovllm.kernels=scalar} is set, or as the reference behaviour for tests.
+ * {@code -Dnanollvm.kernels=scalar} is set, or as the reference behaviour for tests.
  * Numerically straightforward; usually slower than {@code VectorFloatKernels} on wide SIMD CPUs.
  *
  * @see com.igormaznitsa.nanollvm.tensor.FloatKernelsFactory

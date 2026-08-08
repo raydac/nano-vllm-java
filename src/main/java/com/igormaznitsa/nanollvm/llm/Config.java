@@ -26,8 +26,7 @@ public final class Config {
   private final int maxNumBatchedTokens;
   private final int maxNumSeqs;
   private final int maxModelLen;
-  private final float gpuMemoryUtilization;
-  private final boolean enforceEager;
+  private final float kvHeapFraction;
   private final int cpuThreads;
   private final HfConfig hfConfig;
   private final int kvcacheBlockSize;
@@ -39,8 +38,7 @@ public final class Config {
     this.model = b.model;
     this.maxNumBatchedTokens = b.maxNumBatchedTokens;
     this.maxNumSeqs = b.maxNumSeqs;
-    this.gpuMemoryUtilization = b.gpuMemoryUtilization;
-    this.enforceEager = b.enforceEager;
+    this.kvHeapFraction = b.kvHeapFraction;
     this.cpuThreads = b.cpuThreads;
     this.kvcacheBlockSize = b.kvcacheBlockSize;
 
@@ -57,6 +55,10 @@ public final class Config {
     }
     if (this.cpuThreads < 1) {
       throw new IllegalArgumentException("cpuThreads must be >= 1, got " + this.cpuThreads);
+    }
+    if (!(this.kvHeapFraction > 0f && this.kvHeapFraction <= 1f)) {
+      throw new IllegalArgumentException(
+        "kvHeapFraction must be in (0, 1], got " + this.kvHeapFraction);
     }
 
     if (b.hfConfig != null) {
@@ -77,6 +79,7 @@ public final class Config {
       this.maxNumSeqs,
       this.maxModelLen,
       this.kvcacheBlockSize,
+      this.kvHeapFraction,
       this.hfConfig);
   }
 
@@ -85,6 +88,7 @@ public final class Config {
     final int maxNumSeqs,
     final int maxModelLen,
     final int blockSize,
+    final float kvHeapFraction,
     final HfConfig hf) {
     if (configured > 0) {
       return configured;
@@ -95,7 +99,7 @@ public final class Config {
     long free = Runtime.getRuntime().maxMemory();
     long bytesPerBlock = 2L * hf.numHiddenLayers() * blockSize
       * hf.numKeyValueHeads() * hf.headDim() * Float.BYTES;
-    int heapCap = (int) Math.max(32, (free / 4) / Math.max(1, bytesPerBlock));
+    int heapCap = (int) Math.max(32, (long) (free * kvHeapFraction) / Math.max(1, bytesPerBlock));
     int resolved = Math.min(estimated, heapCap);
     if (resolved <= 0) {
       throw new IllegalStateException("numKvcacheBlocks must be > 0");
@@ -129,17 +133,11 @@ public final class Config {
   }
 
   /**
-   * Heap fraction used when auto-sizing KV blocks (CPU port; not GPU VRAM).
+   * Fraction of {@link Runtime#maxMemory()} used when auto-sizing KV blocks
+   * ({@code numKvcacheBlocks} unset). Default {@code 0.25}.
    */
-  public float gpuMemoryUtilization() {
-    return this.gpuMemoryUtilization;
-  }
-
-  /**
-   * Eager-forward flag kept for upstream parity. Always {@code true} on this CPU port.
-   */
-  public boolean enforceEager() {
-    return this.enforceEager;
+  public float kvHeapFraction() {
+    return this.kvHeapFraction;
   }
 
   /**
@@ -175,8 +173,7 @@ public final class Config {
     private int maxNumBatchedTokens = 16384;
     private int maxNumSeqs = 512;
     private int maxModelLen = 4096;
-    private float gpuMemoryUtilization = 0.9f;
-    private boolean enforceEager = true;
+    private float kvHeapFraction = 0.25f;
     private int cpuThreads = 1;
     private int eos = -1;
     private List<Integer> stopTokenIds = List.of();
@@ -207,13 +204,8 @@ public final class Config {
       return this;
     }
 
-    public Builder gpuMemoryUtilization(final float v) {
-      this.gpuMemoryUtilization = v;
-      return this;
-    }
-
-    public Builder enforceEager(final boolean v) {
-      this.enforceEager = v;
+    public Builder kvHeapFraction(final float v) {
+      this.kvHeapFraction = v;
       return this;
     }
 

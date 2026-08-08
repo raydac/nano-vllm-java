@@ -15,6 +15,7 @@ import com.igormaznitsa.nanollvm.exceptions.GenerationCancelledException;
 import com.igormaznitsa.nanollvm.exceptions.GenerationTimeoutException;
 import com.igormaznitsa.nanollvm.exceptions.ModelLoadException;
 import com.igormaznitsa.nanollvm.models.LlmModel;
+import com.igormaznitsa.nanollvm.models.LlmModelFactory;
 import com.igormaznitsa.nanollvm.prompts.ChatPrompts;
 import com.igormaznitsa.nanollvm.rag.PreparedRag;
 import com.igormaznitsa.nanollvm.rag.RagFactory;
@@ -44,8 +45,8 @@ import java.util.stream.IntStream;
  *
  * <h2>Typical use</h2>
  * <pre>{@code
- * LlmModel model = LlmModelFactory.make(modelDir);  // load once, share freely
- * try (LLM llm = LLM.builder(model)
+ * try (LlmModel model = LlmModelFactory.make(modelDir);  // load once, share freely
+ *      LLM llm = LLM.builder(model)
  *         .maxModelLen(2048)
  *         .systemPrompt("Answer briefly.")  // optional
  *         .advisors(LlmAdvisorMixer.defaults(),
@@ -55,7 +56,7 @@ import java.util.stream.IntStream;
  *     String reply = llm.chat(256).send("Hello").answer();
  *     String once = llm.chatOnce("What is 2+2?");
  *     String raw = llm.complete("The capital of France is");
- * }
+ * }  // LLM closes first, then model
  * }</pre>
  *
  * <h2>Layers (which API?)</h2>
@@ -73,7 +74,7 @@ import java.util.stream.IntStream;
  * Construction is <em>library-quiet</em> ({@link LlmListeners#silent()}). CLI tools should pass
  * {@link LlmListeners#toSystem()} via {@link Builder#listen(LlmListener)}. Architecture is auto-detected from
  * {@code config.json}
- * (override with {@code -Dnanollvm.arch=qwen3|gemma3}; legacy {@code nanovllm.arch} still accepted).
+ * (override with {@code -Dnanollvm.arch=qwen3|gemma3}).
  *
  * <h2>Thread safety</h2>
  * <ul>
@@ -85,7 +86,8 @@ import java.util.stream.IntStream;
  *       {@link GenerationCancelledException}.</li>
  *   <li>Do not call {@link #generate}, {@link #runAdvisors}, or chat/RAG from an {@code onToken}
  *       callback — that re-enters the generate lock and deadlocks.</li>
- *   <li>After {@link #close()}, do not call generate/chat APIs on this instance.</li>
+ *   <li>After {@link #close()}, do not call generate/chat APIs on this instance. Closing this
+ *       engine does not unload {@link #model()} — close the {@link LlmModel} separately when done.</li>
  * </ul>
  *
  * <h2>Prompt and sampling restrictions</h2>
@@ -148,7 +150,7 @@ public final class LLM implements AutoCloseable {
       // Business load path: resolve LlmModel → matmul runtime → engine config → KV/scheduler
       int cpuThreads = builder.resolveCpuThreads();
       MatmulRuntime.Builder matmulBuilder = MatmulRuntime.builder().cpuThreads(cpuThreads);
-      if (builder.matmulExecutor != null) {
+      if (cpuThreads > 1 && builder.matmulExecutor != null) {
         matmulBuilder.executor(builder.matmulExecutor);
       }
       createdMatmul = matmulBuilder.build();
@@ -483,7 +485,7 @@ public final class LLM implements AutoCloseable {
       final java.util.function.IntConsumer onToken
   ) {
     // Business: turn prompts into decoded completions under cancel / timeout / optional streaming
-    this.requireOpen();
+    this.assertNotClosed();
     this.generateLock.lock();
     try {
       // Reset cancel flag for this exclusive generate session
@@ -719,6 +721,7 @@ public final class LLM implements AutoCloseable {
    * @return a new immutable {@link SamplingParams}; never {@code null}
    */
   public SamplingParams defaultSampling() {
+    this.assertNotClosed();
     return SamplingDefaults.forTokenizer(this.tokenizer);
   }
 
@@ -730,6 +733,7 @@ public final class LLM implements AutoCloseable {
    * @throws IllegalArgumentException if {@code maxTokens < 1}
    */
   public SamplingParams defaultSampling(final int maxTokens) {
+    this.assertNotClosed();
     return SamplingDefaults.forTokenizer(this.tokenizer, maxTokens);
   }
 
@@ -740,6 +744,7 @@ public final class LLM implements AutoCloseable {
    * @return a new session; not thread-safe; uses this {@code LLM} exclusively while sending
    */
   public ChatSession chat() {
+    this.assertNotClosed();
     return new ChatSession(this);
   }
 
@@ -751,6 +756,7 @@ public final class LLM implements AutoCloseable {
    * @throws NullPointerException if {@code samplingParams} is {@code null}
    */
   public ChatSession chat(final SamplingParams samplingParams) {
+    this.assertNotClosed();
     return new ChatSession(this, samplingParams);
   }
 
@@ -762,6 +768,7 @@ public final class LLM implements AutoCloseable {
    * @throws IllegalArgumentException if {@code maxTokens < 1}
    */
   public ChatSession chat(final int maxTokens) {
+    this.assertNotClosed();
     return ChatSession.open(this, maxTokens);
   }
 
@@ -775,6 +782,7 @@ public final class LLM implements AutoCloseable {
    * @apiNote Session turns call {@link #generate}; exclusive on this {@code LLM} while active.
    */
   public RagSession rag(final RagIndex index) {
+    this.assertNotClosed();
     return RagSession.open(this, index);
   }
 
@@ -788,6 +796,7 @@ public final class LLM implements AutoCloseable {
    * @throws IllegalArgumentException if {@code maxTokens < 1}
    */
   public RagSession rag(final RagIndex index, final int maxTokens) {
+    this.assertNotClosed();
     return RagSession.open(this, index, maxTokens);
   }
 
@@ -928,6 +937,7 @@ public final class LLM implements AutoCloseable {
     final List<ChatMessage> priorDialog,
     final SamplingParams samplingParams
   ) {
+    this.assertNotClosed();
     return AdvisorRunner.enrich(this, modelUserText, priorDialog, samplingParams);
   }
 
@@ -947,12 +957,20 @@ public final class LLM implements AutoCloseable {
    * @return a new mutable list suitable for a new {@link ChatSession}; never {@code null}
    */
   public List<ChatMessage> newConversation() {
+    this.assertNotClosed();
     return ChatMessages.newConversation(this.systemPrompt());
   }
 
   /**
-   * Cancels any in-flight generate and releases runner / matmul resources.
-   * Idempotent; after return this instance must not be used for inference.
+   * {@code true} after {@link #close()} has released per-engine resources.
+   */
+  public boolean isClosed() {
+    return this.closed.get();
+  }
+
+  /**
+   * Cancels any in-flight generate and releases per-engine resources (scheduler, KV/conv arenas,
+   * matmul runtime mark). Idempotent; does not {@link LlmModel#close() close} the shared model.
    *
    * @apiNote Blocks until any in-flight {@link #generate} can be interrupted and the transformer
    *     / matmul runtime are closed under the generate lock.
@@ -962,18 +980,17 @@ public final class LLM implements AutoCloseable {
     this.cancel();
     this.generateLock.lock();
     try {
-      if (!this.closed.compareAndSet(false, true)) {
-        return;
+      if (this.closed.compareAndSet(false, true)) {
+        this.scheduler.clear();
+        this.transformer.close();
+        this.matmul.close();
       }
-      this.scheduler.clear();
-      this.transformer.close();
-      this.matmul.close();
     } finally {
       this.generateLock.unlock();
     }
   }
 
-  private void requireOpen() {
+  private void assertNotClosed() {
     if (this.closed.get()) {
       throw new IllegalStateException("LLM is closed");
     }
@@ -1000,8 +1017,7 @@ public final class LLM implements AutoCloseable {
     private int maxNumBatchedTokens = 16384;
     private int maxNumSeqs = 512;
     private int maxModelLen = 4096;
-    private float gpuMemoryUtilization = 0.9f;
-    private boolean enforceEager = true;
+    private float kvHeapFraction = 0.25f;
     private Integer cpuThreads;
     private ExecutorService matmulExecutor;
     private int kvcacheBlockSize = 256;
@@ -1169,36 +1185,26 @@ public final class LLM implements AutoCloseable {
     }
 
     /**
-     * Fraction of heap used when estimating KV-cache size when {@link #numKvcacheBlocks(int)} is
-     * {@code -1}. Default {@code 0.9}. Named for upstream parity; this port is CPU/heap-based.
+     * Fraction of {@link Runtime#maxMemory()} used when estimating KV-cache size when
+     * {@link #numKvcacheBlocks(int)} is {@code -1}. Default {@code 0.25}.
      *
-     * @param value utilization in {@code (0, 1]} typically; extreme values affect KV estimate only
+     * @param value fraction in {@code (0, 1]}
      * @return {@code this}
      */
-    public Builder gpuMemoryUtilization(final float value) {
-      this.gpuMemoryUtilization = value;
+    public Builder kvHeapFraction(final float value) {
+      this.kvHeapFraction = value;
       return this;
     }
 
     /**
-     * When {@code true} (default), runs eager forward passes only (no CUDA-graph style capture).
-     * Required {@code true} on this CPU port.
+     * CPU workers for dense matmul in {@link MatmulRuntime}. {@code 1} is sequential (calling
+     * thread only; no executor created).
      *
-     * @param value must remain {@code true} for supported builds
-     * @return {@code this}
-     */
-    public Builder enforceEager(final boolean value) {
-      this.enforceEager = value;
-      return this;
-    }
-
-    /**
-     * CPU workers for dense matmul in {@link MatmulRuntime}. {@code 1} is sequential.
-     *
-     * <p>Default when omitted: {@link Runtime#availableProcessors()}. Override with
-     * {@code -Dnanollvm.cpu.threads=N} (legacy {@code nanovllm.cpu.threads}) — system property
-     * wins over this setter. Caps how many matmul chunks this {@code LLM} submits; the underlying
-     * pool is {@link #matmulExecutor} or the shared lazy default.
+     * <p>When this setter (or {@link #disableMultiCpu()} / {@link #allCpuThreads()}) is used, the
+     * value wins. Otherwise {@code -Dnanollvm.cpu.threads=N} applies, else
+     * {@link Runtime#availableProcessors()}. Caps how many matmul chunks this {@code LLM} submits;
+     * the underlying pool is {@link #matmulExecutor} or the shared lazy default (only when
+     * workers &gt; 1).
      *
      * @param value worker count; must be {@code >= 1}
      * @return {@code this}
@@ -1213,7 +1219,7 @@ public final class LLM implements AutoCloseable {
     }
 
     /**
-     * Sets matmul workers to {@link Runtime#availableProcessors()} (same as the builder default).
+     * Sets matmul workers to {@link Runtime#availableProcessors()}.
      *
      * @return {@code this}
      */
@@ -1222,7 +1228,8 @@ public final class LLM implements AutoCloseable {
     }
 
     /**
-     * Sequential dense matmul ({@code cpuThreads(1)}); no executor use.
+     * Sequential dense matmul on the calling thread only ({@code cpuThreads(1)}).
+     * No matmul {@link ExecutorService} is created or used.
      *
      * @return {@code this}
      */
@@ -1232,8 +1239,9 @@ public final class LLM implements AutoCloseable {
 
     /**
      * Executor for parallel dense matmul. Not shut down when this {@code LLM} closes —
-     * the caller owns its lifecycle. When omitted and {@link #cpuThreads} &gt; 1, a process-wide
-     * pool is created lazily on first parallel use.
+     * the caller owns its lifecycle. Used only when resolved {@link #cpuThreads(int)} is &gt; 1;
+     * ignored for {@link #disableMultiCpu()} / sequential. When omitted and workers &gt; 1, a
+     * process-wide pool is created lazily on first parallel use.
      *
      * @param executor non-{@code null} shared or dedicated pool
      * @return {@code this}
@@ -1282,8 +1290,8 @@ public final class LLM implements AutoCloseable {
 
     /**
      * When {@code true}, GGUF weights are expanded to float32. With a shared packed
-     * {@link LlmModel}, unpack happens at engine build (releasing packed bytes). With a path-based
-     * builder, unpack happens during {@link LlmModelFactory#make}. Default {@code false}.
+     * {@link LlmModel}, unpack happens at engine build (releasing packed bytes). Prefer unpacking
+     * at load via {@link LlmModelFactory#make(Path, LlmListener, boolean)}. Default {@code false}.
      *
      * @param value {@code true} to unpack; {@code false} to keep GGUF packed
      * @return {@code this}
@@ -1330,6 +1338,9 @@ public final class LLM implements AutoCloseable {
      * @throws IllegalArgumentException if builder/config constraints fail (bad KV block size, …)
      */
     public LLM build() {
+      if (this.sharedModel.isClosed()) {
+        throw new IllegalStateException("LlmModel is closed");
+      }
       if (!this.advisors.isEmpty()) {
         this.advisors = Builder.requireUniqueAdvisors(this.advisors);
       }
@@ -1352,8 +1363,7 @@ public final class LLM implements AutoCloseable {
           .maxNumBatchedTokens(this.maxNumBatchedTokens)
           .maxNumSeqs(this.maxNumSeqs)
           .maxModelLen(this.maxModelLen)
-          .gpuMemoryUtilization(this.gpuMemoryUtilization)
-          .enforceEager(this.enforceEager)
+        .kvHeapFraction(this.kvHeapFraction)
         .cpuThreads(cpuThreads)
           .kvcacheBlockSize(this.kvcacheBlockSize)
           .numKvcacheBlocks(this.numKvcacheBlocks)
@@ -1362,8 +1372,10 @@ public final class LLM implements AutoCloseable {
     }
 
     private int resolveCpuThreads() {
-      String prop = NanoLlvmProps.systemProperty(
-        NanoLlvmProps.PROP_CPU_THREADS, NanoLlvmProps.PROP_CPU_THREADS_LEGACY);
+      if (this.cpuThreads != null) {
+        return this.cpuThreads;
+      }
+      String prop = NanoLlvmProps.systemProperty(NanoLlvmProps.PROP_CPU_THREADS);
       if (prop != null && !prop.isBlank()) {
         int parsed = Integer.parseInt(prop.strip());
         if (parsed < 1) {
@@ -1371,9 +1383,6 @@ public final class LLM implements AutoCloseable {
             "-" + NanoLlvmProps.PROP_CPU_THREADS + " must be >= 1, got " + parsed);
         }
         return parsed;
-      }
-      if (this.cpuThreads != null) {
-        return this.cpuThreads;
       }
       return Runtime.getRuntime().availableProcessors();
     }

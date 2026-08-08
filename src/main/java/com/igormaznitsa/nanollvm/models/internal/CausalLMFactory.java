@@ -4,7 +4,6 @@ import static com.igormaznitsa.nanollvm.models.internal.WeightNames.ARCH_GEMMA3;
 import static com.igormaznitsa.nanollvm.models.internal.WeightNames.ARCH_LFM2;
 import static com.igormaznitsa.nanollvm.models.internal.WeightNames.ARCH_QWEN3;
 import static com.igormaznitsa.nanollvm.utils.NanoLlvmProps.PROP_ARCH;
-import static com.igormaznitsa.nanollvm.utils.NanoLlvmProps.PROP_ARCH_LEGACY;
 import static java.util.Locale.ROOT;
 
 import com.igormaznitsa.nanollvm.llm.Config;
@@ -15,7 +14,7 @@ import java.util.Optional;
 
 /**
  * Builds an immutable {@link CausalLM} from HF config + {@link WeightBag}
- * (optional {@code -Dnanollvm.arch=qwen3|gemma3|lfm2}, legacy {@code nanovllm.arch}).
+ * (optional {@code -Dnanollvm.arch=qwen3|gemma3|lfm2}).
  */
 public final class CausalLMFactory {
 
@@ -39,7 +38,7 @@ public final class CausalLMFactory {
   }
 
   private static String resolveArch(final Config.HfConfig config) {
-    String forced = Optional.ofNullable(NanoLlvmProps.systemProperty(PROP_ARCH, PROP_ARCH_LEGACY))
+    String forced = Optional.ofNullable(NanoLlvmProps.systemProperty(PROP_ARCH))
       .orElse("")
       .strip()
       .toLowerCase(ROOT);

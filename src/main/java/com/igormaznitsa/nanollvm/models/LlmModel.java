@@ -13,6 +13,7 @@ import com.igormaznitsa.nanollvm.models.internal.WeightBag;
 import com.igormaznitsa.nanollvm.tokenizer.Tokenizer;
 
 import java.nio.file.Path;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.locks.ReentrantLock;
 
@@ -29,13 +30,13 @@ import java.util.concurrent.locks.ReentrantLock;
  * by existing engines are left intact (peak RAM may briefly hold packed + dense).
  *
  * <p>Construct via {@link LlmModelFactory#make(Path)}. Closing an {@link LLM} does not unload
- * this model. The inference graph is module-internal — applications use {@link LLM}, not a network
- * accessor.
+ * this model — call {@link #close()} after every bound {@link LLM} is closed. The inference graph
+ * is module-internal — applications use {@link LLM}, not a network accessor.
  *
  * @see LlmModelFactory
  * @see LLM
  */
-public final class LlmModel {
+public final class LlmModel implements AutoCloseable {
 
   static {
     LlmModelAccess.setResolver(LlmModel::resolveNetwork);
@@ -47,6 +48,7 @@ public final class LlmModel {
   private final AtomicReference<WeightBag> weights;
   private final AtomicReference<CausalLM> network;
   private final ReentrantLock unpackLock = new ReentrantLock();
+  private final AtomicBoolean closed = new AtomicBoolean();
 
   LlmModel(
     final Path path,
@@ -66,6 +68,7 @@ public final class LlmModel {
    * Filesystem path this model was loaded from (absolute, normalized).
    */
   public Path path() {
+    this.assertNotClosed();
     return this.path;
   }
 
@@ -73,6 +76,7 @@ public final class LlmModel {
    * HuggingFace / GGUF-derived architecture config sealed at load.
    */
   public Config.HfConfig hfConfig() {
+    this.assertNotClosed();
     return this.hfConfig;
   }
 
@@ -80,6 +84,7 @@ public final class LlmModel {
    * Tokenizer bound to this model; immutable and safe to share.
    */
   public Tokenizer tokenizer() {
+    this.assertNotClosed();
     return this.tokenizer;
   }
 
@@ -87,22 +92,52 @@ public final class LlmModel {
    * Detected architecture label (e.g. {@code qwen3}, {@code gemma3}, {@code lfm2}).
    */
   public String architectureName() {
-    return this.network.get().architectureName();
+    return this.requireNetwork().architectureName();
   }
 
   /**
    * {@code true} when this model still holds GGUF-packed tensors that can be expanded to float32.
    */
   public boolean hasPackedWeights() {
-    return this.weights.get().hasPacked();
+    return this.requireWeights().hasPacked();
+  }
+
+  /**
+   * {@code true} after {@link #close()} has released owned weight resources.
+   */
+  public boolean isClosed() {
+    return this.closed.get();
+  }
+
+  /**
+   * Releases owned weight resources (packed GGUF payloads and model-held graph refs).
+   * Idempotent. Close every bound {@link LLM} first so engines drop their network references.
+   */
+  @Override
+  public void close() {
+    if (!this.closed.compareAndSet(false, true)) {
+      return;
+    }
+
+    this.unpackLock.lock();
+    try {
+      WeightBag bag = this.weights.getAndSet(null);
+      this.network.set(null);
+      if (bag != null) {
+        bag.releaseResources();
+      }
+    } finally {
+      this.unpackLock.unlock();
+    }
   }
 
   private CausalLM resolveNetwork(final boolean allowUnpackParameters, final LlmListener io) {
+    CausalLM current = this.requireNetwork();
     if (!allowUnpackParameters) {
-      return this.network.get();
+      return current;
     }
-    if (!this.weights.get().hasPacked()) {
-      return this.network.get();
+    if (!this.requireWeights().hasPacked()) {
+      return current;
     }
     return this.unpackToDense(io == null ? LlmListeners.silent() : io);
   }
@@ -110,9 +145,9 @@ public final class LlmModel {
   private CausalLM unpackToDense(final LlmListener io) {
     this.unpackLock.lock();
     try {
-      WeightBag currentWeights = this.weights.get();
+      WeightBag currentWeights = this.requireWeights();
       if (!currentWeights.hasPacked()) {
-        return this.network.get();
+        return this.requireNetwork();
       }
 
       LlmListeners.info(io, null, "Unpacking GGUF parameters to float32…");
@@ -126,6 +161,30 @@ public final class LlmModel {
       return built;
     } finally {
       this.unpackLock.unlock();
+    }
+  }
+
+  private CausalLM requireNetwork() {
+    this.assertNotClosed();
+    CausalLM current = this.network.get();
+    if (current == null) {
+      throw new IllegalStateException("LlmModel is closed");
+    }
+    return current;
+  }
+
+  private WeightBag requireWeights() {
+    this.assertNotClosed();
+    WeightBag bag = this.weights.get();
+    if (bag == null) {
+      throw new IllegalStateException("LlmModel is closed");
+    }
+    return bag;
+  }
+
+  private void assertNotClosed() {
+    if (this.closed.get()) {
+      throw new IllegalStateException("LlmModel is closed");
     }
   }
 }

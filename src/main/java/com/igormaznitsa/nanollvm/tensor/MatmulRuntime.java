@@ -373,6 +373,7 @@ public final class MatmulRuntime implements AutoCloseable {
     /**
      * Executor for parallel matmul chunks. Not shut down by {@link MatmulRuntime#close()}.
      * When omitted and {@code cpuThreads > 1}, the lazily created shared pool is used.
+     * Ignored when {@code cpuThreads == 1} ({@link #disableMultiCpu()} / sequential).
      */
     public Builder executor(final ExecutorService executor) {
       this.executor = requireNonNull(executor, "executor");

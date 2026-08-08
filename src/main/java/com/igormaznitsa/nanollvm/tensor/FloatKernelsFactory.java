@@ -1,7 +1,6 @@
 package com.igormaznitsa.nanollvm.tensor;
 
 import static com.igormaznitsa.nanollvm.utils.NanoLlvmProps.PROP_KERNELS;
-import static com.igormaznitsa.nanollvm.utils.NanoLlvmProps.PROP_KERNELS_LEGACY;
 
 import com.igormaznitsa.nanollvm.tensor.scalar.ScalarFloatKernels;
 import com.igormaznitsa.nanollvm.tensor.vector.VectorFloatKernels;
@@ -13,7 +12,7 @@ import java.util.Optional;
 /**
  * Builds a {@link FloatKernels} backend: Vector API when available, otherwise scalar.
  *
- * <p>Default selection honors {@code -Dnanollvm.kernels} (legacy {@code nanovllm.kernels}):
+ * <p>Default selection honors {@code -Dnanollvm.kernels}:
  * <ul>
  *   <li>{@code auto} (default) — {@link #createBestAvailable()}</li>
  *   <li>{@code vector} / {@code simd} — require incubator Vector API or fail</li>
@@ -37,11 +36,10 @@ public final class FloatKernelsFactory {
   }
 
   /**
-   * Default selection: honors {@code -Dnanollvm.kernels} (legacy {@code nanovllm.kernels}), else best available.
+   * Default selection: honors {@code -Dnanollvm.kernels}, else best available.
    */
   public static FloatKernels create() {
-    return create(Optional.ofNullable(
-      NanoLlvmProps.systemProperty(PROP_KERNELS, PROP_KERNELS_LEGACY)).orElse("auto"));
+    return create(Optional.ofNullable(NanoLlvmProps.systemProperty(PROP_KERNELS)).orElse("auto"));
   }
 
   /**

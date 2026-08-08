@@ -5,8 +5,7 @@ package com.igormaznitsa.nanollvm.tensor;
  *
  * <p>Dense parallel matmul lives on a per-{@code LLM} {@link MatmulRuntime} (shared or custom
  * {@link java.util.concurrent.ExecutorService}). Call sites that need matmul use
- * {@link MatmulRuntime#current()} (bound on inference
- * {@link com.igormaznitsa.nanollvm.internal.Context}) or an explicit runtime.
+ * {@link com.igormaznitsa.nanollvm.internal.Context#matmul()} or an explicit runtime.
  *
  * @see MatmulRuntime
  * @see FloatKernels

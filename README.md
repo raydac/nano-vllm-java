@@ -2,7 +2,8 @@
 
 [![License Apache 2.0](https://img.shields.io/badge/license-Apache%20License%202.0-green.svg)](http://www.apache.org/licenses/LICENSE-2.0)
 [![Java 21+](https://img.shields.io/badge/java-21.0%2b-green.svg)](https://bell-sw.com/pages/downloads/)
-[![Maven 3.9+](https://img.shields.io/badge/maven-3.9%2b-green.svg)](https://maven.apache.org/)   
+[![Maven 3.9+](https://img.shields.io/badge/maven-3.9%2b-green.svg)](https://maven.apache.org/)
+[![Maven central](https://img.shields.io/badge/Maven%20central-1.0.0-green.svg)](http://search.maven.org/#artifactdetails|com.igormaznitsa|nano-vllm-java|1.0.0|jar)   
 [![Arthur's acres sanctuary donation](assets/arthur_sanctuary_banner.png)](https://www.arthursacresanimalsanctuary.org/donate)
 
 # Nano-vLLM Java
@@ -29,14 +30,14 @@ choose), ask a short business question, print the answer.
 <dependency>
   <groupId>com.igormaznitsa</groupId>
   <artifactId>nano-vllm-java</artifactId>
-  <version>1.0.0-SNAPSHOT</version>
+  <version>1.0.0</version>
 </dependency>
 ```
 
 **Gradle (Groovy)**
 
 ```gradle
-implementation 'com.igormaznitsa:nano-vllm-java:1.0.0-SNAPSHOT'
+implementation 'com.igormaznitsa:nano-vllm-java:1.0.0'
 ```
 
 JPMS module name: `com.igormaznitsa.nanollvm` (`requires com.igormaznitsa.nanollvm;`).
@@ -61,8 +62,6 @@ public final class LogTriageHelloWorld {
     // Custom install location — not tied to this repo's ./models layout
     Path gemmaDir = Path.of("/opt/models/Gemma3-270M");
 
-    LlmModel model = LlmModelFactory.make(gemmaDir);
-
     String logExcerpt = """
         2026-08-07 22:14:01 WARN  payment-api - retry 1/3 for order=99102 cause=SocketTimeoutException
         2026-08-07 22:14:04 WARN  payment-api - retry 2/3 for order=99102 cause=SocketTimeoutException
@@ -81,7 +80,8 @@ public final class LogTriageHelloWorld {
         %s
         """.formatted(logExcerpt);
 
-    try (LLM llm = LLM.builder(model)
+    try (LlmModel model = LlmModelFactory.make(gemmaDir);
+         LLM llm = LLM.builder(model)
         .noSystemPrompt()          // Gemma chat path: keep the system role empty
         .maxModelLen(2048)
         .build()) {
@@ -105,6 +105,12 @@ In this repository the same program lives as non-exported
 ```bash
 mvn -q exec:java -Dexec.mainClass=com.igormaznitsa.nanollvm.samples.LogTriageHelloWorld
 # or: … -Dexec.args=/opt/models/Gemma3-270M
+```
+
+For the smallest in-repo smoke test (say hello, print the reply):
+
+```bash
+mvn -q exec:java -Dexec.mainClass=com.igormaznitsa.nanollvm.samples.HelloWorld
 ```
 
 More API samples (streaming, RAG, GGUF, advisors) are in [Library quick start](#library-quick-start).
@@ -143,7 +149,7 @@ mvn package
 
 Artifacts:
 
-- `target/nano-vllm-java-1.0.0-SNAPSHOT.jar` — library JAR (JPMS module `com.igormaznitsa.nanollvm`; no `Main-Class`)
+- `target/nano-vllm-java-1.0.0.jar` — library JAR (JPMS module `com.igormaznitsa.nanollvm`; no `Main-Class`)
 - `target/classes/` — compiled module for development runs
 
 Tests use the Vector incubator module (`jvm.module.args` in the POM). Production runs should use the same flags
@@ -152,13 +158,13 @@ Tests use the Vector incubator module (`jvm.module.args` in the POM). Production
 ### Use as a dependency
 
 See [Hello World](#hello-world--gemma3-log-triage-in-your-app) for Maven / Gradle coordinates and a complete Gemma3
-example. Snapshot builds from this repository still use version `1.0.0-SNAPSHOT` until you publish.
+example.
 
 ```xml
 <dependency>
   <groupId>com.igormaznitsa</groupId>
   <artifactId>nano-vllm-java</artifactId>
-  <version>1.0.0-SNAPSHOT</version>
+  <version>1.0.0</version>
 </dependency>
 ```
 
@@ -170,7 +176,7 @@ requires com.igormaznitsa.nanollvm;
 
 Public API packages: `models`, `llm`, `chat`, `rag`, `tokenizer`, `utils`, `exceptions`.
 (`prompts` and `models.internal` are module-private.)
-`samples` (`Example`, `Bench`, `LogTriageHelloWorld`, `samples.utils`), `engine`, `layers`, `tensor`, and
+`samples` (`HelloWorld`, `LogTriageHelloWorld`, `Example`, `Bench`, `samples.utils`), `engine`, `layers`, `tensor`, and
 `internal` are **not** exported — use `LlmModelFactory` / `LLM` / `RagFactory` from application code.
 
 The packaged JAR is a **library** (no `Main-Class` manifest entry). In-repo demos stay runnable via Maven or the
@@ -201,7 +207,7 @@ models/Qwen3-0.6B/
 
 At load time, `LlmModelFactory` reads `config.json`, builds the graph (Qwen3 or Gemma3), merges packed weights from
 safetensors, and constructs the tokenizer. Architecture is inferred from `model_type` / `architectures` unless you set
-`-Dnanollvm.arch=qwen3|gemma3|lfm2` (legacy `nanovllm.arch`).
+`-Dnanollvm.arch=qwen3|gemma3|lfm2`.
 
 ### GGUF (LFM2)
 
@@ -253,12 +259,12 @@ You can also point the engine at **any** local HF-style directory (your own path
 `samples.utils.BundledModels.resolveDefault()` (used by `Example` and `Bench`; not a library API) picks the model in this order:
 
 1. **First CLI argument** — model path or name (e.g. `models/Gemma3-270M`)
-2. **System property** `-Dnanollvm.model=…` (legacy `-Dnanovllm.model=…`)
-3. **Environment** `NANOLLVM_MODEL=…` (legacy `NANOVLLM_MODEL=…`)
+2. **System property** `-Dnanollvm.model=…`
+3. **Environment** `NANOLLVM_MODEL=…`
 4. **Default** `models/Qwen3-0.6B` under the models root
 
 The models root itself defaults to `./models`, overridable with `-Dnanollvm.models.dir=…` /
-`NANOLLVM_MODELS_DIR` (legacy `nanovllm.*` / `NANOVLLM_*` still accepted).
+`NANOLLVM_MODELS_DIR`.
 
 | Mechanism          | Example                                                             |
 |--------------------|---------------------------------------------------------------------|
@@ -268,7 +274,7 @@ The models root itself defaults to `./models`, overridable with `-Dnanollvm.mode
 | Models root        | `-Dnanollvm.models.dir=/opt/models`                                 |
 | Force architecture | `-Dnanollvm.arch=gemma3` (when auto-detect is wrong)                |
 | RAG corpus dir     | `-Dnanollvm.rag.dir=./docs` or `NANOLLVM_RAG_DIR` (default `./rag`) |
-| CPU matmul threads | `-Dnanollvm.cpu.threads=N` or `.cpuThreads(N)` / `.allCpuThreads()` / `.disableMultiCpu()`; optional `.matmulExecutor(ExecutorService)` (else lazy shared pool) |
+| CPU matmul threads | `.cpuThreads(N)` / `.allCpuThreads()` / `.disableMultiCpu()` (builder wins); else `-Dnanollvm.cpu.threads=N`; else all processors. `.disableMultiCpu()` = calling thread only, no executor. Optional `.matmulExecutor(…)` only when workers &gt; 1 |
 
 If you start **without** any of (1)–(3), the Example CLI shows an interactive menu (**Qwen3 / Gemma3 / LFM2 / Exit**).
 
@@ -291,7 +297,7 @@ mvn -q exec:java -Dexec.args="models/Gemma3-270M"
 ```
 
 ```bash
-NANOVLLM_MODEL=models/Qwen3-0.6B mvn -q exec:java
+NANOLLVM_MODEL=models/Qwen3-0.6B mvn -q exec:java
 ```
 
 **RAG mode:** if the directory `rag/` exists (the repo ships Grimm / Little Red Riding Hood `.txt` and fact cards),
@@ -332,7 +338,7 @@ Session recording (Gemma3 load + RAG questions about the Grimm brothers and thei
 | `/exit`, `/quit`, `exit`, `quit` | Leave the program                           |
 | `/clear`                         | Reset chat history (RAG index stays loaded) |
 
-**Display:** set `NO_COLOR=1` or `-Dnanollvm.color=false` (legacy `nanovllm.color`) to disable ANSI colors.
+**Display:** set `NO_COLOR=1` or `-Dnanollvm.color=false` to disable ANSI colors.
 
 Maven note: `exec:java` runs in the **same JVM as Maven**. Vector API flags and heap come from [
 `.mvn/jvm.config`](.mvn/jvm.config) (`--add-modules=jdk.incubator.vector`, `-Xmx16g`). The exec plugin does not fork, so
@@ -345,7 +351,7 @@ After `mvn package`:
 ```bash
 java --add-modules jdk.incubator.vector \
   -Xmx16g \
-  -p target/nano-vllm-java-1.0.0-SNAPSHOT.jar \
+  -p target/nano-vllm-java-1.0.0.jar \
   -m com.igormaznitsa.nanollvm/com.igormaznitsa.nanollvm.samples.Example \
   models/Qwen3-0.6B
 ```
@@ -379,10 +385,9 @@ import com.igormaznitsa.nanollvm.llm.LLM;
 import java.nio.file.Path;
 
 Path modelDir = Path.of("models/Qwen3-0.6B"); // your local HF (or .gguf) path
-LlmModel model = LlmModelFactory.make(modelDir);    // quiet; LlmModelFactory.make(dir, LlmListeners.toSystem()) for progress
 
-try (LLM llm = LLM.builder(model)
-    .enforceEager(true)
+try (LlmModel model = LlmModelFactory.make(modelDir);  // quiet; LlmModelFactory.make(dir, LlmListeners.toSystem()) for progress
+     LLM llm = LLM.builder(model)
     .maxModelLen(2048)
     .systemPrompt("Answer briefly and factually.") // Qwen-style; prefer .noSystemPrompt() on Gemma
     .build()) {
@@ -394,11 +399,11 @@ try (LLM llm = LLM.builder(model)
 ```
 
 Load weights once with {@code LlmModelFactory.make}, then bind engines with
-{@code LLM.builder(model)} so one immutable model can be shared:
+{@code LLM.builder(model)} so one model can be shared (close engines first, then the model):
 
 ```java
-LlmModel model = LlmModelFactory.make(Path.of("models/Qwen3-0.6B"));
-try (LLM llm = LLM.builder(model).listen(LlmListeners.toSystem()).build()) {
+try (LlmModel model = LlmModelFactory.make(Path.of("models/Qwen3-0.6B"));
+     LLM llm = LLM.builder(model).listen(LlmListeners.toSystem()).build()) {
   System.out.println(llm.chatOnce("Say hi in one sentence."));
 }
 ```
@@ -416,7 +421,7 @@ import java.nio.file.Path;
 LlmModel model = LlmModelFactory.make(Path.of("models/LFM2.5-2.6B-Q4_K_M.gguf"), LlmListeners.toSystem());
 // or unpack at load (no packed heap copy):
 // LlmModel model = LlmModelFactory.make(path, LlmListeners.toSystem(), true);
-try (LLM llm = LLM.builder(model)
+try (model; LLM llm = LLM.builder(model)
     .maxModelLen(2048)
     .allCpuThreads()
     .build()) {

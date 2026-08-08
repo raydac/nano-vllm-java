@@ -6,7 +6,7 @@
 
     <groupId>com.igormaznitsa</groupId>
     <artifactId>nano-vllm-java</artifactId>
-    <version>1.0.0-SNAPSHOT</version>
+    <version>1.0.0</version>
     <name>nano-vllm-java</name>
     <description>Pure Java 21+ CPU LLM inference library (continuous batching, paged KV cache), inspired by
         GeeeekExplorer/nano-vllm
@@ -101,6 +101,19 @@
                     <plugin>
                         <groupId>org.apache.maven.plugins</groupId>
                         <artifactId>maven-javadoc-plugin</artifactId>
+                        <configuration>
+                            <source>${maven.compiler.release}</source>
+                            <!--
+                              Register @apiNote for -Xdoclint. Use &#160; in the header: a plain
+                              "API Note:" is written unquoted into javadoc's @options file, gets
+                              split on the space, and fails with "Illegal package name: Note:".
+                            -->
+                            <additionalOptions>
+                                <additionalOption>-Xdoclint:reference</additionalOption>
+                                <additionalOption>-tag</additionalOption>
+                                <additionalOption>apiNote:a:API&#160;Note:</additionalOption>
+                            </additionalOptions>
+                        </configuration>
                         <executions>
                             <execution>
                                 <id>generate-javadoc</id>
@@ -108,10 +121,6 @@
                                 <goals>
                                     <goal>jar</goal>
                                 </goals>
-                                <configuration>
-                                    <!--<failOnError>false</failOnError>-->
-                                    <source>${maven.compiler.release}</source>
-                                </configuration>
                             </execution>
                         </executions>
                     </plugin>

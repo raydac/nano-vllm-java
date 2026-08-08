@@ -24,10 +24,11 @@ import java.nio.file.Path;
 import java.util.Locale;
 
 /**
- * Loads an immutable {@link LlmModel} from a HuggingFace model directory or a {@code .gguf} file.
+ * Loads a {@link LlmModel} from a HuggingFace model directory or a {@code .gguf} file.
  *
- * <p>One {@link LlmModel} may be reused by any number of {@link LLM} instances. Load is blocking
- * I/O on the calling thread; the returned model is safe to share across threads.
+ * <p>One {@link LlmModel} may be reused by any number of {@link LLM} instances until
+ * {@link LlmModel#close()}. Load is blocking I/O on the calling thread; the returned model is safe
+ * to share across threads while open.
  *
  * <p>GGUF stays packed by default. Pass {@code allowUnpackParameters=true} to dequantize to float32
  * during load (mmap → float tensors; no packed heap copy).

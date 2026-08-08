@@ -70,25 +70,26 @@ class CoreUnitTest {
     org.junit.jupiter.api.Assumptions.assumeTrue(path.isPresent(), "Qwen3-0.6B not downloaded");
 
     LlmModel model = LlmModelFactory.make(path.get());
-    LLM.Builder builder = LLM.builder(model);
-    assertSame(builder, builder
+    try (model) {
+      LLM.Builder builder = LLM.builder(model);
+      assertSame(builder, builder
         .maxModelLen(512)
         .maxNumSeqs(2)
         .maxNumBatchedTokens(1024)
         .kvcacheBlockSize(256)
         .numKvcacheBlocks(32)
-        .gpuMemoryUtilization(0.5f)
-        .enforceEager(true)
-      .warmup()
+        .kvHeapFraction(0.5f)
+        .warmup()
         .skipWarmup()
-      .warmup(false)
-      .allowUnpackParameters()
-      .allowUnpackParameters(false)
-      .listen(LlmListeners.toSystem())
-      .listen(LlmListeners.silent())
+        .warmup(false)
+        .allowUnpackParameters()
+        .allowUnpackParameters(false)
+        .listen(LlmListeners.toSystem())
+        .listen(LlmListeners.silent())
         .systemPrompt("Answer briefly.")
         .noSystemPrompt()
         .defaultSystemPrompt());
+    }
   }
 
   @Test
@@ -97,7 +98,8 @@ class CoreUnitTest {
     org.junit.jupiter.api.Assumptions.assumeTrue(path.isPresent(), "Qwen3-0.6B not downloaded");
 
     LlmModel model = LlmModelFactory.make(path.get());
-    try (LLM a = LLM.builder(model).maxModelLen(256).numKvcacheBlocks(32).build();
+    try (model;
+         LLM a = LLM.builder(model).maxModelLen(256).numKvcacheBlocks(32).build();
          LLM b = LLM.builder(model).maxModelLen(256).numKvcacheBlocks(32).build()) {
       assertSame(model, a.model());
       assertSame(model, b.model());
@@ -108,6 +110,26 @@ class CoreUnitTest {
   }
 
   @Test
+  void closedLlmAndModelRejectFurtherUseWhenWeightsPresent() {
+    var path = BundledModels.find(BundledModels.QWEN3_0_6B);
+    org.junit.jupiter.api.Assumptions.assumeTrue(path.isPresent(), "Qwen3-0.6B not downloaded");
+
+    LlmModel model = LlmModelFactory.make(path.get());
+    LLM llm = LLM.builder(model).maxModelLen(256).numKvcacheBlocks(32).build();
+    llm.close();
+    assertTrue(llm.isClosed());
+    assertThrows(IllegalStateException.class, () -> llm.chat(32));
+    assertThrows(IllegalStateException.class, llm::newConversation);
+    llm.close();
+
+    model.close();
+    assertTrue(model.isClosed());
+    assertThrows(IllegalStateException.class, model::architectureName);
+    assertThrows(IllegalStateException.class, () -> LLM.builder(model).build());
+    model.close();
+  }
+
+  @Test
   void advisorsConfiguredOnBuilderWhenWeightsPresent() {
     var path = BundledModels.find(BundledModels.QWEN3_0_6B);
     org.junit.jupiter.api.Assumptions.assumeTrue(path.isPresent(), "Qwen3-0.6B not downloaded");
@@ -115,46 +137,48 @@ class CoreUnitTest {
     LlmModel model = LlmModelFactory.make(path.get());
     LlmAdvisor facts = LlmAdvisor.builder().name("Facts").prompt("Fact check").build();
     LlmAdvisor risks = LlmAdvisor.builder().name("Risks").prompt("Argue risks").build();
-    try (LLM llm = LLM.builder(model)
-      .maxModelLen(256)
-      .numKvcacheBlocks(32)
-      .advisors(LlmAdvisorMixer.defaults(), facts, risks)
-      .build()) {
-      assertEquals(2, llm.advisors().size());
-      assertEquals("Facts", llm.advisors().get(0).name());
-      assertEquals("Fact check", llm.advisors().get(0).prompt());
-      assertEquals("Risks", llm.advisors().get(1).name());
-      assertNotNull(llm.advisorMixer());
-    }
+    try (model) {
+      try (LLM llm = LLM.builder(model)
+        .maxModelLen(256)
+        .numKvcacheBlocks(32)
+        .advisors(LlmAdvisorMixer.defaults(), facts, risks)
+        .build()) {
+        assertEquals(2, llm.advisors().size());
+        assertEquals("Facts", llm.advisors().get(0).name());
+        assertEquals("Fact check", llm.advisors().get(0).prompt());
+        assertEquals("Risks", llm.advisors().get(1).name());
+        assertNotNull(llm.advisorMixer());
+      }
 
-    try (LLM llm = LLM.builder(model).maxModelLen(256).numKvcacheBlocks(32).build()) {
-      assertTrue(llm.advisors().isEmpty());
-    }
+      try (LLM llm = LLM.builder(model).maxModelLen(256).numKvcacheBlocks(32).build()) {
+        assertTrue(llm.advisors().isEmpty());
+      }
 
-    LLM.Builder rejectsDuplicate =
-      LLM.builder(model).maxModelLen(256).numKvcacheBlocks(32);
-    assertThrows(
-      IllegalArgumentException.class,
-      () -> rejectsDuplicate.advisors(
-        LlmAdvisorMixer.defaults(),
-        LlmAdvisor.builder().name("Same").prompt("a").build(),
-        LlmAdvisor.builder().name("same").prompt("b").build()));
+      LLM.Builder rejectsDuplicate =
+        LLM.builder(model).maxModelLen(256).numKvcacheBlocks(32);
+      assertThrows(
+        IllegalArgumentException.class,
+        () -> rejectsDuplicate.advisors(
+          LlmAdvisorMixer.defaults(),
+          LlmAdvisor.builder().name("Same").prompt("a").build(),
+          LlmAdvisor.builder().name("same").prompt("b").build()));
 
-    try (LLM llm = LLM.builder(model)
-      .maxModelLen(256)
-      .numKvcacheBlocks(32)
-      .advisors(LlmAdvisorMixer.defaults())
-      .build()) {
-      assertTrue(llm.advisors().isEmpty());
-    }
+      try (LLM llm = LLM.builder(model)
+        .maxModelLen(256)
+        .numKvcacheBlocks(32)
+        .advisors(LlmAdvisorMixer.defaults())
+        .build()) {
+        assertTrue(llm.advisors().isEmpty());
+      }
 
-    try (LLM llm = LLM.builder(model)
-      .maxModelLen(256)
-      .numKvcacheBlocks(32)
-      .advisors(LlmAdvisorMixer.defaults(), facts)
-      .noAdvisors()
-      .build()) {
-      assertTrue(llm.advisors().isEmpty());
+      try (LLM llm = LLM.builder(model)
+        .maxModelLen(256)
+        .numKvcacheBlocks(32)
+        .advisors(LlmAdvisorMixer.defaults(), facts)
+        .noAdvisors()
+        .build()) {
+        assertTrue(llm.advisors().isEmpty());
+      }
     }
   }
 
@@ -318,6 +342,51 @@ class CoreUnitTest {
     }
     assertTrue(com.igormaznitsa.nanollvm.tensor.MatmulRuntime.sequential().backendInfo()
       .contains("cpuThreads"));
+  }
+
+  @Test
+  void disableMultiCpuUsesSequentialRuntimeWithoutExecutor() {
+    try (MatmulRuntime withDisable = MatmulRuntime.builder().disableMultiCpu().build();
+         MatmulRuntime withOne = MatmulRuntime.builder().cpuThreads(1).build()) {
+      assertSame(MatmulRuntime.sequential(), withDisable);
+      assertSame(MatmulRuntime.sequential(), withOne);
+      assertEquals(1, withDisable.cpuThreads());
+      assertTrue(withDisable.backendInfo().contains("sequential"));
+    }
+
+    var ignored = java.util.concurrent.Executors.newSingleThreadExecutor();
+    try (MatmulRuntime runtime = MatmulRuntime.builder()
+      .disableMultiCpu()
+      .executor(ignored)
+      .build()) {
+      assertSame(MatmulRuntime.sequential(), runtime);
+      assertTrue(runtime.backendInfo().contains("sequential"));
+    } finally {
+      ignored.shutdownNow();
+    }
+  }
+
+  @Test
+  void disableMultiCpuWinsOverCpuThreadsSystemPropertyWhenWeightsPresent() {
+    var path = BundledModels.find(BundledModels.QWEN3_0_6B);
+    org.junit.jupiter.api.Assumptions.assumeTrue(path.isPresent(), "Qwen3-0.6B not downloaded");
+
+    String previous = System.getProperty("nanollvm.cpu.threads");
+    System.setProperty("nanollvm.cpu.threads", "8");
+    try (LlmModel model = LlmModelFactory.make(path.get());
+         LLM llm = LLM.builder(model)
+           .disableMultiCpu()
+           .maxModelLen(256)
+           .numKvcacheBlocks(32)
+           .build()) {
+      assertEquals(1, llm.config().cpuThreads());
+    } finally {
+      if (previous == null) {
+        System.clearProperty("nanollvm.cpu.threads");
+      } else {
+        System.setProperty("nanollvm.cpu.threads", previous);
+      }
+    }
   }
 
   @Test

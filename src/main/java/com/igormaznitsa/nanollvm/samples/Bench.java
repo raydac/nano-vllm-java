@@ -7,24 +7,20 @@ import com.igormaznitsa.nanollvm.models.LlmModel;
 import com.igormaznitsa.nanollvm.models.LlmModelFactory;
 import com.igormaznitsa.nanollvm.samples.utils.BundledModels;
 import java.nio.file.Path;
-import java.util.ArrayList;
+import java.time.Duration;
 import java.util.List;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.stream.IntStream;
 
 /**
  * Command-line throughput smoke test for the inference engine.
  *
- * <p>Loads a model via {@link BundledModels#resolveDefault(String[])} (same resolution as
- * {@link Example}), builds an {@link LLM} with CLI progress ({@link LlmListeners#toSystem()}),
- * and runs one batched {@link LLM#generate} call over several concurrent sequences. Prompts are
- * random token-id lists (not real text), so output quality is meaningless; the goal is to stress
- * scheduling, KV cache paging, and the forward path and print wall-clock throughput (tokens per second).
+ * <p>Loads a model via {@link BundledModels#resolveDefault(String[])}, builds an {@link LLM},
+ * and runs one batched {@link LLM#generateTokenIds} over random token-id prompts (quality is
+ * irrelevant; the goal is wall-clock tok/s).
  *
- * <p>Arguments: optional model directory or name (see {@link BundledModels}); optional second
- * argument — number of concurrent sequences (default {@code 8}).
- *
- * <p>Typical launch (weights + KV need a large heap; use at least {@code -Xmx8g} for Qwen3-0.6B):
- * {@code MAVEN_OPTS="-Xmx8g" mvn -q exec:java
+ * <p>Args: optional model path/name; optional sequence count (default {@code 8}).
+ * Typical: {@code MAVEN_OPTS="-Xmx8g" mvn -q exec:java
  * -Dexec.mainClass=com.igormaznitsa.nanollvm.samples.Bench
  * -Dexec.args="models/Qwen3-0.6B 8"}
  */
@@ -41,50 +37,51 @@ public final class Bench {
   public static void main(final String[] args) {
     Path path = BundledModels.resolveDefault(args);
     int numSeqs = args.length > 1 ? Integer.parseInt(args[1]) : 8;
-    int kvBlocks = kvBlocksFor(numSeqs);
+    int blocksPerSeq = (MAX_MODEL_LEN + KV_BLOCK_SIZE - 1) / KV_BLOCK_SIZE;
+    int kvBlocks = Math.max(1, numSeqs) * blocksPerSeq;
 
     System.out.println("Loading model from " + path);
     System.out.println(
-        "Architecture: auto from config.json (override -Dnanovllm.arch=qwen3|gemma3)");
-    System.out.printf("Bench: %d seqs, maxModelLen=%d, kvBlocks=%d (heap max %s)%n",
-        numSeqs, MAX_MODEL_LEN, kvBlocks, formatBytes(Runtime.getRuntime().maxMemory()));
+      "Architecture: auto from config.json (override -Dnanollvm.arch=qwen3|gemma3)");
+    System.out.printf(
+      "Bench: %d seqs, maxModelLen=%d, kvBlocks=%d (heap max %.1f GiB)%n",
+      numSeqs,
+      MAX_MODEL_LEN,
+      kvBlocks,
+      Runtime.getRuntime().maxMemory() / (1024.0 * 1024.0 * 1024.0));
+
     ThreadLocalRandom rnd = ThreadLocalRandom.current();
-    LlmModel model = LlmModelFactory.make(path, LlmListeners.toSystem());
-    try (LLM llm = LLM.builder(model)
-        .enforceEager(true)
-        .maxModelLen(MAX_MODEL_LEN)
-        .maxNumSeqs(numSeqs)
-        .kvcacheBlockSize(KV_BLOCK_SIZE)
-        .numKvcacheBlocks(kvBlocks)
-      .listen(LlmListeners.toSystem())
-        .build()) {
-      List<List<Integer>> prompts = new ArrayList<>();
-      List<SamplingParams> params = new ArrayList<>();
-      for (int i = 0; i < numSeqs; i++) {
-        int len = rnd.nextInt(16, MAX_INPUT_LEN + 1);
-        List<Integer> ids = new ArrayList<>(len);
-        for (int t = 0; t < len; t++) {
-          ids.add(rnd.nextInt(0, 10_000));
-        }
-        prompts.add(ids);
-        params.add(new SamplingParams(0.6f, rnd.nextInt(8, MAX_OUTPUT_LEN + 1), true));
-      }
+    try (LlmModel model = LlmModelFactory.make(path, LlmListeners.toSystem());
+         LLM llm = LLM.builder(model)
+           .maxModelLen(MAX_MODEL_LEN)
+           .maxNumSeqs(numSeqs)
+           .kvcacheBlockSize(KV_BLOCK_SIZE)
+           .numKvcacheBlocks(kvBlocks)
+           .listen(LlmListeners.toSystem())
+           .build()) {
 
-      long t0 = System.nanoTime();
-      llm.generateTokenIds(prompts, params, false, java.time.Duration.ZERO, null);
-      double seconds = (System.nanoTime() - t0) / 1e9;
+      List<List<Integer>> prompts = IntStream.range(0, numSeqs)
+        .mapToObj(i -> {
+          int len = rnd.nextInt(16, MAX_INPUT_LEN + 1);
+          return IntStream.range(0, len)
+            .map(t -> rnd.nextInt(0, 10_000))
+            .boxed()
+            .toList();
+        })
+        .toList();
+      List<SamplingParams> params = IntStream.range(0, numSeqs)
+        .mapToObj(i -> new SamplingParams(0.6f, rnd.nextInt(8, MAX_OUTPUT_LEN + 1), true))
+        .toList();
+
+      long started = System.nanoTime();
+      llm.generateTokenIds(prompts, params, false, Duration.ZERO, null);
+      double seconds = (System.nanoTime() - started) / 1e9;
       int totalTokens = params.stream().mapToInt(SamplingParams::maxTokens).sum();
-      System.out.printf("Total: %dtok, Time: %.2fs, Throughput: %.2ftok/s%n",
-          totalTokens, seconds, totalTokens / seconds);
+      System.out.printf(
+        "Total: %dtok, Time: %.2fs, Throughput: %.2ftok/s%n",
+        totalTokens,
+        seconds,
+        totalTokens / seconds);
     }
-  }
-
-  private static int kvBlocksFor(final int numSeqs) {
-    int blocksPerSeq = (MAX_MODEL_LEN + KV_BLOCK_SIZE - 1) / KV_BLOCK_SIZE;
-    return Math.max(1, numSeqs) * blocksPerSeq;
-  }
-
-  private static String formatBytes(final long bytes) {
-    return "%.1f GiB".formatted(bytes / (1024.0 * 1024.0 * 1024.0));
   }
 }

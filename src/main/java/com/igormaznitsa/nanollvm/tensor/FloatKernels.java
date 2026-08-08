@@ -14,7 +14,7 @@ package com.igormaznitsa.nanollvm.tensor;
  *   <li><strong>Scalar</strong> — plain Java loops ({@code ScalarFloatKernels})</li>
  *   <li><strong>Vector</strong> — JDK incubator Vector API / SIMD ({@code VectorFloatKernels})</li>
  * </ul>
- * Selection is done once by {@link FloatKernelsFactory} (see {@code -Dnanovllm.kernels}).
+ * Selection is done once by {@link FloatKernelsFactory} (see {@code -Dnanollvm.kernels}).
  * The process-wide default instance is {@link #get()}; {@link VectorMath} delegates to it.
  *
  * <h2>Contract shared by every method</h2>
@@ -49,7 +49,7 @@ public abstract class FloatKernels {
   /**
    * Process-wide kernel backend chosen at class initialization via {@link FloatKernelsFactory#create()}.
    *
-   * <p>Honors {@code -Dnanovllm.kernels=auto|vector|scalar} (aliases {@code simd}/{@code plain}).
+   * <p>Honors {@code -Dnanollvm.kernels=auto|vector|scalar} (aliases {@code simd}/{@code plain}).
    * Prefer this over constructing kernels repeatedly.
    *
    * @return the singleton scalar or Vector API implementation
@@ -68,7 +68,7 @@ public abstract class FloatKernels {
   /**
    * Dot product of two equal-length float slices: {@code Σ<sub>i=0..n-1</sub> a[aOff+i] * b[bOff+i]}.
    *
-   * <p>Used heavily by {@link VectorMath#linear} (each output channel accumulates tiled dots against
+   * <p>Used heavily by {@link MatmulRuntime#linear} (each output channel accumulates tiled dots against
    * weight rows). The Vector implementation uses lane-wise FMA into an accumulator vector, then
    * {@code reduceLanes(ADD)}, then a scalar remainder loop.
    *

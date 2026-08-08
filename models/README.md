@@ -52,9 +52,9 @@ Creates `models/LFM2.5-2.6B-Q4_K_M.gguf`.
 | Mechanism          | Example                                                                                           |
 |--------------------|---------------------------------------------------------------------------------------------------|
 | CLI arg            | `… Example models/Gemma3-270M` or `… Example models/LFM2.5-2.6B-Q4_K_M.gguf`                      |
-| System property    | `-Dnanovllm.model=models/Gemma3-270M`                                                             |
-| Force architecture | `-Dnanovllm.arch=gemma3` (or `qwen3` / `lfm2`)                                                    |
-| Env                | `NANOVLLM_MODEL=models/Gemma3-270M`                                                               |
-| Models root        | `-Dnanovllm.models.dir=/other/models` or `NANOVLLM_MODELS_DIR` (default loads `<dir>/Qwen3-0.6B`) |
+| System property    | `-Dnanollvm.model=models/Gemma3-270M`                                                             |
+| Force architecture | `-Dnanollvm.arch=gemma3` (or `qwen3` / `lfm2`)                                                    |
+| Env                | `NANOLLVM_MODEL=models/Gemma3-270M`                                                               |
+| Models root        | `-Dnanollvm.models.dir=/other/models` or `NANOLLVM_MODELS_DIR` (default loads `<dir>/Qwen3-0.6B`) |
 
-Architecture is auto-detected from `config.json` or GGUF `general.architecture` unless `-Dnanovllm.arch` is set.
+Architecture is auto-detected from `config.json` or GGUF `general.architecture` unless `-Dnanollvm.arch` is set.

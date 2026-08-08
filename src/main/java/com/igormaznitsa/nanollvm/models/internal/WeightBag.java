@@ -114,6 +114,17 @@ public final class WeightBag {
     return this.byName.size();
   }
 
+  /**
+   * Drops packed GGUF payloads so quantized byte heaps become GC-eligible.
+   * Dense {@link Tensor} entries stay reachable until callers drop this bag.
+   */
+  public void releaseResources() {
+    this.byName.values().stream()
+      .filter(PackedWeight.class::isInstance)
+      .map(PackedWeight.class::cast)
+      .forEach(PackedWeight::releasePackedBytes);
+  }
+
   private Object requireRaw(final String name) {
     Object weight = this.byName.get(name);
     if (weight == null) {

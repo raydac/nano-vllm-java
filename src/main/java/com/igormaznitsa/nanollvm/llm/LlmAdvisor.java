@@ -3,7 +3,7 @@ package com.igormaznitsa.nanollvm.llm;
 import static java.util.Objects.requireNonNull;
 
 /**
- * Named advisor role configured on {@link LLM.Builder#advisors(LlmAdvisor...)}.
+ * Named advisor role configured on {@link LLM.Builder#advisors(LlmAdvisorMixer, LlmAdvisor...)}.
  *
  * <p>Immutable; construct via {@link #builder()}.
  */

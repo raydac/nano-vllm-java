@@ -3,12 +3,8 @@ package com.igormaznitsa.nanollvm.samples.utils;
 import static com.igormaznitsa.nanollvm.utils.NanoLlvmProps.CONFIG_JSON;
 import static com.igormaznitsa.nanollvm.utils.NanoLlvmProps.ENV_MODEL;
 import static com.igormaznitsa.nanollvm.utils.NanoLlvmProps.ENV_MODELS_DIR;
-import static com.igormaznitsa.nanollvm.utils.NanoLlvmProps.ENV_MODELS_DIR_LEGACY;
-import static com.igormaznitsa.nanollvm.utils.NanoLlvmProps.ENV_MODEL_LEGACY;
 import static com.igormaznitsa.nanollvm.utils.NanoLlvmProps.PROP_MODEL;
 import static com.igormaznitsa.nanollvm.utils.NanoLlvmProps.PROP_MODELS_DIR;
-import static com.igormaznitsa.nanollvm.utils.NanoLlvmProps.PROP_MODELS_DIR_LEGACY;
-import static com.igormaznitsa.nanollvm.utils.NanoLlvmProps.PROP_MODEL_LEGACY;
 
 import com.igormaznitsa.nanollvm.utils.NanoLlvmProps;
 import java.nio.file.Files;
@@ -35,18 +31,18 @@ public final class BundledModels {
 
   /**
    * Resolution order: CLI path → {@code -Dnanollvm.model} → {@code NANOLLVM_MODEL}
-   * (legacy {@code nanovllm.*}) → {@code <modelsRoot>/Qwen3-0.6B}.
+   * → {@code <modelsRoot>/Qwen3-0.6B}.
    */
   public static Path resolveDefault(String... cliArgs) {
     if (cliArgs != null && cliArgs.length > 0 && cliArgs[0] != null && !cliArgs[0].isBlank()) {
       return Path.of(cliArgs[0]).toAbsolutePath().normalize();
     }
-    String prop = NanoLlvmProps.systemProperty(PROP_MODEL, PROP_MODEL_LEGACY);
-    if (prop != null && !prop.isBlank()) {
+    String prop = NanoLlvmProps.systemProperty(PROP_MODEL);
+    if (prop != null) {
       return Path.of(prop).toAbsolutePath().normalize();
     }
-    String env = NanoLlvmProps.environment(ENV_MODEL, ENV_MODEL_LEGACY);
-    if (env != null && !env.isBlank()) {
+    String env = NanoLlvmProps.environment(ENV_MODEL);
+    if (env != null) {
       return Path.of(env).toAbsolutePath().normalize();
     }
     return require(QWEN3_0_6B);
@@ -56,12 +52,12 @@ public final class BundledModels {
    * Models root: {@code -Dnanollvm.models.dir} → {@code NANOLLVM_MODELS_DIR} → {@code ./models}.
    */
   public static Path modelsRoot() {
-    String prop = NanoLlvmProps.systemProperty(PROP_MODELS_DIR, PROP_MODELS_DIR_LEGACY);
-    if (prop != null && !prop.isBlank()) {
+    String prop = NanoLlvmProps.systemProperty(PROP_MODELS_DIR);
+    if (prop != null) {
       return Path.of(prop).toAbsolutePath().normalize();
     }
-    String env = NanoLlvmProps.environment(ENV_MODELS_DIR, ENV_MODELS_DIR_LEGACY);
-    if (env != null && !env.isBlank()) {
+    String env = NanoLlvmProps.environment(ENV_MODELS_DIR);
+    if (env != null) {
       return Path.of(env).toAbsolutePath().normalize();
     }
     return Path.of("").toAbsolutePath().normalize().resolve(DEFAULT_MODELS_DIR);

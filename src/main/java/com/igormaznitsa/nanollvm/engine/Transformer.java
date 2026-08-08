@@ -23,7 +23,7 @@ import java.util.List;
  * {@link LlmModel}/{@link CausalLM}.
  *
  * <h2>Role in the engine</h2>
- * Driven by {@link com.igormaznitsa.nanollvm.llm.LLM#step}: the {@link Scheduler} picks a prefill
+ * Driven by {@link com.igormaznitsa.nanollvm.llm.LLM#generate}: the {@link Scheduler} picks a prefill
  * or decode batch, then this class runs the model on that batch and returns one next-token id per
  * scheduled sequence. Attention and short-conv layers read the arenas through an explicit
  * {@link Context} owned by this transformer for the duration of {@link #step}.
@@ -45,9 +45,9 @@ import java.util.List;
  * from the scheduled {@link Sequence}s.
  *
  * <h2>Lifecycle</h2>
- * Constructed once per {@code LLM} with a shared immutable {@link LlmModel}. {@link #close()} only
- * clears the step {@link Context}; the {@link LlmModel} and weight tensors are not owned
- * here and are not released.
+ * Constructed once per {@code LLM} with a shared immutable {@link LlmModel}. {@link #close()}
+ * clears the step {@link Context} and drops per-LLM arena / network references so KV and this
+ * engine's hold on the shared graph can be GC'd; the {@link LlmModel} itself is not closed here.
  *
  * <p><strong>Thread safety:</strong> not concurrent-safe; one transformer per {@code LLM}, used on
  * the generate thread only (same contract as {@link Scheduler}).
@@ -61,7 +61,7 @@ public final class Transformer implements AutoCloseable {
 
   private final Config config;
   private final int blockSize;
-  private final CausalLM network;
+  private CausalLM network;
   private KvCacheArena kvCache;
   private ConvStateArena convCache;
   private final MatmulRuntime matmul;
@@ -247,8 +247,8 @@ public final class Transformer implements AutoCloseable {
   }
 
   /**
-   * Clears the step {@link Context} and drops arena references so KV / conv heap can be GC'd.
-   * Does not free the {@link LlmModel} or weight heap.
+   * Clears the step {@link Context} and drops arena / network references so KV / conv heap and
+   * this engine's hold on the shared graph can be GC'd. Does not {@link LlmModel#close()}.
    */
   @Override
   public void close() {
@@ -259,6 +259,7 @@ public final class Transformer implements AutoCloseable {
       this.convCache.clearAll();
       this.convCache = null;
     }
+    this.network = null;
   }
 
   /**
@@ -279,7 +280,7 @@ public final class Transformer implements AutoCloseable {
 
   /**
    * Allocates the paged {@link KvCacheArena} using {@link Config#numKvcacheBlocks()} already
-   * resolved by {@link LLM} construction.
+   * resolved by {@link com.igormaznitsa.nanollvm.llm.LLM} construction.
    */
   private KvCacheArena allocateKvCache() {
     Config.HfConfig hf = this.config.hfConfig();
