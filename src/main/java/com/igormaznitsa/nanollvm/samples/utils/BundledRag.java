@@ -1,8 +1,11 @@
 package com.igormaznitsa.nanollvm.samples.utils;
 
-import static com.igormaznitsa.nanollvm.utils.NanoVllmProps.ENV_RAG_DIR;
-import static com.igormaznitsa.nanollvm.utils.NanoVllmProps.PROP_RAG_DIR;
+import static com.igormaznitsa.nanollvm.utils.NanoLlvmProps.ENV_RAG_DIR;
+import static com.igormaznitsa.nanollvm.utils.NanoLlvmProps.ENV_RAG_DIR_LEGACY;
+import static com.igormaznitsa.nanollvm.utils.NanoLlvmProps.PROP_RAG_DIR;
+import static com.igormaznitsa.nanollvm.utils.NanoLlvmProps.PROP_RAG_DIR_LEGACY;
 
+import com.igormaznitsa.nanollvm.utils.NanoLlvmProps;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Optional;
@@ -18,14 +21,15 @@ public final class BundledRag {
   }
 
   /**
-   * Resolution order: {@code -Dnanovllm.rag.dir} → {@code NANOVLLM_RAG_DIR} → {@code ./rag}.
+   * Resolution order: {@code -Dnanollvm.rag.dir} → {@code NANOLLVM_RAG_DIR}
+   * (legacy {@code nanovllm.*}) → {@code ./rag}.
    */
   public static Path ragRoot() {
-    String prop = System.getProperty(PROP_RAG_DIR);
+    String prop = NanoLlvmProps.systemProperty(PROP_RAG_DIR, PROP_RAG_DIR_LEGACY);
     if (prop != null && !prop.isBlank()) {
       return Path.of(prop).toAbsolutePath().normalize();
     }
-    String env = System.getenv(ENV_RAG_DIR);
+    String env = NanoLlvmProps.environment(ENV_RAG_DIR, ENV_RAG_DIR_LEGACY);
     if (env != null && !env.isBlank()) {
       return Path.of(env).toAbsolutePath().normalize();
     }

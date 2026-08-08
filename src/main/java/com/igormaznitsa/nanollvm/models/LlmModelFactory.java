@@ -1,6 +1,6 @@
 package com.igormaznitsa.nanollvm.models;
 
-import static com.igormaznitsa.nanollvm.utils.NanoVllmProps.CONFIG_JSON;
+import static com.igormaznitsa.nanollvm.utils.NanoLlvmProps.CONFIG_JSON;
 import static java.util.Objects.requireNonNull;
 
 import com.igormaznitsa.nanollvm.chat.LlmListener;
@@ -12,7 +12,11 @@ import com.igormaznitsa.nanollvm.internal.GgufReader;
 import com.igormaznitsa.nanollvm.internal.ModelLoader;
 import com.igormaznitsa.nanollvm.llm.Config;
 import com.igormaznitsa.nanollvm.llm.LLM;
-import com.igormaznitsa.nanollvm.tensor.VectorMath;
+import com.igormaznitsa.nanollvm.models.internal.CausalLM;
+import com.igormaznitsa.nanollvm.models.internal.CausalLMFactory;
+import com.igormaznitsa.nanollvm.models.internal.WeightBag;
+import com.igormaznitsa.nanollvm.models.internal.WeightSchema;
+import com.igormaznitsa.nanollvm.tensor.MatmulRuntime;
 import com.igormaznitsa.nanollvm.tokenizer.Tokenizer;
 import java.io.IOException;
 import java.nio.file.Files;
@@ -22,29 +26,63 @@ import java.util.Locale;
 /**
  * Loads an immutable {@link LlmModel} from a HuggingFace model directory or a {@code .gguf} file.
  *
- * <p>One {@link LlmModel} may be reused by any number of {@link LLM} instances.
+ * <p>One {@link LlmModel} may be reused by any number of {@link LLM} instances. Load is blocking
+ * I/O on the calling thread; the returned model is safe to share across threads.
+ *
+ * <p>GGUF stays packed by default. Pass {@code allowUnpackParameters=true} to dequantize to float32
+ * during load (mmap → float tensors; no packed heap copy).
  */
 public final class LlmModelFactory {
 
   private LlmModelFactory() {
   }
 
+  /**
+   * Loads weights with silent progress I/O.
+   *
+   * @throws ModelLoadException if the path is missing or the model cannot be loaded
+   */
   public static LlmModel make(final Path modelDir) {
-    return make(modelDir, LlmListeners.silent());
+    return make(modelDir, LlmListeners.silent(), false);
   }
 
+  /**
+   * Loads weights from a path string with silent progress I/O.
+   *
+   * @throws ModelLoadException if the path is missing or the model cannot be loaded
+   */
   public static LlmModel make(final String modelPath) {
     return make(Path.of(requireNonNull(modelPath, "modelPath")));
   }
 
+  /**
+   * Loads weights, reporting progress through {@code io} (null → silent). GGUF stays packed.
+   *
+   * @throws ModelLoadException if the path is missing or the model cannot be loaded
+   */
   public static LlmModel make(final Path modelPath, final LlmListener io) {
+    return make(modelPath, io, false);
+  }
+
+  /**
+   * Loads weights, reporting progress through {@code io} (null → silent).
+   *
+   * @param allowUnpackParameters when {@code true}, GGUF tensors are expanded to float32 at load
+   *                              (no packed heap residency); HF safetensors ignore this flag
+   * @throws ModelLoadException if the path is missing or the model cannot be loaded
+   */
+  public static LlmModel make(
+    final Path modelPath,
+    final LlmListener io,
+    final boolean allowUnpackParameters
+  ) {
     requireNonNull(modelPath, "modelPath");
     LlmListener streams = io == null ? LlmListeners.silent() : io;
     Path path = modelPath.toAbsolutePath().normalize();
     try {
       if (Files.isRegularFile(path) && path.getFileName().toString().toLowerCase(Locale.ROOT)
         .endsWith(".gguf")) {
-        return loadGguf(path, streams);
+        return loadGguf(path, streams, allowUnpackParameters);
       }
       if (!Files.isDirectory(path)) {
         throw new ModelLoadException("model path is not a directory or .gguf file: " + path);
@@ -59,7 +97,7 @@ public final class LlmModelFactory {
 
   private static LlmModel loadHf(final Path path, final LlmListener io) throws IOException {
     long t0 = System.nanoTime();
-    LlmListeners.info(io, null, "CPU backend: " + VectorMath.backendInfo());
+    LlmListeners.info(io, null, "CPU backend: " + MatmulRuntime.sequential().backendInfo());
 
     Config.HfConfig hfConfig = Config.HfConfig.load(path.resolve(CONFIG_JSON));
     String arch = CausalLMFactory.detect(hfConfig);
@@ -76,16 +114,26 @@ public final class LlmModelFactory {
 
     Tokenizer tokenizer = Tokenizer.fromPretrained(path);
     LlmListeners.infof(io, null, "Model loaded in %.1fs%n", (System.nanoTime() - t0) / 1e9);
-    return new LlmModel(path, hfConfig, network, tokenizer);
+    return new LlmModel(path, hfConfig, weights, network, tokenizer);
   }
 
-  private static LlmModel loadGguf(final Path path, final LlmListener io) throws IOException {
+  private static LlmModel loadGguf(
+    final Path path,
+    final LlmListener io,
+    final boolean allowUnpackParameters
+  ) throws IOException {
     long t0 = System.nanoTime();
-    LlmListeners.info(io, null, "CPU backend: " + VectorMath.backendInfo());
-    LlmListeners.info(io, null,
-      "GGUF weights dequantize to float32 — expect large heap (default -Xmx16g in .mvn/jvm.config).");
+    LlmListeners.info(io, null, "CPU backend: " + MatmulRuntime.sequential().backendInfo());
+    if (allowUnpackParameters) {
+      LlmListeners.info(io, null,
+        "GGUF: unpacking to float32 during load (mmap → dense; no packed heap copy).");
+    } else {
+      LlmListeners.info(io, null,
+        "GGUF weights stay packed; use LlmModelFactory.make(path, io, true) or "
+          + "LLM.Builder.allowUnpackParameters() for float32 speed.");
+    }
 
-    LoadedGguf loaded = GgufModelLoader.load(path, io);
+    LoadedGguf loaded = GgufModelLoader.load(path, io, allowUnpackParameters);
     try (GgufReader reader = loaded.reader()) {
       WeightSchema schema = CausalLMFactory.schema(loaded.config());
       for (String required : schema.expectedParameters()) {
@@ -103,7 +151,7 @@ public final class LlmModelFactory {
 
       Tokenizer tokenizer = Tokenizer.fromGguf(reader);
       LlmListeners.infof(io, null, "Model loaded in %.1fs%n", (System.nanoTime() - t0) / 1e9);
-      return new LlmModel(path, loaded.config(), network, tokenizer);
+      return new LlmModel(path, loaded.config(), loaded.weights(), network, tokenizer);
     }
   }
 }

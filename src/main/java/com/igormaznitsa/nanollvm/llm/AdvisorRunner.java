@@ -2,17 +2,20 @@ package com.igormaznitsa.nanollvm.llm;
 
 import static java.util.Objects.requireNonNull;
 
-import com.igormaznitsa.nanollvm.chat.AssistantParts;
-import com.igormaznitsa.nanollvm.prompts.ChatPrompts;
+import com.igormaznitsa.nanollvm.chat.ChatHistory;
+import com.igormaznitsa.nanollvm.chat.ChatMessage;
+import com.igormaznitsa.nanollvm.chat.ChatMessages;
+import com.igormaznitsa.nanollvm.chat.ChatReply;
 import com.igormaznitsa.nanollvm.tokenizer.Tokenizer;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.stream.IntStream;
 
 /**
- * Runs configured LLM advisors on the same engine (no history, no UI stream). Advisor notes
- * appear on the thinking stream; only grounded, non-conflicting notes are mixed into the main
- * user text as unverified hints.
+ * Runs configured {@link LlmAdvisor}s on the same engine (one batched {@link LLM#generate}), then
+ * mixes replies via {@link LlmAdvisorMixer}.
  */
-public final class AdvisorRunner {
+final class AdvisorRunner {
 
   private static final int MAX_ADVISOR_TOKENS = 256;
   private static final float ADVISOR_TEMPERATURE = 0.3f;
@@ -21,60 +24,59 @@ public final class AdvisorRunner {
   }
 
   /**
-   * When the LLM has no advisor prompts, returns {@code modelUserText} unchanged. Otherwise
-   * consults each advisor and mixes their notes into the main prompt.
+   * When the LLM has no advisors, returns {@code modelUserText} unchanged. Otherwise consults each
+   * advisor with {@code priorDialog} plus the prepared user turn, then mixes notes.
    */
   public static AdvisorEnrichment enrich(
     final LLM llm,
     final String modelUserText,
+    final List<ChatMessage> priorDialog,
     final SamplingParams mainSampling
   ) {
     requireNonNull(llm, "llm");
     requireNonNull(modelUserText, "modelUserText");
+    requireNonNull(priorDialog, "priorDialog");
     requireNonNull(mainSampling, "mainSampling");
 
-    List<String> rolePrompts = llm.advisorPrompts();
-    if (rolePrompts.isEmpty()) {
+    List<LlmAdvisor> advisors = llm.advisors();
+    if (advisors.isEmpty()) {
       return AdvisorEnrichment.passthrough(modelUserText);
     }
 
-    boolean compact = llm.tokenizer().isGemmaChat();
-    List<String> prompts = rolePrompts.stream()
-      .map(role -> AdvisorPrompt.isolated(llm.tokenizer(), role, modelUserText))
-      .toList();
+    List<ChatMessage> prior = List.copyOf(priorDialog);
     SamplingParams sampling = advisorSampling(mainSampling);
-    List<String> answers = llm.advisorMode() == AdvisorMode.PARALLEL
-      ? runParallel(llm, prompts, sampling)
-      : runSequential(llm, prompts, sampling);
-    List<String> notes = answers.stream()
-      .map(answer -> answer == null ? "" : answer.strip())
+    List<String> prompts = advisors.stream()
+      .map(advisor -> promptForAdvisor(llm, advisor, prior, modelUserText, sampling))
       .toList();
-    List<String> mixNotes = AdvisorPrompt.selectNotesForMix(modelUserText, notes);
-    return new AdvisorEnrichment(
-      AdvisorPrompt.mix(modelUserText, mixNotes, compact),
-      notes,
-      mixNotes);
+    List<LLM.GenerationOutput> outputs = llm.generate(prompts, sampling);
+    List<AdvisorResponse> responses = IntStream.range(0, advisors.size())
+      .mapToObj(i -> new AdvisorResponse(
+        advisors.get(i).name(),
+        parseAnswer(llm.tokenizer(), outputs.get(i))))
+      .toList();
+
+    List<String> noteTexts = responses.stream()
+      .map(AdvisorResponse::text)
+      .toList();
+    List<String> salvageNotes = AdvisorPrompt.selectNotesForMix(modelUserText, noteTexts);
+
+    ChatHistory history = ChatHistory.of(prior);
+    String mixed = llm.advisorMixer().mixPrompt(llm, responses, history, modelUserText);
+    return new AdvisorEnrichment(mixed, responses, salvageNotes);
   }
 
-  private static List<String> runParallel(
+  private static String promptForAdvisor(
     final LLM llm,
-    final List<String> prompts,
+    final LlmAdvisor advisor,
+    final List<ChatMessage> priorDialog,
+    final String modelUserText,
     final SamplingParams sampling
   ) {
-    return llm.generate(prompts, sampling).stream()
-      .map(output -> parseAnswer(llm.tokenizer(), output))
-      .toList();
-  }
-
-  private static List<String> runSequential(
-    final LLM llm,
-    final List<String> prompts,
-    final SamplingParams sampling
-  ) {
-    return prompts.stream()
-      .map(prompt -> parseAnswer(llm.tokenizer(),
-        llm.generate(List.of(prompt), sampling).getFirst()))
-      .toList();
+    List<ChatMessage> turn = new ArrayList<>(
+      AdvisorPrompt.dialogTurn(advisor.prompt(), priorDialog, modelUserText));
+    ChatMessages.truncateHistory(
+      turn, llm.tokenizer(), llm.config().maxModelLen(), sampling.maxTokens());
+    return llm.tokenizer().applyChatTemplate(ChatMessages.toTemplateMaps(turn), true, false);
   }
 
   private static String parseAnswer(final Tokenizer tokenizer, final LLM.GenerationOutput output) {
@@ -82,11 +84,8 @@ public final class AdvisorRunner {
     if (raw == null || raw.isBlank()) {
       raw = tokenizer.decode(output.tokenIds(), tokenizer.isGemmaChat());
     }
-    String answer = AssistantParts.parse(raw).answer().strip();
-    if (answer.isEmpty() || ChatPrompts.isSetupBoilerplate(answer)) {
-      return "";
-    }
-    return answer;
+    String answer = ChatReply.parse(raw).answer().strip();
+    return AdvisorPrompt.noteOrFallback(answer);
   }
 
   private static SamplingParams advisorSampling(final SamplingParams main) {

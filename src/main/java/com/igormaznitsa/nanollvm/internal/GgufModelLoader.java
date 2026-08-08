@@ -5,8 +5,8 @@ import static java.util.Objects.requireNonNull;
 import com.igormaznitsa.nanollvm.chat.LlmListener;
 import com.igormaznitsa.nanollvm.chat.LlmListeners;
 import com.igormaznitsa.nanollvm.llm.Config;
-import com.igormaznitsa.nanollvm.models.WeightBag;
-import com.igormaznitsa.nanollvm.tensor.Tensor;
+import com.igormaznitsa.nanollvm.models.internal.PackedWeight;
+import com.igormaznitsa.nanollvm.models.internal.WeightBag;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.LinkedHashMap;
@@ -17,7 +17,9 @@ import java.util.stream.IntStream;
 import java.util.stream.Stream;
 
 /**
- * Loads an LFM2 (or compatible) GGUF file into {@link Config.HfConfig} + float32 {@link WeightBag}.
+ * Loads an LFM2 (or compatible) GGUF file into {@link Config.HfConfig} + {@link WeightBag}.
+ * Default keeps large matrices GGML-packed; {@code allowUnpackParameters} dequantizes each tensor
+ * to float32 from the mmap during load (no packed heap copy).
  */
 public final class GgufModelLoader {
 
@@ -25,6 +27,14 @@ public final class GgufModelLoader {
   }
 
   public static LoadedGguf load(final Path ggufPath, final LlmListener io) throws IOException {
+    return load(ggufPath, io, false);
+  }
+
+  public static LoadedGguf load(
+    final Path ggufPath,
+    final LlmListener io,
+    final boolean allowUnpackParameters
+  ) throws IOException {
     LlmListener streams = io == null ? LlmListeners.silent() : io;
     Path path = requireNonNull(ggufPath, "ggufPath").toAbsolutePath().normalize();
     LlmListeners.infof(streams, null, "Loading GGUF from %s%n", path);
@@ -48,17 +58,27 @@ public final class GgufModelLoader {
       config.numKeyValueHeads(),
       config.convLCache());
 
-    Map<String, Tensor> weights = new LinkedHashMap<>();
+    Map<String, Object> weights = new LinkedHashMap<>();
     Progress progress = new Progress("GGUF weights", reader.tensorCount(), streams);
-    long loaded = 0L;
+    long accountedBytes = 0L;
     try {
       for (String name : reader.tensorNames()) {
-        Tensor tensor = reader.getTensor(name);
-        weights.put(name, tensor);
-        loaded += (long) tensor.numel() * Float.BYTES;
-        progress.step("%s (%.0f MiB fp32)".formatted(name, loaded / (1024.0 * 1024.0)));
+        if (allowUnpackParameters) {
+          var tensor = reader.getTensor(name);
+          weights.put(name, tensor);
+          accountedBytes += (long) tensor.numel() * Float.BYTES;
+          progress.step(
+            "%s (%.0f MiB float32)".formatted(name, accountedBytes / (1024.0 * 1024.0)));
+        } else {
+          PackedWeight weight = reader.getPackedWeight(name);
+          weights.put(name, weight);
+          accountedBytes += weight.packedBytes();
+          progress.step("%s (%.0f MiB packed)".formatted(name, accountedBytes / (1024.0 * 1024.0)));
+        }
       }
-      progress.finish("%.0f MiB dequantized to float32".formatted(loaded / (1024.0 * 1024.0)));
+      progress.finish(allowUnpackParameters
+        ? "%.0f MiB float32 (unpacked at load)".formatted(accountedBytes / (1024.0 * 1024.0))
+        : "%.0f MiB packed (dequant on matmul)".formatted(accountedBytes / (1024.0 * 1024.0)));
     } catch (RuntimeException e) {
       progress.finish("failed");
       reader.close();
@@ -80,7 +100,7 @@ public final class GgufModelLoader {
     int context = reader.metaInt(prefix + ".context_length", 131_072);
     int convL = reader.metaInt(prefix + ".shortconv.l_cache", 3);
     int vocab = reader.metaStringArray("tokenizer.ggml.tokens").size();
-    if (vocab <= 0) {
+    if (vocab == 0) {
       vocab = reader.metaInt(prefix + ".vocab_size", 0);
     }
     if (hidden <= 0 || layers <= 0 || heads <= 0 || intermediate <= 0 || vocab <= 0) {

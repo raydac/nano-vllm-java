@@ -1,8 +1,9 @@
 /**
- * Loaded model surface ({@link LlmModel}, {@link LlmModelFactory}) and architecture graphs ({@link CausalLM}, …).
- * <p>
- * Application code should use {@link LlmModelFactory#make(java.nio.file.Path)} and treat graph types as
- * implementation details unless extending the engine in-module.
+ * Application model surface: {@link LlmModel} and {@link LlmModelFactory}.
+ *
+ * <p>{@link LlmModel} is immutable and safe to share across threads and across many
+ * {@link com.igormaznitsa.nanollvm.llm.LLM} instances. Architecture graphs and weight maps live in
+ * non-exported {@code models.internal}.
  */
 
 package com.igormaznitsa.nanollvm.models;

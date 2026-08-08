@@ -1,7 +1,13 @@
 package com.igormaznitsa.nanollvm.chat;
 
+import static java.util.Objects.requireNonNull;
+
 import java.io.PrintStream;
 
+/**
+ * Incremental CLI printer for thinking / answer streams. Session-scoped and not thread-safe;
+ * prefer {@link LlmListeners#toPrintStreams} for typical use.
+ */
 public final class StreamPrinter {
 
   private static final String ANSI_THINK = "\u001B[2;36m";
@@ -31,7 +37,7 @@ public final class StreamPrinter {
     this.answerStarted = false;
   }
 
-  public void update(final AssistantParts parts) {
+  public void update(final ChatReply parts) {
     this.emitThink(parts.thinking());
     if (!parts.thinkOpen() && this.thinkStarted && !this.thinkClosed) {
       this.closeThinkLine();
@@ -53,17 +59,49 @@ public final class StreamPrinter {
     this.answerOut.flush();
   }
 
-  public void emitAdvisorNote(final int slot, final String note) {
-    String body = note == null || note.isBlank() ? "(no usable note)" : note.strip();
+  /**
+   * Clears a partially streamed answer line so a retry can print a fresh {@code assistant>} without
+   * leaving a second answer on screen.
+   */
+  public void discardAnswer() {
+    if (this.answerStarted) {
+      int width = "assistant> ".length() + Math.max(this.shownAnswer.length(), 8);
+      this.answerOut.print('\r');
+      this.answerOut.print(" ".repeat(width));
+      this.answerOut.print('\r');
+      this.answerOut.flush();
+    }
+    this.shownAnswer = "";
+    this.answerStarted = false;
+  }
+
+  public void emitAdvisorNote(final String advisorName, final String note) {
+    String name = requireNonNull(advisorName, "advisorName").strip();
+    if (name.isEmpty()) {
+      throw new IllegalArgumentException("advisorName must not be blank");
+    }
+    String body = note == null ? "" : note;
     this.thinkOut.print("thinking> ");
     if (this.color) {
       this.thinkOut.print(ANSI_THINK);
     }
-    this.thinkOut.printf("[advisor %d] %s", slot, body);
+    this.thinkOut.printf("[%s] %s", name, body);
     if (this.color) {
       this.thinkOut.print(ANSI_RESET);
     }
     this.thinkOut.println();
+    this.thinkOut.flush();
+  }
+
+  public void emitDebug(final String text) {
+    String body = text == null ? "" : text;
+    this.thinkOut.println("debug> --- prepared model user ---");
+    if (body.isEmpty()) {
+      this.thinkOut.println("debug> (empty)");
+    } else {
+      body.lines().forEach(line -> this.thinkOut.println("debug> " + line));
+    }
+    this.thinkOut.println("debug> ---");
     this.thinkOut.flush();
   }
 

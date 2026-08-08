@@ -8,22 +8,26 @@ import static java.nio.file.Files.walk;
 import static java.nio.file.Files.writeString;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import com.igormaznitsa.nanollvm.chat.AssistantParts;
 import com.igormaznitsa.nanollvm.chat.ChatMessage;
 import com.igormaznitsa.nanollvm.chat.ChatMessages;
+import com.igormaznitsa.nanollvm.chat.ChatReply;
 import com.igormaznitsa.nanollvm.chat.ChatRole;
 import com.igormaznitsa.nanollvm.chat.LlmListener;
 import com.igormaznitsa.nanollvm.chat.LlmListeners;
 import com.igormaznitsa.nanollvm.chat.LlmTextKind;
 import com.igormaznitsa.nanollvm.engine.BlockManager;
 import com.igormaznitsa.nanollvm.engine.Sequence;
-import com.igormaznitsa.nanollvm.llm.AdvisorMode;
+import com.igormaznitsa.nanollvm.internal.Json;
 import com.igormaznitsa.nanollvm.llm.Config;
+import com.igormaznitsa.nanollvm.llm.GenerationStats;
 import com.igormaznitsa.nanollvm.llm.LLM;
+import com.igormaznitsa.nanollvm.llm.LlmAdvisor;
+import com.igormaznitsa.nanollvm.llm.LlmAdvisorMixer;
 import com.igormaznitsa.nanollvm.llm.SamplingDefaults;
 import com.igormaznitsa.nanollvm.llm.SamplingParams;
 import com.igormaznitsa.nanollvm.models.LlmModel;
@@ -32,9 +36,9 @@ import com.igormaznitsa.nanollvm.prompts.ChatPrompts;
 import com.igormaznitsa.nanollvm.samples.utils.BundledModels;
 import com.igormaznitsa.nanollvm.tensor.FloatKernels;
 import com.igormaznitsa.nanollvm.tensor.FloatKernelsFactory;
+import com.igormaznitsa.nanollvm.tensor.MatmulRuntime;
 import com.igormaznitsa.nanollvm.tensor.Ops;
 import com.igormaznitsa.nanollvm.tensor.Tensor;
-import com.igormaznitsa.nanollvm.utils.Json;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.file.Path;
@@ -62,7 +66,11 @@ class CoreUnitTest {
 
   @Test
   void llmBuilderIsFluentAndDefaultsQuiet() {
-    LLM.Builder builder = LLM.builder(Path.of("models/Qwen3-0.6B"));
+    var path = BundledModels.find(BundledModels.QWEN3_0_6B);
+    org.junit.jupiter.api.Assumptions.assumeTrue(path.isPresent(), "Qwen3-0.6B not downloaded");
+
+    LlmModel model = LlmModelFactory.make(path.get());
+    LLM.Builder builder = LLM.builder(model);
     assertSame(builder, builder
         .maxModelLen(512)
         .maxNumSeqs(2)
@@ -70,12 +78,14 @@ class CoreUnitTest {
         .kvcacheBlockSize(256)
         .numKvcacheBlocks(32)
         .gpuMemoryUtilization(0.5f)
-        .tensorParallelSize(1)
         .enforceEager(true)
+      .warmup()
         .skipWarmup()
+      .warmup(false)
+      .allowUnpackParameters()
+      .allowUnpackParameters(false)
       .listen(LlmListeners.toSystem())
       .listen(LlmListeners.silent())
-        .warmup(false)
         .systemPrompt("Answer briefly.")
         .noSystemPrompt()
         .defaultSystemPrompt());
@@ -87,8 +97,8 @@ class CoreUnitTest {
     org.junit.jupiter.api.Assumptions.assumeTrue(path.isPresent(), "Qwen3-0.6B not downloaded");
 
     LlmModel model = LlmModelFactory.make(path.get());
-    try (LLM a = LLM.builder(model).maxModelLen(256).numKvcacheBlocks(32).skipWarmup().build();
-         LLM b = LLM.builder(model).maxModelLen(256).numKvcacheBlocks(32).skipWarmup().build()) {
+    try (LLM a = LLM.builder(model).maxModelLen(256).numKvcacheBlocks(32).build();
+         LLM b = LLM.builder(model).maxModelLen(256).numKvcacheBlocks(32).build()) {
       assertSame(model, a.model());
       assertSame(model, b.model());
       assertSame(model.tokenizer(), a.tokenizer());
@@ -98,30 +108,53 @@ class CoreUnitTest {
   }
 
   @Test
-  void setAdvisorsStoresModeAndPromptsWhenWeightsPresent() {
+  void advisorsConfiguredOnBuilderWhenWeightsPresent() {
     var path = BundledModels.find(BundledModels.QWEN3_0_6B);
     org.junit.jupiter.api.Assumptions.assumeTrue(path.isPresent(), "Qwen3-0.6B not downloaded");
 
     LlmModel model = LlmModelFactory.make(path.get());
-    try (LLM llm = LLM.builder(model).maxModelLen(256).numKvcacheBlocks(32).skipWarmup().build()) {
-      assertTrue(llm.advisorPrompts().isEmpty());
-      assertEquals(AdvisorMode.SEQUENTIAL, llm.advisorMode());
+    LlmAdvisor facts = LlmAdvisor.builder().name("Facts").prompt("Fact check").build();
+    LlmAdvisor risks = LlmAdvisor.builder().name("Risks").prompt("Argue risks").build();
+    try (LLM llm = LLM.builder(model)
+      .maxModelLen(256)
+      .numKvcacheBlocks(32)
+      .advisors(LlmAdvisorMixer.defaults(), facts, risks)
+      .build()) {
+      assertEquals(2, llm.advisors().size());
+      assertEquals("Facts", llm.advisors().get(0).name());
+      assertEquals("Fact check", llm.advisors().get(0).prompt());
+      assertEquals("Risks", llm.advisors().get(1).name());
+      assertNotNull(llm.advisorMixer());
+    }
 
-      llm.setAdvisors(AdvisorMode.PARALLEL, "  Fact check  ", "Argue risks");
-      assertEquals(AdvisorMode.PARALLEL, llm.advisorMode());
-      assertEquals(List.of("Fact check", "Argue risks"), llm.advisorPrompts());
+    try (LLM llm = LLM.builder(model).maxModelLen(256).numKvcacheBlocks(32).build()) {
+      assertTrue(llm.advisors().isEmpty());
+    }
 
-      assertThrows(
-        IllegalArgumentException.class,
-        () -> llm.setAdvisors(AdvisorMode.SEQUENTIAL, "ok", "  "));
+    LLM.Builder rejectsDuplicate =
+      LLM.builder(model).maxModelLen(256).numKvcacheBlocks(32);
+    assertThrows(
+      IllegalArgumentException.class,
+      () -> rejectsDuplicate.advisors(
+        LlmAdvisorMixer.defaults(),
+        LlmAdvisor.builder().name("Same").prompt("a").build(),
+        LlmAdvisor.builder().name("same").prompt("b").build()));
 
-      llm.setAdvisors(AdvisorMode.SEQUENTIAL, "   ", "");
-      assertTrue(llm.advisorPrompts().isEmpty());
-      assertEquals(AdvisorMode.SEQUENTIAL, llm.advisorMode());
+    try (LLM llm = LLM.builder(model)
+      .maxModelLen(256)
+      .numKvcacheBlocks(32)
+      .advisors(LlmAdvisorMixer.defaults())
+      .build()) {
+      assertTrue(llm.advisors().isEmpty());
+    }
 
-      llm.setAdvisors(AdvisorMode.PARALLEL, "only");
-      llm.setAdvisors();
-      assertTrue(llm.advisorPrompts().isEmpty());
+    try (LLM llm = LLM.builder(model)
+      .maxModelLen(256)
+      .numKvcacheBlocks(32)
+      .advisors(LlmAdvisorMixer.defaults(), facts)
+      .noAdvisors()
+      .build()) {
+      assertTrue(llm.advisors().isEmpty());
     }
   }
 
@@ -191,9 +224,8 @@ class CoreUnitTest {
 
   @Test
   void blockManagerPrefixCache() {
-    Sequence.setBlockSize(4);
     BlockManager bm = new BlockManager(16, 4);
-    Sequence a = new Sequence(List.of(1, 2, 3, 4, 5, 6, 7, 8, 9), new SamplingParams(0.6f, 8));
+    Sequence a = new Sequence(List.of(1, 2, 3, 4, 5, 6, 7, 8, 9), new SamplingParams(0.6f, 8), 4);
     int cached = bm.canAllocate(a);
     assertTrue(cached >= 0);
     bm.allocate(a, cached);
@@ -202,7 +234,7 @@ class CoreUnitTest {
     a.addCachedTokens(a.numScheduledTokens());
     a.setNumScheduledTokens(0);
 
-    Sequence b = new Sequence(List.of(1, 2, 3, 4, 5, 6, 7, 8, 10), new SamplingParams(0.6f, 8));
+    Sequence b = new Sequence(List.of(1, 2, 3, 4, 5, 6, 7, 8, 10), new SamplingParams(0.6f, 8), 4);
     int cachedB = bm.canAllocate(b);
     assertEquals(2, cachedB); // first two full blocks shared
   }
@@ -249,7 +281,8 @@ class CoreUnitTest {
         assertEquals(expected, y.get(r * out + o), 1e-4f);
       }
     }
-    assertTrue(com.igormaznitsa.nanollvm.tensor.VectorMath.backendInfo().contains("tileN"));
+    assertTrue(
+      com.igormaznitsa.nanollvm.tensor.MatmulRuntime.sequential().backendInfo().contains("tileN"));
     String kernels = com.igormaznitsa.nanollvm.tensor.FloatKernels.get().name();
     assertTrue(kernels.contains("Vector API") || kernels.equals("scalar"), kernels);
   }
@@ -273,22 +306,18 @@ class CoreUnitTest {
     }
     float[] sequential = new float[rows * out];
     float[] parallel = new float[rows * out];
-    try {
-      com.igormaznitsa.nanollvm.tensor.VectorMath.configureCpuThreads(1);
-      com.igormaznitsa.nanollvm.tensor.VectorMath.linear(
-        x, 0, w, 0, bias, sequential, 0, rows, in, out);
-
-      com.igormaznitsa.nanollvm.tensor.VectorMath.configureCpuThreads(
-        Math.max(2, Runtime.getRuntime().availableProcessors()));
-      com.igormaznitsa.nanollvm.tensor.VectorMath.linear(
-        x, 0, w, 0, bias, parallel, 0, rows, in, out);
-    } finally {
-      com.igormaznitsa.nanollvm.tensor.VectorMath.configureCpuThreads(1);
+    MatmulRuntime.sequential().linear(
+      x, 0, w, 0, bias, sequential, 0, rows, in, out);
+    try (MatmulRuntime multi = MatmulRuntime.builder()
+      .cpuThreads(Math.max(2, Runtime.getRuntime().availableProcessors()))
+      .build()) {
+      multi.linear(x, 0, w, 0, bias, parallel, 0, rows, in, out);
     }
     for (int i = 0; i < sequential.length; i++) {
       assertEquals(sequential[i], parallel[i], 1e-4f, "index " + i);
     }
-    assertTrue(com.igormaznitsa.nanollvm.tensor.VectorMath.backendInfo().contains("cpuThreads"));
+    assertTrue(com.igormaznitsa.nanollvm.tensor.MatmulRuntime.sequential().backendInfo()
+      .contains("cpuThreads"));
   }
 
   @Test
@@ -323,21 +352,21 @@ class CoreUnitTest {
   @Test
   void cleanAssistantTextHidesTemplateNoise() {
     String raw = "</think>\n\nHello there<|im_end|>";
-    assertEquals("Hello there", AssistantParts.cleanAssistantText(raw));
+    assertEquals("Hello there", ChatReply.cleanAssistantText(raw));
   }
 
   @Test
   void cleanAssistantTextKeepsGreetingReplies() {
     assertEquals("Hello! How can I assist you today?",
-        AssistantParts.cleanAssistantText(
+      ChatReply.cleanAssistantText(
             "</think>\n\nHello! How can I assist you today?<|im_end|>"));
-    assertEquals("hello", AssistantParts.cleanAssistantText("hello"));
+    assertEquals("hello", ChatReply.cleanAssistantText("hello"));
   }
 
   @Test
   void cleanAssistantTextUsesThinkBodyWhenAnswerEmpty() {
     assertEquals("Tere hommikust",
-        AssistantParts.cleanAssistantText("<think>\nTere hommikust\n</think>\n\n"));
+      ChatReply.cleanAssistantText("<think>\nTere hommikust\n</think>\n\n"));
   }
 
   @Test
@@ -384,19 +413,30 @@ class CoreUnitTest {
 
   @Test
   void streamDisplayStripsThinkAndSpecials() {
-    assertEquals("Hello", AssistantParts.streamDisplayText("<think>secret</think>Hello"));
-    assertEquals("still thinking", AssistantParts.streamDisplayText("<think>still thinking"));
-    assertEquals("ok", AssistantParts.streamDisplayText("ok<|im_end|>"));
+    assertEquals("Hello", ChatReply.streamDisplayText("<think>secret</think>Hello"));
+    assertEquals("still thinking", ChatReply.streamDisplayText("<think>still thinking"));
+    assertEquals("ok", ChatReply.streamDisplayText("ok<|im_end|>"));
+  }
+
+  @Test
+  void generationStatsThroughputAndChatReplyAttachment() {
+    GenerationStats stats = new GenerationStats(10, 5, 2_000_000_000L);
+    assertEquals(15, stats.totalTokens());
+    assertEquals(2.5d, stats.completionTokensPerSecond(), 1e-9);
+
+    ChatReply reply = ChatReply.parse("hi").withStats(stats);
+    assertEquals(5, reply.stats().completionTokens());
+    assertEquals(GenerationStats.NONE, ChatReply.parse("x").stats());
   }
 
   @Test
   void assistantPartsHoldsIncompleteThinkTag() {
-    AssistantParts partial = AssistantParts.parse("<think");
+    ChatReply partial = ChatReply.parse("<think");
     assertEquals("", partial.thinking());
     assertEquals("", partial.answer());
     assertEquals(false, partial.thinkOpen());
 
-    AssistantParts afterClose = AssistantParts.parse(
+    ChatReply afterClose = ChatReply.parse(
         "<think>\nplan\n</think>\n<think");
     assertEquals("plan", afterClose.thinking());
     assertEquals("", afterClose.answer());
@@ -405,13 +445,13 @@ class CoreUnitTest {
 
   @Test
   void assistantPartsHandlesSecondThinkBlock() {
-    AssistantParts openSecond = AssistantParts.parse(
+    ChatReply openSecond = ChatReply.parse(
         "<think>\nplan\n</think>\n\n<think>\nmore");
     assertEquals("plan\nmore", openSecond.thinking());
     assertEquals("", openSecond.answer());
     assertEquals(true, openSecond.thinkOpen());
 
-    AssistantParts withAnswer = AssistantParts.parse(
+    ChatReply withAnswer = ChatReply.parse(
         "<think>\nplan\n</think>\n\n1\n<think>\nnoise</think>\n");
     assertEquals("plan\nnoise", withAnswer.thinking());
     assertEquals("1", withAnswer.answer());
@@ -420,11 +460,11 @@ class CoreUnitTest {
 
   @Test
   void salvageFromThinkingPrefersStatedShortAnswer() {
-    assertEquals("1", AssistantParts.salvageFromThinking("""
+    assertEquals("1", ChatReply.salvageFromThinking("""
         Okay, the user wants a score.
         Therefore, the answer should be 1.
         """.stripIndent()));
-    assertEquals("1", AssistantParts.salvageFromThinking("""
+    assertEquals("1", ChatReply.salvageFromThinking("""
         some reasoning
         1
         """.stripIndent()));
@@ -432,7 +472,7 @@ class CoreUnitTest {
 
   @Test
   void assistantPartsSplitsThinkAndAnswer() {
-    AssistantParts parts = AssistantParts.parse(
+    ChatReply parts = ChatReply.parse(
         "<think>\nplan\n</think>\n\nTere hommikust<|im_end|>");
     assertEquals("plan", parts.thinking());
     assertEquals("Tere hommikust", parts.answer());
@@ -459,8 +499,17 @@ class CoreUnitTest {
     assertEquals("hi", ChatPrompts.gemmaUserContent("", "hi", true));
     assertTrue(ChatPrompts.isSetupBoilerplate("Okay, I'm ready."));
     assertTrue(ChatPrompts.isSetupBoilerplate("Okay, I understand. Let's begin."));
+    assertTrue(ChatPrompts.isSetupBoilerplate(
+      "Okay, I understand. I will respond with a short viewpoint, not the user-facing assistant."));
     assertFalse(ChatPrompts.isSetupBoilerplate("Hello! How can I help you today?"));
     assertFalse(ChatPrompts.isSetupBoilerplate("The president of Estonia is Alar Karis."));
+    assertFalse(ChatPrompts.isSetupBoilerplate(
+      "The universe is the totality of space, time, matter, and energy."));
+    assertTrue(ChatPrompts.withAdvisorGuidance(ChatPrompts.CHAT_SYSTEM, true)
+      .contains(ChatPrompts.ADVISOR_AWARE_ADDON));
+    assertEquals("", ChatPrompts.withAdvisorGuidance(ChatPrompts.GEMMA_CHAT_SYSTEM, true));
+    assertEquals(ChatPrompts.CHAT_SYSTEM,
+      ChatPrompts.withAdvisorGuidance(ChatPrompts.CHAT_SYSTEM, false));
     assertTrue(ChatMessages.newConversation(true).isEmpty());
     assertFalse(ChatMessages.newConversation(false).isEmpty());
     assertEquals(1, ChatMessages.newConversation("Be brief.").size());
@@ -502,8 +551,9 @@ class CoreUnitTest {
           """);
       Config.HfConfig qwen = Config.HfConfig.load(qwenCfg);
       Config.HfConfig gemma = Config.HfConfig.load(gemmaCfg);
-      assertEquals("qwen3", com.igormaznitsa.nanollvm.models.CausalLMFactory.detect(qwen));
-      assertEquals("gemma3", com.igormaznitsa.nanollvm.models.CausalLMFactory.detect(gemma));
+      assertEquals("qwen3", com.igormaznitsa.nanollvm.models.internal.CausalLMFactory.detect(qwen));
+      assertEquals("gemma3",
+        com.igormaznitsa.nanollvm.models.internal.CausalLMFactory.detect(gemma));
       assertTrue(gemma.isSlidingLayer(0));
       assertFalse(gemma.isSlidingLayer(1));
       assertEquals((float) Math.pow(16, -0.5), gemma.attentionScale(), 1e-6f);
@@ -548,7 +598,7 @@ class CoreUnitTest {
   @Test
   void gemmaChatTemplateBranchingWithoutWeights() throws Exception {
     assertEquals("gemma3",
-        com.igormaznitsa.nanollvm.models.CausalLMFactory.detect(
+      com.igormaznitsa.nanollvm.models.internal.CausalLMFactory.detect(
             new Config.HfConfig(
                 100, 64, 128, 1, 4, 1, 16, 128, 1e-6f, "gelu", false, false,
                 1e6f, null, "float32", "gemma3_text",
@@ -626,16 +676,16 @@ class CoreUnitTest {
       throw new AssertionError(e);
     }
     assertTrue(hf.tieWordEmbeddings());
-    assertEquals("gemma3", com.igormaznitsa.nanollvm.models.CausalLMFactory.detect(hf));
-    assertTrue(com.igormaznitsa.nanollvm.models.WeightSchema.gemma3(hf)
+    assertEquals("gemma3", com.igormaznitsa.nanollvm.models.internal.CausalLMFactory.detect(hf));
+    assertTrue(com.igormaznitsa.nanollvm.models.internal.WeightSchema.gemma3(hf)
         .expects("model.layers.0.pre_feedforward_layernorm.weight"));
   }
 
   @Test
   void stripChatMarkupRemovesGemmaTurnTokens() {
-    assertEquals("", AssistantParts.stripChatMarkup("<end_of_turn>"));
-    assertEquals("Hi", AssistantParts.stripChatMarkup("Hi<end_of_turn>"));
+    assertEquals("", ChatReply.stripChatMarkup("<end_of_turn>"));
+    assertEquals("Hi", ChatReply.stripChatMarkup("Hi<end_of_turn>"));
     assertEquals("model\nplan",
-        AssistantParts.stripChatMarkup("<start_of_turn>model\nplan<end_of_turn>"));
+      ChatReply.stripChatMarkup("<start_of_turn>model\nplan<end_of_turn>"));
   }
 }

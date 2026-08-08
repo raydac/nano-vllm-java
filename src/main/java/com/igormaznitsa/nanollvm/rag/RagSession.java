@@ -31,6 +31,9 @@ import java.util.function.Consumer;
  * Thinking is off by default so small max-token budgets are not spent on {@code <think>} blocks.
  * Grounded turns also clamp sampling temperature. Not thread-safe.
  *
+ * <p>{@link #open(ChatSession, RagIndex)} reuses that session's {@link LLM} (rewrite and Gemma
+ * policy stay enabled).
+ *
  * <pre>{@code
  * PreparedRag rag = RagFactory.make(Path.of("docs"));
  * ChatReply reply = llm.rag(rag).topK(2).send("What is the capital of France?");
@@ -54,10 +57,10 @@ public final class RagSession {
   private String lastRetrievalQuery = "";
 
   private RagSession(final LLM llm, final ChatSession chat, final RagIndex index) {
-    this.llm = llm;
+    this.llm = requireNonNull(llm, "llm");
     this.chat = requireNonNull(chat, "chat");
     this.index = requireNonNull(index, "index");
-    this.isolateGeneration = llm != null && llm.tokenizer().isGemmaChat();
+    this.isolateGeneration = this.llm.tokenizer().isGemmaChat();
     this.chat.enableThinking(false);
   }
 
@@ -72,7 +75,8 @@ public final class RagSession {
   }
 
   public static RagSession open(final ChatSession chat, final RagIndex index) {
-    return new RagSession(null, chat, index);
+    requireNonNull(chat, "chat");
+    return new RagSession(chat.llm(), chat, index);
   }
 
   public RagSession topK(final int topK) {
@@ -94,10 +98,9 @@ public final class RagSession {
   public static String formatUserMessage(
     final List<RagHit> hits,
     final String question,
-    final int maxContextChars,
-    final boolean compact
+    final int maxContextChars
   ) {
-    return UserMessage.format(hits, question, maxContextChars, compact);
+    return UserMessage.format(hits, question, maxContextChars);
   }
 
   /**
@@ -166,7 +169,7 @@ public final class RagSession {
   }
 
   public static String formatUserMessage(final List<RagHit> hits, final String question) {
-    return UserMessage.format(hits, question, Integer.MAX_VALUE, false);
+    return UserMessage.format(hits, question, Integer.MAX_VALUE);
   }
 
   private void applyTurnSampling() {
@@ -190,6 +193,13 @@ public final class RagSession {
       base.topP()));
   }
 
+  /**
+   * Convenience: {@link #send(String)} then {@link ChatReply#answer()}.
+   *
+   * @throws IllegalArgumentException                                          if {@code question} is blank after strip
+   * @throws com.igormaznitsa.nanollvm.exceptions.GenerationCancelledException if cancel fires
+   * @throws com.igormaznitsa.nanollvm.exceptions.GenerationTimeoutException   if the session timeout elapses
+   */
   public String ask(final String question) {
     return this.send(question).answer();
   }
@@ -212,6 +222,13 @@ public final class RagSession {
     return this;
   }
 
+  /**
+   * Generates a grounded reply for {@code question} (rewrite / retrieve / prompt / chat).
+   *
+   * @throws IllegalArgumentException                                          if {@code question} is blank after strip
+   * @throws com.igormaznitsa.nanollvm.exceptions.GenerationCancelledException if cancel fires
+   * @throws com.igormaznitsa.nanollvm.exceptions.GenerationTimeoutException   if the session timeout elapses
+   */
   public ChatReply send(final String question) {
     requireNonNull(question, "question");
     String q = question.strip();
@@ -225,14 +242,13 @@ public final class RagSession {
       return this.chat.send(q);
     }
 
-    this.lastHits = this.retrieve(q);
+    this.lastHits = List.copyOf(this.retrieve(q));
     this.updateAnchorAfterRetrieve(q);
     if (!this.lastHits.isEmpty()) {
       this.lastSource = this.lastHits.getFirst().chunk().source();
     }
 
-    boolean compact = this.llm != null && this.llm.tokenizer().isGemmaChat();
-    String prompt = UserMessage.format(this.lastHits, q, this.maxContextChars, compact);
+    String prompt = UserMessage.format(this.lastHits, q, this.maxContextChars);
     this.applyTurnSampling();
     boolean isolate = this.lastHits.isEmpty() || this.isolateGeneration;
     return this.chat.sendPrepared(q, prompt, isolate);
@@ -256,17 +272,13 @@ public final class RagSession {
   }
 
   private void updateAnchorAfterRetrieve(final String question) {
-    if (this.llm != null && Retrieval.shortFollowUp(question)) {
+    if (Retrieval.shortFollowUp(question)) {
       if (!this.lastHits.isEmpty() && !this.lastRetrievalQuery.isBlank()) {
         this.anchorQuery = this.lastRetrievalQuery;
       }
       return;
     }
     if (Retrieval.updatesAnchorFromQuestion(question)) {
-      this.anchorQuery = question;
-      return;
-    }
-    if (this.llm == null && this.anchorQuery.isBlank() && !this.index.isOutsideCorpus(question)) {
       this.anchorQuery = question;
     }
   }
@@ -276,8 +288,7 @@ public final class RagSession {
       return Optional.empty();
     }
 
-    boolean shortWithPrior = this.llm != null
-      && Retrieval.shortFollowUp(question)
+    boolean shortWithPrior = Retrieval.shortFollowUp(question)
       && !this.anchorQuery.isBlank();
 
     if (shortWithPrior) {
@@ -285,13 +296,11 @@ public final class RagSession {
         return Optional.of(question);
       }
       Optional<String> rewritten = QueryRewrite.rewrite(this.llm, this.anchorQuery, question);
-      return Retrieval.queryAfterRewrite(question, this.anchorQuery, rewritten, this.index);
+      return Retrieval.queryAfterRewrite(
+        question, this.anchorQuery, rewritten.orElse(null), this.index);
     }
 
-    if (this.llm != null) {
-      return Optional.of(question);
-    }
-    return Optional.of(Retrieval.anchorExpandedQuery(question, this.anchorQuery));
+    return Optional.of(question);
   }
 
   /**
@@ -305,8 +314,7 @@ public final class RagSession {
     static String format(
       final List<RagHit> hits,
       final String question,
-      final int maxContextChars,
-      final boolean compact
+      final int maxContextChars
     ) {
       requireNonNull(hits, "hits");
       requireNonNull(question, "question");
@@ -318,29 +326,21 @@ public final class RagSession {
         throw new IllegalArgumentException("maxContextChars must be >= 64");
       }
 
-      String context = truncateContext(hits, maxContextChars, compact);
+      String context = truncateContext(hits, maxContextChars);
       if (context.isBlank()) {
-        return compact ? RagPrompts.compactNoHit(q) : RagPrompts.fullNoHit(q);
+        return RagPrompts.withoutContext(q);
       }
-      return compact ? RagPrompts.compactHit(q, context) : RagPrompts.fullHit(q, context);
+      return RagPrompts.withContext(q, context);
     }
 
-    private static String truncateContext(
-      final List<RagHit> hits,
-      final int maxContextChars,
-      final boolean compact
-    ) {
+    private static String truncateContext(final List<RagHit> hits, final int maxContextChars) {
       if (hits.isEmpty()) {
         return "";
       }
       List<String> parts = new ArrayList<>();
       int used = 0;
-      int n = 0;
       for (RagHit hit : hits) {
-        n++;
-        String block = compact
-          ? "- " + hit.chunk().text().strip()
-          : "[%d] (%s)%n%s".formatted(n, hit.chunk().source(), hit.chunk().text().strip());
+        String block = "- " + hit.chunk().text().strip();
         int next = used == 0 ? block.length() : used + 2 + block.length();
         if (next > maxContextChars && used > 0) {
           break;
@@ -387,7 +387,7 @@ public final class RagSession {
       if (rawModelText == null || rawModelText.isBlank()) {
         return Optional.empty();
       }
-      String answer = com.igormaznitsa.nanollvm.chat.AssistantParts.parse(rawModelText)
+      String answer = com.igormaznitsa.nanollvm.chat.ChatReply.parse(rawModelText)
         .answer().strip();
       if (answer.isEmpty()) {
         return Optional.empty();
@@ -457,19 +457,19 @@ public final class RagSession {
      * Chooses the BM25 string after an optional rewrite of a short follow-up.
      * Prefer a usable rewrite; otherwise expand with Prior. Caller must already reject
      * off-topic follow-ups via {@link RagIndex#isOutsideCorpus(String)}.
+     *
+     * @param rewritten rewritten query, or {@code null} when rewrite yielded nothing usable
      */
     static Optional<String> queryAfterRewrite(
       final String question,
       final String anchor,
-      final Optional<String> rewritten,
+      final String rewritten,
       final RagIndex index
     ) {
       requireNonNull(question, "question");
       requireNonNull(index, "index");
-      if (rewritten != null
-        && rewritten.isPresent()
-        && !index.isOutsideCorpus(rewritten.get())) {
-        return rewritten;
+      if (rewritten != null && !index.isOutsideCorpus(rewritten)) {
+        return Optional.of(rewritten);
       }
       return Optional.of(anchorExpandedQuery(question, anchor));
     }

@@ -2,12 +2,16 @@ package com.igormaznitsa.nanollvm.chat;
 
 import com.igormaznitsa.nanollvm.prompts.ChatPrompts;
 import com.igormaznitsa.nanollvm.tokenizer.Tokenizer;
-
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.IntStream;
 
+/**
+ * Helpers for building and trimming chat histories.
+ *
+ * <p>{@link #newConversation(String)} returns an unmodifiable list. Truncate / scrub helpers
+ * mutate the caller-supplied list in place.
+ */
 public final class ChatMessages {
 
   private static final int PROMPT_MARGIN = 16;
@@ -19,18 +23,26 @@ public final class ChatMessages {
     return newConversation(ChatPrompts.systemFor(gemmaChat));
   }
 
+  /**
+   * Fresh history seeded with an optional system turn.
+   *
+   * @return an unmodifiable list (empty when {@code systemPrompt} is null/blank)
+   */
   public static List<ChatMessage> newConversation(final String systemPrompt) {
-    List<ChatMessage> history = new ArrayList<>();
-    if (systemPrompt != null && !systemPrompt.isBlank()) {
-      history.add(ChatMessage.system(systemPrompt));
+    if (systemPrompt == null || systemPrompt.isBlank()) {
+      return List.of();
     }
-    return history;
+    return List.of(ChatMessage.system(systemPrompt));
   }
 
   public static List<Map<String, String>> toTemplateMaps(final List<ChatMessage> history) {
     return history.stream().map(ChatMessage::toMap).toList();
   }
 
+  /**
+   * Drops oldest turns from {@code history} until the chat template fits the token budget.
+   * Mutates {@code history} in place.
+   */
   public static void truncateHistory(
       final List<ChatMessage> history,
       final Tokenizer tokenizer,
@@ -56,6 +68,10 @@ public final class ChatMessages {
     }
   }
 
+  /**
+   * Replaces setup-boilerplate assistant turns with a short greeting. Mutates {@code history}
+   * in place.
+   */
   public static void scrubSetupBoilerplateTurns(final List<ChatMessage> history) {
     IntStream.range(0, history.size())
         .filter(i -> history.get(i).role() == ChatRole.ASSISTANT

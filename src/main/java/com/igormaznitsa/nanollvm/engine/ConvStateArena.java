@@ -37,6 +37,10 @@ public final class ConvStateArena {
     this.bySeqId.remove(seqId);
   }
 
+  public void clearAll() {
+    this.bySeqId.clear();
+  }
+
   private float[][] newSeqStates() {
     float[][] layers = new float[this.numLayers][];
     int row = this.hiddenSize * this.stateLen;

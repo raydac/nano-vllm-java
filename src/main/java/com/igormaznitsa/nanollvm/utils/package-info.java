@@ -1,6 +1,5 @@
 /**
- * Small exported helpers ({@link NanoVllmProps}, {@link Json}). Model/RAG folder resolution for demos
- * lives in non-exported {@code com.igormaznitsa.nanollvm.samples.utils}.
+ * Exported helpers: {@link NanoLlvmProps}, {@link ResourceLimits}.
+ * JSON parsing lives in non-exported {@code internal}.
  */
-
 package com.igormaznitsa.nanollvm.utils;

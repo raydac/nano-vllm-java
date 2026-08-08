@@ -62,9 +62,14 @@ class RagRetrievalTest {
   void offTopicProperNameDoesNotRetrieveFairyTaleNoise() {
     PreparedRag index = RagFactory.of(
       "Little Red Riding Hood met a wolf. Oh grandmother, what big ears you have! "
-        + "She did not know what a wicked animal he was, and was not afraid of him.");
+        + "She did not know what a wicked animal he was, and was not afraid of him. "
+        + "I usually like it at grandmother's.");
     assertTrue(index.isOutsideCorpus("what do you think about estonia?"));
     assertTrue(index.retrieve("what do you think about estonia?", 3).isEmpty());
+    assertTrue(index.isOutsideCorpus("I would like to discuss about cars"));
+    assertTrue(index.retrieve("I would like to discuss about cars", 3).isEmpty());
+    assertTrue(index.isOutsideCorpus("what do you think about BMW?"));
+    assertTrue(index.retrieve("what do you think about BMW?", 3).isEmpty());
     assertFalse(index.retrieve("Little Red Riding Hood wolf grandmother", 2).isEmpty());
   }
 
@@ -163,7 +168,7 @@ class RagRetrievalTest {
     Optional<String> chosen = RagSession.Retrieval.queryAfterRewrite(
       "who was their father?",
       "who are the grimm brothers?",
-      Optional.empty(),
+      null,
       rag);
     assertEquals(
       "who are the grimm brothers?\nwho was their father?",
@@ -177,7 +182,7 @@ class RagRetrievalTest {
     Optional<String> chosen = RagSession.Retrieval.queryAfterRewrite(
       "who was their father?",
       "who are the grimm brothers?",
-      Optional.of("estonia capital tallinn"),
+      "estonia capital tallinn",
       rag);
     assertEquals(
       "who are the grimm brothers?\nwho was their father?",

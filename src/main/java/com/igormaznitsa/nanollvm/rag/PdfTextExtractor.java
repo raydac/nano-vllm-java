@@ -4,6 +4,7 @@ import static java.nio.charset.StandardCharsets.ISO_8859_1;
 import static java.nio.charset.StandardCharsets.UTF_16BE;
 import static java.util.Objects.requireNonNull;
 
+import com.igormaznitsa.nanollvm.utils.ResourceLimits;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
@@ -61,13 +62,26 @@ public final class PdfTextExtractor {
    * @throws UncheckedIOException if the file cannot be read or is not a PDF
    */
   public static String extract(final Path pdf) {
+    return extract(pdf, ResourceLimits.current());
+  }
+
+  /**
+   * Reads {@code pdf} under {@code limits} (file size and inflate caps).
+   */
+  public static String extract(final Path pdf, final ResourceLimits limits) {
     requireNonNull(pdf, "pdf");
+    requireNonNull(limits, "limits");
     Path path = pdf.toAbsolutePath().normalize();
     if (!Files.isRegularFile(path)) {
       throw new IllegalArgumentException("not a regular file: " + path);
     }
     try {
-      return extract(Files.readAllBytes(path));
+      long size = Files.size(path);
+      if (size > limits.maxFileBytes()) {
+        throw new IllegalArgumentException(
+          "PDF exceeds maxFileBytes (" + limits.maxFileBytes() + "): " + path);
+      }
+      return extract(Files.readAllBytes(path), limits);
     } catch (IOException e) {
       throw new UncheckedIOException("failed to read PDF " + path, e);
     }
@@ -79,9 +93,14 @@ public final class PdfTextExtractor {
    * @throws UncheckedIOException if the stream cannot be read or is not a PDF
    */
   public static String extract(final InputStream in) {
+    return extract(in, ResourceLimits.current());
+  }
+
+  public static String extract(final InputStream in, final ResourceLimits limits) {
     requireNonNull(in, "in");
+    requireNonNull(limits, "limits");
     try {
-      return extract(in.readAllBytes());
+      return extract(in.readAllBytes(), limits);
     } catch (IOException e) {
       throw new UncheckedIOException("failed to read PDF stream", e);
     }
@@ -93,9 +112,18 @@ public final class PdfTextExtractor {
    * @throws UncheckedIOException if the bytes are not a PDF or cannot be decoded
    */
   public static String extract(final byte[] pdfBytes) {
+    return extract(pdfBytes, ResourceLimits.current());
+  }
+
+  public static String extract(final byte[] pdfBytes, final ResourceLimits limits) {
     requireNonNull(pdfBytes, "pdfBytes");
+    requireNonNull(limits, "limits");
+    if (pdfBytes.length > limits.maxFileBytes()) {
+      throw new IllegalArgumentException(
+        "PDF bytes exceed maxFileBytes (" + limits.maxFileBytes() + ")");
+    }
     requirePdfHeader(pdfBytes);
-    return joinFragments(collectTextFragments(pdfBytes)).strip();
+    return joinFragments(collectTextFragments(pdfBytes, limits)).strip();
   }
 
   private static void requirePdfHeader(final byte[] pdfBytes) {
@@ -126,15 +154,15 @@ public final class PdfTextExtractor {
       .replaceAll("(?<=\\p{L})(?=\\p{N})", " ");
   }
 
-  private static List<String> collectTextFragments(final byte[] pdf) {
+  private static List<String> collectTextFragments(final byte[] pdf, final ResourceLimits limits) {
     List<byte[]> decodedStreams = findStreams(pdf).stream()
-      .map(PdfTextExtractor::decodeStream)
+      .map(stream -> decodeStream(stream, limits))
       .filter(data -> data != null && data.length > 0)
       .toList();
 
     List<ToUnicode> cmaps = decodedStreams.stream()
       .filter(PdfTextExtractor::looksLikeCMap)
-      .map(PdfTextExtractor::parseToUnicode)
+      .map(data -> parseToUnicode(data, limits))
       .filter(cmap -> !cmap.isEmpty())
       .toList();
 
@@ -184,10 +212,10 @@ public final class PdfTextExtractor {
     return indexOfKeyword(pdf, dataStart, "endstream");
   }
 
-  private static byte[] decodeStream(final StreamPayload stream) {
+  private static byte[] decodeStream(final StreamPayload stream, final ResourceLimits limits) {
     byte[] data = stream.data();
     for (String filter : stream.filters()) {
-      data = applyFilter(data, filter);
+      data = applyFilter(data, filter, limits);
       if (data == null) {
         return null;
       }
@@ -195,25 +223,33 @@ public final class PdfTextExtractor {
     return data;
   }
 
-  private static byte[] applyFilter(final byte[] data, final String filter) {
+  private static byte[] applyFilter(
+    final byte[] data,
+    final String filter,
+    final ResourceLimits limits
+  ) {
     return switch (filter) {
       case "", "Identity" -> data;
-      case "FlateDecode", "Fl" -> inflate(data);
+      case "FlateDecode", "Fl" -> inflate(data, limits);
       case "ASCII85Decode", "A85" -> decodeAscii85(data);
       case "ASCIIHexDecode", "AHx" -> decodeAsciiHex(data);
       default -> null;
     };
   }
 
-  private static byte[] inflate(final byte[] compressed) {
-    byte[] zlib = inflateWith(compressed, false);
+  private static byte[] inflate(final byte[] compressed, final ResourceLimits limits) {
+    byte[] zlib = inflateWith(compressed, false, limits);
     if (zlib != null && zlib.length > 0) {
       return zlib;
     }
-    return inflateWith(compressed, true);
+    return inflateWith(compressed, true, limits);
   }
 
-  private static byte[] inflateWith(final byte[] compressed, final boolean nowrap) {
+  private static byte[] inflateWith(
+    final byte[] compressed,
+    final boolean nowrap,
+    final ResourceLimits limits
+  ) {
     Inflater inflater = new Inflater(nowrap);
     try {
       inflater.setInput(compressed);
@@ -226,6 +262,11 @@ public final class PdfTextExtractor {
             break;
           }
         } else {
+          if (out.size() + (long) n > limits.maxPdfInflateBytes()) {
+            throw new UncheckedIOException(
+              "PDF FlateDecode exceeds maxPdfInflateBytes (" + limits.maxPdfInflateBytes() + ")",
+              new IOException("inflate budget exceeded"));
+          }
           out.write(buffer, 0, n);
         }
       }
@@ -343,9 +384,9 @@ public final class PdfTextExtractor {
       && (sample.contains("beginbfchar") || sample.contains("beginbfrange"));
   }
 
-  private static ToUnicode parseToUnicode(final byte[] data) {
+  private static ToUnicode parseToUnicode(final byte[] data, final ResourceLimits limits) {
     String cmap = new String(data, ISO_8859_1);
-    ToUnicode toUnicode = new ToUnicode();
+    ToUnicode toUnicode = new ToUnicode(limits);
     Matcher space = CODE_SPACE.matcher(cmap);
     if (space.find()) {
       Matcher hex = HEX_TOKEN.matcher(space.group(1));
@@ -382,6 +423,13 @@ public final class PdfTextExtractor {
       int to = parseHexCode(line.group(2));
       toUnicode.noteCodeWidth(line.group(1).length() / 2);
       if (line.group(3) != null) {
+        int span = to - from + 1;
+        if (span < 0 || span > toUnicode.maxRangeSpan()) {
+          throw new UncheckedIOException(
+            "PDF ToUnicode bfRange span exceeds maxCmapRangeSpan ("
+              + toUnicode.maxRangeSpan() + ")",
+            new IOException("cmap range too large"));
+        }
         int dst = parseHexCode(line.group(3));
         for (int code = from; code <= to; code++) {
           toUnicode.put(code, new String(Character.toChars(dst + (code - from))));
@@ -814,7 +862,18 @@ public final class PdfTextExtractor {
 
   private static final class ToUnicode {
     private final Map<Integer, String> map = new HashMap<>();
+    private final int maxEntries;
+    private final int maxRangeSpan;
     private int codeWidth = 1;
+
+    private ToUnicode(final ResourceLimits limits) {
+      this.maxEntries = limits.maxCmapEntries();
+      this.maxRangeSpan = limits.maxCmapRangeSpan();
+    }
+
+    int maxRangeSpan() {
+      return this.maxRangeSpan;
+    }
 
     private static int bytesToCode(final byte[] raw, final int offset, final int width) {
       int code = 0;
@@ -832,6 +891,11 @@ public final class PdfTextExtractor {
 
     void put(final int code, final String value) {
       if (value != null && !value.isEmpty()) {
+        if (this.map.size() >= this.maxEntries && !this.map.containsKey(code)) {
+          throw new UncheckedIOException(
+            "PDF ToUnicode map exceeds maxCmapEntries (" + this.maxEntries + ")",
+            new IOException("cmap too large"));
+        }
         this.map.put(code, value);
       }
     }

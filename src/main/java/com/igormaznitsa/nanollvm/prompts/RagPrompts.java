@@ -1,32 +1,12 @@
 package com.igormaznitsa.nanollvm.prompts;
 
 /**
- * Model-facing RAG prompt text and section markers shared with advisor grounding.
+ * Model-facing RAG document layout: facts first, blank line, user question last.
  */
 public final class RagPrompts {
 
-  public static final String CONTEXT_HEADING = "Context:";
-  public static final String QUESTION_HEADING = "Question:";
   public static final String NO_CONTEXT_DOCUMENTS = "No context documents";
   public static final String ABSTAIN_REPLY = "I do not know";
-
-  public static final String COMPACT_ANSWER_INSTRUCTION =
-    "Answer in one short sentence using names and facts from the Context above.";
-
-  public static final String FULL_ANSWER_INSTRUCTION = """
-    Answer using only the context. Do not invent names, dates, or other details.
-    If the context does not contain the answer, say you do not know. Be concise.
-    """.strip();
-
-  public static final String COMPACT_NO_HIT_INSTRUCTION = """
-    No context documents were found for this question.
-    Reply with exactly: %s.
-    Do not invent places, names, or stories.
-    """.formatted(ABSTAIN_REPLY).strip();
-
-  public static final String FULL_NO_HIT_INSTRUCTION = """
-    No context documents were retrieved. Say you do not know. Do not invent facts.
-    """.strip();
 
   public static final String REWRITE_STANDALONE = """
     Rewrite the question as a short keyword search for a document index.
@@ -48,37 +28,46 @@ public final class RagPrompts {
   private RagPrompts() {
   }
 
-  public static String compactHit(final String question, final String context) {
-    return question + "\n\n\n" + CONTEXT_HEADING + "\n" + context + "\n\n"
-      + COMPACT_ANSWER_INSTRUCTION + "\n";
+  /**
+   * Facts block, then blank line, then the user question.
+   */
+  public static String withContext(final String question, final String context) {
+    return context.strip() + "\n\n" + question.strip();
   }
 
-  public static String fullHit(final String question, final String context) {
-    return """
-      %s
-      %s
-
-      %s %s
-
-      %s
-      """.formatted(
-      CONTEXT_HEADING,
-      context,
-      QUESTION_HEADING,
-      question,
-      FULL_ANSWER_INSTRUCTION).strip();
+  /**
+   * Question only (no retrieved facts).
+   */
+  public static String withoutContext(final String question) {
+    return question.strip();
   }
 
-  public static String compactNoHit(final String question) {
-    return question + "\n\n\n" + COMPACT_NO_HIT_INSTRUCTION + "\n";
+  public static String facts(final String document) {
+    if (document == null || document.isBlank()) {
+      return "";
+    }
+    String text = document.strip();
+    int sep = text.lastIndexOf("\n\n");
+    if (sep < 0) {
+      return "";
+    }
+    return text.substring(0, sep).strip();
   }
 
-  public static String fullNoHit(final String question) {
-    return """
-      %s %s
+  public static String question(final String document) {
+    if (document == null || document.isBlank()) {
+      return "";
+    }
+    String text = document.strip();
+    int sep = text.lastIndexOf("\n\n");
+    if (sep < 0) {
+      return text;
+    }
+    return text.substring(sep + 2).strip();
+  }
 
-      %s
-      """.formatted(QUESTION_HEADING, question, FULL_NO_HIT_INSTRUCTION).strip();
+  public static boolean hasFacts(final String document) {
+    return !facts(document).isBlank();
   }
 
   public static String rewriteStandalone(final String question) {

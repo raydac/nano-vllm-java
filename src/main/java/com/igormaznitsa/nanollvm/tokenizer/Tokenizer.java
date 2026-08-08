@@ -1,12 +1,12 @@
 package com.igormaznitsa.nanollvm.tokenizer;
 
-import static com.igormaznitsa.nanollvm.utils.NanoVllmProps.CONFIG_JSON;
+import static com.igormaznitsa.nanollvm.utils.NanoLlvmProps.CONFIG_JSON;
 import static java.nio.charset.StandardCharsets.UTF_8;
 import static java.util.Objects.requireNonNull;
 
+import com.igormaznitsa.nanollvm.exceptions.ModelLoadException;
+import com.igormaznitsa.nanollvm.internal.Json;
 import com.igormaznitsa.nanollvm.prompts.ChatPrompts;
-import com.igormaznitsa.nanollvm.utils.Json;
-
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -24,6 +24,10 @@ import java.util.regex.Pattern;
 
 /**
  * HF {@code tokenizer.json} loader: GPT-2 byte-level BPE (Qwen) or Metaspace/{@code ▁} BPE (Gemma).
+ *
+ * <p>Immutable after construction. Safe to share across threads and across many {@link
+ * com.igormaznitsa.nanollvm.llm.LLM} instances (normally obtained via
+ * {@link com.igormaznitsa.nanollvm.models.LlmModel#tokenizer()}).
  */
 public final class Tokenizer {
 
@@ -232,7 +236,7 @@ public final class Tokenizer {
         chatTemplate, byteFallback, style, gemmaChat, prependMetaSpace, !gemmaChat
       );
     } catch (IOException e) {
-      throw new IllegalStateException("failed to load tokenizer from " + modelDir, e);
+      throw new ModelLoadException("failed to load tokenizer from " + modelDir, e);
     }
   }
 
@@ -244,7 +248,7 @@ public final class Tokenizer {
     requireNonNull(source, "source");
     List<String> tokens = source.metaStringArray("tokenizer.ggml.tokens");
     if (tokens.isEmpty()) {
-      throw new IllegalStateException("GGUF missing tokenizer.ggml.tokens");
+      throw new ModelLoadException("GGUF missing tokenizer.ggml.tokens");
     }
     Map<String, Integer> vocab = new LinkedHashMap<>(tokens.size() * 2);
     Set<String> addedTexts = new HashSet<>();
@@ -570,7 +574,10 @@ public final class Tokenizer {
   }
 
   public List<Integer> encode(final String text) {
-    return this.style == Style.METASPACE_BPE ? this.encodeMetaspace(text) : this.encodeGpt2(text);
+    List<Integer> ids = this.style == Style.METASPACE_BPE
+      ? this.encodeMetaspace(text)
+      : this.encodeGpt2(text);
+    return List.copyOf(ids);
   }
 
   private List<Integer> encodeGpt2(final String text) {
@@ -618,7 +625,7 @@ public final class Tokenizer {
         if (this.prependMetaSpace) {
           prepared = META_SPACE + prepared;
         }
-        ids.addAll(this.bpe(this.codepoints(prepared)));
+        ids.addAll(this.bpe(codepoints(prepared)));
       }
       i = nextSpecial;
     }

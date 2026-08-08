@@ -4,7 +4,7 @@ import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-public record AssistantParts(String thinking, String answer, boolean thinkOpen) {
+record AssistantParts(String thinking, String answer, boolean thinkOpen) {
 
   private static final Pattern SPECIAL_TOKEN = Pattern.compile("<\\|[^\\s|>]*\\|>?");
   private static final Pattern LEADING_ASSISTANT = Pattern.compile("(?i)^\\s*assistant\\s*:?\\s*");
@@ -177,7 +177,7 @@ public record AssistantParts(String thinking, String answer, boolean thinkOpen) 
   }
 
   private static boolean looksLikeReasoning(final String line) {
-    String lower = line.toLowerCase();
+    String lower = line.toLowerCase(java.util.Locale.ROOT);
     return lower.startsWith("okay")
       || lower.startsWith("wait")
       || lower.startsWith("let me")

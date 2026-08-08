@@ -2,22 +2,23 @@ package com.igormaznitsa.nanollvm.llm;
 
 import static java.util.Objects.requireNonNull;
 
+import com.igormaznitsa.nanollvm.prompts.AdvisorPrompts;
+import com.igormaznitsa.nanollvm.prompts.ChatPrompts;
 import java.util.List;
 
 /**
- * Result of the optional advisor pass: enriched user text, raw advisor notes for the thinking
- * stream, and the filtered notes actually mixed into the main prompt.
+ * Result of the optional advisor pass: mixed user text plus named advisor replies.
  */
 public record AdvisorEnrichment(
   String modelUserText,
-  List<String> advisorNotes,
-  List<String> groundedNotes
+  List<AdvisorResponse> responses,
+  List<String> salvageNotes
 ) {
 
   public AdvisorEnrichment {
     requireNonNull(modelUserText, "modelUserText");
-    advisorNotes = List.copyOf(requireNonNull(advisorNotes, "advisorNotes"));
-    groundedNotes = List.copyOf(requireNonNull(groundedNotes, "groundedNotes"));
+    responses = List.copyOf(requireNonNull(responses, "responses"));
+    salvageNotes = List.copyOf(requireNonNull(salvageNotes, "salvageNotes"));
   }
 
   public static AdvisorEnrichment passthrough(final String modelUserText) {
@@ -26,17 +27,25 @@ public record AdvisorEnrichment(
   }
 
   public boolean hasAdvisorNotes() {
-    return this.advisorNotes.stream().anyMatch(note -> note != null && !note.isBlank());
+    return this.responses.stream()
+      .map(AdvisorResponse::text)
+      .anyMatch(note -> note != null && !note.isBlank());
   }
 
-  public boolean hasGroundedNotes() {
-    return this.groundedNotes.stream().anyMatch(note -> note != null && !note.isBlank());
-  }
-
-  public int groundedMixedCount() {
-    return (int) this.groundedNotes.stream()
+  /**
+   * Notes usable when the main answer collapses to setup boilerplate: prefer grounded salvage
+   * notes, else raw advisor replies.
+   */
+  public List<String> answerSalvageNotes() {
+    List<String> source = this.salvageNotes.isEmpty()
+      ? this.responses.stream().map(AdvisorResponse::text).toList()
+      : this.salvageNotes;
+    return source.stream()
       .map(note -> note == null ? "" : note.strip())
       .filter(note -> !note.isEmpty())
-      .count();
+      .filter(note -> !note.equals(AdvisorPrompts.EMPTY_NOTE_FALLBACK))
+      .filter(note -> !ChatPrompts.isSetupBoilerplate(note))
+      .distinct()
+      .toList();
   }
 }

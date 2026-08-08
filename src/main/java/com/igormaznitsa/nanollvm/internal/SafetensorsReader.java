@@ -4,8 +4,7 @@ import static java.nio.charset.StandardCharsets.UTF_8;
 import static java.util.Objects.requireNonNull;
 
 import com.igormaznitsa.nanollvm.tensor.Tensor;
-import com.igormaznitsa.nanollvm.utils.Json;
-
+import com.igormaznitsa.nanollvm.utils.ResourceLimits;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
@@ -27,11 +26,26 @@ public final class SafetensorsReader implements AutoCloseable {
 
   public SafetensorsReader(final Path path) throws IOException {
     this.path = requireNonNull(path, "path");
+    ResourceLimits limits = ResourceLimits.current();
     this.channel = FileChannel.open(path);
     long size = this.channel.size();
+    if (size > Integer.MAX_VALUE) {
+      throw new IOException("safetensors larger than 2GiB mmap limit: " + path);
+    }
     this.map = this.channel.map(FileChannel.MapMode.READ_ONLY, 0, size);
     this.map.order(ByteOrder.LITTLE_ENDIAN);
+    if (size < 8) {
+      throw new IOException("safetensors header truncated: " + path);
+    }
     long headerLen = Integer.toUnsignedLong(this.map.getInt(0));
+    if (headerLen > limits.maxSafetensorsHeaderBytes()) {
+      throw new IOException(
+        "safetensors header length " + headerLen + " exceeds maxSafetensorsHeaderBytes ("
+          + limits.maxSafetensorsHeaderBytes() + ")");
+    }
+    if (8L + headerLen > size) {
+      throw new IOException("safetensors header extends past file end: " + path);
+    }
     byte[] headerBytes = new byte[(int) headerLen];
     this.map.position(8);
     this.map.get(headerBytes);

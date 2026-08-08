@@ -77,46 +77,46 @@ class RagUnitTest {
   }
 
   @Test
-  void ragPromptIncludesContextAndQuestion() {
+  void ragPromptIncludesFactsAndQuestion() {
     PreparedRag index = RagFactory.of("Cats are mammals.");
     List<RagHit> hits = index.retrieve("mammals", 1);
     String prompt = RagSession.formatUserMessage(hits, "What are cats?");
     assertTrue(prompt.contains("Cats are mammals."));
     assertTrue(prompt.contains("What are cats?"));
-    assertTrue(prompt.contains("Context:"));
+    assertTrue(prompt.endsWith("What are cats?"));
+    assertFalse(prompt.contains("Context:"));
   }
 
   @Test
-  void compactPromptPutsQuestionBeforePassages() {
+  void promptPutsFactsBeforeQuestion() {
     PreparedRag index = RagFactory.of("The Nile is a major river in Africa.");
     List<RagHit> hits = index.retrieve("Nile", 1);
-    String prompt = RagSession.formatUserMessage(hits, "what is Nile?", 900, true);
+    String prompt = RagSession.formatUserMessage(hits, "what is Nile?", 900);
     assertTrue(prompt.contains("The Nile is a major river in Africa."));
     assertTrue(prompt.contains("what is Nile?"));
-    assertTrue(prompt.indexOf("what is Nile?") < prompt.indexOf("The Nile is a major river"));
-    assertTrue(prompt.contains("Context:"));
-    assertTrue(prompt.contains("Answer in one short sentence"));
+    assertTrue(prompt.indexOf("The Nile is a major river") < prompt.indexOf("what is Nile?"));
+    assertTrue(prompt.endsWith("what is Nile?"));
+    assertFalse(prompt.contains("Context:"));
     assertFalse(prompt.contains("say you do not know"));
     assertFalse(prompt.contains("answer the request normally"));
     assertFalse(prompt.contains("previous answer was wrong"));
   }
 
   @Test
-  void compactNoHitPromptForbidsInvention() {
-    String prompt = RagSession.formatUserMessage(List.of(), "где живут ведьмы?", 900, true);
-    assertTrue(prompt.contains("где живут ведьмы?"));
-    assertTrue(prompt.contains("No context documents were found"));
-    assertTrue(prompt.contains("I do not know"));
-    assertTrue(prompt.contains("Do not invent"));
+  void noHitPromptIsQuestionOnly() {
+    String prompt = RagSession.formatUserMessage(List.of(), "где живут ведьмы?", 900);
+    assertEquals("где живут ведьмы?", prompt);
+    assertFalse(prompt.toLowerCase().contains("i do not know"));
   }
 
   @Test
-  void groundedPromptForbidsInventingDetails() {
+  void groundedPromptIsFactsThenQuestion() {
     PreparedRag index = RagFactory.of("Jacob Grimm was born in 1785.");
     List<RagHit> hits = index.retrieve("Jacob Grimm born", 1);
     String prompt = RagSession.formatUserMessage(hits, "When was Jacob born?");
-    assertTrue(prompt.contains("Do not invent"));
-    assertTrue(prompt.contains("say you do not know"));
+    assertTrue(prompt.endsWith("When was Jacob born?"));
+    assertTrue(prompt.contains("Jacob Grimm was born in 1785."));
+    assertFalse(prompt.contains("Context:"));
   }
 
   @Test
@@ -174,19 +174,17 @@ class RagUnitTest {
     PreparedRag prepared = RagFactory.builder()
       .add("facts-capitals.md", "Paris is the capital of France.")
       .build();
-    PreparedRag.Passage passage = prepared.passages().getFirst();
-    assertTrue(passage.searchText().contains("capitals"));
-    assertTrue(passage.searchText().contains("facts"));
-    assertTrue(passage.termFreqs().containsKey("paris"));
-    assertTrue(passage.termFreqs().containsKey("capitals"));
-    assertEquals("Paris is the capital of France.", passage.modelText());
+    List<RagHit> hits = prepared.retrieve("Paris capital France", 1);
+    assertFalse(hits.isEmpty());
+    assertEquals("Paris is the capital of France.", hits.getFirst().chunk().text());
+    assertTrue(hits.getFirst().chunk().source().contains("facts-capitals"));
   }
 
   @Test
-  void preparedRagExposesPreparsedPassages() {
+  void preparedRagIndexesInlineCorpus() {
     PreparedRag prepared = RagFactory.of("Tokyo is the capital of Japan.");
-    assertEquals(1, prepared.passages().size());
-    assertFalse(prepared.passages().getFirst().termFreqs().isEmpty());
+    assertEquals(1, prepared.size());
+    assertFalse(prepared.retrieve("Tokyo Japan", 1).isEmpty());
   }
 
   @Test
@@ -203,14 +201,15 @@ class RagUnitTest {
   }
 
   @Test
-  void bundledRagFranceQueryPrefersCapitals() {
+  void bundledFairyTaleCorpusRejectsUnrelatedCapitalsQuery() {
     var root = com.igormaznitsa.nanollvm.samples.utils.BundledRag.find();
     org.junit.jupiter.api.Assumptions.assumeTrue(root.isPresent(), "run tests from project root");
     PreparedRag prepared = RagFactory.make(root.get(), RagLoadOptions.forTinyModels());
     assertTrue(prepared.size() > 0);
-    List<RagHit> hits = prepared.retrieve("capital of France Paris", 3);
-    assertFalse(hits.isEmpty());
-    assertTrue(hits.stream().anyMatch(hit ->
-        hit.chunk().text().toLowerCase().contains("paris")));
+    assertTrue(prepared.isOutsideCorpus("capital of France Paris"));
+    assertTrue(prepared.retrieve("capital of France Paris", 3).isEmpty());
+    assertTrue(prepared.isOutsideCorpus("what do you think about BMW?"));
+    assertTrue(prepared.retrieve("what do you think about BMW?", 3).isEmpty());
+    assertFalse(prepared.retrieve("Little Red Riding Hood wolf", 2).isEmpty());
   }
 }

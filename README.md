@@ -99,7 +99,8 @@ What this shows: **pure Java** in / out, **your** model directory, one `LlmModel
 
 In this repository the same program lives as non-exported
 `com.igormaznitsa.nanollvm.samples.LogTriageHelloWorld` (defaults to `models/Gemma3-270M` via
-`samples.utils.BundledModels`; optional first arg overrides the path):
+`samples.utils.BundledModels`; optional first arg overrides the path). The sample also prints
+`[timing]` lines for model load, engine build, chat turn, and total wall time:
 
 ```bash
 mvn -q exec:java -Dexec.mainClass=com.igormaznitsa.nanollvm.samples.LogTriageHelloWorld
@@ -112,11 +113,13 @@ More API samples (streaming, RAG, GGUF, advisors) are in [Library quick start](#
 
 - Continuous batching scheduler with paged KV cache and prefix caching
 - **Qwen3** (default), **Gemma3**, and **LFM2** (hybrid short-conv + GQA) causal LMs
-- Loads HF `config.json` + `.safetensors`, or a single **`.gguf`** file (dequantized to float32)
-- Optional multi-thread CPU matmul (`cpuThreads` / `allCpuThreads` / `disableMultiCpu`); default = all processors
+- Loads HF `config.json` + `.safetensors`, or a single **`.gguf`** file (weights stay packed; in-place block dequant on matmul / embedding via `LinearKernel` / `EmbeddingKernel`)
+- Optional multi-thread CPU matmul (`cpuThreads` / `matmulExecutor` / `disableMultiCpu`); default = all processors on a lazily shared pool
 - GPT-2 byte BPE, Gemma Metaspace BPE, and GGUF-embedded tokenizers
 - Optional **BM25 text RAG** over a local `rag/` corpus (used automatically by the Example CLI)
-- Optional **advisors** before each chat/RAG turn (`LLM.setAdvisors`)
+- **ResourceLimits** — default caps for corpus/PDF/JSON/GGUF/safetensors (overridable)
+- Optional **advisors** before each chat/RAG turn: `LLM.Builder.advisors(LlmAdvisorMixer, LlmAdvisor…)`
+- Warmup **off** by default (`LLM.Builder.warmup()` to enable)
 
 ## Requirements
 
@@ -165,7 +168,8 @@ On the module path:
 requires com.igormaznitsa.nanollvm;
 ```
 
-Public API packages: `models`, `llm`, `chat`, `rag`, `tokenizer`, `prompts`, `utils`, `exceptions`.
+Public API packages: `models`, `llm`, `chat`, `rag`, `tokenizer`, `utils`, `exceptions`.
+(`prompts` and `models.internal` are module-private.)
 `samples` (`Example`, `Bench`, `LogTriageHelloWorld`, `samples.utils`), `engine`, `layers`, `tensor`, and
 `internal` are **not** exported — use `LlmModelFactory` / `LLM` / `RagFactory` from application code.
 
@@ -197,13 +201,18 @@ models/Qwen3-0.6B/
 
 At load time, `LlmModelFactory` reads `config.json`, builds the graph (Qwen3 or Gemma3), merges packed weights from
 safetensors, and constructs the tokenizer. Architecture is inferred from `model_type` / `architectures` unless you set
-`-Dnanovllm.arch=qwen3|gemma3|lfm2`.
+`-Dnanollvm.arch=qwen3|gemma3|lfm2` (legacy `nanovllm.arch`).
 
 ### GGUF (LFM2)
 
 A single `.gguf` file is also valid. Example: LiquidAI [LFM2.5-2.6B-GGUF](https://huggingface.co/LiquidAI/LFM2.5-2.6B-GGUF)
-`Q4_K_M` (~1.67 GB on disk). Weights are **dequantized to float32** at load (~10 GB weights alone; plan on
-**~16 GB heap** with KV/JVM) and run on the same CPU kernels; there is no quantized matmul path.
+`Q4_K_M` (~1.67 GB on disk). Weights **stay packed** in RAM by default; each `Linear` / embedding binds a
+`LinearKernel` / `EmbeddingKernel` at construction (GGML type fixed in a dequant lambda). Block quants
+(`Q4_K`, `Q6_K`, …) decode **in place** into a float row during matmul / gather — no per-row full-tensor scratch.
+For float32 speed without a packed+dense peak, unpack **at load**:
+`LlmModelFactory.make(path, io, true)` (mmap → float tensors). Late unpack via
+`LLM.Builder.allowUnpackParameters()` still works on an already-packed model (releases packed bytes).
+Activations and KV remain float32 either way. Engine warmup is **off** by default (`.warmup()` to enable).
 
 ```bash
 ./models/download-lfm2.5-2.6b-gguf.sh
@@ -213,8 +222,8 @@ mvn -q exec:java \
 ```
 
 Supported GGUF dtypes for this path: `Q4_K`, `Q4_0`, `Q6_K`, `Q8_0`, `F16`, `BF16`, `F32`. Architecture must be
-`lfm2` (hybrid short-convolution + attention). Heap defaults to **16 GB** via `.mvn/jvm.config` (override with
-`MAVEN_OPTS` if you need more).
+`lfm2` (hybrid short-convolution + attention). Default heap in `.mvn/jvm.config` is still **16 GB** (safe headroom for
+KV / scratch); packed weights alone are closer to on-disk size.
 
 ### Download scripts
 
@@ -244,21 +253,22 @@ You can also point the engine at **any** local HF-style directory (your own path
 `samples.utils.BundledModels.resolveDefault()` (used by `Example` and `Bench`; not a library API) picks the model in this order:
 
 1. **First CLI argument** — model path or name (e.g. `models/Gemma3-270M`)
-2. **System property** `-Dnanovllm.model=…`
-3. **Environment** `NANOVLLM_MODEL=…`
+2. **System property** `-Dnanollvm.model=…` (legacy `-Dnanovllm.model=…`)
+3. **Environment** `NANOLLVM_MODEL=…` (legacy `NANOVLLM_MODEL=…`)
 4. **Default** `models/Qwen3-0.6B` under the models root
 
-The models root itself defaults to `./models`, overridable with `-Dnanovllm.models.dir=…` or `NANOVLLM_MODELS_DIR`.
+The models root itself defaults to `./models`, overridable with `-Dnanollvm.models.dir=…` /
+`NANOLLVM_MODELS_DIR` (legacy `nanovllm.*` / `NANOVLLM_*` still accepted).
 
 | Mechanism          | Example                                                             |
 |--------------------|---------------------------------------------------------------------|
 | CLI arg            | `mvn … -Dexec.args=models/Gemma3-270M`                              |
-| Property           | `-Dnanovllm.model=/data/hf/Qwen3-0.6B`                              |
-| Environment        | `NANOVLLM_MODEL=models/Gemma3-270M`                                 |
-| Models root        | `-Dnanovllm.models.dir=/opt/models`                                 |
-| Force architecture | `-Dnanovllm.arch=gemma3` (when auto-detect is wrong)                |
-| RAG corpus dir     | `-Dnanovllm.rag.dir=./docs` or `NANOVLLM_RAG_DIR` (default `./rag`) |
-| CPU matmul threads | `-Dnanovllm.cpu.threads=N` or `.cpuThreads(N)` / `.allCpuThreads()` / `.disableMultiCpu()` |
+| Property           | `-Dnanollvm.model=/data/hf/Qwen3-0.6B`                              |
+| Environment        | `NANOLLVM_MODEL=models/Gemma3-270M`                                 |
+| Models root        | `-Dnanollvm.models.dir=/opt/models`                                 |
+| Force architecture | `-Dnanollvm.arch=gemma3` (when auto-detect is wrong)                |
+| RAG corpus dir     | `-Dnanollvm.rag.dir=./docs` or `NANOLLVM_RAG_DIR` (default `./rag`) |
+| CPU matmul threads | `-Dnanollvm.cpu.threads=N` or `.cpuThreads(N)` / `.allCpuThreads()` / `.disableMultiCpu()`; optional `.matmulExecutor(ExecutorService)` (else lazy shared pool) |
 
 If you start **without** any of (1)–(3), the Example CLI shows an interactive menu (**Qwen3 / Gemma3 / LFM2 / Exit**).
 
@@ -287,16 +297,16 @@ NANOVLLM_MODEL=models/Qwen3-0.6B mvn -q exec:java
 **RAG mode:** if the directory `rag/` exists (the repo ships Grimm / Little Red Riding Hood `.txt` and fact cards),
 Example builds a shared BM25 index and uses the `rag?>` prompt. Otherwise it uses plain chat (`?>`).
 
-**Advisors (Example only):** after load, advisors are wired by architecture — **Gemma** 3 roles (PARALLEL), **Qwen**
-2 roles (PARALLEL), **LFM** none. Advisor notes appear on the thinking stream; grounded RAG mixes only Context-supported
-hints into the main prompt.
+**Advisors (Example only):** at build time, named advisors are wired by architecture — **Gemma**
+Practical/Abstract/Consequence, **Qwen** Practical/Abstract, **LFM** none. Notes appear on the thinking
+stream as `[Name] …`; the default mixer folds useful notes into the main prompt.
 
 Example session (ask about the demo corpus):
 
 ```text
 Loading model from …/models/Qwen3-0.6B
 RAG: prepared BM25 over …/rag (… chunks, shared index)
-Advisors: 2 (practical, abstract) PARALLEL for Qwen.
+Advisors: Practical, Abstract for Qwen.
 Type a message and press Enter. Commands: /exit  /quit  /clear
 
 rag?> who are the grimm brothers?
@@ -322,7 +332,7 @@ Session recording (Gemma3 load + RAG questions about the Grimm brothers and thei
 | `/exit`, `/quit`, `exit`, `quit` | Leave the program                           |
 | `/clear`                         | Reset chat history (RAG index stays loaded) |
 
-**Display:** set `NO_COLOR=1` or `-Dnanovllm.color=false` to disable ANSI colors.
+**Display:** set `NO_COLOR=1` or `-Dnanollvm.color=false` (legacy `nanovllm.color`) to disable ANSI colors.
 
 Maven note: `exec:java` runs in the **same JVM as Maven**. Vector API flags and heap come from [
 `.mvn/jvm.config`](.mvn/jvm.config) (`--add-modules=jdk.incubator.vector`, `-Xmx16g`). The exec plugin does not fork, so
@@ -383,15 +393,12 @@ try (LLM llm = LLM.builder(model)
 }
 ```
 
-Path convenience (private `LlmModel` inside the builder):
+Load weights once with {@code LlmModelFactory.make}, then bind engines with
+{@code LLM.builder(model)} so one immutable model can be shared:
 
 ```java
-import com.igormaznitsa.nanollvm.chat.LlmListeners;
-import com.igormaznitsa.nanollvm.llm.LLM;
-
-import java.nio.file.Path;
-
-try (LLM llm = LLM.builder(Path.of("models/Qwen3-0.6B")).listen(LlmListeners.toSystem()).build()) {
+LlmModel model = LlmModelFactory.make(Path.of("models/Qwen3-0.6B"));
+try (LLM llm = LLM.builder(model).listen(LlmListeners.toSystem()).build()) {
   System.out.println(llm.chatOnce("Say hi in one sentence."));
 }
 ```
@@ -407,6 +414,8 @@ import com.igormaznitsa.nanollvm.models.LlmModelFactory;
 import java.nio.file.Path;
 
 LlmModel model = LlmModelFactory.make(Path.of("models/LFM2.5-2.6B-Q4_K_M.gguf"), LlmListeners.toSystem());
+// or unpack at load (no packed heap copy):
+// LlmModel model = LlmModelFactory.make(path, LlmListeners.toSystem(), true);
 try (LLM llm = LLM.builder(model)
     .maxModelLen(2048)
     .allCpuThreads()
@@ -432,7 +441,7 @@ try (LLM llm = LLM.builder(model)
         switch (event.kind()) {
           case TEXT_THINKING -> System.err.print(event.text());
           case TEXT_ASSISTANT -> System.out.print(event.text());
-          case TEXT_ADVISOR_NOTE -> System.err.printf("[advisor %d] %s%n", event.slot(), event.text());
+          case TEXT_ADVISOR_NOTE -> System.err.printf("[%s] %s%n", event.advisorName(), event.text());
           case TEXT_DIAGNOSTICS -> System.err.println(event.text());
           case STATUS_INFO, STATUS_PROGRESS -> { /* already handled by toSystem on the LLM */ }
         }
@@ -463,23 +472,30 @@ try (LLM llm = LLM.builder(model).build()) {
 
 ### Advisors
 
-Isolated advisor generates run **before** each chat/RAG turn (no history). Notes show on the thinking stream; for RAG
-hits, only Context-grounded notes are mixed into the main prompt.
+Named advisors run **before** each chat/RAG turn as one batched `generate` on the same `LLM`.
+Configure them with a mixer first, then one or more `LlmAdvisor` values (unique non-blank names + role
+prompts). The mixer folds `AdvisorResponse(name, text)` replies into the main user prompt; pass
+`LlmAdvisorMixer.defaults()` for the built-in facts-block mix, or a custom `LlmAdvisorMixer`.
 
 ```java
-import com.igormaznitsa.nanollvm.llm.AdvisorMode;
-import com.igormaznitsa.nanollvm.prompts.AdvisorPrompts;
+import com.igormaznitsa.nanollvm.llm.LlmAdvisor;
+import com.igormaznitsa.nanollvm.llm.LlmAdvisorMixer;
 
-try (LLM llm = LLM.builder(model).build()) {
-  llm.setAdvisors(AdvisorMode.PARALLEL, AdvisorPrompts.demoRolesQwen());
-  // Gemma: AdvisorPrompts.demoRolesGemma() — three roles
-  // Clear: llm.setAdvisors();
+try (LLM llm = LLM.builder(model)
+    .advisors(
+        LlmAdvisorMixer.defaults(),
+        LlmAdvisor.builder().name("Facts").prompt("Extract concrete facts only.").build(),
+        LlmAdvisor.builder().name("Risks").prompt("Flag unsupported claims.").build())
+    // Clear on the same builder: .noAdvisors()
+    .build()) {
 
   System.out.println(llm.chat(256).send("Summarize the user question briefly.").answer());
 }
 ```
 
-`PARALLEL` batches all advisors in one `generate`; `SEQUENTIAL` runs one generate per role (slower, same `LLM` lock).
+Advisor notes show on the thinking stream as `[Name] …` (`LlmTextEvent.advisorName()`).
+Parallelism comes from the engine matmul executor inside that batched generate — there is no
+separate advisor PARALLEL/SEQUENTIAL mode.
 
 ### Text RAG
 
@@ -519,12 +535,30 @@ PreparedRag rag = RagFactory.of(
     "Berlin is the capital of Germany.");
 ```
 
+Load budgets (file size, corpus total, PDF inflate, JSON depth, …) default via
+`ResourceLimits` and can be raised per process or per corpus:
+
+```java
+import com.igormaznitsa.nanollvm.utils.ResourceLimits;
+
+ResourceLimits.setCurrent(ResourceLimits.builder().maxFileBytes(128L << 20).build());
+// or: RagFactory.make(path, RagLoadOptions.defaults().withResourceLimits(...));
+```
+
+Chat history length defaults to `ResourceLimits.maxHistoryMessages()`; override with
+`chat.maxHistoryMessages(n)`. Optional `chat.emitDebugPrompts(false)` suppresses prepared-prompt
+`TEXT_DEBUG` events.
+
+**Trust boundary:** corpus text and advisor notes are concatenated into the model prompt (facts then
+question). Treat RAG directories and listener sinks as trusted. Untrusted uploads into `RagFactory`
+need app-level sanitization; the library does not fence or redact retrieved passages.
+
 Retrieval is **lexical BM25** (no embedding model). Short anaphoric follow-ups may rewrite to keywords; if the rewrite
 returns `NONE`, the session falls back to Prior + follow-up instead of aborting. Off-topic queries with contentful
 out-of-vocabulary terms tend to yield no hits.
 
-See [`description.md`](description.md) §17 and package `com.igormaznitsa.nanollvm.rag`. Prompt wording lives in
-`prompts.RagPrompts`; `RagSession.formatUserMessage` builds the model-facing turn.
+See [`description.md`](description.md) §17 and package `com.igormaznitsa.nanollvm.rag`.
+Prompt wording is module-private (`prompts`); `RagSession.formatUserMessage` builds the model-facing turn.
 
 ## Further reading
 

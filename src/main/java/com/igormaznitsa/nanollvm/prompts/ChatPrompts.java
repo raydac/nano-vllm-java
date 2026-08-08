@@ -7,7 +7,7 @@ public final class ChatPrompts {
 
   public static final String CHAT_SYSTEM = """
       You are the Assistant. The human is the User. Never swap those roles.
-      
+
       Answer from the conversation history in this session.
       Style: one short, new reply that answers THIS turn.
       - Vary wording each turn; do not reuse the same opener or stock line.
@@ -16,7 +16,7 @@ public final class ChatPrompts {
       - Do not greet again if you already greeted.
       - Do not repeat the User's words back as your reply.
       - Do not invent facts. If unknown from the conversation, say you don't know.
-      
+
       Thinking format (use for non-trivial replies):
       - Start with <think> … </think>, then the user-visible answer.
       - Inside think, keep 2–4 short lines: user intent, useful context from history, reply plan.
@@ -40,25 +40,66 @@ public final class ChatPrompts {
       Do not invent facts. If you do not know, say so.
       """.strip();
 
+  /**
+   * Extra system guidance when advisors are configured. Kept short; not applied to Gemma
+   * (blank system — guidance lives in the mixed user turn instead).
+   */
+  public static final String ADVISOR_AWARE_ADDON = """
+    Advisor hints may appear in the user turn. Answer the user's topic.
+    Use hints as optional perspective. Never narrate advisor roles or copy instruction text.
+    """.strip();
+
   private static final Pattern SETUP_BOILERPLATE = Pattern.compile(
-      "(?i).*\\b(i(?:'m| am) ready|let'?s begin|okay[,.]?\\s*i understand)\\b.*"
+    "(?i).*\\b("
+      + "i(?:'m| am) ready"
+      + "|let'?s begin"
+      + "|okay[,.]?\\s*i understand"
+      + "|i will not invent"
+      + "|i will respond"
+      + "|short viewpoint"
+      + "|user-facing assistant"
+      + "|pre-answer advisor"
+      + "|from my role"
+      + "|explanation of my role"
+      + "|these instructions"
+      + ")\\b.*"
   );
+
+  private static final int SETUP_BOILERPLATE_MAX_LEN = 240;
 
   private ChatPrompts() {
   }
 
   public static String systemFor(final Tokenizer tokenizer) {
+    return systemFor(tokenizer, false);
+  }
+
+  public static String systemFor(final Tokenizer tokenizer, final boolean advisorsEnabled) {
+    String base;
     if (tokenizer == null || tokenizer.isGemmaChat()) {
-      return GEMMA_CHAT_SYSTEM;
+      base = GEMMA_CHAT_SYSTEM;
+    } else if (!tokenizer.invitesThinking()) {
+      base = PLAIN_CHAT_SYSTEM;
+    } else {
+      base = CHAT_SYSTEM;
     }
-    if (!tokenizer.invitesThinking()) {
-      return PLAIN_CHAT_SYSTEM;
-    }
-    return CHAT_SYSTEM;
+    return withAdvisorGuidance(base, advisorsEnabled);
   }
 
   public static String systemFor(final boolean gemmaChat) {
     return gemmaChat ? GEMMA_CHAT_SYSTEM : CHAT_SYSTEM;
+  }
+
+  public static String withAdvisorGuidance(final String systemPrompt,
+                                           final boolean advisorsEnabled) {
+    if (!advisorsEnabled) {
+      return systemPrompt == null ? "" : systemPrompt;
+    }
+    String base = systemPrompt == null ? "" : systemPrompt.strip();
+    if (base.isEmpty()) {
+      return "";
+    }
+    return base + "\n\n" + ADVISOR_AWARE_ADDON;
   }
 
   public static String gemmaUserContent(final String system, final String userContent,
@@ -75,7 +116,7 @@ public final class ChatPrompts {
       return false;
     }
     String trimmed = reply.strip();
-    if (trimmed.length() > 120) {
+    if (trimmed.length() > SETUP_BOILERPLATE_MAX_LEN) {
       return false;
     }
     return SETUP_BOILERPLATE.matcher(trimmed).matches();

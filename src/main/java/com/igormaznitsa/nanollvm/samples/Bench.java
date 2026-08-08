@@ -3,6 +3,8 @@ package com.igormaznitsa.nanollvm.samples;
 import com.igormaznitsa.nanollvm.chat.LlmListeners;
 import com.igormaznitsa.nanollvm.llm.LLM;
 import com.igormaznitsa.nanollvm.llm.SamplingParams;
+import com.igormaznitsa.nanollvm.models.LlmModel;
+import com.igormaznitsa.nanollvm.models.LlmModelFactory;
 import com.igormaznitsa.nanollvm.samples.utils.BundledModels;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -47,13 +49,13 @@ public final class Bench {
     System.out.printf("Bench: %d seqs, maxModelLen=%d, kvBlocks=%d (heap max %s)%n",
         numSeqs, MAX_MODEL_LEN, kvBlocks, formatBytes(Runtime.getRuntime().maxMemory()));
     ThreadLocalRandom rnd = ThreadLocalRandom.current();
-    try (LLM llm = LLM.builder(path)
+    LlmModel model = LlmModelFactory.make(path, LlmListeners.toSystem());
+    try (LLM llm = LLM.builder(model)
         .enforceEager(true)
         .maxModelLen(MAX_MODEL_LEN)
         .maxNumSeqs(numSeqs)
         .kvcacheBlockSize(KV_BLOCK_SIZE)
         .numKvcacheBlocks(kvBlocks)
-        .skipWarmup()
       .listen(LlmListeners.toSystem())
         .build()) {
       List<List<Integer>> prompts = new ArrayList<>();
@@ -69,7 +71,7 @@ public final class Bench {
       }
 
       long t0 = System.nanoTime();
-      llm.generate(prompts, params, false);
+      llm.generateTokenIds(prompts, params, false, java.time.Duration.ZERO, null);
       double seconds = (System.nanoTime() - t0) / 1e9;
       int totalTokens = params.stream().mapToInt(SamplingParams::maxTokens).sum();
       System.out.printf("Total: %dtok, Time: %.2fs, Throughput: %.2ftok/s%n",

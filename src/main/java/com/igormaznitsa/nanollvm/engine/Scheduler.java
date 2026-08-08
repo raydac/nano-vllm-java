@@ -1,11 +1,14 @@
 package com.igormaznitsa.nanollvm.engine;
 
+import static java.util.Objects.requireNonNull;
+
 import com.igormaznitsa.nanollvm.llm.Config;
 
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
 import java.util.List;
+import java.util.function.IntConsumer;
 import java.util.stream.IntStream;
 
 /**
@@ -61,6 +64,7 @@ public final class Scheduler {
   private final List<Integer> stopTokenIds;
   private final int blockSize;
   private final BlockManager blockManager;
+  private final IntConsumer onSequenceReleased;
   private final Deque<Sequence> waiting = new ArrayDeque<>();
   private final Deque<Sequence> running = new ArrayDeque<>();
 
@@ -69,6 +73,16 @@ public final class Scheduler {
    * Instantiates a fresh {@link BlockManager} sized to {@code config.numKvcacheBlocks()}.
    */
   public Scheduler(final Config config) {
+    this(config, seqId -> {
+    });
+  }
+
+  /**
+   * Same as {@link #Scheduler(Config)}, plus {@code onSequenceReleased} when a sequence's KV is
+   * deallocated (finish, cancel/{@link #clear()}, or preempt) so callers can drop short-conv state.
+   */
+  public Scheduler(final Config config, final IntConsumer onSequenceReleased) {
+    requireNonNull(config, "config");
     this.maxNumSeqs = config.maxNumSeqs();
     this.maxNumBatchedTokens = config.maxNumBatchedTokens();
     this.stopTokenIds = config.stopTokenIds().isEmpty()
@@ -76,6 +90,7 @@ public final class Scheduler {
         : List.copyOf(config.stopTokenIds());
     this.blockSize = config.kvcacheBlockSize();
     this.blockManager = new BlockManager(config.numKvcacheBlocks(), config.kvcacheBlockSize());
+    this.onSequenceReleased = requireNonNull(onSequenceReleased, "onSequenceReleased");
   }
 
   /**
@@ -98,7 +113,7 @@ public final class Scheduler {
 
   private void finishAndDeallocateAll(final Iterable<Sequence> sequences) {
     for (Sequence seq : sequences) {
-      this.blockManager.deallocate(seq);
+      this.releaseSequence(seq);
       seq.setStatus(Sequence.Status.FINISHED);
     }
   }
@@ -108,14 +123,25 @@ public final class Scheduler {
       if (!seq.blockTable().isEmpty()) {
         this.blockManager.deallocate(seq);
       }
+      this.onSequenceReleased.accept(seq.seqId());
       seq.setStatus(Sequence.Status.FINISHED);
     }
+  }
+
+  private void releaseSequence(final Sequence seq) {
+    this.blockManager.deallocate(seq);
+    this.onSequenceReleased.accept(seq.seqId());
   }
 
   /**
    * Enqueues {@code seq} at the end of the waiting queue (status should already be WAITING).
    */
   public void add(final Sequence seq) {
+    if (seq.blockSize() != this.blockSize) {
+      throw new IllegalArgumentException(
+          "sequence blockSize " + seq.blockSize()
+              + " does not match scheduler blockSize " + this.blockSize);
+    }
     this.waiting.addLast(seq);
   }
 
@@ -240,7 +266,7 @@ public final class Scheduler {
   public void preempt(final Sequence seq) {
     seq.setStatus(Sequence.Status.WAITING);
     seq.setPrefill(true);
-    this.blockManager.deallocate(seq);
+    this.releaseSequence(seq);
     this.waiting.addFirst(seq);
   }
 
@@ -308,7 +334,7 @@ public final class Scheduler {
 
   private void finishSequence(final Sequence seq) {
     seq.setStatus(Sequence.Status.FINISHED);
-    this.blockManager.deallocate(seq);
+    this.releaseSequence(seq);
     this.running.remove(seq);
   }
 

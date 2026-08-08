@@ -1,4 +1,4 @@
-package com.igormaznitsa.nanollvm.models;
+package com.igormaznitsa.nanollvm.models.internal;
 
 import java.util.Map;
 

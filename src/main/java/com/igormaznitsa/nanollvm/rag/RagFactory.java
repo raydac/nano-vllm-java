@@ -4,6 +4,7 @@ import static java.util.Objects.requireNonNull;
 
 import com.igormaznitsa.nanollvm.chat.LlmListener;
 import com.igormaznitsa.nanollvm.chat.LlmListeners;
+import com.igormaznitsa.nanollvm.exceptions.ModelLoadException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
@@ -17,6 +18,9 @@ import java.util.Set;
  * <p>Preprocessing is document-side only: section titles, sentence passages, load-time
  * preparsing (model vs search text, term frequencies), inverted BM25 — not user-reply rules.
  * Pass {@link LlmListeners#toSystem()} to print per-file extraction stats while loading.
+ *
+ * <p>Empty corpora throw {@link ModelLoadException}. The returned index is immutable and safe to
+ * share across threads.
  */
 public final class RagFactory {
 
@@ -36,7 +40,7 @@ public final class RagFactory {
     final RagLoadOptions options,
     final LlmListener io
   ) {
-    return tryMake(folderOrFile, options, io).orElseThrow(() -> new IllegalStateException(
+    return tryMake(folderOrFile, options, io).orElseThrow(() -> new ModelLoadException(
       "corpus has no non-blank chunks: " + folderOrFile.toAbsolutePath().normalize()));
   }
 

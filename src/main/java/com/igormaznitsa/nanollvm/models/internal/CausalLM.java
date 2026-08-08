@@ -1,8 +1,8 @@
-package com.igormaznitsa.nanollvm.models;
+package com.igormaznitsa.nanollvm.models.internal;
 
+import com.igormaznitsa.nanollvm.internal.Context;
 import com.igormaznitsa.nanollvm.layers.Attention;
 import com.igormaznitsa.nanollvm.tensor.Tensor;
-
 import java.util.List;
 
 /**
@@ -11,9 +11,9 @@ import java.util.List;
  */
 public interface CausalLM {
 
-  Tensor forward(final Tensor inputIds, final Tensor positions);
+  Tensor forward(final Tensor inputIds, final Tensor positions, final Context context);
 
-  Tensor computeLogits(final Tensor hiddenStates);
+  Tensor computeLogits(final Tensor hiddenStates, final Context context);
 
   List<Attention> attentionLayers();
 

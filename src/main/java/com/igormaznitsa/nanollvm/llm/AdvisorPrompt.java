@@ -4,22 +4,24 @@ import static java.util.Objects.requireNonNull;
 
 import com.igormaznitsa.nanollvm.chat.ChatMessage;
 import com.igormaznitsa.nanollvm.chat.ChatMessages;
+import com.igormaznitsa.nanollvm.chat.ChatRole;
 import com.igormaznitsa.nanollvm.prompts.AdvisorPrompts;
+import com.igormaznitsa.nanollvm.prompts.ChatPrompts;
 import com.igormaznitsa.nanollvm.prompts.RagPrompts;
 import com.igormaznitsa.nanollvm.tokenizer.Tokenizer;
 import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
 import java.util.regex.Pattern;
-import java.util.stream.IntStream;
 
 /**
  * Builds isolated advisor chat prompts and mixes advisor answers into the main user text.
  * Wording lives in {@link AdvisorPrompts} / {@link RagPrompts}.
  */
-public final class AdvisorPrompt {
+final class AdvisorPrompt {
 
   private static final Pattern TOKEN = Pattern.compile("[\\p{L}\\p{N}]+");
   private static final int CONTENTFUL_MIN_LEN = 4;
@@ -29,126 +31,166 @@ public final class AdvisorPrompt {
   }
 
   /**
-   * Role prompt plus shared grounded-extraction rules used for every advisor turn.
+   * Role prompt plus shared advisor instructions.
    */
   public static String groundedRole(final String rolePrompt) {
-    return AdvisorPrompts.groundedRole(rolePrompt);
+    return AdvisorPrompts.forAdvisor(rolePrompt);
   }
 
   /**
-   * Isolated turn: grounded role as system (Gemma folds it into the first user turn) plus the
-   * same prepared user text the main model will see — no conversation history.
+   * Advisor turn: role+instructions as system (Gemma folds into first user), prior user turns,
+   * then advisor user payload (question + Context when RAG hit).
    */
-  public static String isolated(
+  public static String withDialog(
     final Tokenizer tokenizer,
     final String rolePrompt,
+    final List<ChatMessage> priorDialog,
     final String modelUserText
   ) {
     requireNonNull(tokenizer, "tokenizer");
+    requireNonNull(priorDialog, "priorDialog");
+    List<ChatMessage> turn = dialogTurn(rolePrompt, priorDialog, modelUserText);
+    return tokenizer.applyChatTemplate(ChatMessages.toTemplateMaps(turn), true, false);
+  }
+
+  static List<ChatMessage> dialogTurn(
+    final String rolePrompt,
+    final List<ChatMessage> priorDialog,
+    final String modelUserText
+  ) {
+    requireNonNull(priorDialog, "priorDialog");
     requireNonNull(modelUserText, "modelUserText");
-    String user = modelUserText.strip();
+    String user = advisorFacingUserText(modelUserText);
     if (user.isEmpty()) {
       throw new IllegalArgumentException("modelUserText must not be blank");
     }
 
-    boolean ragNoHits = ragTurnWithoutHits(user);
     List<ChatMessage> turn = new ArrayList<>(ChatMessages.newConversation(
-      AdvisorPrompts.groundedRole(rolePrompt, ragNoHits)));
+      AdvisorPrompts.forAdvisor(rolePrompt)));
+    priorDialog.stream()
+      .filter(message -> message.role() == ChatRole.USER)
+      .forEach(turn::add);
     turn.add(ChatMessage.user(user));
-    return tokenizer.applyChatTemplate(ChatMessages.toTemplateMaps(turn), true, false);
+    return turn;
   }
 
   /**
-   * Chooses which advisor notes may enter the main prompt.
-   *
-   * <ul>
-   *   <li>RAG no-hit — none (notes stay on the thinking stream only)</li>
-   *   <li>RAG with Context — drop abstentions and notes that are not lexically grounded in
-   *       Context</li>
-   *   <li>Plain chat — drop abstentions only</li>
-   * </ul>
+   * User text advisors generate on: question + Context when present (no main-answer footer).
+   */
+  static String advisorFacingUserText(final String modelUserText) {
+    requireNonNull(modelUserText, "modelUserText");
+    String base = modelUserText.strip();
+    if (base.isEmpty()) {
+      return "";
+    }
+    if (hasContextSection(base)) {
+      String question = extractUserQuestion(base);
+      String context = extractContextBlock(base);
+      if (!question.isEmpty() && !context.isEmpty()) {
+        return AdvisorPrompts.advisorUser(question, context);
+      }
+    }
+    return extractUserQuestion(base);
+  }
+
+  static String extractUserQuestion(final String modelUserText) {
+    if (modelUserText == null || modelUserText.isBlank()) {
+      return "";
+    }
+    return RagPrompts.question(modelUserText);
+  }
+
+  /**
+   * Notes usable for salvage / diagnostics: drop empty fallbacks; when facts are present require
+   * lexical grounding; dedupe identical notes (first advisor slot wins).
    */
   public static List<String> selectNotesForMix(
     final String modelUserText,
     final List<String> notes
   ) {
+    return selectIndexedNotesForMix(modelUserText, notes).stream()
+      .map(IndexedNote::note)
+      .toList();
+  }
+
+  private static List<IndexedNote> selectIndexedNotesForMix(
+    final String modelUserText,
+    final List<String> notes
+  ) {
     requireNonNull(modelUserText, "modelUserText");
     requireNonNull(notes, "notes");
-    if (ragTurnWithoutHits(modelUserText)) {
-      return List.of();
-    }
 
     boolean withContext = hasContextSection(modelUserText);
     Set<String> contextTerms = withContext
       ? contentfulTerms(extractContextBlock(modelUserText))
       : Set.of();
 
-    return notes.stream()
-      .map(note -> note == null ? "" : note.strip())
-      .filter(note -> !note.isEmpty())
-      .filter(note -> !isAbstention(note))
-      .filter(note -> !withContext || isGroundedInContext(note, contextTerms))
-      .toList();
+    LinkedHashSet<String> seen = new LinkedHashSet<>();
+    List<IndexedNote> selected = new ArrayList<>();
+    for (int i = 0; i < notes.size(); i++) {
+      String note = noteOrFallback(notes.get(i));
+      if (note.equals(AdvisorPrompts.EMPTY_NOTE_FALLBACK)) {
+        continue;
+      }
+      if (withContext && !isGroundedInContext(note, contextTerms)) {
+        continue;
+      }
+      if (!seen.add(note)) {
+        continue;
+      }
+      selected.add(new IndexedNote(i, note));
+    }
+    return selected;
+  }
+
+  static String noteOrFallback(final String note) {
+    String body = note == null ? "" : note.strip();
+    if (body.isEmpty() || ChatPrompts.isSetupBoilerplate(body)) {
+      return AdvisorPrompts.EMPTY_NOTE_FALLBACK;
+    }
+    return body;
   }
 
   /**
-   * Mixes non-blank advisor notes with {@code modelUserText}. Empty answers leave the text
-   * unchanged.
+   * Mixes useful advisor notes into the main user text via {@link AdvisorPrompts#withGeneratedNotes}.
+   * Empty/fallback-only lists leave {@code modelUserText} unchanged.
    */
   public static String mix(final String modelUserText, final List<String> answers) {
-    return mix(modelUserText, answers, false);
-  }
-
-  /**
-   * Mixes advisor notes so the main model does not treat them as ranked candidate answers.
-   *
-   * <p>For {@code compact} (tiny models), notes are <em>prepended</em> as unverified claims so the
-   * original Context / answer instruction stays last — otherwise models copy {@code [1]}.
-   */
-  public static String mix(
-    final String modelUserText,
-    final List<String> answers,
-    final boolean compact
-  ) {
     requireNonNull(modelUserText, "modelUserText");
     requireNonNull(answers, "answers");
     String base = modelUserText.strip();
     if (base.isEmpty()) {
       throw new IllegalArgumentException("modelUserText must not be blank");
     }
-
-    List<String> claimLines = IntStream.range(0, answers.size())
-      .mapToObj(i -> {
-        String note = answers.get(i) == null ? "" : answers.get(i).strip();
-        return note.isEmpty() ? "" : AdvisorPrompts.claimLine(claimLabel(i), note);
-      })
-      .filter(line -> !line.isEmpty())
-      .toList();
-    if (claimLines.isEmpty()) {
+    if (answers.isEmpty()) {
       return base;
     }
 
-    String claims = String.join("\n", claimLines);
-    return compact
-      ? AdvisorPrompts.mixCompact(claims, base)
-      : AdvisorPrompts.mixFull(base, claims);
+    List<String> notes = answers.stream()
+      .map(AdvisorPrompt::noteOrFallback)
+      .filter(note -> !note.equals(AdvisorPrompts.EMPTY_NOTE_FALLBACK))
+      .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new))
+      .stream()
+      .toList();
+    if (notes.isEmpty()) {
+      return base;
+    }
+    return AdvisorPrompts.withGeneratedNotes(base, notes);
   }
 
   static String claimLabel(final int index) {
-    if (index < 0) {
-      throw new IllegalArgumentException("index must be >= 0");
-    }
-    if (index < 26) {
-      return String.valueOf((char) ('A' + index));
-    }
-    return Integer.toString(index + 1);
+    return AdvisorPrompts.advisorName(index);
   }
 
   static boolean ragTurnWithoutHits(final String modelUserText) {
     if (modelUserText == null || modelUserText.isBlank()) {
       return false;
     }
-    return modelUserText.contains(RagPrompts.NO_CONTEXT_DOCUMENTS);
+    return !hasContextSection(modelUserText);
+  }
+
+  static boolean hasContextSection(final String modelUserText) {
+    return RagPrompts.hasFacts(modelUserText);
   }
 
   static boolean isAbstention(final String note) {
@@ -171,36 +213,11 @@ public final class AdvisorPrompt {
     return next == '.' || next == '!' || next == '?' || Character.isWhitespace(next);
   }
 
-  static boolean hasContextSection(final String modelUserText) {
-    if (ragTurnWithoutHits(modelUserText)) {
-      return false;
-    }
-    String lower = modelUserText.toLowerCase(Locale.ROOT);
-    return lower.contains(RagPrompts.CONTEXT_HEADING.toLowerCase(Locale.ROOT));
+  static String extractContextBlock(final String modelUserText) {
+    return RagPrompts.facts(modelUserText);
   }
 
-  static String extractContextBlock(final String modelUserText) {
-    if (modelUserText == null || modelUserText.isBlank()) {
-      return "";
-    }
-    String heading = RagPrompts.CONTEXT_HEADING;
-    int start = indexOfIgnoreCase(modelUserText, heading);
-    if (start < 0) {
-      return "";
-    }
-    int bodyStart = start + heading.length();
-    int end = modelUserText.length();
-    for (String marker : AdvisorPrompts.CONTEXT_BLOCK_END_MARKERS) {
-      int at = modelUserText.indexOf(marker, bodyStart);
-      if (at >= 0 && at < end) {
-        end = at;
-      }
-    }
-    int questionAt = indexOfIgnoreCase(modelUserText, RagPrompts.QUESTION_HEADING, bodyStart);
-    if (questionAt >= 0 && questionAt < end) {
-      end = questionAt;
-    }
-    return modelUserText.substring(bodyStart, end).strip();
+  private record IndexedNote(int index, String note) {
   }
 
   static boolean isGroundedInContext(final String note, final Set<String> contextTerms) {
@@ -228,18 +245,5 @@ public final class AdvisorPrompt {
       }
     }
     return Set.copyOf(terms);
-  }
-
-  private static int indexOfIgnoreCase(final String haystack, final String needle) {
-    return indexOfIgnoreCase(haystack, needle, 0);
-  }
-
-  private static int indexOfIgnoreCase(
-    final String haystack,
-    final String needle,
-    final int fromIndex
-  ) {
-    return haystack.toLowerCase(Locale.ROOT)
-      .indexOf(needle.toLowerCase(Locale.ROOT), fromIndex);
   }
 }

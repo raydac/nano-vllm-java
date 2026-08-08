@@ -1,24 +1,25 @@
-package com.igormaznitsa.nanollvm.models;
+package com.igormaznitsa.nanollvm.models.internal;
 
-import static com.igormaznitsa.nanollvm.models.WeightNames.ARCH_GEMMA3;
-import static com.igormaznitsa.nanollvm.models.WeightNames.DOWN_PROJ_WEIGHT;
-import static com.igormaznitsa.nanollvm.models.WeightNames.EMBED_TOKENS;
-import static com.igormaznitsa.nanollvm.models.WeightNames.GATE_UP_PROJ_WEIGHT;
-import static com.igormaznitsa.nanollvm.models.WeightNames.INPUT_LAYERNORM;
-import static com.igormaznitsa.nanollvm.models.WeightNames.K_NORM_WEIGHT;
-import static com.igormaznitsa.nanollvm.models.WeightNames.LM_HEAD;
-import static com.igormaznitsa.nanollvm.models.WeightNames.MODEL_NORM;
-import static com.igormaznitsa.nanollvm.models.WeightNames.O_PROJ_WEIGHT;
-import static com.igormaznitsa.nanollvm.models.WeightNames.POST_ATTENTION_LAYERNORM;
-import static com.igormaznitsa.nanollvm.models.WeightNames.POST_FEEDFORWARD_LAYERNORM;
-import static com.igormaznitsa.nanollvm.models.WeightNames.PRE_FEEDFORWARD_LAYERNORM;
-import static com.igormaznitsa.nanollvm.models.WeightNames.QKV_PROJ_WEIGHT;
-import static com.igormaznitsa.nanollvm.models.WeightNames.Q_NORM_WEIGHT;
-import static com.igormaznitsa.nanollvm.models.WeightNames.layer;
-import static com.igormaznitsa.nanollvm.models.WeightNames.mlp;
-import static com.igormaznitsa.nanollvm.models.WeightNames.selfAttn;
+import static com.igormaznitsa.nanollvm.models.internal.WeightNames.ARCH_GEMMA3;
+import static com.igormaznitsa.nanollvm.models.internal.WeightNames.DOWN_PROJ_WEIGHT;
+import static com.igormaznitsa.nanollvm.models.internal.WeightNames.EMBED_TOKENS;
+import static com.igormaznitsa.nanollvm.models.internal.WeightNames.GATE_UP_PROJ_WEIGHT;
+import static com.igormaznitsa.nanollvm.models.internal.WeightNames.INPUT_LAYERNORM;
+import static com.igormaznitsa.nanollvm.models.internal.WeightNames.K_NORM_WEIGHT;
+import static com.igormaznitsa.nanollvm.models.internal.WeightNames.LM_HEAD;
+import static com.igormaznitsa.nanollvm.models.internal.WeightNames.MODEL_NORM;
+import static com.igormaznitsa.nanollvm.models.internal.WeightNames.O_PROJ_WEIGHT;
+import static com.igormaznitsa.nanollvm.models.internal.WeightNames.POST_ATTENTION_LAYERNORM;
+import static com.igormaznitsa.nanollvm.models.internal.WeightNames.POST_FEEDFORWARD_LAYERNORM;
+import static com.igormaznitsa.nanollvm.models.internal.WeightNames.PRE_FEEDFORWARD_LAYERNORM;
+import static com.igormaznitsa.nanollvm.models.internal.WeightNames.QKV_PROJ_WEIGHT;
+import static com.igormaznitsa.nanollvm.models.internal.WeightNames.Q_NORM_WEIGHT;
+import static com.igormaznitsa.nanollvm.models.internal.WeightNames.layer;
+import static com.igormaznitsa.nanollvm.models.internal.WeightNames.mlp;
+import static com.igormaznitsa.nanollvm.models.internal.WeightNames.selfAttn;
 import static java.util.Objects.requireNonNull;
 
+import com.igormaznitsa.nanollvm.internal.Context;
 import com.igormaznitsa.nanollvm.layers.Attention;
 import com.igormaznitsa.nanollvm.layers.Linear;
 import com.igormaznitsa.nanollvm.layers.Norms.RMSNorm;
@@ -59,13 +60,13 @@ public record Gemma3ForCausalLM(Gemma3Model model, ParallelLMHead lmHead) implem
   }
 
   @Override
-  public Tensor forward(final Tensor inputIds, final Tensor positions) {
-    return this.model.forward(inputIds, positions);
+  public Tensor forward(final Tensor inputIds, final Tensor positions, final Context context) {
+    return this.model.forward(inputIds, positions, context);
   }
 
   @Override
-  public Tensor computeLogits(final Tensor hiddenStates) {
-    return this.lmHead.forward(hiddenStates);
+  public Tensor computeLogits(final Tensor hiddenStates, final Context context) {
+    return this.lmHead.forward(hiddenStates, context);
   }
 
   @Override
@@ -136,8 +137,8 @@ public record Gemma3ForCausalLM(Gemma3Model model, ParallelLMHead lmHead) implem
           numKvHeads * headDim);
     }
 
-    Tensor forward(final Tensor positions, final Tensor hiddenStates) {
-      Tensor qkv = this.qkvProj.forward(hiddenStates);
+    Tensor forward(final Tensor positions, final Tensor hiddenStates, final Context context) {
+      Tensor qkv = this.qkvProj.forward(hiddenStates, context);
       Tensor[] parts = Ops.splitLast(qkv, this.qSize, this.kvSize, this.kvSize);
       Tensor q = parts[0].reshape(parts[0].size(0), this.numHeads, this.headDim);
       Tensor k = parts[1].reshape(parts[1].size(0), this.numKvHeads, this.headDim);
@@ -145,8 +146,8 @@ public record Gemma3ForCausalLM(Gemma3Model model, ParallelLMHead lmHead) implem
       q = this.normHeads(q, this.qNorm);
       k = this.normHeads(k, this.kNorm);
       Tensor[] rotated = this.rotaryEmb.forward(positions, q, k);
-      Tensor o = this.attn.forward(rotated[0], rotated[1], v);
-      return this.oProj.forward(o.reshape(o.size(0), this.numHeads * this.headDim));
+      Tensor o = this.attn.forward(rotated[0], rotated[1], v, context);
+      return this.oProj.forward(o.reshape(o.size(0), this.numHeads * this.headDim), context);
     }
 
     private Tensor normHeads(final Tensor x, final RMSNorm norm) {
@@ -176,8 +177,9 @@ public record Gemma3ForCausalLM(Gemma3Model model, ParallelLMHead lmHead) implem
           new Linear.Row(weights.require(p + DOWN_PROJ_WEIGHT)));
     }
 
-    Tensor forward(final Tensor x) {
-      return this.downProj.forward(Ops.geluPytorchTanhAndMul(this.gateUpProj.forward(x)));
+    Tensor forward(final Tensor x, final Context context) {
+      return this.downProj.forward(
+        Ops.geluPytorchTanhAndMul(this.gateUpProj.forward(x, context)), context);
     }
   }
 
@@ -215,13 +217,14 @@ public record Gemma3ForCausalLM(Gemma3Model model, ParallelLMHead lmHead) implem
           new RMSNorm(weights.require(p + POST_FEEDFORWARD_LAYERNORM), config.rmsNormEps(), true));
     }
 
-    Tensor forward(final Tensor positions, final Tensor hiddenStates) {
+    Tensor forward(final Tensor positions, final Tensor hiddenStates, final Context context) {
       Tensor residual = hiddenStates;
-      Tensor hidden = this.selfAttn.forward(positions, this.inputLayernorm.forward(hiddenStates));
+      Tensor hidden = this.selfAttn.forward(
+        positions, this.inputLayernorm.forward(hiddenStates), context);
       hidden = this.add(residual, this.postAttentionLayernorm.forward(hidden));
 
       residual = hidden;
-      hidden = this.mlp.forward(this.preFeedforwardLayernorm.forward(hidden));
+      hidden = this.mlp.forward(this.preFeedforwardLayernorm.forward(hidden), context);
       return this.add(residual, this.postFeedforwardLayernorm.forward(hidden));
     }
 
@@ -266,10 +269,10 @@ public record Gemma3ForCausalLM(Gemma3Model model, ParallelLMHead lmHead) implem
           (float) Math.sqrt(config.hiddenSize()));
     }
 
-    Tensor forward(final Tensor inputIds, final Tensor positions) {
-      Tensor hiddenStates = this.scaleEmbed(this.embedTokens.forward(inputIds));
+    Tensor forward(final Tensor inputIds, final Tensor positions, final Context context) {
+      Tensor hiddenStates = this.scaleEmbed(this.embedTokens.forward(inputIds, context));
       for (Gemma3DecoderLayer layer : this.layers) {
-        hiddenStates = layer.forward(positions, hiddenStates);
+        hiddenStates = layer.forward(positions, hiddenStates, context);
       }
       return this.norm.forward(hiddenStates);
     }

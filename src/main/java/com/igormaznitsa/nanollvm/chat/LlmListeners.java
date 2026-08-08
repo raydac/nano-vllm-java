@@ -31,10 +31,7 @@ public final class LlmListeners {
     if (right == Silent.INSTANCE) {
       return left;
     }
-    return (source, event) -> {
-      left.onText(source, event);
-      right.onText(source, event);
-    };
+    return new Composite(left, right);
   }
 
   /**
@@ -116,7 +113,22 @@ public final class LlmListeners {
     if (listener instanceof PrintStreamLlmListener print) {
       return print;
     }
+    if (listener instanceof Composite(LlmListener left, LlmListener right)) {
+      PrintStreamLlmListener fromLeft = unwrapPrintStream(left);
+      if (fromLeft != null) {
+        return fromLeft;
+      }
+      return unwrapPrintStream(right);
+    }
     return null;
+  }
+
+  private record Composite(LlmListener left, LlmListener right) implements LlmListener {
+    @Override
+    public void onText(final LLM source, final LlmTextEvent event) {
+      this.left.onText(source, event);
+      this.right.onText(source, event);
+    }
   }
 
   enum Silent implements LlmListener {
@@ -140,14 +152,15 @@ public final class LlmListeners {
     @Override
     public void onText(final LLM source, final LlmTextEvent event) {
       switch (event.kind()) {
-        case TEXT_ADVISOR_NOTE -> this.printer.emitAdvisorNote(event.slot(), event.text());
+        case TEXT_ADVISOR_NOTE -> this.printer.emitAdvisorNote(event.advisorName(), event.text());
+        case TEXT_DEBUG -> this.printer.emitDebug(event.text());
         case TEXT_THINKING -> {
           this.think = this.merge(this.think, event);
-          this.printer.update(new AssistantParts(this.think, this.answer, true));
+          this.printer.update(new ChatReply(this.think, this.answer, true));
         }
         case TEXT_ASSISTANT -> {
           this.answer = this.merge(this.answer, event);
-          this.printer.update(new AssistantParts(this.think, this.answer, false));
+          this.printer.update(new ChatReply(this.think, this.answer, false));
         }
         case TEXT_DIAGNOSTICS, STATUS_INFO, STATUS_PROGRESS -> {
         }
@@ -156,6 +169,11 @@ public final class LlmListeners {
 
     void closeTurn() {
       this.printer.closeTurn();
+    }
+
+    void discardAnswer() {
+      this.printer.discardAnswer();
+      this.answer = "";
     }
 
     void resetTurn() {

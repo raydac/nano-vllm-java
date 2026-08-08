@@ -5,126 +5,222 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.igormaznitsa.nanollvm.chat.ChatMessage;
+import com.igormaznitsa.nanollvm.chat.ChatRole;
 import com.igormaznitsa.nanollvm.prompts.AdvisorPrompts;
 import com.igormaznitsa.nanollvm.prompts.RagPrompts;
 import java.util.List;
+import java.util.regex.Pattern;
 import org.junit.jupiter.api.Test;
 
 class AdvisorPromptTest {
 
   @Test
-  void mixUsesClaimLabelsNotRankedIndexes() {
-    String mixed = AdvisorPrompt.mix("Question: capital of France?", List.of(
-        "Paris is the capital.",
-        "  Confirm from geography.  "
-    ));
-    assertTrue(mixed.contains(AdvisorPrompts.MIX_CLAIMS_HEADER));
-    assertTrue(mixed.contains(AdvisorPrompts.claimLine("A", "Paris is the capital.")));
-    assertTrue(mixed.contains(AdvisorPrompts.claimLine("B", "Confirm from geography.")));
-    assertFalse(mixed.contains("[1]"));
+  void withGeneratedNotesInsertsIntoFactsBeforeQuestion() {
+    String mixed = AdvisorPrompt.mix(
+      RagPrompts.withContext("capital of France?", "- Paris is in France."),
+      List.of("Paris is the capital.", "Confirm from geography."));
+    assertTrue(mixed.endsWith("capital of France?"), mixed);
+    assertTrue(mixed.contains(AdvisorPrompts.mixNoteLine("Paris is the capital.")), mixed);
+    assertTrue(mixed.indexOf("Paris is in France.") < mixed.indexOf("capital of France?"), mixed);
+    assertTrue(mixed.indexOf("Paris is the capital.") < mixed.indexOf("capital of France?"), mixed);
   }
 
   @Test
-  void mixKeepsOriginalClaimSlotsWhenOneEmpty() {
+  void mixSkipsEmptyAndDedupesIdenticalNotes() {
     String mixed = AdvisorPrompt.mix(
         "Question?",
-        List.of("Practical note.", "", "Future note."));
-    assertTrue(mixed.contains(AdvisorPrompts.claimLine("A", "Practical note.")));
-    assertTrue(mixed.contains(AdvisorPrompts.claimLine("C", "Future note.")));
-    assertFalse(mixed.contains("claim-B"));
+      List.of("Practical note.", "", "Practical note.", "Future note."));
+    assertTrue(mixed.contains(AdvisorPrompts.mixNoteLine("Practical note.")));
+    assertTrue(mixed.contains(AdvisorPrompts.mixNoteLine("Future note.")));
+    assertFalse(mixed.contains(AdvisorPrompts.EMPTY_NOTE_FALLBACK));
+    assertTrue(mixed.endsWith("Question?"), mixed);
+    assertEquals(1,
+      mixed.split(Pattern.quote(AdvisorPrompts.mixNoteLine("Practical note.")), -1).length - 1);
   }
 
   @Test
-  void mixCompactPrependsClaimsSoContextStaysLast() {
-    String base = """
-        what was the destination?
-
-        %s
-        - Take them to your grandmother.
-
-        %s
-        """.formatted(RagPrompts.CONTEXT_HEADING, RagPrompts.COMPACT_ANSWER_INSTRUCTION).strip();
-    String mixed = AdvisorPrompt.mix(base, List.of("It was a garden."), true);
-    assertTrue(mixed.startsWith(AdvisorPrompts.MIX_CLAIMS_HEADER));
-    assertTrue(mixed.contains(AdvisorPrompts.MIX_FULL_FOOTER));
-    assertTrue(mixed.contains(AdvisorPrompts.claimLine("A", "It was a garden.")));
-    assertTrue(mixed.endsWith(RagPrompts.COMPACT_ANSWER_INSTRUCTION));
-    int claimsAt = mixed.indexOf("claim-A");
-    int contextAt = mixed.indexOf(RagPrompts.CONTEXT_HEADING);
-    assertTrue(claimsAt >= 0 && contextAt > claimsAt);
+  void mixMapsUsefulNotesIntoFactsBlock() {
+    String mixed = AdvisorPrompt.mix(
+      RagPrompts.withContext("who are the grimm brothers?",
+        "- The Brothers Grimm were Jacob Grimm and Wilhelm Grimm.\n"
+          + "- The Brothers Grimm were born in Hanau, Germany."),
+      List.of(
+        AdvisorPrompts.EMPTY_NOTE_FALLBACK,
+        AdvisorPrompts.EMPTY_NOTE_FALLBACK,
+        "The Brothers Grimm were born in Hanau, Germany."));
+    assertTrue(mixed.endsWith("who are the grimm brothers?"), mixed);
+    assertTrue(mixed.contains(AdvisorPrompts.mixNoteLine(
+      "The Brothers Grimm were born in Hanau, Germany.")), mixed);
+    assertFalse(mixed.contains(AdvisorPrompts.EMPTY_NOTE_FALLBACK), mixed);
+    assertFalse(mixed.contains("Context:"), mixed);
   }
 
   @Test
-  void groundedRoleAppendsExtractionRules() {
-    String role = AdvisorPrompt.groundedRole("Practical extractor.");
-    assertTrue(role.startsWith("Practical extractor."));
-    assertTrue(role.contains("pre-answer advisor"));
-    assertTrue(role.contains("Do not reply with only"));
-    assertTrue(role.contains("Context"));
-    assertTrue(role.contains("open-ended"));
-    assertTrue(role.contains("partial summary"));
+  void mixOmitsBlockWhenEveryAdvisorIsEmpty() {
+    String base = RagPrompts.withContext(
+      "who are the grimm brothers?",
+      "- The Brothers Grimm were Jacob Grimm and Wilhelm Grimm.");
+    String mixed = AdvisorPrompt.mix(base, List.of(
+      AdvisorPrompts.EMPTY_NOTE_FALLBACK,
+      "",
+      "Okay, I understand."));
+    assertEquals(base.strip(), mixed);
   }
 
   @Test
-  void claimLabelUsesLettersThenNumbers() {
-    assertEquals("A", AdvisorPrompt.claimLabel(0));
-    assertEquals("C", AdvisorPrompt.claimLabel(2));
-    assertEquals("27", AdvisorPrompt.claimLabel(26));
+  void mixKeepsQuestionLast() {
+    String base = RagPrompts.withContext(
+      "what was the destination?",
+      "- Take them to your grandmother.");
+    String mixed = AdvisorPrompt.mix(base, List.of("Take them to your grandmother."));
+    assertTrue(mixed.endsWith("what was the destination?"), mixed);
+    assertTrue(mixed.contains(AdvisorPrompts.mixNoteLine("Take them to your grandmother.")));
+    int factsAt = mixed.indexOf("- Take them to your grandmother.");
+    int questionAt = mixed.lastIndexOf("what was the destination?");
+    assertTrue(factsAt >= 0 && questionAt > factsAt);
   }
 
   @Test
-  void selectNotesDropsAbstentionAndUngroundedWhenContextPresent() {
-    String ragUser = """
-      what was their main interest?
+  void forAdvisorAppendsSharedInstructions() {
+    String role = AdvisorPrompt.groundedRole("Practical viewpoint.");
+    assertTrue(role.startsWith("Practical viewpoint."));
+    assertTrue(role.contains(AdvisorPrompts.FOR_ADVISOR));
+  }
 
-        %s
-      - Jacob and Wilhelm Grimm were German authors of fairy tales and folklore.
+  @Test
+  void claimLabelUsesGreekNamesThenAdvisorN() {
+    assertEquals("Alpha", AdvisorPrompt.claimLabel(0));
+    assertEquals("Gamma", AdvisorPrompt.claimLabel(2));
+    assertEquals("Advisor25", AdvisorPrompt.claimLabel(24));
+    assertEquals("Advisor27", AdvisorPrompt.claimLabel(26));
+  }
 
-        %s
-        """.formatted(RagPrompts.CONTEXT_HEADING, RagPrompts.COMPACT_ANSWER_INSTRUCTION).strip();
+  @Test
+  void counselorNameOnlyDetectsLabels() {
+    assertTrue(AdvisorPrompts.isCounselorNameOnly("Gamma"));
+    assertTrue(AdvisorPrompts.isCounselorNameOnly(" alpha "));
+    assertFalse(AdvisorPrompts.isCounselorNameOnly("The Brothers Grimm were Jacob Grimm."));
+  }
+
+  @Test
+  void selectNotesKeepsOnlyContextGroundedNotes() {
+    String ragUser = RagPrompts.withContext(
+      "what was their main interest?",
+      "- Jacob and Wilhelm Grimm were German authors of fairy tales and folklore.");
     List<String> selected = AdvisorPrompt.selectNotesForMix(ragUser, List.of(
-      "Jacob Grimm and Wilhelm Grimm were famous Danish storytellers.",
-        RagPrompts.ABSTAIN_REPLY + ".",
-      "Jacob Grimm and Wilhelm Grimm were famous German authors of fairy tales and folklore."));
+      "Jacob Grimm and Wilhelm Grimm were famous German authors of fairy tales and folklore.",
+      "",
+      "I think the Grimm brothers are fascinating."));
     assertEquals(List.of(
         "Jacob Grimm and Wilhelm Grimm were famous German authors of fairy tales and folklore."),
       selected);
   }
 
   @Test
-  void selectNotesKeepsComplementaryGroundedHints() {
-    String ragUser = """
-      where did they work?
+  void noteOrFallbackUsesDefaultWhenBlankOrBoilerplate() {
+    assertEquals(AdvisorPrompts.EMPTY_NOTE_FALLBACK, AdvisorPrompt.noteOrFallback(""));
+    assertEquals(AdvisorPrompts.EMPTY_NOTE_FALLBACK, AdvisorPrompt.noteOrFallback("  "));
+    assertEquals(AdvisorPrompts.EMPTY_NOTE_FALLBACK, AdvisorPrompt.noteOrFallback(null));
+    assertEquals(AdvisorPrompts.EMPTY_NOTE_FALLBACK,
+      AdvisorPrompt.noteOrFallback("Okay, I understand."));
+    assertEquals("Useful hint.", AdvisorPrompt.noteOrFallback(" Useful hint. "));
+  }
 
-      %s
-      - Jacob Grimm worked as a librarian in Kassel. Wilhelm Grimm also worked in Kassel.
-      - Later they taught in Göttingen and then lived in Berlin.
+  @Test
+  void mixKeepsRealNoteAndSkipsEmptyFallback() {
+    String mixed = AdvisorPrompt.mix(
+      "who was their father?",
+      List.of("Okay, I understand.", "Philipp Wilhelm Grimm was their father."));
+    assertTrue(mixed.contains("Philipp Wilhelm Grimm was their father."), mixed);
+    assertTrue(mixed.endsWith("who was their father?"), mixed);
+    assertFalse(mixed.contains(AdvisorPrompts.EMPTY_NOTE_FALLBACK), mixed);
+  }
 
-      %s
-      """.formatted(RagPrompts.CONTEXT_HEADING, RagPrompts.COMPACT_ANSWER_INSTRUCTION).strip();
+  @Test
+  void selectNotesKeepsGroundedNameFacts() {
+    String ragUser = RagPrompts.withContext(
+      "what do you think about the grimm brothers?",
+      "- The Brothers Grimm were Jacob Grimm and Wilhelm Grimm.");
     List<String> selected = AdvisorPrompt.selectNotesForMix(ragUser, List.of(
-      "They worked as librarians in Kassel.",
-      "They later taught in Göttingen and lived in Berlin."));
-    assertEquals(2, selected.size());
+      "The Brothers Grimm were Jacob Grimm and Wilhelm Grimm.",
+      "I think the Grimm brothers are a fascinating and complex group of individuals."));
+    assertEquals(List.of("The Brothers Grimm were Jacob Grimm and Wilhelm Grimm."), selected);
   }
 
   @Test
-  void selectNotesSkipsMixOnRagNoHit() {
-    String noHit = RagPrompts.compactNoHit("what is alpha centauri?");
-    List<String> selected = AdvisorPrompt.selectNotesForMix(noHit, List.of(
-      "The question asks for a star system outside the fairy-tale index."));
-    assertTrue(selected.isEmpty());
+  void dialogTurnIncludesPriorUsersThenAdvisorFacingUser() {
+    List<ChatMessage> prior = List.of(
+      ChatMessage.user("what do you think about the grimm brothers?"),
+      ChatMessage.assistant("They were Jacob and Wilhelm Grimm."),
+      ChatMessage.user("and who was their father?"));
+    String prepared = RagPrompts.withContext(
+      "and who was their father?",
+      "- Their father was Philipp Wilhelm Grimm.");
+    List<ChatMessage> turn = AdvisorPrompt.dialogTurn("Practical viewpoint.", prior, prepared);
+
+    assertEquals(ChatRole.SYSTEM, turn.getFirst().role());
+    assertTrue(turn.getFirst().content().contains(AdvisorPrompts.FOR_ADVISOR));
+    assertEquals(ChatRole.USER, turn.get(1).role());
+    assertEquals("what do you think about the grimm brothers?", turn.get(1).content());
+    assertEquals(ChatRole.USER, turn.get(2).role());
+    assertEquals("and who was their father?", turn.get(2).content());
+    assertEquals(ChatRole.USER, turn.getLast().role());
+    assertTrue(turn.getLast().content().contains("Philipp Wilhelm Grimm"));
+    assertTrue(turn.getLast().content().endsWith("and who was their father?"));
+    assertEquals(4, turn.size());
+    assertTrue(turn.stream().noneMatch(m -> m.role() == ChatRole.ASSISTANT));
   }
 
   @Test
-  void groundedRoleForRagNoHitsAddsDocumentIndexAngle() {
-    String role = AdvisorPrompts.groundedRole("Practical extractor.", true);
-    assertTrue(role.contains("Indexed documents"));
+  void advisorFacingUserKeepsFactsThenQuestion() {
+    String prepared = RagPrompts.withContext(
+      "who are the grimm brothers?",
+      "- The Brothers Grimm were Jacob Grimm and Wilhelm Grimm.");
+    String facing = AdvisorPrompt.advisorFacingUserText(prepared);
+    assertTrue(facing.endsWith("who are the grimm brothers?"));
+    assertTrue(facing.contains("Jacob Grimm and Wilhelm Grimm"));
+    assertFalse(facing.contains("Context:"));
+  }
+
+  @Test
+  void extractContextBlockIsFactsOnly() {
+    String prepared = RagPrompts.withContext(
+      "who are the grimm brothers?",
+      "- The Brothers Grimm were Jacob Grimm and Wilhelm Grimm.");
+    String context = AdvisorPrompt.extractContextBlock(prepared);
+    assertEquals("- The Brothers Grimm were Jacob Grimm and Wilhelm Grimm.", context);
+  }
+
+  @Test
+  void selectNotesDropsUngroundedPriorLatchWhenContextIsNamesOnly() {
+    String ragUser = RagPrompts.withContext(
+      "not very clear, I want to know their names",
+      "- Their names were Jacob Grimm and Wilhelm Grimm.");
+    List<String> selected = AdvisorPrompt.selectNotesForMix(ragUser, List.of(
+      "The Brothers Grimm were among these seven brave men.",
+      "The Brothers Grimm were among these seven brave men.",
+      "Their names were Jacob Grimm and Wilhelm Grimm."));
+    assertEquals(List.of("Their names were Jacob Grimm and Wilhelm Grimm."), selected);
+  }
+
+  @Test
+  void mixDedupesIdenticalAdvisorNotes() {
+    String mixed = AdvisorPrompt.mix(
+      RagPrompts.withContext("who are the grimm brothers?",
+        "- The Brothers Grimm were Jacob Grimm and Wilhelm Grimm."),
+      List.of(
+        "The Brothers Grimm were Jacob Grimm and Wilhelm Grimm.",
+        "The Brothers Grimm were Jacob Grimm and Wilhelm Grimm."));
+    String line = AdvisorPrompts.mixNoteLine(
+      "The Brothers Grimm were Jacob Grimm and Wilhelm Grimm.");
+    assertTrue(mixed.endsWith("who are the grimm brothers?"), mixed);
+    assertEquals(1, mixed.split(Pattern.quote(line), -1).length - 1, mixed);
   }
 
   @Test
   void ragTurnWithoutHitsSkipsContextGrounding() {
-    String noHit = RagPrompts.compactNoHit("что такое альфа центавра?");
+    String noHit = RagPrompts.withoutContext("что такое альфа центавра?");
     assertTrue(AdvisorPrompt.ragTurnWithoutHits(noHit));
     assertFalse(AdvisorPrompt.hasContextSection(noHit));
   }

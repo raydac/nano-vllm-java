@@ -1,12 +1,16 @@
 package com.igormaznitsa.nanollvm.engine;
 
+import static java.util.Objects.requireNonNull;
+
 import com.igormaznitsa.nanollvm.chat.LlmListener;
 import com.igormaznitsa.nanollvm.chat.LlmListeners;
 import com.igormaznitsa.nanollvm.internal.Context;
 import com.igormaznitsa.nanollvm.layers.Sampler;
 import com.igormaznitsa.nanollvm.llm.Config;
-import com.igormaznitsa.nanollvm.models.CausalLM;
 import com.igormaznitsa.nanollvm.models.LlmModel;
+import com.igormaznitsa.nanollvm.models.internal.CausalLM;
+import com.igormaznitsa.nanollvm.models.internal.LlmModelAccess;
+import com.igormaznitsa.nanollvm.tensor.MatmulRuntime;
 import com.igormaznitsa.nanollvm.tensor.Tensor;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -21,8 +25,8 @@ import java.util.List;
  * <h2>Role in the engine</h2>
  * Driven by {@link com.igormaznitsa.nanollvm.llm.LLM#step}: the {@link Scheduler} picks a prefill
  * or decode batch, then this class runs the model on that batch and returns one next-token id per
- * scheduled sequence. Attention and short-conv layers read the arenas through thread-local
- * {@link Context} bindings set for the duration of {@link #step}.
+ * scheduled sequence. Attention and short-conv layers read the arenas through an explicit
+ * {@link Context} owned by this transformer for the duration of {@link #step}.
  *
  * <h2>Prefill vs decode</h2>
  * <dl>
@@ -42,7 +46,7 @@ import java.util.List;
  *
  * <h2>Lifecycle</h2>
  * Constructed once per {@code LLM} with a shared immutable {@link LlmModel}. {@link #close()} only
- * clears thread-local {@link Context} bindings; the {@link LlmModel} and weight tensors are not owned
+ * clears the step {@link Context}; the {@link LlmModel} and weight tensors are not owned
  * here and are not released.
  *
  * <p><strong>Thread safety:</strong> not concurrent-safe; one transformer per {@code LLM}, used on
@@ -58,18 +62,22 @@ public final class Transformer implements AutoCloseable {
   private final Config config;
   private final int blockSize;
   private final CausalLM network;
-  private final KvCacheArena kvCache;
-  private final ConvStateArena convCache;
+  private KvCacheArena kvCache;
+  private ConvStateArena convCache;
+  private final MatmulRuntime matmul;
+  private final Context stepContext = new Context();
   private final Sampler sampler = new Sampler();
+  private volatile boolean closed;
 
   /**
    * Builds a transformer with silent engine I/O (no load-progress lines).
    *
    * @param model  immutable loaded graph + weights (shared across LLMs)
    * @param config engine limits used to size the KV arena
+   * @param matmul per-LLM dense matmul runtime
    */
-  public Transformer(final LlmModel model, final Config config) {
-    this(model, config, LlmListeners.silent());
+  public Transformer(final LlmModel model, final Config config, final MatmulRuntime matmul) {
+    this(model, config, matmul, LlmListeners.silent());
   }
 
   /**
@@ -78,14 +86,41 @@ public final class Transformer implements AutoCloseable {
    *
    * @param model  immutable loaded graph + weights (shared across LLMs)
    * @param config engine limits used to size the KV arena
+   * @param matmul per-LLM dense matmul runtime (bound on step {@link Context})
    * @param io     progress sink for KV / conv allocation messages; {@code null} → silent
    */
-  public Transformer(final LlmModel model, final Config config, final LlmListener io) {
+  public Transformer(
+    final LlmModel model,
+    final Config config,
+    final MatmulRuntime matmul,
+    final LlmListener io
+  ) {
+    this(model, config, matmul, io, false);
+  }
+
+  /**
+   * Builds a transformer, allocates the per-LLM {@link KvCacheArena}, and optionally a
+   * {@link ConvStateArena} when the HF config advertises a short-conv cache length.
+   *
+   * @param model                 immutable loaded graph + weights (shared across LLMs)
+   * @param config                engine limits used to size the KV arena
+   * @param matmul                per-LLM dense matmul runtime (bound on step {@link Context})
+   * @param io                    progress sink for KV / conv allocation messages; {@code null} → silent
+   * @param allowUnpackParameters when {@code true}, GGUF packed weights are expanded to float32
+   */
+  public Transformer(
+    final LlmModel model,
+    final Config config,
+    final MatmulRuntime matmul,
+    final LlmListener io,
+    final boolean allowUnpackParameters
+  ) {
     // Capture engine config and resolve progress sink (null → silent)
     this.config = config;
     final LlmListener io1 = io == null ? LlmListeners.silent() : io;
     this.blockSize = config.kvcacheBlockSize();
-    this.network = model.network();
+    this.network = LlmModelAccess.resolveNetwork(model, allowUnpackParameters, io1);
+    this.matmul = requireNonNull(matmul, "matmul");
 
     // Allocate paged KV arena sized from config (or heap-aware estimate)
     LlmListeners.info(io1, null, "Allocating KV cache…");
@@ -121,53 +156,53 @@ public final class Transformer implements AutoCloseable {
    * One forward+sample over a scheduled batch (prefill or decode).
    *
    * <p>Binds the KV (and optional conv) arenas on {@link Context}, prepares input tensors,
-   * runs the causal LM, samples one token id per sequence, then clears the thread-local bindings.
+   * runs the causal LM, samples one token id per sequence, then clears the Context.
    *
    * @param seqs      sequences chosen by {@link Scheduler#schedule()} for this tick
    * @param isPrefill {@code true} for a prompt-token batch; {@code false} for one-token decode
    * @return sampled next-token id for each sequence, same order as {@code seqs}
    */
   public List<Integer> step(final List<Sequence> seqs, final boolean isPrefill) {
-    // Bind per-LLM arenas so Attention / ShortConv resolve them via Context
-    Context.bindKvCache(this.kvCache);
+    this.requireOpen();
+    // Bind per-LLM arenas / matmul on the step Context passed through the forward graph
+    this.stepContext.bindKvCache(this.kvCache);
+    this.stepContext.bindMatmul(this.matmul);
     if (this.convCache != null) {
-      Context.bindConvCache(this.convCache);
+      this.stepContext.bindConvCache(this.convCache);
     }
 
-    // 1) Flatten scheduled tokens → tensors + Context metadata (cuSeqlens, slots, …)
-    PreparedInputs prepared = this.prepareInputs(seqs, isPrefill);
+    try {
+      // 1) Flatten scheduled tokens → tensors + Context metadata (cuSeqlens, slots, …)
+      PreparedInputs prepared = this.prepareInputs(seqs, isPrefill);
 
-    // 2) Snapshot sampling knobs once per sequence for this batch
-    SamplingControls sampling = this.collectSamplingControls(seqs);
+      // 2) Snapshot sampling knobs once per sequence for this batch
+      SamplingControls sampling = this.collectSamplingControls(seqs);
 
-    // 3) CausalLM forward → last-layer hidden states
-    Tensor hidden = this.forwardHidden(prepared);
+      // 3) CausalLM forward → last-layer hidden states
+      Tensor hidden = this.forwardHidden(prepared);
 
-    // 4) Hidden → vocabulary logits
-    Tensor logits = this.computeLogits(hidden);
+      // 4) Hidden → vocabulary logits
+      Tensor logits = this.computeLogits(hidden);
 
-    // 5) Temperature / top-k / top-p → one token id per sequence
-    List<Integer> tokenIds = this.sampleTokens(logits, sampling);
-
-    // Drop thread-local bindings before returning to the LLM drive loop
-    Context.reset();
-    return tokenIds;
+      // 5) Temperature / top-k / top-p → one token id per sequence
+      return this.sampleTokens(logits, sampling);
+    } finally {
+      this.stepContext.clear();
+    }
   }
 
   /**
    * Runs {@link CausalLM#forward} on the prepared input-id and position tensors.
    */
   private Tensor forwardHidden(final PreparedInputs prepared) {
-    // Network graph owns weights; Context supplies KV / conv arenas for this tick
-    return this.network.forward(prepared.inputIds(), prepared.positions());
+    return this.network.forward(prepared.inputIds(), prepared.positions(), this.stepContext);
   }
 
   /**
    * Projects last-layer hidden states to vocabulary logits via {@link CausalLM#computeLogits}.
    */
   private Tensor computeLogits(final Tensor hidden) {
-    // Tied or untied LM head — decided inside the CausalLM implementation
-    return this.network.computeLogits(hidden);
+    return this.network.computeLogits(hidden, this.stepContext);
   }
 
   /**
@@ -212,38 +247,42 @@ public final class Transformer implements AutoCloseable {
   }
 
   /**
-   * Clears thread-local {@link Context} bindings. Does not free the {@link LlmModel} or weight heap.
+   * Clears the step {@link Context} and drops arena references so KV / conv heap can be GC'd.
+   * Does not free the {@link LlmModel} or weight heap.
    */
   @Override
   public void close() {
-    // LLM.close() calls this under the generate lock after cancel/abort
-    Context.reset();
+    this.closed = true;
+    this.stepContext.clear();
+    this.kvCache = null;
+    if (this.convCache != null) {
+      this.convCache.clearAll();
+      this.convCache = null;
+    }
   }
 
   /**
-   * Allocates the paged {@link KvCacheArena}. When {@code numKvcacheBlocks} is unset (≤ 0),
-   * estimates blocks from {@code maxNumSeqs × ceil(maxModelLen / blockSize)} and caps by a
-   * quarter of the JVM max heap so large models do not OOM at startup.
-   *
-   * @return newly allocated arena wired to this transformer's config dimensions
-   * @throws IllegalStateException if the resolved block count is still ≤ 0
+   * Drops short-conv state for {@code seqId} (no-op when this transformer has no conv arena).
+   */
+  public void clearConvState(final int seqId) {
+    ConvStateArena arena = this.convCache;
+    if (arena != null) {
+      arena.clear(seqId);
+    }
+  }
+
+  private void requireOpen() {
+    if (this.closed) {
+      throw new IllegalStateException("Transformer is closed");
+    }
+  }
+
+  /**
+   * Allocates the paged {@link KvCacheArena} using {@link Config#numKvcacheBlocks()} already
+   * resolved by {@link LLM} construction.
    */
   private KvCacheArena allocateKvCache() {
     Config.HfConfig hf = this.config.hfConfig();
-
-    // Auto-size when the caller left numKvcacheBlocks unset
-    if (this.config.numKvcacheBlocks() <= 0) {
-      int blocksPerSeq = (this.config.maxModelLen() + this.blockSize - 1) / this.blockSize;
-      int estimated = Math.max(this.config.maxNumSeqs() * blocksPerSeq, 128);
-
-      // Cap by ~¼ of max heap so KV + weights can coexist
-      long free = Runtime.getRuntime().maxMemory();
-      long bytesPerBlock = 2L * hf.numHiddenLayers() * this.blockSize
-          * hf.numKeyValueHeads() * hf.headDim() * Float.BYTES;
-      int heapCap = (int) Math.max(32, (free / 4) / Math.max(1, bytesPerBlock));
-      this.config.setNumKvcacheBlocks(Math.min(estimated, heapCap));
-    }
-
     if (this.config.numKvcacheBlocks() <= 0) {
       throw new IllegalStateException("numKvcacheBlocks must be > 0");
     }
@@ -352,7 +391,7 @@ public final class Transformer implements AutoCloseable {
     }
 
     // Publish varlen attention metadata; layers read this via Context during forward
-    Context.set(
+    this.stepContext.set(
         true,
         cuSeqlensQ.stream().mapToInt(Integer::intValue).toArray(),
         cuSeqlensK.stream().mapToInt(Integer::intValue).toArray(),
@@ -394,7 +433,7 @@ public final class Transformer implements AutoCloseable {
     }
 
     // Decode Context: no cu-seqlens; contextLens + blockTables drive attention reads
-    Context.set(
+    this.stepContext.set(
       false, null, null, 0, 0, slotMapping, contextLens, this.prepareBlockTables(seqs), seqIds);
     return new PreparedInputs(Tensor.of(inputIds, n), Tensor.of(positions, n));
   }

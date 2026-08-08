@@ -1,17 +1,25 @@
 package com.igormaznitsa.nanollvm.llm;
 
-import static com.igormaznitsa.nanollvm.utils.NanoVllmProps.CONFIG_JSON;
+import static com.igormaznitsa.nanollvm.utils.NanoLlvmProps.CONFIG_JSON;
 import static java.util.Objects.requireNonNull;
 
+import com.igormaznitsa.nanollvm.internal.Json;
 import com.igormaznitsa.nanollvm.models.LlmModel;
-import com.igormaznitsa.nanollvm.utils.Json;
+import com.igormaznitsa.nanollvm.tokenizer.Tokenizer;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 
+/**
+ * Immutable engine configuration built by {@link Builder}.
+ *
+ * <p>EOS / stop tokens and KV-block counts are sealed at {@link Builder#build()} time
+ * (tokenizer stops + heap estimate when unset).
+ */
 public final class Config {
 
   private final Path model;
@@ -19,26 +27,22 @@ public final class Config {
   private final int maxNumSeqs;
   private final int maxModelLen;
   private final float gpuMemoryUtilization;
-  private final int tensorParallelSize;
   private final boolean enforceEager;
   private final int cpuThreads;
   private final HfConfig hfConfig;
   private final int kvcacheBlockSize;
-  private int eos;
-  private List<Integer> stopTokenIds = List.of();
-  private int numKvcacheBlocks;
+  private final int eos;
+  private final List<Integer> stopTokenIds;
+  private final int numKvcacheBlocks;
 
   private Config(final Builder b) {
     this.model = b.model;
     this.maxNumBatchedTokens = b.maxNumBatchedTokens;
     this.maxNumSeqs = b.maxNumSeqs;
     this.gpuMemoryUtilization = b.gpuMemoryUtilization;
-    this.tensorParallelSize = b.tensorParallelSize;
     this.enforceEager = b.enforceEager;
     this.cpuThreads = b.cpuThreads;
     this.kvcacheBlockSize = b.kvcacheBlockSize;
-    this.numKvcacheBlocks = b.numKvcacheBlocks;
-    this.eos = b.eos;
 
     if (b.hfConfig == null && !Files.isDirectory(this.model)) {
       throw new IllegalArgumentException("model path is not a directory: " + this.model);
@@ -50,12 +54,6 @@ public final class Config {
     }
     if (this.kvcacheBlockSize % 256 != 0) {
       throw new IllegalArgumentException("kvcacheBlockSize must be multiple of 256");
-    }
-    if (this.tensorParallelSize < 1 || this.tensorParallelSize > 8) {
-      throw new IllegalArgumentException("tensorParallelSize must be in [1,8]");
-    }
-    if (this.tensorParallelSize != 1) {
-      throw new IllegalArgumentException("Java port currently supports tensorParallelSize=1 only");
     }
     if (this.cpuThreads < 1) {
       throw new IllegalArgumentException("cpuThreads must be >= 1, got " + this.cpuThreads);
@@ -72,6 +70,37 @@ public final class Config {
       }
     }
     this.maxModelLen = Math.min(b.maxModelLen, this.hfConfig.maxPositionEmbeddings());
+    this.eos = b.eos;
+    this.stopTokenIds = List.copyOf(b.stopTokenIds);
+    this.numKvcacheBlocks = Config.resolveNumKvcacheBlocks(
+      b.numKvcacheBlocks,
+      this.maxNumSeqs,
+      this.maxModelLen,
+      this.kvcacheBlockSize,
+      this.hfConfig);
+  }
+
+  private static int resolveNumKvcacheBlocks(
+    final int configured,
+    final int maxNumSeqs,
+    final int maxModelLen,
+    final int blockSize,
+    final HfConfig hf) {
+    if (configured > 0) {
+      return configured;
+    }
+
+    int blocksPerSeq = (maxModelLen + blockSize - 1) / blockSize;
+    int estimated = Math.max(maxNumSeqs * blocksPerSeq, 128);
+    long free = Runtime.getRuntime().maxMemory();
+    long bytesPerBlock = 2L * hf.numHiddenLayers() * blockSize
+      * hf.numKeyValueHeads() * hf.headDim() * Float.BYTES;
+    int heapCap = (int) Math.max(32, (free / 4) / Math.max(1, bytesPerBlock));
+    int resolved = Math.min(estimated, heapCap);
+    if (resolved <= 0) {
+      throw new IllegalStateException("numKvcacheBlocks must be > 0");
+    }
+    return resolved;
   }
 
   public static Builder builder(final Path model) {
@@ -99,14 +128,16 @@ public final class Config {
     return this.maxModelLen;
   }
 
+  /**
+   * Heap fraction used when auto-sizing KV blocks (CPU port; not GPU VRAM).
+   */
   public float gpuMemoryUtilization() {
     return this.gpuMemoryUtilization;
   }
 
-  public int tensorParallelSize() {
-    return this.tensorParallelSize;
-  }
-
+  /**
+   * Eager-forward flag kept for upstream parity. Always {@code true} on this CPU port.
+   */
   public boolean enforceEager() {
     return this.enforceEager;
   }
@@ -126,22 +157,8 @@ public final class Config {
     return this.eos;
   }
 
-  public void setEos(final int eos) {
-    this.eos = eos;
-    if (this.stopTokenIds.isEmpty()) {
-      this.stopTokenIds = List.of(eos);
-    }
-  }
-
   public List<Integer> stopTokenIds() {
     return this.stopTokenIds;
-  }
-
-  public void setStopTokenIds(final List<Integer> stopTokenIds) {
-    this.stopTokenIds = List.copyOf(stopTokenIds);
-    if (!stopTokenIds.isEmpty()) {
-      this.eos = stopTokenIds.getFirst();
-    }
   }
 
   public int kvcacheBlockSize() {
@@ -152,10 +169,6 @@ public final class Config {
     return this.numKvcacheBlocks;
   }
 
-  public void setNumKvcacheBlocks(final int numKvcacheBlocks) {
-    this.numKvcacheBlocks = numKvcacheBlocks;
-  }
-
   public static final class Builder {
     private final Path model;
     private final HfConfig hfConfig;
@@ -163,10 +176,10 @@ public final class Config {
     private int maxNumSeqs = 512;
     private int maxModelLen = 4096;
     private float gpuMemoryUtilization = 0.9f;
-    private int tensorParallelSize = 1;
     private boolean enforceEager = true;
     private int cpuThreads = 1;
     private int eos = -1;
+    private List<Integer> stopTokenIds = List.of();
     private int kvcacheBlockSize = 256;
     private int numKvcacheBlocks = -1;
 
@@ -199,11 +212,6 @@ public final class Config {
       return this;
     }
 
-    public Builder tensorParallelSize(final int v) {
-      this.tensorParallelSize = v;
-      return this;
-    }
-
     public Builder enforceEager(final boolean v) {
       this.enforceEager = v;
       return this;
@@ -216,6 +224,30 @@ public final class Config {
 
     public Builder eos(final int v) {
       this.eos = v;
+      if (this.stopTokenIds.isEmpty()) {
+        this.stopTokenIds = List.of(v);
+      }
+      return this;
+    }
+
+    /**
+     * Seals EOS / stop ids from the model tokenizer. Tokenizer stop ids win when non-empty;
+     * otherwise {@link Tokenizer#eosTokenId()} is used when EOS was not set explicitly.
+     */
+    public Builder applyTokenizer(final Tokenizer tokenizer) {
+      requireNonNull(tokenizer, "tokenizer");
+      List<Integer> stops = tokenizer.stopTokenIds();
+      if (!stops.isEmpty()) {
+        this.stopTokenIds = List.copyOf(stops);
+        this.eos = stops.getFirst();
+        return this;
+      }
+      if (this.eos < 0) {
+        this.eos = tokenizer.eosTokenId();
+      }
+      if (this.stopTokenIds.isEmpty()) {
+        this.stopTokenIds = List.of(this.eos);
+      }
       return this;
     }
 
@@ -259,6 +291,34 @@ public final class Config {
       float queryPreAttnScalar,
       int convLCache
   ) {
+    public HfConfig {
+      ropeScaling = freezeStringKeyedMap(ropeScaling);
+      architectures = architectures == null ? List.of() : List.copyOf(architectures);
+      layerTypes = layerTypes == null ? List.of() : List.copyOf(layerTypes);
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Map<String, Object> freezeStringKeyedMap(final Map<String, Object> map) {
+      if (map == null || map.isEmpty()) {
+        return Map.of();
+      }
+      return (Map<String, Object>) freezeJsonValue(map);
+    }
+
+    private static Object freezeJsonValue(final Object value) {
+      if (value instanceof Map<?, ?> map) {
+        Map<String, Object> frozen = new LinkedHashMap<>();
+        for (Map.Entry<?, ?> entry : map.entrySet()) {
+          frozen.put(String.valueOf(entry.getKey()), freezeJsonValue(entry.getValue()));
+        }
+        return Map.copyOf(frozen);
+      }
+      if (value instanceof List<?> list) {
+        return list.stream().map(HfConfig::freezeJsonValue).toList();
+      }
+      return value;
+    }
+
     public static HfConfig load(final Path configJson) throws IOException {
       Map<String, Object> m = Json.parseObject(Files.readString(configJson));
       int hiddenSize = Json.asInt(m.get("hidden_size"), 0);

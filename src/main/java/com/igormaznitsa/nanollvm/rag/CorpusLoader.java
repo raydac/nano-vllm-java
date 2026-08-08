@@ -5,6 +5,7 @@ import static java.util.Objects.requireNonNull;
 
 import com.igormaznitsa.nanollvm.chat.LlmListener;
 import com.igormaznitsa.nanollvm.chat.LlmListeners;
+import com.igormaznitsa.nanollvm.utils.ResourceLimits;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.file.FileVisitResult;
@@ -49,6 +50,9 @@ final class CorpusLoader {
     private boolean preprocess = true;
     private boolean atomicSentences = false;
     private boolean dedupe = true;
+    private ResourceLimits resourceLimits = ResourceLimits.current();
+    private long totalBytesRead;
+    private int filesRead;
     private Set<String> folderExtensions = DEFAULT_EXTENSIONS;
     private LlmListener io = LlmListeners.silent();
     private Path reportRoot;
@@ -102,7 +106,13 @@ final class CorpusLoader {
           .chunkOverlap(options.chunkOverlap())
           .preprocess(options.preprocess())
           .atomicSentences(options.atomicSentences())
-          .dedupe(options.dedupe());
+        .dedupe(options.dedupe())
+        .resourceLimits(options.resourceLimits());
+    }
+
+    public Builder resourceLimits(final ResourceLimits resourceLimits) {
+      this.resourceLimits = requireNonNull(resourceLimits, "resourceLimits");
+      return this;
     }
 
     public Builder folderExtensions(final Set<String> extensions) {
@@ -151,7 +161,10 @@ final class CorpusLoader {
         throw new IllegalArgumentException("not a regular file: " + path);
       }
       try {
+        long size = Files.size(path);
+        this.requireFileBudget(path, size);
         String body = this.readFileText(path);
+        this.accountRead(size);
         String source = path.toString();
         List<TextChunk> chunks = Chunking.split(
             source,
@@ -169,9 +182,30 @@ final class CorpusLoader {
       return this;
     }
 
+    private void requireFileBudget(final Path path, final long size) {
+      if (size > this.resourceLimits.maxFileBytes()) {
+        throw new IllegalArgumentException(
+          "file exceeds maxFileBytes (" + this.resourceLimits.maxFileBytes() + "): " + path);
+      }
+      if (this.filesRead >= this.resourceLimits.maxCorpusFiles()) {
+        throw new IllegalStateException(
+          "corpus exceeds maxCorpusFiles (" + this.resourceLimits.maxCorpusFiles() + ")");
+      }
+      if (this.totalBytesRead + size > this.resourceLimits.maxTotalCorpusBytes()) {
+        throw new IllegalStateException(
+          "corpus exceeds maxTotalCorpusBytes ("
+            + this.resourceLimits.maxTotalCorpusBytes() + ")");
+      }
+    }
+
+    private void accountRead(final long size) {
+      this.filesRead++;
+      this.totalBytesRead += size;
+    }
+
     private String readFileText(final Path path) throws IOException {
       return PdfTextExtractor.isPdf(path)
-        ? PdfTextExtractor.extract(path)
+        ? PdfTextExtractor.extract(path, this.resourceLimits)
         : Files.readString(path, UTF_8);
     }
 

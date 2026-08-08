@@ -1,11 +1,16 @@
 package com.igormaznitsa.nanollvm.samples.utils;
 
-import static com.igormaznitsa.nanollvm.utils.NanoVllmProps.CONFIG_JSON;
-import static com.igormaznitsa.nanollvm.utils.NanoVllmProps.ENV_MODEL;
-import static com.igormaznitsa.nanollvm.utils.NanoVllmProps.ENV_MODELS_DIR;
-import static com.igormaznitsa.nanollvm.utils.NanoVllmProps.PROP_MODEL;
-import static com.igormaznitsa.nanollvm.utils.NanoVllmProps.PROP_MODELS_DIR;
+import static com.igormaznitsa.nanollvm.utils.NanoLlvmProps.CONFIG_JSON;
+import static com.igormaznitsa.nanollvm.utils.NanoLlvmProps.ENV_MODEL;
+import static com.igormaznitsa.nanollvm.utils.NanoLlvmProps.ENV_MODELS_DIR;
+import static com.igormaznitsa.nanollvm.utils.NanoLlvmProps.ENV_MODELS_DIR_LEGACY;
+import static com.igormaznitsa.nanollvm.utils.NanoLlvmProps.ENV_MODEL_LEGACY;
+import static com.igormaznitsa.nanollvm.utils.NanoLlvmProps.PROP_MODEL;
+import static com.igormaznitsa.nanollvm.utils.NanoLlvmProps.PROP_MODELS_DIR;
+import static com.igormaznitsa.nanollvm.utils.NanoLlvmProps.PROP_MODELS_DIR_LEGACY;
+import static com.igormaznitsa.nanollvm.utils.NanoLlvmProps.PROP_MODEL_LEGACY;
 
+import com.igormaznitsa.nanollvm.utils.NanoLlvmProps;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Locale;
@@ -29,18 +34,18 @@ public final class BundledModels {
   }
 
   /**
-   * Resolution order: CLI path → {@code -Dnanovllm.model} → {@code NANOVLLM_MODEL}
-   * → {@code <modelsRoot>/Qwen3-0.6B}.
+   * Resolution order: CLI path → {@code -Dnanollvm.model} → {@code NANOLLVM_MODEL}
+   * (legacy {@code nanovllm.*}) → {@code <modelsRoot>/Qwen3-0.6B}.
    */
   public static Path resolveDefault(String... cliArgs) {
     if (cliArgs != null && cliArgs.length > 0 && cliArgs[0] != null && !cliArgs[0].isBlank()) {
       return Path.of(cliArgs[0]).toAbsolutePath().normalize();
     }
-    String prop = System.getProperty(PROP_MODEL);
+    String prop = NanoLlvmProps.systemProperty(PROP_MODEL, PROP_MODEL_LEGACY);
     if (prop != null && !prop.isBlank()) {
       return Path.of(prop).toAbsolutePath().normalize();
     }
-    String env = System.getenv(ENV_MODEL);
+    String env = NanoLlvmProps.environment(ENV_MODEL, ENV_MODEL_LEGACY);
     if (env != null && !env.isBlank()) {
       return Path.of(env).toAbsolutePath().normalize();
     }
@@ -48,14 +53,14 @@ public final class BundledModels {
   }
 
   /**
-   * Models root: {@code -Dnanovllm.models.dir} → {@code NANOVLLM_MODELS_DIR} → {@code ./models}.
+   * Models root: {@code -Dnanollvm.models.dir} → {@code NANOLLVM_MODELS_DIR} → {@code ./models}.
    */
   public static Path modelsRoot() {
-    String prop = System.getProperty(PROP_MODELS_DIR);
+    String prop = NanoLlvmProps.systemProperty(PROP_MODELS_DIR, PROP_MODELS_DIR_LEGACY);
     if (prop != null && !prop.isBlank()) {
       return Path.of(prop).toAbsolutePath().normalize();
     }
-    String env = System.getenv(ENV_MODELS_DIR);
+    String env = NanoLlvmProps.environment(ENV_MODELS_DIR, ENV_MODELS_DIR_LEGACY);
     if (env != null && !env.isBlank()) {
       return Path.of(env).toAbsolutePath().normalize();
     }

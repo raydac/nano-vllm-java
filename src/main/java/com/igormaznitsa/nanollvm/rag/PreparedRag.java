@@ -18,6 +18,9 @@ import java.util.regex.Pattern;
 /**
  * Immutable, shareable RAG corpus: preparsed passages + inverted BM25 index.
  * Load once via {@link RagFactory}; reuse across many LLM sessions.
+ *
+ * <p>Safe to share across threads after construction. {@link #retrieve} returns an unmodifiable
+ * list.
  */
 public final class PreparedRag implements RagIndex {
 
@@ -55,7 +58,7 @@ public final class PreparedRag implements RagIndex {
     this.chunks = this.passages.stream().map(Passage::chunk).toList();
   }
 
-  public static PreparedRag fromChunks(
+  static PreparedRag fromChunks(
     final List<TextChunk> chunks,
     final Path sourceRoot,
     final RagLoadOptions options
@@ -66,7 +69,7 @@ public final class PreparedRag implements RagIndex {
     return buildIndex(prepared, sourceRoot, options);
   }
 
-  public static List<String> tokenize(final String text) {
+  static List<String> tokenize(final String text) {
     return Lexicon.tokenize(text);
   }
 
@@ -155,7 +158,7 @@ public final class PreparedRag implements RagIndex {
       .toList();
   }
 
-  public List<Passage> passages() {
+  List<Passage> passages() {
     return this.passages;
   }
 
@@ -178,16 +181,20 @@ public final class PreparedRag implements RagIndex {
 
   @Override
   public boolean isOutsideCorpus(final String query) {
-    List<String> raw = List.copyOf(new LinkedHashSet<>(PreparedRag.tokenize(query)));
+    List<String> raw = List.copyOf(new LinkedHashSet<>(Lexicon.tokenizeSurface(query)));
     return QueryTerms.queryOutsideCorpus(this.docFreq, this.docCount, raw);
   }
 
   @Override
   public List<RagHit> retrieve(final String query, final int topK) {
     List<String> terms = this.selectedQueryTerms(query);
+    if (terms.isEmpty()) {
+      return List.of();
+    }
     List<RagHit> hits = this.bm25Retrieve(query, Math.max(topK * 4, topK));
     return hits.stream()
         .map(hit -> new RagHit(hit.chunk(), groundedScore(hit, terms)))
+      .filter(hit -> termCoverage(hit.chunk().text(), terms) > 0.0)
         .sorted(Comparator
             .comparingDouble(RagHit::score).reversed()
             .thenComparingInt(hit -> hit.chunk().text().length()))
@@ -215,7 +222,7 @@ public final class PreparedRag implements RagIndex {
     if (terms.isEmpty()) {
       return List.of();
     }
-    int rawDistinct = new LinkedHashSet<>(PreparedRag.tokenize(query)).size();
+    int rawDistinct = new LinkedHashSet<>(Lexicon.tokenizeSurface(query)).size();
     if (QueryTerms.queryTooBroadForCorpus(rawDistinct, terms)) {
       return List.of();
     }
@@ -268,7 +275,7 @@ public final class PreparedRag implements RagIndex {
   private record Posting(int docId, int tf) {
   }
 
-  public record Passage(
+  record Passage(
     TextChunk chunk,
     String searchText,
     Map<String, Integer> termFreqs,
@@ -319,6 +326,18 @@ public final class PreparedRag implements RagIndex {
       return tokens;
     }
 
+    static List<String> tokenizeSurface(final String text) {
+      List<String> tokens = new ArrayList<>();
+      var matcher = TOKEN.matcher(text.toLowerCase(Locale.ROOT));
+      while (matcher.find()) {
+        String token = matcher.group();
+        if (token.length() > 1) {
+          tokens.add(token);
+        }
+      }
+      return tokens;
+    }
+
     static Map<String, Integer> termFrequencies(final String text) {
       Map<String, Integer> tf = new HashMap<>();
       for (String token : tokenize(text)) {
@@ -331,11 +350,14 @@ public final class PreparedRag implements RagIndex {
       if (!isCyrillicToken(token)) {
         return;
       }
-      if (token.length() >= 4) {
+      if (token.length() >= 3) {
         tokens.add(token.substring(0, token.length() - 1));
       }
       if (token.length() >= 5) {
-        String prefix = token.substring(0, 5);
+        tokens.add(token.substring(0, token.length() - 2));
+      }
+      if (token.length() >= 5) {
+        String prefix = token.substring(0, Math.min(5, token.length()));
         if (!prefix.equals(token)) {
           tokens.add(prefix);
         }
@@ -442,23 +464,7 @@ public final class PreparedRag implements RagIndex {
   private static final class QueryTerms {
 
     private static final int MAX_SELECTED_TERMS = 5;
-
-    private static final Set<String> FUNCTION_WORDS = Set.of(
-      "a", "an", "the", "and", "or", "but", "if", "then", "so", "as", "at", "by", "for",
-      "from", "in", "into", "of", "on", "to", "with", "without", "about", "over", "after",
-      "before", "between", "through", "during", "under", "again", "further",
-      "who", "what", "when", "where", "why", "how", "which", "whom", "whose",
-      "is", "are", "was", "were", "be", "been", "being", "am",
-      "do", "did", "does", "done", "doing",
-      "have", "has", "had", "having",
-      "can", "could", "would", "should", "may", "might", "must", "will", "shall",
-      "their", "they", "them", "theirs", "his", "her", "hers", "its", "itself",
-      "our", "ours", "your", "yours", "my", "mine", "myself", "yourself", "themselves",
-      "this", "that", "these", "those",
-      "i", "you", "he", "she", "we", "it", "me", "him", "us",
-      "not", "no", "nor", "too", "very", "just", "than", "also", "only", "own",
-      "there", "here", "such", "same", "both", "each", "few", "more", "most", "other",
-      "some", "any", "all", "once", "up", "down", "out", "off", "above", "below");
+    private static final int CONTENTFUL_MIN_LEN = 3;
 
     private QueryTerms() {
     }
@@ -473,78 +479,55 @@ public final class PreparedRag implements RagIndex {
       if (docCount <= 0) {
         return List.of();
       }
-      List<String> rawDistinct = List.copyOf(new LinkedHashSet<>(PreparedRag.tokenize(query)));
-      if (rawDistinct.isEmpty()) {
+      List<String> surface = List.copyOf(new LinkedHashSet<>(Lexicon.tokenizeSurface(query)));
+      if (surface.isEmpty()) {
         return List.of();
       }
-      if (queryOutsideCorpus(docFreq, docCount, rawDistinct)) {
+      if (queryOutsideCorpus(docFreq, docCount, surface)) {
         return List.of();
       }
 
-      List<String> known = rawDistinct.stream()
-        .filter(term -> !isFunctionWord(term))
+      List<String> expanded = List.copyOf(new LinkedHashSet<>(PreparedRag.tokenize(query)));
+      List<String> known = expanded.stream()
+        .filter(QueryTerms::isContentful)
         .filter(term -> docFreq.getOrDefault(term, 0) > 0)
         .toList();
       if (known.isEmpty()) {
         return List.of();
       }
 
-      int maxDf = maxCommonDocFreq(docCount);
-      List<String> discriminative = known.stream()
-        .filter(term -> docFreq.getOrDefault(term, 0) <= maxDf)
+      return distinctiveKnown(known).stream()
         .sorted(Comparator
-          .comparingInt((String term) -> docFreq.getOrDefault(term, 0))
-          .thenComparing(Comparator.comparingInt(String::length).reversed()))
+          .comparingInt(String::length).reversed()
+          .thenComparingDouble((String term) -> -idfWeight(docFreq, docCount, term)))
         .limit(MAX_SELECTED_TERMS)
         .toList();
-      if (!discriminative.isEmpty()) {
-        return List.copyOf(discriminative);
-      }
-
-      boolean hasOov = rawDistinct.stream().anyMatch(term -> docFreq.getOrDefault(term, 0) == 0);
-      if (hasOov) {
-        return List.of();
-      }
-
-      return known.stream()
-        .sorted(Comparator.comparingInt(term -> docFreq.getOrDefault(term, 0)))
-        .limit(Math.min(3, known.size()))
-        .toList();
-    }
-
-    static boolean isFunctionWord(final String term) {
-      return term != null && FUNCTION_WORDS.contains(term);
-    }
-
-    static int maxCommonDocFreq(final int docCount) {
-      return Math.max(3, docCount / 2);
-    }
-
-    static int maxRareDocFreq(final int docCount) {
-      return Math.max(2, docCount / 10);
     }
 
     static boolean queryOutsideCorpus(
       final Map<String, Integer> docFreq,
       final int docCount,
-      final List<String> rawDistinct
+      final List<String> surfaceTerms
     ) {
       requireNonNull(docFreq, "docFreq");
-      requireNonNull(rawDistinct, "rawDistinct");
-      if (rawDistinct.isEmpty() || docCount <= 0) {
+      requireNonNull(surfaceTerms, "surfaceTerms");
+      if (surfaceTerms.isEmpty() || docCount <= 0) {
         return false;
       }
-      if (hasUngroundedContentfulOov(docFreq, docCount, rawDistinct)) {
+      List<String> contentful = surfaceTerms.stream()
+        .filter(QueryTerms::isContentful)
+        .toList();
+      if (contentful.isEmpty()) {
+        return false;
+      }
+      long oov = contentful.stream().filter(term -> isContentfulOov(docFreq, term)).count();
+      if (oov == 0L) {
+        return false;
+      }
+      if (oov * 2L >= contentful.size()) {
         return true;
       }
-      List<String> contentful = rawDistinct.stream()
-        .filter(term -> !isFunctionWord(term))
-        .toList();
-      if (contentful.size() < 4) {
-        return false;
-      }
-      long unknown = contentful.stream().filter(term -> docFreq.getOrDefault(term, 0) == 0).count();
-      return unknown >= 2 && unknown * 2 >= contentful.size();
+      return hasLongestContentfulOov(docFreq, contentful);
     }
 
     static boolean queryTooBroadForCorpus(
@@ -562,39 +545,47 @@ public final class PreparedRag implements RagIndex {
       }
       Set<String> passageTerms = new LinkedHashSet<>(passage.termFreqs().keySet());
       long matched = selectedTerms.stream().filter(passageTerms::contains).count();
-      int need = Math.max(1, Math.min(2, (selectedTerms.size() + 1) / 2));
+      int need = Math.clamp((selectedTerms.size() + 1) / 2, 1, 2);
       return matched >= need;
     }
 
-    private static boolean hasUngroundedContentfulOov(
+    private static double idfWeight(
       final Map<String, Integer> docFreq,
       final int docCount,
-      final List<String> rawDistinct
+      final String term
     ) {
-      boolean contentfulOov = rawDistinct.stream().anyMatch(term -> isContentfulOov(docFreq, term));
-      if (!contentfulOov) {
-        return false;
+      int df = docFreq.getOrDefault(term, 0);
+      if (df <= 0) {
+        return 0.0;
       }
-      return !hasRareKnownContent(docFreq, docCount, rawDistinct);
+      return Math.log(1.0 + (docCount - df + 0.5) / (df + 0.5));
     }
 
-    private static boolean hasRareKnownContent(
+    private static boolean isContentful(final String term) {
+      return term != null && term.length() >= CONTENTFUL_MIN_LEN;
+    }
+
+    private static List<String> distinctiveKnown(final List<String> known) {
+      boolean hasLong = known.stream().anyMatch(term -> term.length() >= 5);
+      if (!hasLong) {
+        return known;
+      }
+      List<String> longer = known.stream().filter(term -> term.length() >= 5).toList();
+      return longer.isEmpty() ? known : longer;
+    }
+
+    private static boolean hasLongestContentfulOov(
       final Map<String, Integer> docFreq,
-      final int docCount,
-      final List<String> rawDistinct
+      final List<String> contentful
     ) {
-      int rareDf = maxRareDocFreq(docCount);
-      return rawDistinct.stream()
-        .filter(term -> !isFunctionWord(term))
-        .flatMap(term -> PreparedRag.tokenize(term).stream())
-        .anyMatch(key -> {
-          int df = docFreq.getOrDefault(key, 0);
-          return key.length() >= 4 && df > 0 && df <= rareDf;
-        });
+      int maxLen = contentful.stream().mapToInt(String::length).max().orElse(0);
+      return contentful.stream()
+        .filter(term -> term.length() == maxLen)
+        .anyMatch(term -> isContentfulOov(docFreq, term));
     }
 
     private static boolean isContentfulOov(final Map<String, Integer> docFreq, final String term) {
-      if (isFunctionWord(term) || term.length() < 5 || docFreq.getOrDefault(term, 0) > 0) {
+      if (!isContentful(term) || docFreq.getOrDefault(term, 0) > 0) {
         return false;
       }
       return PreparedRag.tokenize(term).stream()

@@ -1,18 +1,21 @@
-package com.igormaznitsa.nanollvm.models;
+package com.igormaznitsa.nanollvm.models.internal;
 
-import static com.igormaznitsa.nanollvm.models.WeightNames.ARCH_GEMMA3;
-import static com.igormaznitsa.nanollvm.models.WeightNames.ARCH_LFM2;
-import static com.igormaznitsa.nanollvm.models.WeightNames.ARCH_QWEN3;
-import static com.igormaznitsa.nanollvm.utils.NanoVllmProps.PROP_ARCH;
+import static com.igormaznitsa.nanollvm.models.internal.WeightNames.ARCH_GEMMA3;
+import static com.igormaznitsa.nanollvm.models.internal.WeightNames.ARCH_LFM2;
+import static com.igormaznitsa.nanollvm.models.internal.WeightNames.ARCH_QWEN3;
+import static com.igormaznitsa.nanollvm.utils.NanoLlvmProps.PROP_ARCH;
+import static com.igormaznitsa.nanollvm.utils.NanoLlvmProps.PROP_ARCH_LEGACY;
 import static java.util.Locale.ROOT;
 
 import com.igormaznitsa.nanollvm.llm.Config;
+import com.igormaznitsa.nanollvm.utils.NanoLlvmProps;
 
 import java.util.List;
+import java.util.Optional;
 
 /**
  * Builds an immutable {@link CausalLM} from HF config + {@link WeightBag}
- * (optional {@code -Dnanovllm.arch=qwen3|gemma3|lfm2}).
+ * (optional {@code -Dnanollvm.arch=qwen3|gemma3|lfm2}, legacy {@code nanovllm.arch}).
  */
 public final class CausalLMFactory {
 
@@ -20,8 +23,7 @@ public final class CausalLMFactory {
   }
 
   public static CausalLM create(final Config.HfConfig config, final WeightBag weights) {
-    String forced = System.getProperty(PROP_ARCH, "").strip().toLowerCase(ROOT);
-    String arch = forced.isEmpty() ? detect(config) : normalize(forced);
+    String arch = resolveArch(config);
     return switch (arch) {
       case ARCH_GEMMA3 -> new Gemma3ForCausalLM(config, weights);
       case ARCH_QWEN3 -> new Qwen3ForCausalLM(config, weights);
@@ -33,9 +35,15 @@ public final class CausalLMFactory {
   }
 
   public static WeightSchema schema(final Config.HfConfig config) {
-    String forced = System.getProperty(PROP_ARCH, "").strip().toLowerCase(ROOT);
-    String arch = forced.isEmpty() ? detect(config) : normalize(forced);
-    return WeightSchema.forArchitecture(arch, config);
+    return WeightSchema.forArchitecture(resolveArch(config), config);
+  }
+
+  private static String resolveArch(final Config.HfConfig config) {
+    String forced = Optional.ofNullable(NanoLlvmProps.systemProperty(PROP_ARCH, PROP_ARCH_LEGACY))
+      .orElse("")
+      .strip()
+      .toLowerCase(ROOT);
+    return forced.isEmpty() ? detect(config) : normalize(forced);
   }
 
   public static String detect(final Config.HfConfig config) {

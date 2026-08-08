@@ -2,10 +2,14 @@ package com.igormaznitsa.nanollvm.internal;
 
 import com.igormaznitsa.nanollvm.engine.ConvStateArena;
 import com.igormaznitsa.nanollvm.engine.KvCacheArena;
+import com.igormaznitsa.nanollvm.tensor.MatmulRuntime;
 
+/**
+ * Step-scoped engine state for one transformer forward: KV / conv arenas, matmul runtime,
+ * and varlen attention metadata. Owned and passed explicitly by {@code Transformer} — not
+ * thread-local.
+ */
 public final class Context {
-
-  private static final ThreadLocal<Context> CURRENT = ThreadLocal.withInitial(Context::new);
 
   private boolean prefill;
   private int[] cuSeqlensQ;
@@ -18,20 +22,21 @@ public final class Context {
   private int[] seqIds;
   private KvCacheArena kvCache;
   private ConvStateArena convCache;
+  private MatmulRuntime matmul;
 
-  public static Context get() {
-    return CURRENT.get();
+  public void bindKvCache(final KvCacheArena arena) {
+    this.kvCache = arena;
   }
 
-  public static void bindKvCache(final KvCacheArena arena) {
-    CURRENT.get().kvCache = arena;
+  public void bindConvCache(final ConvStateArena arena) {
+    this.convCache = arena;
   }
 
-  public static void bindConvCache(final ConvStateArena arena) {
-    CURRENT.get().convCache = arena;
+  public void bindMatmul(final MatmulRuntime runtime) {
+    this.matmul = runtime;
   }
 
-  public static void set(
+  public void set(
       final boolean isPrefill,
       final int[] cuSeqlensQ,
       final int[] cuSeqlensK,
@@ -42,20 +47,30 @@ public final class Context {
       final int[][] blockTables,
       final int[] seqIds
   ) {
-    Context ctx = CURRENT.get();
-    ctx.prefill = isPrefill;
-    ctx.cuSeqlensQ = cuSeqlensQ;
-    ctx.cuSeqlensK = cuSeqlensK;
-    ctx.maxSeqlenQ = maxSeqlenQ;
-    ctx.maxSeqlenK = maxSeqlenK;
-    ctx.slotMapping = slotMapping;
-    ctx.contextLens = contextLens;
-    ctx.blockTables = blockTables;
-    ctx.seqIds = seqIds;
+    this.prefill = isPrefill;
+    this.cuSeqlensQ = cuSeqlensQ;
+    this.cuSeqlensK = cuSeqlensK;
+    this.maxSeqlenQ = maxSeqlenQ;
+    this.maxSeqlenK = maxSeqlenK;
+    this.slotMapping = slotMapping;
+    this.contextLens = contextLens;
+    this.blockTables = blockTables;
+    this.seqIds = seqIds;
   }
 
-  public static void reset() {
-    CURRENT.set(new Context());
+  public void clear() {
+    this.prefill = false;
+    this.cuSeqlensQ = null;
+    this.cuSeqlensK = null;
+    this.maxSeqlenQ = 0;
+    this.maxSeqlenK = 0;
+    this.slotMapping = null;
+    this.contextLens = null;
+    this.blockTables = null;
+    this.seqIds = null;
+    this.kvCache = null;
+    this.convCache = null;
+    this.matmul = null;
   }
 
   public boolean isPrefill() {
@@ -100,5 +115,9 @@ public final class Context {
 
   public ConvStateArena convCache() {
     return this.convCache;
+  }
+
+  public MatmulRuntime matmul() {
+    return this.matmul;
   }
 }

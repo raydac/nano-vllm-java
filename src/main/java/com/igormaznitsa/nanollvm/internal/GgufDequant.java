@@ -5,8 +5,20 @@ import java.nio.ByteOrder;
 
 /**
  * Dequantizes GGML block layouts into float32 (ported from ggml row dequant kernels).
+ *
+ * <p>{@link #dequantizeRange} writes into the caller buffer: full blocks go straight to
+ * {@code dst}; only partial block edges use a small one-block scratch (no per-row full-tensor
+ * allocation).
  */
 public final class GgufDequant {
+
+  public static final int TYPE_F32 = 0;
+  public static final int TYPE_F16 = 1;
+  public static final int TYPE_Q4_0 = 2;
+  public static final int TYPE_Q8_0 = 8;
+  public static final int TYPE_Q4_K = 12;
+  public static final int TYPE_Q6_K = 14;
+  public static final int TYPE_BF16 = 30;
 
   public static final int QK4_0 = 32;
   public static final int QK8_0 = 32;
@@ -21,37 +33,162 @@ public final class GgufDequant {
 
   public static float[] dequantize(final ByteBuffer src, final int ggmlType, final long numel) {
     return switch (ggmlType) {
-      case 0 -> readF32(src, numel);
-      case 1 -> readF16(src, numel);
-      case 2 -> dequantQ4_0(src, numel);
-      case 8 -> dequantQ8_0(src, numel);
-      case 12 -> dequantQ4_K(src, numel);
-      case 14 -> dequantQ6_K(src, numel);
-      case 30 -> readBf16(src, numel);
+      case TYPE_F32 -> readF32(src, numel);
+      case TYPE_F16 -> readF16(src, numel);
+      case TYPE_Q4_0 -> dequantQ4_0(src, numel);
+      case TYPE_Q8_0 -> dequantQ8_0(src, numel);
+      case TYPE_Q4_K -> dequantQ4_K(src, numel);
+      case TYPE_Q6_K -> dequantQ6_K(src, numel);
+      case TYPE_BF16 -> readBf16(src, numel);
       default -> throw new UnsupportedOperationException("unsupported GGML type " + ggmlType);
     };
   }
 
   public static int typeBlockSize(final int ggmlType) {
     return switch (ggmlType) {
-      case 0 -> 4;
-      case 1, 30 -> 2;
-      case 2 -> BLOCK_Q4_0;
-      case 8 -> BLOCK_Q8_0;
-      case 12 -> BLOCK_Q4_K;
-      case 14 -> BLOCK_Q6_K;
+      case TYPE_F32 -> 4;
+      case TYPE_F16, TYPE_BF16 -> 2;
+      case TYPE_Q4_0 -> BLOCK_Q4_0;
+      case TYPE_Q8_0 -> BLOCK_Q8_0;
+      case TYPE_Q4_K -> BLOCK_Q4_K;
+      case TYPE_Q6_K -> BLOCK_Q6_K;
       default -> throw new UnsupportedOperationException("unsupported GGML type " + ggmlType);
     };
   }
 
   public static int typeBlockElems(final int ggmlType) {
     return switch (ggmlType) {
-      case 0, 1, 30 -> 1;
-      case 2 -> QK4_0;
-      case 8 -> QK8_0;
-      case 12, 14 -> QK_K;
+      case TYPE_F32, TYPE_F16, TYPE_BF16 -> 1;
+      case TYPE_Q4_0 -> QK4_0;
+      case TYPE_Q8_0 -> QK8_0;
+      case TYPE_Q4_K, TYPE_Q6_K -> QK_K;
       default -> throw new UnsupportedOperationException("unsupported GGML type " + ggmlType);
     };
+  }
+
+  public static long packedByteLength(final int ggmlType, final long numel) {
+    int blockElems = typeBlockElems(ggmlType);
+    int blockBytes = typeBlockSize(ggmlType);
+    long blocks = (numel + blockElems - 1) / blockElems;
+    return Math.multiplyExact(blocks, blockBytes);
+  }
+
+  /**
+   * Dequantizes {@code elemCount} elements starting at {@code elemStart} into {@code dst}.
+   * Packed layout matches full-tensor {@link #dequantize} order (GGML storage / HF row-major
+   * after {@code GgufReader} shape remap).
+   */
+  public static void dequantizeRange(
+    final byte[] packed,
+    final int ggmlType,
+    final int numel,
+    final int elemStart,
+    final int elemCount,
+    final float[] dst,
+    final int dstOff) {
+    if (elemCount < 0 || elemStart < 0 || elemStart > numel - elemCount) {
+      throw new IndexOutOfBoundsException(
+        "range [" + elemStart + "," + (elemStart + elemCount) + ") vs numel " + numel);
+    }
+    if (dstOff < 0 || dstOff > dst.length - elemCount) {
+      throw new IndexOutOfBoundsException("dst range");
+    }
+    if (elemCount == 0) {
+      return;
+    }
+
+    switch (ggmlType) {
+      case TYPE_F32, TYPE_F16, TYPE_BF16 ->
+        dequantizeUnitStride(packed, ggmlType, elemStart, elemCount, dst, dstOff);
+      case TYPE_Q4_0 -> dequantizeBlockedRange(packed, numel, elemStart, elemCount, dst, dstOff,
+        QK4_0, BLOCK_Q4_0, GgufDequant::dequantOneQ4_0);
+      case TYPE_Q8_0 -> dequantizeBlockedRange(packed, numel, elemStart, elemCount, dst, dstOff,
+        QK8_0, BLOCK_Q8_0, GgufDequant::dequantOneQ8_0);
+      case TYPE_Q4_K -> dequantizeBlockedRange(packed, numel, elemStart, elemCount, dst, dstOff,
+        QK_K, BLOCK_Q4_K, GgufDequant::dequantOneQ4_K);
+      case TYPE_Q6_K -> dequantizeBlockedRange(packed, numel, elemStart, elemCount, dst, dstOff,
+        QK_K, BLOCK_Q6_K, GgufDequant::dequantOneQ6_K);
+      default -> throw new UnsupportedOperationException("unsupported GGML type " + ggmlType);
+    }
+  }
+
+  private static void dequantizeBlockedRange(
+    final byte[] packed,
+    final int numel,
+    final int elemStart,
+    final int elemCount,
+    final float[] dst,
+    final int dstOff,
+    final int blockElems,
+    final int blockBytes,
+    final BlockDequant blockDequant
+  ) {
+    if (numel % blockElems != 0) {
+      throw new IllegalArgumentException("numel must be multiple of " + blockElems);
+    }
+
+    float[] scratch = null;
+    int elem = elemStart;
+    int remaining = elemCount;
+    int out = dstOff;
+    while (remaining > 0) {
+      int inBlock = elem % blockElems;
+      int take = Math.min(remaining, blockElems - inBlock);
+      int byteOff = Math.multiplyExact(elem / blockElems, blockBytes);
+      if (inBlock == 0 && take == blockElems) {
+        blockDequant.dequant(packed, byteOff, dst, out);
+      } else {
+        if (scratch == null) {
+          scratch = new float[blockElems];
+        }
+        blockDequant.dequant(packed, byteOff, scratch, 0);
+        System.arraycopy(scratch, inBlock, dst, out, take);
+      }
+      elem += take;
+      out += take;
+      remaining -= take;
+    }
+  }
+
+  private static void dequantizeUnitStride(
+    final byte[] packed,
+    final int ggmlType,
+    final int elemStart,
+    final int elemCount,
+    final float[] dst,
+    final int dstOff) {
+    switch (ggmlType) {
+      case TYPE_F32 -> {
+        int byteOff = Math.multiplyExact(elemStart, 4);
+        for (int i = 0; i < elemCount; i++) {
+          dst[dstOff + i] = Float.intBitsToFloat(i32LE(packed, byteOff + i * 4));
+        }
+      }
+      case TYPE_F16 -> {
+        int byteOff = Math.multiplyExact(elemStart, 2);
+        for (int i = 0; i < elemCount; i++) {
+          dst[dstOff + i] = Float.float16ToFloat((short) u16LE(packed, byteOff + i * 2));
+        }
+      }
+      case TYPE_BF16 -> {
+        int byteOff = Math.multiplyExact(elemStart, 2);
+        for (int i = 0; i < elemCount; i++) {
+          dst[dstOff + i] = Float.intBitsToFloat(u16LE(packed, byteOff + i * 2) << 16);
+        }
+      }
+      default -> throw new UnsupportedOperationException("unit-stride type " + ggmlType);
+    }
+  }
+
+  private static float[] dequantQ4_0(final ByteBuffer src, final long numel) {
+    int n = requireInt(numel);
+    if (n % QK4_0 != 0) {
+      throw new IllegalArgumentException("Q4_0 numel must be multiple of " + QK4_0);
+    }
+    byte[] packed = copyRemaining(src);
+    float[] out = new float[n];
+    dequantizeRange(packed, TYPE_Q4_0, n, 0, n, out, 0);
+    return out;
   }
 
   private static float[] readF32(final ByteBuffer src, final long numel) {
@@ -78,37 +215,14 @@ public final class GgufDequant {
     return out;
   }
 
-  private static float[] dequantQ4_0(final ByteBuffer src, final long numel) {
-    int n = requireInt(numel);
-    if (n % QK4_0 != 0) {
-      throw new IllegalArgumentException("Q4_0 numel must be multiple of " + QK4_0);
-    }
-    float[] out = new float[n];
-    int nb = n / QK4_0;
-    for (int i = 0; i < nb; i++) {
-      float d = Float.float16ToFloat(src.getShort());
-      for (int j = 0; j < QK4_0 / 2; j++) {
-        int qs = src.get() & 0xFF;
-        out[i * QK4_0 + j] = ((qs & 0x0F) - 8) * d;
-        out[i * QK4_0 + j + QK4_0 / 2] = ((qs >> 4) - 8) * d;
-      }
-    }
-    return out;
-  }
-
   private static float[] dequantQ8_0(final ByteBuffer src, final long numel) {
     int n = requireInt(numel);
     if (n % QK8_0 != 0) {
       throw new IllegalArgumentException("Q8_0 numel must be multiple of " + QK8_0);
     }
+    byte[] packed = copyRemaining(src);
     float[] out = new float[n];
-    int nb = n / QK8_0;
-    for (int i = 0; i < nb; i++) {
-      float d = Float.float16ToFloat(src.getShort());
-      for (int j = 0; j < QK8_0; j++) {
-        out[i * QK8_0 + j] = src.get() * d;
-      }
-    }
+    dequantizeRange(packed, TYPE_Q8_0, n, 0, n, out, 0);
     return out;
   }
 
@@ -117,37 +231,9 @@ public final class GgufDequant {
     if (n % QK_K != 0) {
       throw new IllegalArgumentException("Q4_K numel must be multiple of " + QK_K);
     }
+    byte[] packed = copyRemaining(src);
     float[] out = new float[n];
-    int nb = n / QK_K;
-    byte[] scales = new byte[12];
-    byte[] qs = new byte[QK_K / 2];
-    int y = 0;
-    for (int i = 0; i < nb; i++) {
-      float d = Float.float16ToFloat(src.getShort());
-      float min = Float.float16ToFloat(src.getShort());
-      src.get(scales);
-      src.get(qs);
-      int qOff = 0;
-      int is = 0;
-      for (int j = 0; j < QK_K; j += 64) {
-        int sc0 = scaleMinK4(is, scales);
-        int m0 = scaleMinK4Min(is, scales);
-        float d1 = d * sc0;
-        float m1 = min * m0;
-        int sc1 = scaleMinK4(is + 1, scales);
-        int m1b = scaleMinK4Min(is + 1, scales);
-        float d2 = d * sc1;
-        float m2 = min * m1b;
-        for (int l = 0; l < 32; l++) {
-          out[y++] = d1 * (qs[qOff + l] & 0x0F) - m1;
-        }
-        for (int l = 0; l < 32; l++) {
-          out[y++] = d2 * ((qs[qOff + l] & 0xFF) >> 4) - m2;
-        }
-        qOff += 32;
-        is += 2;
-      }
-    }
+    dequantizeRange(packed, TYPE_Q4_K, n, 0, n, out, 0);
     return out;
   }
 
@@ -156,53 +242,129 @@ public final class GgufDequant {
     if (n % QK_K != 0) {
       throw new IllegalArgumentException("Q6_K numel must be multiple of " + QK_K);
     }
+    byte[] packed = copyRemaining(src);
     float[] out = new float[n];
-    int nb = n / QK_K;
-    byte[] ql = new byte[QK_K / 2];
-    byte[] qh = new byte[QK_K / 4];
-    byte[] sc = new byte[QK_K / 16];
-    int y = 0;
-    for (int i = 0; i < nb; i++) {
-      src.get(ql);
-      src.get(qh);
-      src.get(sc);
-      float d = Float.float16ToFloat(src.getShort());
-      int qlOff = 0;
-      int qhOff = 0;
-      int scOff = 0;
-      for (int block = 0; block < QK_K; block += 128) {
-        for (int l = 0; l < 32; l++) {
-          int is = l / 16;
-          int q1 = (ql[qlOff + l] & 0x0F) | ((qh[qhOff + l] & 3) << 4);
-          int q2 = (ql[qlOff + l + 32] & 0x0F) | (((qh[qhOff + l] >> 2) & 3) << 4);
-          int q3 = ((ql[qlOff + l] & 0xFF) >> 4) | (((qh[qhOff + l] >> 4) & 3) << 4);
-          int q4 = ((ql[qlOff + l + 32] & 0xFF) >> 4) | (((qh[qhOff + l] >> 6) & 3) << 4);
-          out[y + l] = d * sc[scOff + is] * (q1 - 32);
-          out[y + l + 32] = d * sc[scOff + is + 2] * (q2 - 32);
-          out[y + l + 64] = d * sc[scOff + is + 4] * (q3 - 32);
-          out[y + l + 96] = d * sc[scOff + is + 6] * (q4 - 32);
-        }
-        y += 128;
-        qlOff += 64;
-        qhOff += 32;
-        scOff += 8;
-      }
-    }
+    dequantizeRange(packed, TYPE_Q6_K, n, 0, n, out, 0);
     return out;
   }
 
-  private static int scaleMinK4(final int j, final byte[] q) {
-    if (j < 4) {
-      return q[j] & 63;
+  private static void dequantOneQ4_0(
+    final byte[] packed, final int byteOff, final float[] dst, final int dstOff
+  ) {
+    float d = Float.float16ToFloat((short) u16LE(packed, byteOff));
+    int qsOff = byteOff + 2;
+    for (int j = 0; j < QK4_0 / 2; j++) {
+      int qs = packed[qsOff + j] & 0xFF;
+      dst[dstOff + j] = ((qs & 0x0F) - 8) * d;
+      dst[dstOff + j + QK4_0 / 2] = ((qs >> 4) - 8) * d;
     }
-    return (q[j + 4] & 0x0F) | (((q[j - 4] & 0xFF) >> 6) << 4);
   }
 
-  private static int scaleMinK4Min(final int j, final byte[] q) {
-    if (j < 4) {
-      return q[j + 4] & 63;
+  private static void dequantOneQ8_0(
+    final byte[] packed, final int byteOff, final float[] dst, final int dstOff
+  ) {
+    float d = Float.float16ToFloat((short) u16LE(packed, byteOff));
+    int qsOff = byteOff + 2;
+    for (int j = 0; j < QK8_0; j++) {
+      dst[dstOff + j] = packed[qsOff + j] * d;
     }
-    return ((q[j + 4] & 0xFF) >> 4) | (((q[j] & 0xFF) >> 6) << 4);
+  }
+
+  private static void dequantOneQ4_K(
+    final byte[] packed, final int byteOff, final float[] dst, final int dstOff
+  ) {
+    float d = Float.float16ToFloat((short) u16LE(packed, byteOff));
+    float min = Float.float16ToFloat((short) u16LE(packed, byteOff + 2));
+    int scalesOff = byteOff + 4;
+    int qsOff = byteOff + 16;
+    int y = dstOff;
+    int qOff = 0;
+    int is = 0;
+    for (int j = 0; j < QK_K; j += 64) {
+      int sc0 = scaleMinK4(is, packed, scalesOff);
+      int m0 = scaleMinK4Min(is, packed, scalesOff);
+      float d1 = d * sc0;
+      float m1 = min * m0;
+      int sc1 = scaleMinK4(is + 1, packed, scalesOff);
+      int m1b = scaleMinK4Min(is + 1, packed, scalesOff);
+      float d2 = d * sc1;
+      float m2 = min * m1b;
+      for (int l = 0; l < 32; l++) {
+        dst[y++] = d1 * (packed[qsOff + qOff + l] & 0x0F) - m1;
+      }
+      for (int l = 0; l < 32; l++) {
+        dst[y++] = d2 * ((packed[qsOff + qOff + l] & 0xFF) >> 4) - m2;
+      }
+      qOff += 32;
+      is += 2;
+    }
+  }
+
+  private static void dequantOneQ6_K(
+    final byte[] packed, final int byteOff, final float[] dst, final int dstOff
+  ) {
+    int qlOff = byteOff;
+    int qhOff = byteOff + QK_K / 2;
+    int scOff = byteOff + QK_K / 2 + QK_K / 4;
+    float d = Float.float16ToFloat((short) u16LE(packed, scOff + QK_K / 16));
+    int y = dstOff;
+    int ql = 0;
+    int qh = 0;
+    int sc = 0;
+    for (int block = 0; block < QK_K; block += 128) {
+      for (int l = 0; l < 32; l++) {
+        int is = l / 16;
+        int q1 = (packed[qlOff + ql + l] & 0x0F) | ((packed[qhOff + qh + l] & 3) << 4);
+        int q2 = (packed[qlOff + ql + l + 32] & 0x0F) | (((packed[qhOff + qh + l] >> 2) & 3) << 4);
+        int q3 =
+          ((packed[qlOff + ql + l] & 0xFF) >> 4) | (((packed[qhOff + qh + l] >> 4) & 3) << 4);
+        int q4 = ((packed[qlOff + ql + l + 32] & 0xFF) >> 4)
+          | (((packed[qhOff + qh + l] >> 6) & 3) << 4);
+        dst[y + l] = d * packed[scOff + sc + is] * (q1 - 32);
+        dst[y + l + 32] = d * packed[scOff + sc + is + 2] * (q2 - 32);
+        dst[y + l + 64] = d * packed[scOff + sc + is + 4] * (q3 - 32);
+        dst[y + l + 96] = d * packed[scOff + sc + is + 6] * (q4 - 32);
+      }
+      y += 128;
+      ql += 64;
+      qh += 32;
+      sc += 8;
+    }
+  }
+
+  private static int scaleMinK4(final int j, final byte[] q, final int off) {
+    if (j < 4) {
+      return q[off + j] & 63;
+    }
+    return (q[off + j + 4] & 0x0F) | (((q[off + j - 4] & 0xFF) >> 6) << 4);
+  }
+
+  private static int scaleMinK4Min(final int j, final byte[] q, final int off) {
+    if (j < 4) {
+      return q[off + j + 4] & 63;
+    }
+    return ((q[off + j + 4] & 0xFF) >> 4) | (((q[off + j] & 0xFF) >> 6) << 4);
+  }
+
+  private static int u16LE(final byte[] b, final int off) {
+    return (b[off] & 0xFF) | ((b[off + 1] & 0xFF) << 8);
+  }
+
+  private static int i32LE(final byte[] b, final int off) {
+    return (b[off] & 0xFF)
+      | ((b[off + 1] & 0xFF) << 8)
+      | ((b[off + 2] & 0xFF) << 16)
+      | ((b[off + 3] & 0xFF) << 24);
+  }
+
+  private static byte[] copyRemaining(final ByteBuffer src) {
+    byte[] packed = new byte[src.remaining()];
+    src.get(packed);
+    return packed;
+  }
+
+  static ByteBuffer littleEndianSlice(final byte[] packed, final int position, final int length) {
+    return littleEndianSlice(ByteBuffer.wrap(packed), position, length);
   }
 
   private static int requireInt(final long numel) {
@@ -217,5 +379,10 @@ public final class GgufDequant {
     slice.position(position);
     slice.limit(position + length);
     return slice.slice().order(ByteOrder.LITTLE_ENDIAN);
+  }
+
+  @FunctionalInterface
+  private interface BlockDequant {
+    void dequant(byte[] packed, int byteOff, float[] dst, int dstOff);
   }
 }

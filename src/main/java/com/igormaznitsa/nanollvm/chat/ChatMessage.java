@@ -2,9 +2,13 @@ package com.igormaznitsa.nanollvm.chat;
 
 import static java.util.Objects.requireNonNull;
 
-import java.util.LinkedHashMap;
 import java.util.Map;
 
+/**
+ * One chat turn with a {@link ChatRole} and text content.
+ *
+ * <p>Immutable value type; safe to share across threads.
+ */
 public record ChatMessage(ChatRole role, String content) {
 
   public ChatMessage {
@@ -32,9 +36,8 @@ public record ChatMessage(ChatRole role, String content) {
   }
 
   public Map<String, String> toMap() {
-    Map<String, String> m = new LinkedHashMap<>();
-    m.put("role", this.role.wireName());
-    m.put("content", this.content);
-    return m;
+    return Map.of(
+      "role", this.role.wireName(),
+      "content", this.content);
   }
 }

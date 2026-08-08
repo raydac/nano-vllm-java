@@ -1,17 +1,24 @@
 package com.igormaznitsa.nanollvm.samples;
 
-import static com.igormaznitsa.nanollvm.models.WeightNames.ARCH_GEMMA3;
-import static com.igormaznitsa.nanollvm.models.WeightNames.ARCH_LFM2;
-import static com.igormaznitsa.nanollvm.models.WeightNames.ARCH_QWEN3;
-import static com.igormaznitsa.nanollvm.utils.NanoVllmProps.ENV_MODEL;
-import static com.igormaznitsa.nanollvm.utils.NanoVllmProps.PROP_COLOR;
-import static com.igormaznitsa.nanollvm.utils.NanoVllmProps.PROP_MODEL;
+import static com.igormaznitsa.nanollvm.models.internal.WeightNames.ARCH_GEMMA3;
+import static com.igormaznitsa.nanollvm.models.internal.WeightNames.ARCH_LFM2;
+import static com.igormaznitsa.nanollvm.models.internal.WeightNames.ARCH_QWEN3;
+import static com.igormaznitsa.nanollvm.utils.NanoLlvmProps.ENV_MODEL;
+import static com.igormaznitsa.nanollvm.utils.NanoLlvmProps.ENV_MODEL_LEGACY;
+import static com.igormaznitsa.nanollvm.utils.NanoLlvmProps.PROP_COLOR;
+import static com.igormaznitsa.nanollvm.utils.NanoLlvmProps.PROP_COLOR_LEGACY;
+import static com.igormaznitsa.nanollvm.utils.NanoLlvmProps.PROP_MODEL;
+import static com.igormaznitsa.nanollvm.utils.NanoLlvmProps.PROP_MODEL_LEGACY;
 
+import com.igormaznitsa.nanollvm.chat.ChatReply;
 import com.igormaznitsa.nanollvm.chat.ChatSession;
-import com.igormaznitsa.nanollvm.chat.LlmListeners;
-import com.igormaznitsa.nanollvm.llm.AdvisorMode;
+import com.igormaznitsa.nanollvm.chat.LlmListener;
 import com.igormaznitsa.nanollvm.llm.LLM;
+import com.igormaznitsa.nanollvm.llm.LlmAdvisor;
+import com.igormaznitsa.nanollvm.llm.LlmAdvisorMixer;
 import com.igormaznitsa.nanollvm.llm.SamplingParams;
+import com.igormaznitsa.nanollvm.models.LlmModel;
+import com.igormaznitsa.nanollvm.models.LlmModelFactory;
 import com.igormaznitsa.nanollvm.prompts.AdvisorPrompts;
 import com.igormaznitsa.nanollvm.rag.PreparedRag;
 import com.igormaznitsa.nanollvm.rag.RagFactory;
@@ -20,8 +27,11 @@ import com.igormaznitsa.nanollvm.rag.RagLoadOptions;
 import com.igormaznitsa.nanollvm.rag.RagSession;
 import com.igormaznitsa.nanollvm.samples.utils.BundledModels;
 import com.igormaznitsa.nanollvm.samples.utils.BundledRag;
+import com.igormaznitsa.nanollvm.samples.utils.OrderedConsole;
+import com.igormaznitsa.nanollvm.utils.NanoLlvmProps;
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
+import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.Locale;
@@ -38,7 +48,7 @@ public final class Example {
   private static final int RAG_MAX_TOKENS_DEFAULT = 768;
   private static final int RAG_MAX_TOKENS_GEMMA = 128;
   private static final int RAG_TOP_K_DEFAULT = 4;
-  private static final int RAG_TOP_K_GEMMA = 3;
+  private static final int RAG_TOP_K_GEMMA = 2;
   private static final int RAG_CONTEXT_CHARS_DEFAULT = 3500;
   private static final int RAG_CONTEXT_CHARS_GEMMA = 900;
 
@@ -46,9 +56,10 @@ public final class Example {
   }
 
   public static void main(final String[] args) throws Exception {
+    OrderedConsole console = new OrderedConsole(System.out, System.err);
     try (BufferedReader in = new BufferedReader(
         new InputStreamReader(System.in, StandardCharsets.UTF_8))) {
-      Path path = resolveModel(args, in);
+      Path path = resolveModel(args, in, console);
       if (path == null) {
         return;
       }
@@ -56,81 +67,109 @@ public final class Example {
       boolean gemmaPath = path.toString().toLowerCase(Locale.ROOT).contains("gemma");
       boolean ggufPath = path.toString().toLowerCase(Locale.ROOT).endsWith(".gguf")
         || path.toString().toLowerCase(Locale.ROOT).contains("lfm2");
-      Optional<PreparedRag> preparedRag = loadPreparedRag(gemmaPath);
+      Optional<PreparedRag> preparedRag = loadPreparedRag(gemmaPath, console);
 
-      System.out.println("Loading model from " + path);
-      System.out.println(
+      console.printlnInfo("Loading model from " + path);
+      console.printlnInfo(
         "Architecture auto-detects from config.json / GGUF metadata "
           + "(override: -Dnanovllm.arch=qwen3|gemma3|lfm2).");
-      System.out.println(
+      console.printlnInfo(
         "CPU matmul: " + Runtime.getRuntime().availableProcessors()
           + " threads from Runtime (override: -Dnanovllm.cpu.threads=N).");
       if (ggufPath) {
-        System.out.println(
-          "GGUF/LFM2: weights expand to float32 — default heap is -Xmx16g via .mvn/jvm.config.");
+        console.printlnInfo(
+          "GGUF/LFM2: weights stay packed (dequant on matmul). For float32 at load: "
+            + "LlmModelFactory.make(path, io, true).");
       }
       if (preparedRag.isPresent()) {
         PreparedRag rag = preparedRag.get();
-        System.out.println("RAG: prepared BM25 over " + BundledRag.ragRoot()
+        console.printlnInfo("RAG: prepared BM25 over " + BundledRag.ragRoot()
             + " (" + rag.size() + " chunks, shared index)");
-        System.out.println("Ask about the docs in rag/ (engine, models, Nile, capitals, …).");
+        console.printlnInfo("Ask about the docs in rag/ (engine, models, Nile, capitals, …).");
       } else {
-        System.out.println("RAG: no usable corpus at " + BundledRag.ragRoot() + " — plain chat.");
+        console.printlnInfo("RAG: no usable corpus at " + BundledRag.ragRoot() + " — plain chat.");
       }
-      System.out.println("Type a message and press Enter. Commands: /exit  /quit  /clear");
-      System.out.println("Thinking → stderr (dim cyan); reply → stdout.");
-      System.out.println();
+      console.println("Type a message and press Enter. Commands: /exit  /quit  /clear");
+      console.println(
+        "Answer/prompts on stdout; thinking, debug, and load/status on stderr (red in many IDEs).");
+      console.println(
+        "After each turn: engine tok/s from GenerationStats (main generate; excludes advisors / RAG prep).");
+      console.println();
 
       boolean color = useColor();
-      try (LLM llm = LLM.builder(path)
-          .enforceEager(true)
-          .tensorParallelSize(1)
-          .maxNumSeqs(4)
-          .maxModelLen(2048)
-        .listen(LlmListeners.toSystem())
-          .build()) {
-        configureDemoAdvisors(llm);
+      LlmListener status = statusTo(console);
+      LlmModel model = LlmModelFactory.make(path, status);
+      LLM.Builder builder = LLM.builder(model)
+        .enforceEager(true)
+        .maxNumSeqs(4)
+        .maxModelLen(2048)
+        .listen(status);
+      configureDemoAdvisors(builder, model.architectureName(), console);
+      try (LLM llm = builder.build()) {
         if (preparedRag.isPresent()) {
-          runRagChat(in, llm, preparedRag.get(), color);
+          runRagChat(in, llm, preparedRag.get(), color, console);
         } else {
-          runPlainChat(in, llm, color);
+          runPlainChat(in, llm, color, console);
         }
       }
     }
   }
 
-  private static void configureDemoAdvisors(final LLM llm) {
-    String arch = llm.model().architectureName();
+  private static LlmListener statusTo(final OrderedConsole console) {
+    return (source, event) -> {
+      switch (event.kind()) {
+        case STATUS_INFO -> console.printInfo(event.text());
+        case STATUS_PROGRESS -> console.print(event.text());
+        default -> {
+        }
+      }
+    };
+  }
+
+  private static void configureDemoAdvisors(
+    final LLM.Builder builder,
+    final String arch,
+    final OrderedConsole console
+  ) {
     if (ARCH_GEMMA3.equals(arch)) {
-      llm.setAdvisors(AdvisorMode.PARALLEL, AdvisorPrompts.demoRolesGemma());
-      System.out.println(
-        "Advisors: 3 (practical, abstract, consequence) PARALLEL for Gemma.");
+      builder.advisors(
+        LlmAdvisorMixer.defaults(),
+        LlmAdvisor.builder().name("Practical").prompt(AdvisorPrompts.ROLE_PRACTICAL).build(),
+        LlmAdvisor.builder().name("Abstract").prompt(AdvisorPrompts.ROLE_ABSTRACT).build(),
+        LlmAdvisor.builder().name("Consequence").prompt(AdvisorPrompts.ROLE_CONSEQUENCE).build());
+      console.printlnInfo("Advisors: Practical, Abstract, Consequence for Gemma.");
       return;
     }
     if (ARCH_QWEN3.equals(arch)) {
-      llm.setAdvisors(AdvisorMode.PARALLEL, AdvisorPrompts.demoRolesQwen());
-      System.out.println("Advisors: 2 (practical, abstract) PARALLEL for Qwen.");
+      builder.advisors(
+        LlmAdvisorMixer.defaults(),
+        LlmAdvisor.builder().name("Practical").prompt(AdvisorPrompts.ROLE_PRACTICAL).build(),
+        LlmAdvisor.builder().name("Abstract").prompt(AdvisorPrompts.ROLE_ABSTRACT).build());
+      console.printlnInfo("Advisors: Practical, Abstract for Qwen.");
       return;
     }
     if (ARCH_LFM2.equals(arch)) {
-      System.out.println("Advisors: off for LFM.");
+      console.printlnInfo("Advisors: off for LFM.");
       return;
     }
-    System.out.println("Advisors: off (architecture " + arch + ").");
+    console.printlnInfo("Advisors: off (architecture " + arch + ").");
   }
 
-  private static Optional<PreparedRag> loadPreparedRag(final boolean tinyModel) {
+  private static Optional<PreparedRag> loadPreparedRag(
+    final boolean tinyModel,
+    final OrderedConsole console
+  ) {
     Optional<Path> root = BundledRag.find();
     if (root.isEmpty()) {
       return Optional.empty();
     }
-    System.out.println("Preparing RAG corpus from " + root.get());
+    console.printlnInfo("Preparing RAG corpus from " + root.get());
     RagLoadOptions options =
       tinyModel ? RagLoadOptions.forTinyModels() : RagLoadOptions.defaults();
     Optional<PreparedRag> prepared =
-      RagFactory.tryMake(root.get(), options, LlmListeners.toSystem());
+      RagFactory.tryMake(root.get(), options, statusTo(console));
     if (prepared.isEmpty()) {
-      System.out.println("RAG: no documents in " + root.get() + " — plain chat.");
+      console.printlnInfo("RAG: no documents in " + root.get() + " — plain chat.");
     }
     return prepared;
   }
@@ -139,10 +178,13 @@ public final class Example {
       final BufferedReader in,
       final LLM llm,
       final PreparedRag prepared,
-      final boolean color
+      final boolean color,
+      final OrderedConsole console
   ) throws Exception {
     boolean gemma = llm.tokenizer().isGemmaChat();
     int maxTokens = gemma ? RAG_MAX_TOKENS_GEMMA : RAG_MAX_TOKENS_DEFAULT;
+    PrintStream answerOut = console.stream();
+    PrintStream thinkOut = console.infoStream();
     RagSession rag = llm.rag(prepared, maxTokens)
         .maxTokensWhenNoHits(gemma ? MAX_NEW_TOKENS : RAG_MAX_TOKENS_DEFAULT)
         .topK(gemma ? RAG_TOP_K_GEMMA : RAG_TOP_K_DEFAULT)
@@ -150,15 +192,15 @@ public final class Example {
       .enableThinking(llm.tokenizer().invitesThinking())
       .sampling(new SamplingParams(gemma ? 0.1f : 0.4f, maxTokens, false, gemma ? 30 : 0,
         gemma ? 0.8f : 0.85f))
-        .streamTo(System.err, System.out, color)
-        .diagnostics(System.err::println);
+      .streamTo(thinkOut, answerOut, color);
+    TurnSpeedTracker speed = new TurnSpeedTracker(console);
 
     while (true) {
-      System.out.print("rag?> ");
-      System.out.flush();
+      console.print("rag?> ");
       String line = in.readLine();
       if (line == null) {
-        System.out.println();
+        console.println();
+        speed.printSessionAverage();
         break;
       }
       String user = line.strip();
@@ -166,47 +208,55 @@ public final class Example {
         continue;
       }
       if (isExit(user)) {
+        speed.printSessionAverage();
         break;
       }
       if ("/clear".equalsIgnoreCase(user)) {
         rag.clear();
-        System.out.println("(conversation cleared; RAG index kept)");
+        console.println("(conversation cleared; RAG index kept)");
         continue;
       }
 
-      rag.send(user);
-      printRetrievalSummary(rag.lastHits());
-      System.out.println();
-      System.out.flush();
+      ChatReply reply = rag.send(user);
+      speed.recordAndPrint(reply);
+      printRetrievalSummary(rag.lastHits(), console);
+      console.println();
     }
   }
 
-  private static void printRetrievalSummary(final java.util.List<RagHit> hits) {
+  private static void printRetrievalSummary(
+    final java.util.List<RagHit> hits,
+    final OrderedConsole console
+  ) {
     if (hits.isEmpty()) {
-      System.out.println("(no RAG hits)");
-      System.out.flush();
+      console.println("(no RAG hits)");
       return;
     }
     String sources = hits.stream()
         .map(hit -> Path.of(hit.chunk().source()).getFileName().toString())
         .distinct()
         .collect(Collectors.joining(", "));
-    System.out.println("(retrieved " + hits.size() + " chunk(s): " + sources + ")");
-    System.out.flush();
+    console.println("(retrieved " + hits.size() + " chunk(s): " + sources + ")");
   }
 
-  private static void runPlainChat(final BufferedReader in, final LLM llm, final boolean color)
-      throws Exception {
+  private static void runPlainChat(
+    final BufferedReader in,
+    final LLM llm,
+    final boolean color,
+    final OrderedConsole console
+  ) throws Exception {
+    PrintStream answerOut = console.stream();
+    PrintStream thinkOut = console.infoStream();
     ChatSession chat = llm.chat(MAX_NEW_TOKENS)
-        .streamTo(System.err, System.out, color)
-        .diagnostics(System.err::println);
+      .streamTo(thinkOut, answerOut, color);
+    TurnSpeedTracker speed = new TurnSpeedTracker(console);
 
     while (true) {
-      System.out.print("?> ");
-      System.out.flush();
+      console.print("?> ");
       String line = in.readLine();
       if (line == null) {
-        System.out.println();
+        console.println();
+        speed.printSessionAverage();
         break;
       }
       String user = line.strip();
@@ -214,53 +264,53 @@ public final class Example {
         continue;
       }
       if (isExit(user)) {
+        speed.printSessionAverage();
         break;
       }
       if ("/clear".equalsIgnoreCase(user)) {
         chat.clear();
-        System.out.println("(conversation cleared)");
+        console.println("(conversation cleared)");
         continue;
       }
 
-      chat.send(user);
-      System.out.println();
+      ChatReply reply = chat.send(user);
+      speed.recordAndPrint(reply);
+      console.println();
     }
   }
 
   static Path resolveModel(final String[] args, final BufferedReader in) throws Exception {
+    return resolveModel(args, in, new OrderedConsole(System.out, System.err));
+  }
+
+  private static Path resolveModel(
+    final String[] args,
+    final BufferedReader in,
+    final OrderedConsole console
+  ) throws Exception {
     if (hasExplicitModel(args)) {
       return BundledModels.resolveDefault(args);
     }
-    return promptModelChoice(in);
+    return promptModelChoice(in, console);
   }
 
-  private static boolean hasExplicitModel(final String[] args) {
-    if (args != null && args.length > 0 && args[0] != null && !args[0].isBlank()) {
-      return true;
-    }
-    String prop = System.getProperty(PROP_MODEL);
-    if (prop != null && !prop.isBlank()) {
-      return true;
-    }
-    String env = System.getenv(ENV_MODEL);
-    return env != null && !env.isBlank();
-  }
-
-  private static Path promptModelChoice(final BufferedReader in) throws Exception {
+  private static Path promptModelChoice(
+    final BufferedReader in,
+    final OrderedConsole console
+  ) throws Exception {
     var qwen = BundledModels.find(BundledModels.QWEN3_0_6B);
     var gemma = BundledModels.find(BundledModels.GEMMA3_270M);
     var lfm2 = BundledModels.find(BundledModels.LFM2_5_2_6B_GGUF);
 
     while (true) {
-      System.out.println("Select model to load:");
-      System.out.println("  1) Qwen3-0.6B" + (qwen.isPresent() ? "" : "  [not downloaded]"));
-      System.out.println("  2) Gemma3-270M" + (gemma.isPresent() ? "" : "  [not downloaded]"));
-      System.out.println(
+      console.println("Select model to load:");
+      console.println("  1) Qwen3-0.6B" + (qwen.isPresent() ? "" : "  [not downloaded]"));
+      console.println("  2) Gemma3-270M" + (gemma.isPresent() ? "" : "  [not downloaded]"));
+      console.println(
         "  3) LFM2.5-2.6B GGUF Q4_K_M" + (lfm2.isPresent() ? "" : "  [not downloaded]")
           + "  (~16g heap)");
-      System.out.println("  4) Exit");
-      System.out.print("Choice [1-4]: ");
-      System.out.flush();
+      console.println("  4) Exit");
+      console.print("Choice [1-4]: ");
       String line = in.readLine();
       if (line == null) {
         return null;
@@ -280,11 +330,70 @@ public final class Example {
               + "(heap: .mvn/jvm.config -Xmx16g)"));
         }
         case "4", "q", "quit", "exit" -> {
-          System.out.println("Bye.");
+          console.println("Bye.");
           return null;
         }
-        default -> System.out.println("Enter 1, 2, 3, or 4.");
+        default -> console.println("Enter 1, 2, 3, or 4.");
       }
+    }
+  }
+
+  private static boolean hasExplicitModel(final String[] args) {
+    if (args != null && args.length > 0 && args[0] != null && !args[0].isBlank()) {
+      return true;
+    }
+    String prop = NanoLlvmProps.systemProperty(PROP_MODEL, PROP_MODEL_LEGACY);
+    if (prop != null && !prop.isBlank()) {
+      return true;
+    }
+    String env = NanoLlvmProps.environment(ENV_MODEL, ENV_MODEL_LEGACY);
+    return env != null && !env.isBlank();
+  }
+
+  private static final class TurnSpeedTracker {
+    private final OrderedConsole console;
+    private long totalTokens;
+    private long totalNanos;
+    private int turns;
+
+    TurnSpeedTracker(final OrderedConsole console) {
+      this.console = console;
+    }
+
+    void recordAndPrint(final ChatReply reply) {
+      var stats = reply.stats();
+      int tokens = stats.completionTokens();
+      long nanos = Math.max(1L, stats.elapsedNanos());
+      this.totalTokens += tokens;
+      this.totalNanos += nanos;
+      this.turns++;
+
+      double seconds = nanos / 1e9;
+      this.console.printf(
+        Locale.ROOT,
+        "(turn %d: %d tok in %.2fs → %.1f tok/s; session avg %.1f tok/s)%n",
+        this.turns,
+        tokens,
+        seconds,
+        stats.completionTokensPerSecond(),
+        this.sessionTokPerSec());
+    }
+
+    void printSessionAverage() {
+      if (this.turns == 0) {
+        return;
+      }
+      this.console.printf(
+        Locale.ROOT,
+        "(session: %d turn(s), %d tok, %.2fs → avg %.1f tok/s)%n",
+        this.turns,
+        this.totalTokens,
+        this.totalNanos / 1e9,
+        this.sessionTokPerSec());
+    }
+
+    private double sessionTokPerSec() {
+      return this.totalTokens / (this.totalNanos / 1e9);
     }
   }
 
@@ -297,6 +406,7 @@ public final class Example {
     if (System.getenv("NO_COLOR") != null) {
       return false;
     }
-    return !"false".equalsIgnoreCase(System.getProperty(PROP_COLOR, "true"));
+    String color = NanoLlvmProps.systemProperty(PROP_COLOR, PROP_COLOR_LEGACY);
+    return !"false".equalsIgnoreCase(color);
   }
 }

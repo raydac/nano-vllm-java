@@ -36,8 +36,8 @@ Creates `models/Gemma3-270M/`.
 
 ## LFM2.5-2.6B GGUF (optional)
 
-Hybrid Liquid LFM2 checkpoint as a single GGUF file. On load, Q4 weights expand to ~10 GB float32 — plan on
-**~16 GB heap** (default `-Xmx16g` in [`.mvn/jvm.config`](../.mvn/jvm.config)).
+Hybrid Liquid LFM2 checkpoint as a single GGUF file. Weights stay packed in RAM (dequant on matmul); default
+**~16 GB heap** in [`.mvn/jvm.config`](../.mvn/jvm.config) is safe headroom for KV / activations.
 
 ```bash
 ./models/download-lfm2.5-2.6b-gguf.sh

@@ -1,15 +1,17 @@
 package com.igormaznitsa.nanollvm.chat;
 
 import static java.util.Objects.requireNonNull;
-import static java.util.stream.Collectors.joining;
 
 import com.igormaznitsa.nanollvm.llm.AdvisorEnrichment;
-import com.igormaznitsa.nanollvm.llm.AdvisorRunner;
+import com.igormaznitsa.nanollvm.llm.AdvisorResponse;
+import com.igormaznitsa.nanollvm.llm.GenerationStats;
 import com.igormaznitsa.nanollvm.llm.LLM;
 import com.igormaznitsa.nanollvm.llm.SamplingDefaults;
 import com.igormaznitsa.nanollvm.llm.SamplingParams;
+import com.igormaznitsa.nanollvm.prompts.AdvisorPrompts;
 import com.igormaznitsa.nanollvm.prompts.ChatPrompts;
 import com.igormaznitsa.nanollvm.tokenizer.Tokenizer;
+import com.igormaznitsa.nanollvm.utils.ResourceLimits;
 import java.io.PrintStream;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -33,6 +35,10 @@ public final class ChatSession {
   private LlmListener listener = LlmListeners.silent();
   private LlmListeners.PrintStreamLlmListener printSink;
   private Boolean enableThinking;
+  private long lastAdvisorNanos;
+  private GenerationStats lastGenerateStats = GenerationStats.NONE;
+  private int maxHistoryMessages = ResourceLimits.current().maxHistoryMessages();
+  private boolean emitDebugPrompts = true;
 
   /**
    * Opens a session with {@link LLM#defaultSampling()} and a fresh conversation seeded from the
@@ -81,12 +87,42 @@ public final class ChatSession {
   }
 
   /**
+   * Engine that owns generation for this session.
+   */
+  public LLM llm() {
+    return this.llm;
+  }
+
+  /**
    * Sampling parameters currently used by {@link #send} / {@link #sendPrepared}.
    *
-   * @return the live sampling params (not a defensive copy of nested state)
+   * @return the live sampling params (immutable record)
    */
   public SamplingParams samplingParams() {
     return this.samplingParams;
+  }
+
+  /**
+   * Wall time of the advisor pass on the last {@link #send} / {@link #sendPrepared}
+   * ({@code 0} when no advisors ran or before the first turn).
+   */
+  public long lastAdvisorNanos() {
+    return this.lastAdvisorNanos;
+  }
+
+  /**
+   * Engine stats for the main assistant generate(s) on the last {@link #send} /
+   * {@link #sendPrepared} (includes Gemma boilerplate retries' elapsed time; excludes advisors).
+   */
+  public GenerationStats lastGenerateStats() {
+    return this.lastGenerateStats;
+  }
+
+  /**
+   * {@link GenerationStats#elapsedNanos()} of {@link #lastGenerateStats()}.
+   */
+  public long lastGenerateNanos() {
+    return this.lastGenerateStats.elapsedNanos();
   }
 
   /**
@@ -145,6 +181,28 @@ public final class ChatSession {
   }
 
   /**
+   * Caps retained dialog turns (system + user + assistant). Oldest non-system messages are dropped
+   * when the cap is exceeded. Default from {@link ResourceLimits#maxHistoryMessages()}.
+   */
+  public ChatSession maxHistoryMessages(final int maxHistoryMessages) {
+    if (maxHistoryMessages < 1) {
+      throw new IllegalArgumentException("maxHistoryMessages must be >= 1");
+    }
+    this.maxHistoryMessages = maxHistoryMessages;
+    this.trimHistoryToCap();
+    return this;
+  }
+
+  /**
+   * When {@code true} (default), emits {@link LlmTextKind#TEXT_DEBUG} with the prepared model-user
+   * text after advisors. Set {@code false} to avoid leaking full prompts to listeners.
+   */
+  public ChatSession emitDebugPrompts(final boolean emitDebugPrompts) {
+    this.emitDebugPrompts = emitDebugPrompts;
+    return this;
+  }
+
+  /**
    * Composes a diagnostics sink for {@link LlmTextKind#TEXT_DIAGNOSTICS} only.
    * Does not wipe a prior {@link #listen} / {@link #streamTo}; {@code null} is a no-op.
    *
@@ -195,6 +253,8 @@ public final class ChatSession {
    * @return parsed thinking / answer for this turn
    * @throws IllegalArgumentException if {@code userText} is blank after strip
    * @throws NullPointerException     if {@code userText} is {@code null}
+   * @throws com.igormaznitsa.nanollvm.exceptions.GenerationCancelledException if {@link LLM#cancel()} fires
+   * @throws com.igormaznitsa.nanollvm.exceptions.GenerationTimeoutException if the session timeout elapses
    */
   public ChatReply send(final String userText) {
     requireNonNull(userText, "userText");
@@ -209,6 +269,8 @@ public final class ChatSession {
    * @param modelUserText   text used in the chat template for this generate
    * @return parsed thinking / answer for this turn
    * @throws IllegalArgumentException if either text is blank after strip
+   * @throws com.igormaznitsa.nanollvm.exceptions.GenerationCancelledException if {@link LLM#cancel()} fires
+   * @throws com.igormaznitsa.nanollvm.exceptions.GenerationTimeoutException if the session timeout elapses
    */
   public ChatReply sendPrepared(final String historyUserText, final String modelUserText) {
     return this.sendPrepared(historyUserText, modelUserText, false);
@@ -224,6 +286,8 @@ public final class ChatSession {
    *                          the app but are not fed into this generate (avoids tiny-model latch)
    * @return parsed thinking / answer for this turn
    * @throws IllegalArgumentException if either text is blank after strip
+   * @throws com.igormaznitsa.nanollvm.exceptions.GenerationCancelledException if {@link LLM#cancel()} fires
+   * @throws com.igormaznitsa.nanollvm.exceptions.GenerationTimeoutException if the session timeout elapses
    */
   public ChatReply sendPrepared(
     final String historyUserText,
@@ -242,42 +306,70 @@ public final class ChatSession {
     }
 
     this.history.add(ChatMessage.user(historyUser));
+    this.trimHistoryToCap();
     Tokenizer tokenizer = this.llm.tokenizer();
     ChatMessages.truncateHistory(
       this.history, tokenizer, this.llm.config().maxModelLen(), this.samplingParams.maxTokens());
 
     boolean gemmaChat = tokenizer.isGemmaChat();
     TurnStream turn = this.beginTurn();
-    AdvisorEnrichment enrichment =
-      AdvisorRunner.enrich(this.llm, modelUser, this.samplingParams);
-    this.emitAdvisorNotes(enrichment.advisorNotes());
 
+    long advisorStarted = System.nanoTime();
+    AdvisorEnrichment enrichment =
+      this.llm.runAdvisors(modelUser, this.priorDialogForAdvisors(), this.samplingParams);
+    this.emitAdvisorNotes(enrichment.responses());
+    this.emitPreparedUserDebug(enrichment);
+    this.lastAdvisorNanos = System.nanoTime() - advisorStarted;
+
+    this.lastGenerateStats = GenerationStats.NONE;
     ChatReply reply = this.generateTurn(turn, enrichment.modelUserText(), isolateGeneration);
 
-    if (gemmaChat && ChatPrompts.isSetupBoilerplate(reply.answer())) {
+    if (gemmaChat && this.isUnusableMainAnswer(reply.answer())) {
       ChatMessages.scrubSetupBoilerplateTurns(this.history);
-      this.emitDiagnostics("(setup boilerplate — retrying without filler history)");
+      this.emitDiagnostics("(unusable main answer — retrying without filler history)");
+      this.discardPrintedAnswer();
       turn = this.beginTurn();
       reply = this.generateTurn(turn, enrichment.modelUserText(), isolateGeneration);
-      if (ChatPrompts.isSetupBoilerplate(reply.answer())) {
-        reply = this.boilerplateFallback(enrichment);
+      if (this.isUnusableMainAnswer(reply.answer())) {
+        this.discardPrintedAnswer();
+        reply = this.advisorSalvageFallback(enrichment);
       }
     }
 
     return this.finishTurn(reply, turn);
   }
 
-  private ChatReply boilerplateFallback(final AdvisorEnrichment enrichment) {
-    if (enrichment.hasGroundedNotes()) {
-      String salvage = enrichment.groundedNotes().stream()
-        .map(note -> note == null ? "" : note.strip())
-        .filter(note -> !note.isEmpty())
-        .collect(joining(" "));
-      this.emitDiagnostics("(setup boilerplate — used grounded advisor notes as answer)");
-      return new ChatReply("", salvage.strip(), false);
+  private List<ChatMessage> priorDialogForAdvisors() {
+    List<ChatMessage> users = this.history.stream()
+      .filter(message -> message.role() == ChatRole.USER)
+      .toList();
+    if (users.size() <= 1) {
+      return List.of();
     }
-    this.emitDiagnostics("(setup boilerplate — used plain greeting fallback)");
-    return new ChatReply("", "Hello! What would you like to know?", false);
+    return users.subList(0, users.size() - 1);
+  }
+
+  private boolean isUnusableMainAnswer(final String answer) {
+    String body = answer == null ? "" : answer.strip();
+    if (body.isEmpty() || ChatPrompts.isSetupBoilerplate(body)) {
+      return true;
+    }
+    if (AdvisorPrompts.isCounselorNameOnly(body)) {
+      return true;
+    }
+    return this.llm.advisors().stream()
+      .map(advisor -> advisor.name().strip())
+      .anyMatch(name -> name.equalsIgnoreCase(body));
+  }
+
+  private ChatReply advisorSalvageFallback(final AdvisorEnrichment enrichment) {
+    String salvage = String.join(" ", enrichment.answerSalvageNotes());
+    if (!salvage.isBlank()) {
+      this.emitDiagnostics("(unusable main answer — used advisor notes as answer)");
+      return new ChatReply("", salvage.strip(), false, this.lastGenerateStats);
+    }
+    this.emitDiagnostics("(unusable main answer — used plain reply fallback)");
+    return new ChatReply("", "What would you like to explore?", false, this.lastGenerateStats);
   }
 
   private TurnStream beginTurn() {
@@ -287,15 +379,27 @@ public final class ChatSession {
     return new TurnStream();
   }
 
-  private void emitAdvisorNotes(final List<String> notes) {
-    if (notes == null || notes.isEmpty()) {
+  private void discardPrintedAnswer() {
+    if (this.printSink != null) {
+      this.printSink.discardAnswer();
+    }
+  }
+
+  private void emitAdvisorNotes(final List<AdvisorResponse> responses) {
+    if (responses == null || responses.isEmpty()) {
       return;
     }
-    for (int i = 0; i < notes.size(); i++) {
-      String note = notes.get(i) == null ? "" : notes.get(i).strip();
-      String body = note.isEmpty() ? "(no usable note)" : note;
-      this.listener.onText(this.llm, LlmTextEvent.advisorNote(i + 1, body));
+    for (AdvisorResponse response : responses) {
+      this.listener.onText(
+        this.llm, LlmTextEvent.advisorNote(response.advisorName(), response.text()));
     }
+  }
+
+  private void emitPreparedUserDebug(final AdvisorEnrichment enrichment) {
+    if (!this.emitDebugPrompts) {
+      return;
+    }
+    this.listener.onText(this.llm, LlmTextEvent.debug(enrichment.modelUserText()));
   }
 
   private void emitDiagnostics(final String message) {
@@ -325,12 +429,27 @@ public final class ChatSession {
       tokenId -> {
         streamedIds.add(tokenId);
         turn.push(this.llm, this.listener,
-          AssistantParts.parse(tokenizer.decode(streamedIds, gemmaChat)));
+            ChatReply.parse(tokenizer.decode(streamedIds, gemmaChat)));
       }
     );
 
-    return ChatReply.from(
-      AssistantParts.parse(tokenizer.decode(outputs.getFirst().tokenIds(), gemmaChat)));
+    LLM.GenerationOutput output = outputs.getFirst();
+    this.lastGenerateStats = this.mergeGenerateStats(this.lastGenerateStats, output.stats());
+    return ChatReply.parse(tokenizer.decode(output.tokenIds(), gemmaChat))
+      .withStats(this.lastGenerateStats);
+  }
+
+  private GenerationStats mergeGenerateStats(
+    final GenerationStats prior,
+    final GenerationStats next
+  ) {
+    if (prior.equals(GenerationStats.NONE)) {
+      return next;
+    }
+    return new GenerationStats(
+      next.promptTokens(),
+      next.completionTokens(),
+      prior.elapsedNanos() + next.elapsedNanos());
   }
 
   private boolean thinkingEnabled(final Tokenizer tokenizer) {
@@ -362,7 +481,7 @@ public final class ChatSession {
     boolean thinkOpen = reply.thinkOpen();
 
     if (this.shouldSalvageAnswer(answer, thinking)) {
-      answer = AssistantParts.salvageFromThinking(thinking);
+      answer = ChatReply.salvageFromThinking(thinking);
       this.emitDiagnostics(thinkOpen
         ? "(reply recovered from unclosed thinking)"
         : "(reply recovered from thinking; model omitted or truncated visible answer)");
@@ -372,14 +491,32 @@ public final class ChatSession {
       this.emitDiagnostics("(empty reply — used fallback)");
     }
 
-    ChatReply finished = new ChatReply(thinking, answer, false);
+    ChatReply finished = new ChatReply(thinking, answer, false, this.lastGenerateStats);
     turn.push(this.llm, this.listener,
-      new AssistantParts(finished.thinking(), finished.answer(), false));
+      new ChatReply(finished.thinking(), finished.answer(), false, finished.stats()));
+    this.closePrintTurn();
+    this.history.add(ChatMessage.assistant(finished.answer()));
+    this.trimHistoryToCap();
+    return finished;
+  }
+
+  private void trimHistoryToCap() {
+    while (this.history.size() > this.maxHistoryMessages) {
+      int dropAt = 0;
+      if (!this.history.isEmpty() && this.history.getFirst().role() == ChatRole.SYSTEM) {
+        if (this.history.size() == 1) {
+          break;
+        }
+        dropAt = 1;
+      }
+      this.history.remove(dropAt);
+    }
+  }
+
+  private void closePrintTurn() {
     if (this.printSink != null) {
       this.printSink.closeTurn();
     }
-    this.history.add(ChatMessage.assistant(finished.answer()));
-    return finished;
   }
 
   private boolean shouldSalvageAnswer(final String answer, final String thinking) {
@@ -396,7 +533,7 @@ public final class ChatSession {
     private String shownThink = "";
     private String shownAnswer = "";
 
-    void push(final LLM llm, final LlmListener listener, final AssistantParts parts) {
+    void push(final LLM llm, final LlmListener listener, final ChatReply parts) {
       this.emit(llm, listener, LlmTextKind.TEXT_THINKING, parts.thinking(), this.shownThink);
       this.shownThink = parts.thinking();
       if (!parts.thinkOpen()) {

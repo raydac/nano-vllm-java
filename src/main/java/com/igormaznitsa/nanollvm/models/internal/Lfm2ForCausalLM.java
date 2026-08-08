@@ -1,12 +1,13 @@
-package com.igormaznitsa.nanollvm.models;
+package com.igormaznitsa.nanollvm.models.internal;
 
-import static com.igormaznitsa.nanollvm.models.WeightNames.ARCH_LFM2;
-import static com.igormaznitsa.nanollvm.models.WeightNames.GGUF_OUTPUT;
-import static com.igormaznitsa.nanollvm.models.WeightNames.GGUF_TOKEN_EMBD;
-import static com.igormaznitsa.nanollvm.models.WeightNames.GGUF_TOKEN_EMBD_NORM;
-import static com.igormaznitsa.nanollvm.models.WeightNames.ggufBlk;
+import static com.igormaznitsa.nanollvm.models.internal.WeightNames.ARCH_LFM2;
+import static com.igormaznitsa.nanollvm.models.internal.WeightNames.GGUF_OUTPUT;
+import static com.igormaznitsa.nanollvm.models.internal.WeightNames.GGUF_TOKEN_EMBD;
+import static com.igormaznitsa.nanollvm.models.internal.WeightNames.GGUF_TOKEN_EMBD_NORM;
+import static com.igormaznitsa.nanollvm.models.internal.WeightNames.ggufBlk;
 import static java.util.Objects.requireNonNull;
 
+import com.igormaznitsa.nanollvm.internal.Context;
 import com.igormaznitsa.nanollvm.layers.Attention;
 import com.igormaznitsa.nanollvm.layers.Linear;
 import com.igormaznitsa.nanollvm.layers.Norms.RMSNorm;
@@ -23,6 +24,8 @@ import java.util.stream.IntStream;
 
 /**
  * Immutable LFM2 hybrid causal LM (short-conv + GQA) loaded from GGUF weight names.
+ *
+ * <p>Weights may stay packed (default) or be dense float32 after {@link WeightBag#asDense()}.
  */
 public record Lfm2ForCausalLM(Lfm2Model model, ParallelLMHead lmHead) implements CausalLM {
 
@@ -36,8 +39,47 @@ public record Lfm2ForCausalLM(Lfm2Model model, ParallelLMHead lmHead) implements
 
   private static Lfm2ForCausalLM assemble(final Config.HfConfig config, final WeightBag weights) {
     Lfm2Model model = new Lfm2Model(config, weights);
-    Tensor lmWeight = weights.find(GGUF_OUTPUT).orElseGet(() -> model.embedTokens().weight());
-    return new Lfm2ForCausalLM(model, new ParallelLMHead(lmWeight));
+    ParallelLMHead lmHead = weights.findPacked(GGUF_OUTPUT)
+      .map(ParallelLMHead::new)
+      .or(() -> weights.find(GGUF_OUTPUT).map(ParallelLMHead::new))
+      .orElseGet(() -> tiedLmHead(model.embedTokens()));
+    return new Lfm2ForCausalLM(model, lmHead);
+  }
+
+  private static ParallelLMHead tiedLmHead(final VocabParallelEmbedding embed) {
+    return embed.isPacked()
+      ? new ParallelLMHead(embed.packedWeight())
+      : new ParallelLMHead(embed.weight());
+  }
+
+  private static Linear.Row linearRow(final WeightBag weights, final String name) {
+    return weights.findPacked(name)
+      .map(Linear.Row::new)
+      .orElseGet(() -> new Linear.Row(weights.require(name)));
+  }
+
+  private static VocabParallelEmbedding embedding(final WeightBag weights, final String name) {
+    return weights.findPacked(name)
+      .map(VocabParallelEmbedding::new)
+      .orElseGet(() -> new VocabParallelEmbedding(weights.require(name)));
+  }
+
+  private static ShortConv buildShortConv(
+    final WeightBag weights,
+    final String blk,
+    final int layerIndex
+  ) {
+    return weights.isPacked(blk + "shortconv.in_proj.weight")
+      ? new ShortConv(
+      weights.requirePacked(blk + "shortconv.in_proj.weight"),
+      weights.require(blk + "shortconv.conv.weight"),
+      weights.requirePacked(blk + "shortconv.out_proj.weight"),
+      layerIndex)
+      : new ShortConv(
+      weights.require(blk + "shortconv.in_proj.weight"),
+      weights.require(blk + "shortconv.conv.weight"),
+      weights.require(blk + "shortconv.out_proj.weight"),
+      layerIndex);
   }
 
   @Override
@@ -46,13 +88,13 @@ public record Lfm2ForCausalLM(Lfm2Model model, ParallelLMHead lmHead) implements
   }
 
   @Override
-  public Tensor forward(final Tensor inputIds, final Tensor positions) {
-    return this.model.forward(inputIds, positions);
+  public Tensor forward(final Tensor inputIds, final Tensor positions, final Context context) {
+    return this.model.forward(inputIds, positions, context);
   }
 
   @Override
-  public Tensor computeLogits(final Tensor hiddenStates) {
-    return this.lmHead.forward(hiddenStates);
+  public Tensor computeLogits(final Tensor hiddenStates, final Context context) {
+    return this.lmHead.forward(hiddenStates, context);
   }
 
   @Override
@@ -108,10 +150,10 @@ public record Lfm2ForCausalLM(Lfm2Model model, ParallelLMHead lmHead) implements
       float scaling = (float) Math.pow(headDim, -0.5);
       String blk = ggufBlk(layerIndex);
       return new Lfm2Attention(
-        new Linear.Row(weights.require(blk + "attn_q.weight")),
-        new Linear.Row(weights.require(blk + "attn_k.weight")),
-        new Linear.Row(weights.require(blk + "attn_v.weight")),
-        new Linear.Row(weights.require(blk + "attn_output.weight")),
+        linearRow(weights, blk + "attn_q.weight"),
+        linearRow(weights, blk + "attn_k.weight"),
+        linearRow(weights, blk + "attn_v.weight"),
+        linearRow(weights, blk + "attn_output.weight"),
         RotaryEmbedding.get(headDim, headDim, config.maxPositionEmbeddings(), config.ropeTheta()),
         new Attention(numHeads, headDim, scaling, numKvHeads, layerIndex),
         new RMSNorm(weights.require(blk + "attn_q_norm.weight"), config.rmsNormEps()),
@@ -121,19 +163,20 @@ public record Lfm2ForCausalLM(Lfm2Model model, ParallelLMHead lmHead) implements
         headDim);
     }
 
-    Tensor forward(final Tensor positions, final Tensor hiddenStates) {
+    Tensor forward(final Tensor positions, final Tensor hiddenStates, final Context context) {
       Tensor q = this.normHeads(
-        this.qProj.forward(hiddenStates).reshape(hiddenStates.size(0), this.numHeads, this.headDim),
+        this.qProj.forward(hiddenStates, context)
+          .reshape(hiddenStates.size(0), this.numHeads, this.headDim),
         this.qNorm);
       Tensor k = this.normHeads(
-        this.kProj.forward(hiddenStates)
+        this.kProj.forward(hiddenStates, context)
           .reshape(hiddenStates.size(0), this.numKvHeads, this.headDim),
         this.kNorm);
-      Tensor v = this.vProj.forward(hiddenStates)
+      Tensor v = this.vProj.forward(hiddenStates, context)
         .reshape(hiddenStates.size(0), this.numKvHeads, this.headDim);
       Tensor[] rotated = this.rotaryEmb.forward(positions, q, k);
-      Tensor o = this.attn.forward(rotated[0], rotated[1], v);
-      return this.oProj.forward(o.reshape(o.size(0), this.numHeads * this.headDim));
+      Tensor o = this.attn.forward(rotated[0], rotated[1], v, context);
+      return this.oProj.forward(o.reshape(o.size(0), this.numHeads * this.headDim), context);
     }
 
     private Tensor normHeads(final Tensor x, final RMSNorm norm) {
@@ -161,14 +204,15 @@ public record Lfm2ForCausalLM(Lfm2Model model, ParallelLMHead lmHead) implements
       }
       String blk = ggufBlk(layerIndex);
       return new Lfm2MLP(
-        new Linear.Row(weights.require(blk + "ffn_gate.weight")),
-        new Linear.Row(weights.require(blk + "ffn_up.weight")),
-        new Linear.Row(weights.require(blk + "ffn_down.weight")));
+        linearRow(weights, blk + "ffn_gate.weight"),
+        linearRow(weights, blk + "ffn_up.weight"),
+        linearRow(weights, blk + "ffn_down.weight"));
     }
 
-    Tensor forward(final Tensor x) {
+    Tensor forward(final Tensor x, final Context context) {
       return this.downProj.forward(
-        Ops.siluAndMul(this.gateProj.forward(x), this.upProj.forward(x)));
+        Ops.siluAndMul(this.gateProj.forward(x, context), this.upProj.forward(x, context)),
+        context);
     }
   }
 
@@ -198,11 +242,7 @@ public record Lfm2ForCausalLM(Lfm2Model model, ParallelLMHead lmHead) implements
       Lfm2Attention attention = null;
       ShortConv shortConv = null;
       if (config.isConvLayer(layerIndex)) {
-        shortConv = new ShortConv(
-          weights.require(blk + "shortconv.in_proj.weight"),
-          weights.require(blk + "shortconv.conv.weight"),
-          weights.require(blk + "shortconv.out_proj.weight"),
-          layerIndex);
+        shortConv = buildShortConv(weights, blk, layerIndex);
       } else {
         attention = new Lfm2Attention(config, weights, layerIndex);
       }
@@ -214,13 +254,13 @@ public record Lfm2ForCausalLM(Lfm2Model model, ParallelLMHead lmHead) implements
         new RMSNorm(weights.require(blk + "ffn_norm.weight"), config.rmsNormEps()));
     }
 
-    Tensor forward(final Tensor positions, final Tensor hiddenStates) {
+    Tensor forward(final Tensor positions, final Tensor hiddenStates, final Context context) {
       Tensor normed = this.operatorNorm.forward(hiddenStates);
       Tensor mixed = this.attention != null
-        ? this.attention.forward(positions, normed)
-        : this.shortConv.forward(normed);
+        ? this.attention.forward(positions, normed, context)
+        : this.shortConv.forward(normed, context);
       Tensor afterOp = Ops.add(hiddenStates, mixed);
-      return Ops.add(afterOp, this.mlp.forward(this.ffnNorm.forward(afterOp)));
+      return Ops.add(afterOp, this.mlp.forward(this.ffnNorm.forward(afterOp), context));
     }
   }
 
@@ -242,15 +282,15 @@ public record Lfm2ForCausalLM(Lfm2Model model, ParallelLMHead lmHead) implements
         .mapToObj(i -> new Lfm2DecoderLayer(config, weights, i))
         .toList();
       return new Lfm2Model(
-        new VocabParallelEmbedding(weights.require(GGUF_TOKEN_EMBD)),
+        embedding(weights, GGUF_TOKEN_EMBD),
         List.copyOf(built),
         new RMSNorm(weights.require(GGUF_TOKEN_EMBD_NORM), config.rmsNormEps()));
     }
 
-    Tensor forward(final Tensor inputIds, final Tensor positions) {
-      Tensor hidden = this.embedTokens.forward(inputIds);
+    Tensor forward(final Tensor inputIds, final Tensor positions, final Context context) {
+      Tensor hidden = this.embedTokens.forward(inputIds, context);
       for (Lfm2DecoderLayer layer : this.layers) {
-        hidden = layer.forward(positions, hidden);
+        hidden = layer.forward(positions, hidden, context);
       }
       return this.embeddingNorm.forward(hidden);
     }

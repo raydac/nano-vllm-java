@@ -1,85 +1,117 @@
 ## 1. Implementation Progress
 - Maven `1.0.0-SNAPSHOT`; enforcer Java `[21,)`, Maven `[3.9,)`; JPMS module `com.igormaznitsa.nanollvm`; POM description = CPU LLM inference library (not an app / not a full vLLM port)
+- **ResourceLimits** (exported utils): process-wide defaults + builder; RAG/PDF/JSON/GGUF/safetensors/corpus/history budgets; overridable via `ResourceLimits.setCurrent` or `RagLoadOptions.withResourceLimits`
 - CausalLM: Qwen3 + Gemma3 + LFM2 (GGUF); tokenizers GPT-2 BPE / Metaspace / GGUF-embedded
-- **GGUF:** `*.gguf` → `internal.Gguf*` → FP32 `WeightBag` → `Lfm2ForCausalLM` (Q4_K/Q4_0/Q6_K/Q8_0/F16/BF16/F32); ShortConv + `ConvStateArena`; download `models/download-lfm2.5-2.6b-gguf.sh`; Example menu #3; ~16 GiB heap for 2.6B
-- Library: `LlmModelFactory.make` → shared immutable `LlmModel` (renamed from `Model`/`ModelFactory` to avoid generic name clashes); `LLM.Builder`; `ChatSession` + `LlmListener`/`LlmTextKind`; helpers `chat`/`chatOnce`/`complete`; `cancel` + generate timeout; `exceptions.*`
-- **Advisors:** `LLM.setAdvisors(AdvisorMode, String…)` — isolated advisor generates before main chat/RAG turn; thinking shows all notes; mix filters via `selectNotesForMix`; Example: Gemma 3 / Qwen 2 / LFM none (`configureDemoAdvisors`); wording in `AdvisorPrompts` / `RagPrompts`
-- Engine: `Transformer` owns per-LLM `KvCacheArena` (+ optional `ConvStateArena`); `Scheduler` continuous batching; CPU matmul default = all processors (`cpuThreads` / `allCpuThreads` / `disableMultiCpu` / prop `nanovllm.cpu.threads`)
-- Immutable split: weights/tokenizer on `LlmModel`; runtime KV/scheduler/lock on `LLM`; CausalLM layers are `record`s; constants in `WeightNames` / `NanoVllmProps`
-- JPMS: exports models/llm/chat/rag/exceptions/tokenizer/prompts/utils; non-exported `samples` (Example/Bench/LogTriageHelloWorld + `samples.utils`), engine/layers/tensor/internal; library JAR has no `Main-Class` (demos via `mvn exec:java` / `java -m …`); `Tokenizer.fromGguf` takes `GgufTokenizerSource`
+- **GGUF:** packed by default; `LlmModelFactory.make(path, io, true)` unpacks at load (mmap→float32, no packed heap); `LLM.Builder.allowUnpackParameters()` late-unpacks packed models (releases bytes); `Lfm2ForCausalLM`; Example menu #3
+- Library: `LlmModelFactory.make` → shared immutable `LlmModel`; `LLM.Builder` (warmup **off** by default); `GenerationStats` on `GenerationOutput` / `ChatReply`; `ChatSession` + `LlmListener`; helpers `chat`/`chatOnce`/`complete`; `cancel` + timeout; `exceptions.*`
+- **Advisors:** `advisors(LlmAdvisorMixer, LlmAdvisor…)`; unique non-blank names at build; one batched `generate`; `AdvisorResponse(name,text)`; mix via mixer with `ChatHistory`; Example uses `LlmAdvisorMixer.defaults()`
+- Engine: `Transformer` owns per-LLM `KvCacheArena` (+ optional `ConvStateArena`) and an explicit step `Context` (no ThreadLocal); `MatmulRuntime` per `LLM`, bound on that Context each step; `VectorMath` = stateless float primitives only
+- `Sequence` carries its own `blockSize` from `Config` (no process-wide registry)
+- `LLM.generate` / `close` use `ReentrantLock` (no `synchronized`)
+- JPMS: exports models/llm/chat/rag/exceptions/tokenizer/utils; non-exported `models.internal`, `prompts`, samples, engine/layers/tensor/internal; library JAR has no `Main-Class`; `NanoLlvmProps` prefers `nanollvm.*` (legacy `nanovllm.*`)
+
 - **Samples packaging:** `BundledModels` / `BundledRag` → `samples.utils` (not library API); README Hello World mirrored as `samples.LogTriageHelloWorld`
 - **RAG:** `RagFactory` → `PreparedRag` (inline BM25 + passage prep + `Passage` record); package-private `CorpusLoader` for chunking; `RagSession` nests `UserMessage`, `QueryRewrite`, `Retrieval`; public API ~10 types in `rag/` (+ `PdfTextExtractor`)
-    - Docs: English `description.md` (§7a GGUF, §15 call chain, §16 map, §17 RAG, ch.10 math); ch.16 paths audited (`internal.*` loaders/`Context`, `llm/LLM.java`, LFM2 + advisors in tree)
+    - Docs: English `description.md` (§7a GGUF kernels/in-place dequant, §15 call chain, §16 map, §17 RAG, ch.10 math); README GGUF / features aligned; ch.16 paths audited
 - Demo RAG corpus under `rag/` is `.md`/`.txt` only; `rag/*.pdf` is gitignored (local/temporary PDFs, not project assets or test fixtures)
 
 
 ## 2. Architecture & Technical Discoveries
 - Share one `LlmModel` / `PreparedRag` across many `LLM`s; one LLM not concurrent-safe for generate (`cancel()` is cross-thread); `Scheduler.clear()` on cancel/timeout
-- Advisors reuse the same `LLM.generate` (lock); advisor notes on thinking stream (`[advisor N]`); RAG hit mix keeps only Context-grounded non-abstention hints (no-hit: thinking only); compact Gemma prepends hints + Context-first footer
-- Exports: models, llm, chat, rag, exceptions, tokenizer, prompts, utils (`Json`, `NanoVllmProps`); private: samples (+ utils for local models/rag), engine, layers, tensor, internal
+- Advisors: same `LLM.generate` batch; prior *user* turns only; mixer gets `ChatHistory` + `List<AdvisorResponse>`; default mixer inserts notes into facts; salvage uses grounded notes from original prompt
+- `extractContextBlock` ends at `\nIf Context` / answer markers so instruction text is not treated as Context terms
+- Exports: models, llm, chat, rag, exceptions, tokenizer, utils (`NanoLlvmProps`); private: samples (+ utils for local models/rag), engine, layers, tensor, internal, prompts, `models.internal` (`LlmModelAccess`)
 - Demo path helpers: `samples.utils.BundledModels` / `BundledRag` — not shipped as public API (weights/corpus not in JAR)
-- `LlmModel.network()` → `CausalLM` for same-module `Transformer` (exported but non-stable)
-- GGUF→FP32: Q4_K_M mixes Q4_K+Q6_K; 2D dims → HF `[out,in]`; LFM2 norm `token_embd_norm`; conv state by `seqId`; `head_count_kv` per-layer (0=conv) → max>0 as GQA heads
+- Engine obtains `CausalLM` via `LlmModelAccess.resolveNetwork` (public `LlmModel.network()` removed)
+- GGUF: packed by default; load-time unpack via `make(..., true)`; late unpack releases packed bytes; per-tensor `LinearKernel` / `EmbeddingKernel` = dense or one packed holder + dequant lambda (type chosen in `of()`)
+- Format splits stop at weight touchpoints: activations/KV/RMSNorm/Attention/`FloatKernels` are always F32 — further “format variants” of those classes buy nothing. `GgufDequant.dequantizeRange` now decodes Q4_0/Q8_0/Q4_K/Q6_K blocks straight into `dst` (one-block scratch only for mid-block edges); next optional win is fused packed GEMM
+- Optional next GGUF perf: mmap weights (no `byte[]` copy); FP16 / smaller default KV; fused packed GEMM without row scratch
+
 - LFM2 chat: no `chat_template` in many GGUFs → ChatML if `<|im_start|>` in vocab; `invitesThinking=false` + `PLAIN_CHAT_SYSTEM` (Qwen think rules cause format-narration)
 - Gemma: no system role by default; long system+hello latches boilerplate
 - Engine status + chat text share `LlmListener` / `LlmTextKind` (`STATUS_*` + `TEXT_*`); `.listen(...)` on LLM / factories; no EngineIo
+- `TEXT_DEBUG`: ChatSession always emits prepared model-user text after advisors; CLI `streamTo` prints `debug>` lines; advisor notes use advisor name (`TEXT_ADVISOR_NOTE` + `advisorName`)
+- Off-topic RAG: any longest-tier contentful OOV ⇒ outside (blocks `about`-only BMW→LRRH hits)
 - RAG session: short turns with prior → rewrite only if follow-up alone has no hits; NONE/empty → Prior+follow-up fallback (not abort); `PreparedRag.retrieve` re-ranks by coverage + length; helpers in `RagSession.Retrieval`; `RagIndex.isOutsideCorpus` on indexes
 
 
 ## 3. Technical Debt & Refactoring
-- RAG load path consolidated: `CorpusLoader` + merged `PreparedRag` (was TextCorpus/TextChunker/PassagePreparser/Bm25Index/RagQueryTerms); `description.md` §17 / glossary updated
-- Attention O(n²); no float16 / TP / CUDA; GGUF dequant-on-load only (no quantized matmul)
-- PDF RAG: pure-Java extractor keeps OCR glyph spaces, joins Tj pieces, ToUnicode CMaps; Cyrillic inflection prefix keys for case endings; PDFBox test-scoped for fixtures
-- Metaspace BPE simplified; optional `chat_template.jinja` in download
-- Optional repetition penalty for tiny IT models
-- `Sequence.setBlockSize` still static (breaks if LLMs differ on block size)
+- **API surface (pre-1.0):** path LLM ctors/builders and public tick API removed (SNAPSHOT: no deprecation period); ChatReply/`AssistantParts` demotion, `RagSession.open(ChatSession)` rewrite, Config KV setter package-private, defensive returns, JavaDoc/thread contracts
+- Attention O(n²); no float16 / TP / CUDA; GGUF packed by default (`allowUnpackParameters` → float32); HF safetensors still FP32
+- PDF RAG: pure-Java extractor; Cyrillic inflection keys; PDFBox test-scoped
+- `Sequence` KV `blockSize` is per-sequence (from `Config`); `Config` sealed at build (no post-load setters); matmul uses shared lazy or custom `ExecutorService` (not per-LLM owned pools)
+- No `ThreadLocal` / `synchronized` in library code: step `Context` is explicit; generate exclusion via `ReentrantLock`; `MatmulRuntime` shared pool remains `AtomicReference` CAS; `FloatKernels` / tokenizer byte maps are immutable singletons
 - LFM2 GGUF tokenizer heuristics may need per-export tuning
-- Advisors: Example wires by arch — Gemma 3 roles PARALLEL, Qwen 2 roles PARALLEL, LFM off; `AdvisorPrompts.demoRolesGemma()` / `demoRolesQwen()`
+- Advisors: Example wires named `LlmAdvisor`s by arch on `LLM.Builder` — Gemma/Qwen on, LFM off
+- Remaining polish (optional): thin unused Config knobs (`gpuMemoryUtilization` / `enforceEager`); drop legacy `nanovllm.*` after notice
 
 
 ## 4. Current Work In Progress
-- Advisor mix: Context lexical grounding filter live; watch whether complementary hints still help tiny models
-- Library JAR: `Main-Class` removed from manifest (verified); `exec-maven-plugin` still defaults to `samples.Example` for in-repo `mvn exec:java`
+- **Done (2026-08-08, SNAPSHOT cleanup):** removed all `@Deprecated` APIs — path LLM ctors/builders, public tick (`addRequest`/`step`/`isFinished` + nested records private), `AdvisorPrompt.isolated`, compact `RagSession.formatUserMessage`; callers use `LlmModelFactory` only
+- **Done (2026-08-08, continue pass):** `LlmModel.network()` removed → `LlmModelAccess` bridge; README RAG trust boundary + ResourceLimits notes; Config knob JavaDoc; ChatSession/RagSession `@throws`; audit canvas refreshed
+- **Done (2026-08-08):** audit fixes — ConvStateArena clear on finish/preempt/cancel; late unpack uses `asDense()` (no shared packed-byte release); `LLM` closed flag + arenas nulled + matmul.close under lock; `addRequest`/`step` under generateLock; `ResourceLimits` defaults (override via `setCurrent` / `RagLoadOptions.withResourceLimits` / ChatSession caps); PDF/JSON/GGUF/safetensors/corpus budgets
+- **Done (2026-08-08):** full library audit → canvas `library-audit-2026-08.canvas.tsx`; `security_audit.txt`
+- **Done:** advisor API redesign — `LlmAdvisor` + `AdvisorResponse` + `LlmAdvisorMixer` + `ChatHistory`; removed `AdvisorMode`
+- **Done (Grimm latch):** advisor prior = user turns only; mix/salvage grounding + dedupe; prompts prefer most specific Context bullet; Gemma demo `RAG_TOP_K_GEMMA=2`
+- **Done (facts-then-question):** RAG/advisor document = fact bullets, blank line, user question last; no Context:/instruction headings; advisor notes merge into facts
+- Gemma unusable main answer (blank/boilerplate): retry, then salvage real advisor notes
+- Boilerplate salvage uses mixed notes, else raw advisor notes (not the explore fallback when advisors answered)
+- Demo Example: `OrderedConsole(out, err)` — assistant/prompts/tok/s on stdout; thinking/debug/`STATUS_INFO` on stderr
+- RAG no-hit: short “reply briefly” prompt; `LlmListeners.compose` keeps printSink for `assistant>` labels
+- RAG query terms: no language stopword lists — OOV/longest-term outside check + length-then-IDF select
+- Optional next GGUF perf: mmap weights (no `byte[]` copy); FP16 / smaller default KV; fused packed GEMM without row scratch
+- GGUF unpack: prefer `LlmModelFactory.make(path, io, true)` at load; builder flag remains for already-packed models
+- Format kernels: dense + Packed*Kernel + dequant lambda; `GgufDequant.dequantizeRange` in-place block decode (Q4_K/Q6_K/…)
+- **Done:** `GenerationStats` on `LLM.GenerationOutput` / `ChatReply`; Example tok/s uses engine stats (advisors excluded)
 
 
 ## 5. Known Issues & Limitations
-- CPU-only; large float32 heap; weights not in git
-- LFM2.5-2.6B needs ~16 GiB after Q4→FP32; default `-Xmx16g` in `.mvn/jvm.config`
-- Bench auto-sizes KV blocks (was hardcoded OOM); still needs `MAVEN_OPTS=-Xmx8g` for weights
-- Gemma RAG: compact prompt answers from Context; no-hit: advisors on thinking only (no claim mix); Example Gemma topK=3, 128 tok, 900 context chars
-- Demo `rag/` is English Grimm/LRRH only — Russian queries correctly get no hits unless local PDFs are added
-- Off-topic RAG mitigated by DF/OOV ratio + overlap; contentful OOV (len≥5, e.g. estonia) forces no-hit even when stopwords match fairy-tale text
-- Query term select drops English function words, keeps rarest ≤5 contentful terms; `qualifies` needs at most 2 matches — fixes long natural questions on tiny atomic corpora (was requiring ~half of who/are/did/they…)
-- Short follow-ups: rewrite skipped when question alone has hits; rewrite NONE/empty falls back to Prior+follow-up (no longer aborts retrieval)
-- Qwen RAG + thinking + low maxTokens truncates after `<think>` — Example uses 768; ChatSession stub salvage remains
-- Extra generate per short RAG follow-up (rewrite) — only when the follow-up alone has no BM25 hits
-- Advisors multiply turn latency by advisor count (SEQUENTIAL) or share one batch (PARALLEL)
-- Lexical advisor grounding blocks invented names (e.g. Danish) but not relation errors that reuse Context tokens (e.g. “Jacob was Wilhelm’s father”)
+- Security (see `security_audit.txt`): defaults now cap inflate/CMap/safetensors header/corpus/JSON/GGUF string dims; raise via `ResourceLimits` / `RagLoadOptions.withResourceLimits`. RAG mixes corpus into prompts by design (README trust boundary); `ChatSession.emitDebugPrompts(false)` to suppress TEXT_DEBUG
+- Pre-1.0 optional: thin CPU-parity Config knobs; drop legacy `nanovllm.*` after notice
+- CPU-only; HF safetensors still float32 heap; GGUF weights packed; weights not in git
+- LFM2.5-2.6B: packed weights ~disk size; default `-Xmx16g` still used for KV/scratch headroom
+- Bench auto-sizes KV blocks; still needs `MAVEN_OPTS=-Xmx8g` for weights
+- Gemma RAG: simple withContext/withoutContext prompts; advisors on for Gemma/Qwen demo; Example topK=2 (Gemma) / 4 (default), 128 tok, 900 chars
+- Bugfix: `.diagnostics()` after `.streamTo()` used to drop `printSink` (lambda compose) → missing `assistant>` labels / glued turn stats
+- Demo `rag/` is English Grimm/LRRH only
+- Off-topic RAG: no stopword lists — length + DF/OOV (any longest-tier contentful OOV ⇒ outside); select by length then IDF; drop zero-coverage hits
+- Boilerplate salvage prefers grounded advisor notes from salvage list
+- Short follow-ups: rewrite skipped when alone has hits; NONE/empty → Prior+follow-up fallback
+- Qwen RAG + thinking + low maxTokens truncates after `<think>` — Example uses 768
+- Advisors add latency (one batched generate for all roles); matmul pool parallelism applies inside that batch
+- CPU matmul pool is process-shared (lazy) or caller-provided via `LLM.Builder.matmulExecutor`
 
 
 ## 6. Open Questions & Pending Decisions
 - Fold Sampler deeper into Transformer bricks?
 - BM25F field weights for multi-field docs?
 - HF safetensors LFM2 directory load beside GGUF?
+- Prefer dropping legacy `nanovllm.*` props after a notice period?
+- Thin upstream-named CPU knobs (`gpuMemoryUtilization` / `enforceEager`) before 1.0? (`tensorParallelSize` removed — single-process only)
 
 
 ## 7. Useful References
+- `security_audit.txt` — 2026-08-08 library threat-model audit (paths, parsers, RAG, listeners, props)
 - `README.md` — Hello World (Maven/Gradle + Gemma3 log triage) near the top; build/download/CLI/library samples
 - Demo GIF: `assets/java_nano_llvm_session_1.gif` (README RAG section)
 - Build: `mvn -q test` / `MAVEN_OPTS="-Xmx8g" mvn -q exec:java -Dexec.mainClass=com.igormaznitsa.nanollvm.samples.Example`
 - Log triage sample: `mvn -q exec:java -Dexec.mainClass=com.igormaznitsa.nanollvm.samples.LogTriageHelloWorld`
 - LFM2: `./models/download-lfm2.5-2.6b-gguf.sh` then `mvn -q exec:java -Dexec.args=models/LFM2.5-2.6B-Q4_K_M.gguf`
 - Library: `LlmModelFactory.make(path)` → `LLM.builder(model)…`; RAG: `RagFactory.make(dir)` → `llm.rag(rag)`
-- Advisors: `llm.setAdvisors(AdvisorMode.PARALLEL, "…", "…")` then `llm.chat()` / `llm.rag(…)`
+- Advisors: `LLM.builder(model).advisors(LlmAdvisorMixer.defaults(), LlmAdvisor.builder().name("…").prompt("…").build(), …).build()`
+- Advisors docs: README “Advisors” + description ch.16 package map / Sample E / ONE TURN (`advisors(mixer, …)`)
 - CLI progress: `.listen(LlmListeners.toSystem())`; heap/vector: `.mvn/jvm.config` (`jdk.incubator.vector`, `-Xmx16g`); surefire uses `jvm.module.args`
 - Plugins: compiler 3.15.0, surefire 3.5.5, jar 3.5.0, flatten 1.8.0 (`oss` mode), exec 3.6.3; JUnit 6.1.3
 - Flatten: install/deploy use `.flattened-pom.xml` (gitignored); strips build/plugins, keeps license/scm/developers for Central
-- RAG dir: project `rag/` or `-Dnanovllm.rag.dir` / `NANOVLLM_RAG_DIR`; shipped demo = Grimm / Little Red Riding Hood `.md`/`.txt` only (`rag/*.pdf` gitignored)
+- RAG dir: project `rag/` or `-Dnanollvm.rag.dir` / `NANOLLVM_RAG_DIR` (legacy `nanovllm.*`); shipped demo = Grimm / LRRH `.md`/`.txt` only (`rag/*.pdf` gitignored)
+- Props: prefer `nanollvm.*` / `NANOLLVM_*`; `NanoLlvmProps` still reads legacy `nanovllm.*`
 
 
 ## 8. User Advice and Recommendations
 - Document Maven as `mvn` (portable); agent on this machine may use `mvn22`
 - Prefer `ChatSession` for dialog; raw `generate` for completions; keep I/O out of Config
+- Optional: use as return only (never method params) — `Retrieval.queryAfterRewrite` takes nullable `String`
+- Optional `.matmulExecutor(ExecutorService)` for custom matmul workers; omit for lazy shared pool; never shut down by `LLM.close()`
 - Do not stack long Gemma system prompts (latch risk)
 - English `description.md` only — no Russian translation revive
 - Stream-first for filter/map/collect; keep scheduler/prefill and numeric kernels as loops

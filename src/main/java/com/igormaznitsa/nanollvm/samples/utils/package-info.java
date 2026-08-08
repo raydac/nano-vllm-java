@@ -1,5 +1,5 @@
 /**
- * Project-local helpers for demos and tests (model / RAG folder resolution).
+ * Project-local helpers for demos and tests (model / RAG folder resolution, ordered console).
  * Not part of the library API — weights and corpora are not shipped in the JAR.
  */
 

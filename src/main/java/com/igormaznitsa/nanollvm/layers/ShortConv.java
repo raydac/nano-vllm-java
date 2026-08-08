@@ -4,6 +4,7 @@ import static java.util.Objects.requireNonNull;
 
 import com.igormaznitsa.nanollvm.engine.ConvStateArena;
 import com.igormaznitsa.nanollvm.internal.Context;
+import com.igormaznitsa.nanollvm.models.internal.PackedWeight;
 import com.igormaznitsa.nanollvm.tensor.Tensor;
 
 /**
@@ -24,8 +25,34 @@ public final class ShortConv {
     final Tensor outProjWeight,
     final int layerIndex
   ) {
-    this.inProj = new Linear.Row(requireNonNull(inProjWeight, "inProjWeight"));
-    this.outProj = new Linear.Row(requireNonNull(outProjWeight, "outProjWeight"));
+    this(
+      new Linear.Row(inProjWeight),
+      convWeight,
+      new Linear.Row(outProjWeight),
+      layerIndex);
+  }
+
+  public ShortConv(
+    final PackedWeight inProjWeight,
+    final Tensor convWeight,
+    final PackedWeight outProjWeight,
+    final int layerIndex
+  ) {
+    this(
+      new Linear.Row(inProjWeight),
+      convWeight,
+      new Linear.Row(outProjWeight),
+      layerIndex);
+  }
+
+  private ShortConv(
+    final Linear.Row inProj,
+    final Tensor convWeight,
+    final Linear.Row outProj,
+    final int layerIndex
+  ) {
+    this.inProj = requireNonNull(inProj, "inProj");
+    this.outProj = requireNonNull(outProj, "outProj");
     requireNonNull(convWeight, "convWeight");
     this.hiddenSize = convWeight.size(0);
     this.kernelSize = convWeight.size(1);
@@ -36,9 +63,9 @@ public final class ShortConv {
     this.layerIndex = layerIndex;
   }
 
-  public Tensor forward(final Tensor hiddenStates) {
-    Context ctx = Context.get();
-    Tensor projected = this.inProj.forward(hiddenStates);
+  public Tensor forward(final Tensor hiddenStates, final Context ctx) {
+    requireNonNull(ctx, "ctx");
+    Tensor projected = this.inProj.forward(hiddenStates, ctx);
     int tokens = projected.size(0);
     int width = projected.size(1);
     if (width != 3 * this.hiddenSize) {
@@ -65,7 +92,7 @@ public final class ShortConv {
     for (int i = 0; i < convOut.length; i++) {
       convOut[i] *= gateC[i];
     }
-    return this.outProj.forward(Tensor.of(convOut, tokens, this.hiddenSize));
+    return this.outProj.forward(Tensor.of(convOut, tokens, this.hiddenSize), ctx);
   }
 
   private float[] causalConv(final float[] bx, final int tokens, final Context ctx) {

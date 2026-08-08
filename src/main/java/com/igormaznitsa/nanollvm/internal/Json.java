@@ -1,5 +1,6 @@
-package com.igormaznitsa.nanollvm.utils;
+package com.igormaznitsa.nanollvm.internal;
 
+import com.igormaznitsa.nanollvm.utils.ResourceLimits;
 import java.math.BigInteger;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -12,7 +13,12 @@ public final class Json {
   }
 
   public static Object parse(final String text) {
-    return new Parser(text).parse();
+    ResourceLimits limits = ResourceLimits.current();
+    if (text != null && text.length() > limits.maxJsonChars()) {
+      throw new IllegalArgumentException(
+        "JSON exceeds maxJsonChars (" + limits.maxJsonChars() + ")");
+    }
+    return new Parser(text, limits).parse();
   }
 
   public static Map<String, Object> parseObject(final String text) {
@@ -94,15 +100,17 @@ public final class Json {
 
   private static final class Parser {
     private final String text;
+    private final int maxDepth;
     private int pos;
 
-    private Parser(final String text) {
+    private Parser(final String text, final ResourceLimits limits) {
       this.text = text == null ? "null" : text;
+      this.maxDepth = limits.maxJsonDepth();
     }
 
     private Object parse() {
       this.skipWhitespace();
-      Object value = this.parseValue();
+      Object value = this.parseValue(0);
       this.skipWhitespace();
       if (!this.atEnd()) {
         throw this.error("unexpected trailing content");
@@ -110,15 +118,18 @@ public final class Json {
       return value;
     }
 
-    private Object parseValue() {
+    private Object parseValue(final int depth) {
+      if (depth > this.maxDepth) {
+        throw this.error("JSON nesting exceeds maxJsonDepth (" + this.maxDepth + ")");
+      }
       this.skipWhitespace();
       if (this.atEnd()) {
         throw this.error("unexpected end of input");
       }
       char ch = this.current();
       return switch (ch) {
-        case '{' -> this.parseObject();
-        case '[' -> this.parseArray();
+        case '{' -> this.parseObject(depth);
+        case '[' -> this.parseArray(depth);
         case '"' -> this.parseString();
         case 't' -> this.parseTrue();
         case 'f' -> this.parseFalse();
@@ -132,7 +143,7 @@ public final class Json {
       };
     }
 
-    private Map<String, Object> parseObject() {
+    private Map<String, Object> parseObject(final int depth) {
       this.expect('{');
       this.skipWhitespace();
       Map<String, Object> result = new LinkedHashMap<>();
@@ -144,7 +155,7 @@ public final class Json {
         String key = this.parseString();
         this.skipWhitespace();
         this.expect(':');
-        Object value = this.parseValue();
+        Object value = this.parseValue(depth + 1);
         result.put(key, value);
         this.skipWhitespace();
         if (this.tryConsume('}')) {
@@ -154,7 +165,7 @@ public final class Json {
       }
     }
 
-    private List<Object> parseArray() {
+    private List<Object> parseArray(final int depth) {
       this.expect('[');
       this.skipWhitespace();
       List<Object> result = new ArrayList<>();
@@ -162,7 +173,7 @@ public final class Json {
         return result;
       }
       while (true) {
-        result.add(this.parseValue());
+        result.add(this.parseValue(depth + 1));
         this.skipWhitespace();
         if (this.tryConsume(']')) {
           return result;

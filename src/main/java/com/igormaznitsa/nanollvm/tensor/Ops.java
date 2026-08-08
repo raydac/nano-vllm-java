@@ -2,6 +2,8 @@ package com.igormaznitsa.nanollvm.tensor;
 
 import static java.util.Objects.requireNonNull;
 
+import com.igormaznitsa.nanollvm.internal.Context;
+import com.igormaznitsa.nanollvm.models.internal.PackedWeight;
 import java.util.Arrays;
 
 /**
@@ -10,9 +12,9 @@ import java.util.Arrays;
  *
  * <h2>What this class is</h2>
  * {@link Tensor} owns storage and shape; {@link FloatKernels} / {@link VectorMath} own raw float
- * loops. {@code Ops} sits between them: it interprets {@link Tensor} layouts, allocates outputs,
- * and implements the algebraic bricks that {@code Linear}, {@code RMSNorm}, embeddings, and MLPs
- * call.
+ * loops and {@link MatmulRuntime} owns parallel dense matmul. {@code Ops} sits between them: it
+ * interprets {@link Tensor} layouts, allocates outputs, and implements the algebraic bricks that
+ * {@code Linear}, {@code RMSNorm}, embeddings, and MLPs call.
  *
  * <p>All public methods are <strong>static</strong> and side-effect-free on inputs (they allocate
  * new result tensors unless noted). Inputs may be views with non-zero {@link Tensor#offset()}.
@@ -32,6 +34,7 @@ import java.util.Arrays;
  * </ul>
  *
  * @see Tensor
+ * @see MatmulRuntime
  * @see VectorMath
  * @see FloatKernels
  */
@@ -50,7 +53,7 @@ public final class Ops {
    * a length-{@code out} vector).
    *
    * <p><strong>Hard part — bias buffer:</strong> if {@code bias} is a non-zero-offset view,
-   * elements are copied via {@link Tensor#toFloatArray()} so {@link VectorMath#linear} can index
+   * elements are copied via {@link Tensor#toFloatArray()} so {@link MatmulRuntime#linear} can index
    * bias from {@code 0}. Weight and activation slices keep their offsets.
    *
    * @param x      input activations (last logical width = {@code in})
@@ -60,8 +63,32 @@ public final class Ops {
    * @throws IllegalArgumentException if {@code weight} is not 2D or {@code x} width mismatches
    */
   public static Tensor linear(final Tensor x, final Tensor weight, final Tensor bias) {
+    return linear(x, weight, bias, MatmulRuntime.sequential());
+  }
+
+  /**
+   * Same as {@link #linear(Tensor, Tensor, Tensor)} using the matmul runtime bound on
+   * {@code context}, or {@link MatmulRuntime#sequential()} when unbound / {@code null}.
+   */
+  public static Tensor linear(
+    final Tensor x,
+    final Tensor weight,
+    final Tensor bias,
+    final Context context) {
+    MatmulRuntime runtime = context != null && context.matmul() != null
+      ? context.matmul()
+      : MatmulRuntime.sequential();
+    return linear(x, weight, bias, runtime);
+  }
+
+  public static Tensor linear(
+    final Tensor x,
+    final Tensor weight,
+    final Tensor bias,
+    final MatmulRuntime matmul) {
     requireNonNull(x, "x");
     requireNonNull(weight, "weight");
+    requireNonNull(matmul, "matmul");
     int[] xs = x.rawShape();
     int[] ws = weight.rawShape();
     if (ws.length != 2) {
@@ -78,13 +105,60 @@ public final class Ops {
     if (bias != null) {
       biasData = bias.offset() == 0 ? bias.data() : bias.toFloatArray();
     }
-    VectorMath.linear(
+    matmul.linear(
         x.data(), x.offset(),
         weight.data(), weight.offset(),
         biasData,
         y.data(), 0,
         rows, in, out
     );
+    if (xs.length == 1) {
+      return y.reshape(out);
+    }
+    if (xs.length == 2) {
+      return y.reshape(xs[0], out);
+    }
+    int[] newShape = xs.clone();
+    newShape[newShape.length - 1] = out;
+    return y.reshape(newShape);
+  }
+
+  /**
+   * Affine map with a packed GGUF weight {@code [out, in]}: dequantizes one weight row at a time.
+   */
+  public static Tensor linear(
+    final Tensor x,
+    final PackedWeight weight,
+    final Tensor bias,
+    final Context context) {
+    MatmulRuntime runtime = context != null && context.matmul() != null
+      ? context.matmul()
+      : MatmulRuntime.sequential();
+    return linear(x, weight, bias, runtime);
+  }
+
+  public static Tensor linear(
+    final Tensor x,
+    final PackedWeight weight,
+    final Tensor bias,
+    final MatmulRuntime matmul) {
+    requireNonNull(x, "x");
+    requireNonNull(weight, "weight");
+    requireNonNull(matmul, "matmul");
+    LinearKernel kernel = LinearKernel.of(weight);
+    int[] xs = x.rawShape();
+    int in = kernel.inFeatures();
+    int out = kernel.outFeatures();
+    int rows = x.numel() / in;
+    if (x.numel() % in != 0) {
+      throw new IllegalArgumentException("x last dim mismatch");
+    }
+    Tensor y = Tensor.zeros(rows, out);
+    float[] biasData = null;
+    if (bias != null) {
+      biasData = bias.offset() == 0 ? bias.data() : bias.toFloatArray();
+    }
+    kernel.apply(x.data(), x.offset(), biasData, y.data(), 0, rows, matmul);
     if (xs.length == 1) {
       return y.reshape(out);
     }
@@ -124,6 +198,19 @@ public final class Ops {
       }
       System.arraycopy(weight.data(), weight.offset() + id * dim, out.data(), i * dim, dim);
     }
+    return out;
+  }
+
+  /**
+   * Embedding gather from a packed GGUF table {@code [vocab, dim]} (dequant one row per id).
+   */
+  public static Tensor embedding(final Tensor ids, final PackedWeight weight) {
+    requireNonNull(ids, "ids");
+    requireNonNull(weight, "weight");
+    EmbeddingKernel kernel = EmbeddingKernel.of(weight);
+    int n = ids.numel();
+    Tensor out = Tensor.zeros(n, kernel.embeddingDim());
+    kernel.gather(ids.data(), ids.offset(), n, out.data(), 0);
     return out;
   }
 
