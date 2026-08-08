@@ -5,7 +5,8 @@
  * {@code exceptions}, {@code tokenizer}, {@code prompts}, {@code utils}.
  *
  * <p><b>Not exported:</b> {@code samples} ({@code Example}, {@code Bench},
- * {@code LogTriageHelloWorld}, {@code samples.utils} — still runnable as module main classes),
+ * {@code LogTriageHelloWorld}, {@code samples.utils} — runnable via {@code mvn exec:java} /
+ * {@code java -m …}, not as {@code Main-Class} in the library JAR),
  * {@code engine}, {@code layers}, {@code tensor} (and {@code tensor.scalar} / {@code tensor.vector}),
  * {@code internal} (safetensors / GGUF loaders, inference {@code Context}). Application code should
  * use {@code LlmModelFactory} / {@code LLM} / {@code RagFactory} rather than loaders or the network graph.

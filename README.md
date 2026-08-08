@@ -140,7 +140,7 @@ mvn package
 
 Artifacts:
 
-- `target/nano-vllm-java-1.0.0-SNAPSHOT.jar` — library JAR (JPMS module `com.igormaznitsa.nanollvm`)
+- `target/nano-vllm-java-1.0.0-SNAPSHOT.jar` — library JAR (JPMS module `com.igormaznitsa.nanollvm`; no `Main-Class`)
 - `target/classes/` — compiled module for development runs
 
 Tests use the Vector incubator module (`jvm.module.args` in the POM). Production runs should use the same flags
@@ -167,9 +167,15 @@ requires com.igormaznitsa.nanollvm;
 
 Public API packages: `models`, `llm`, `chat`, `rag`, `tokenizer`, `prompts`, `utils`, `exceptions`.
 `samples` (`Example`, `Bench`, `LogTriageHelloWorld`, `samples.utils`), `engine`, `layers`, `tensor`, and
-`internal` are **not** exported — use `LlmModelFactory` / `LLM` / `RagFactory` from application code. Demos
-remain runnable as main classes
-(`mvn exec:java` or `java -m com.igormaznitsa.nanollvm/com.igormaznitsa.nanollvm.samples.Example`).
+`internal` are **not** exported — use `LlmModelFactory` / `LLM` / `RagFactory` from application code.
+
+The packaged JAR is a **library** (no `Main-Class` manifest entry). In-repo demos stay runnable via Maven or the
+module path:
+
+```bash
+mvn -q exec:java
+# or: java … -m com.igormaznitsa.nanollvm/com.igormaznitsa.nanollvm.samples.Example
+```
 
 ## Download and load models
 

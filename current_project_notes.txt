@@ -1,12 +1,12 @@
 ## 1. Implementation Progress
-- Maven `1.0.0-SNAPSHOT`; enforcer Java `[21,)`, Maven `[3.9,)`; JPMS module `com.igormaznitsa.nanollvm`
+- Maven `1.0.0-SNAPSHOT`; enforcer Java `[21,)`, Maven `[3.9,)`; JPMS module `com.igormaznitsa.nanollvm`; POM description = CPU LLM inference library (not an app / not a full vLLM port)
 - CausalLM: Qwen3 + Gemma3 + LFM2 (GGUF); tokenizers GPT-2 BPE / Metaspace / GGUF-embedded
 - **GGUF:** `*.gguf` → `internal.Gguf*` → FP32 `WeightBag` → `Lfm2ForCausalLM` (Q4_K/Q4_0/Q6_K/Q8_0/F16/BF16/F32); ShortConv + `ConvStateArena`; download `models/download-lfm2.5-2.6b-gguf.sh`; Example menu #3; ~16 GiB heap for 2.6B
 - Library: `LlmModelFactory.make` → shared immutable `LlmModel` (renamed from `Model`/`ModelFactory` to avoid generic name clashes); `LLM.Builder`; `ChatSession` + `LlmListener`/`LlmTextKind`; helpers `chat`/`chatOnce`/`complete`; `cancel` + generate timeout; `exceptions.*`
 - **Advisors:** `LLM.setAdvisors(AdvisorMode, String…)` — isolated advisor generates before main chat/RAG turn; thinking shows all notes; mix filters via `selectNotesForMix`; Example: Gemma 3 / Qwen 2 / LFM none (`configureDemoAdvisors`); wording in `AdvisorPrompts` / `RagPrompts`
 - Engine: `Transformer` owns per-LLM `KvCacheArena` (+ optional `ConvStateArena`); `Scheduler` continuous batching; CPU matmul default = all processors (`cpuThreads` / `allCpuThreads` / `disableMultiCpu` / prop `nanovllm.cpu.threads`)
 - Immutable split: weights/tokenizer on `LlmModel`; runtime KV/scheduler/lock on `LLM`; CausalLM layers are `record`s; constants in `WeightNames` / `NanoVllmProps`
-- JPMS: exports models/llm/chat/rag/exceptions/tokenizer/prompts/utils; non-exported `samples` (Example/Bench/LogTriageHelloWorld + `samples.utils`), engine/layers/tensor/internal; `Tokenizer.fromGguf` takes `GgufTokenizerSource`
+- JPMS: exports models/llm/chat/rag/exceptions/tokenizer/prompts/utils; non-exported `samples` (Example/Bench/LogTriageHelloWorld + `samples.utils`), engine/layers/tensor/internal; library JAR has no `Main-Class` (demos via `mvn exec:java` / `java -m …`); `Tokenizer.fromGguf` takes `GgufTokenizerSource`
 - **Samples packaging:** `BundledModels` / `BundledRag` → `samples.utils` (not library API); README Hello World mirrored as `samples.LogTriageHelloWorld`
 - **RAG:** `RagFactory` → `PreparedRag` (inline BM25 + passage prep + `Passage` record); package-private `CorpusLoader` for chunking; `RagSession` nests `UserMessage`, `QueryRewrite`, `Retrieval`; public API ~10 types in `rag/` (+ `PdfTextExtractor`)
     - Docs: English `description.md` (§7a GGUF, §15 call chain, §16 map, §17 RAG, ch.10 math); ch.16 paths audited (`internal.*` loaders/`Context`, `llm/LLM.java`, LFM2 + advisors in tree)
@@ -38,8 +38,8 @@
 
 
 ## 4. Current Work In Progress
-- Unified `LlmListener` (text + `STATUS_*`); `EngineIo` removed — watch call-site feedback
 - Advisor mix: Context lexical grounding filter live; watch whether complementary hints still help tiny models
+- Library JAR: `Main-Class` removed from manifest (verified); `exec-maven-plugin` still defaults to `samples.Example` for in-repo `mvn exec:java`
 
 
 ## 5. Known Issues & Limitations
@@ -72,7 +72,8 @@
 - Library: `LlmModelFactory.make(path)` → `LLM.builder(model)…`; RAG: `RagFactory.make(dir)` → `llm.rag(rag)`
 - Advisors: `llm.setAdvisors(AdvisorMode.PARALLEL, "…", "…")` then `llm.chat()` / `llm.rag(…)`
 - CLI progress: `.listen(LlmListeners.toSystem())`; heap/vector: `.mvn/jvm.config` (`jdk.incubator.vector`, `-Xmx16g`); surefire uses `jvm.module.args`
-- Plugins: compiler 3.15.0, surefire 3.5.5, jar 3.5.0, exec 3.6.3; JUnit 6.0.2
+- Plugins: compiler 3.15.0, surefire 3.5.5, jar 3.5.0, flatten 1.8.0 (`oss` mode), exec 3.6.3; JUnit 6.1.3
+- Flatten: install/deploy use `.flattened-pom.xml` (gitignored); strips build/plugins, keeps license/scm/developers for Central
 - RAG dir: project `rag/` or `-Dnanovllm.rag.dir` / `NANOVLLM_RAG_DIR`; shipped demo = Grimm / Little Red Riding Hood `.md`/`.txt` only (`rag/*.pdf` gitignored)
 
 

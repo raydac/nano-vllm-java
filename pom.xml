@@ -8,12 +8,14 @@
     <artifactId>nano-vllm-java</artifactId>
     <version>1.0.0-SNAPSHOT</version>
     <name>nano-vllm-java</name>
-    <description>Lightweight vLLM implementation in Java 21+ inspired by GeeeekExplorer/nano-vllm project</description>
+    <description>Pure Java 21+ CPU LLM inference library (continuous batching, paged KV cache), inspired by
+        GeeeekExplorer/nano-vllm
+    </description>
 
     <properties>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <maven.compiler.release>21</maven.compiler.release>
-        <junit.version>6.0.2</junit.version>
+        <junit.version>6.1.3</junit.version>
         <jvm.module.args>--add-modules jdk.incubator.vector</jvm.module.args>
     </properties>
 
@@ -46,6 +48,17 @@
         <url>https://www.igormaznitsa.com</url>
     </organization>
 
+    <issueManagement>
+        <system>GitHub Issues</system>
+        <url>https://github.com/raydac/nano-vllm-java/issues</url>
+    </issueManagement>
+
+    <scm>
+        <url>https://github.com/raydac/nano-vllm-java</url>
+        <connection>scm:git:git://github.com/raydac/nano-vllm-java.git</connection>
+        <developerConnection>scm:git:git@github.com:raydac/nano-vllm-java.git</developerConnection>
+    </scm>
+
     <dependencies>
         <dependency>
             <groupId>org.junit.jupiter</groupId>
@@ -60,6 +73,109 @@
             <scope>test</scope>
         </dependency>
     </dependencies>
+
+    <profiles>
+        <profile>
+            <id>publish</id>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-assembly-plugin</artifactId>
+                        <executions>
+                            <execution>
+                                <id>make-bundle</id>
+                                <phase>install</phase>
+                                <goals>
+                                    <goal>single</goal>
+                                </goals>
+                                <configuration>
+                                    <descriptors>
+                                        <descriptor>src/assemble/bundle.xml</descriptor>
+                                    </descriptors>
+                                </configuration>
+                            </execution>
+                        </executions>
+                    </plugin>
+
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-javadoc-plugin</artifactId>
+                        <executions>
+                            <execution>
+                                <id>generate-javadoc</id>
+                                <phase>package</phase>
+                                <goals>
+                                    <goal>jar</goal>
+                                </goals>
+                                <configuration>
+                                    <!--<failOnError>false</failOnError>-->
+                                    <source>${maven.compiler.release}</source>
+                                </configuration>
+                            </execution>
+                        </executions>
+                    </plugin>
+
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-source-plugin</artifactId>
+                        <executions>
+                            <execution>
+                                <id>generate-sources</id>
+                                <phase>package</phase>
+                                <goals>
+                                    <goal>jar</goal>
+                                </goals>
+                            </execution>
+                        </executions>
+                    </plugin>
+
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-gpg-plugin</artifactId>
+                        <executions>
+                            <execution>
+                                <id>sign-artifacts</id>
+                                <phase>verify</phase>
+                                <goals>
+                                    <goal>sign</goal>
+                                </goals>
+                            </execution>
+                        </executions>
+                    </plugin>
+
+                    <plugin>
+                        <groupId>net.nicoulaj.maven.plugins</groupId>
+                        <artifactId>checksum-maven-plugin</artifactId>
+                        <version>1.11</version>
+                        <executions>
+                            <execution>
+                                <phase>verify</phase>
+                                <goals>
+                                    <goal>files</goal>
+                                </goals>
+                                <configuration>
+                                    <fileSets>
+                                        <fileSet>
+                                            <directory>${project.build.directory}</directory>
+                                            <includes>
+                                                <include>*.jar</include>
+                                                <include>*.pom</include>
+                                            </includes>
+                                        </fileSet>
+                                    </fileSets>
+                                    <algorithms>
+                                        <algorithm>SHA-1</algorithm>
+                                        <algorithm>MD5</algorithm>
+                                    </algorithms>
+                                </configuration>
+                            </execution>
+                        </executions>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+    </profiles>
 
     <build>
         <plugins>
@@ -110,13 +226,31 @@
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-jar-plugin</artifactId>
                 <version>3.5.0</version>
+            </plugin>
+            <plugin>
+                <groupId>org.codehaus.mojo</groupId>
+                <artifactId>flatten-maven-plugin</artifactId>
+                <version>1.8.0</version>
                 <configuration>
-                    <archive>
-                        <manifest>
-                            <mainClass>com.igormaznitsa.nanollvm.samples.Example</mainClass>
-                        </manifest>
-                    </archive>
+                    <flattenMode>oss</flattenMode>
+                    <updatePomFile>true</updatePomFile>
                 </configuration>
+                <executions>
+                    <execution>
+                        <id>flatten</id>
+                        <phase>process-resources</phase>
+                        <goals>
+                            <goal>flatten</goal>
+                        </goals>
+                    </execution>
+                    <execution>
+                        <id>flatten.clean</id>
+                        <phase>clean</phase>
+                        <goals>
+                            <goal>clean</goal>
+                        </goals>
+                    </execution>
+                </executions>
             </plugin>
             <plugin>
                 <groupId>org.codehaus.mojo</groupId>
