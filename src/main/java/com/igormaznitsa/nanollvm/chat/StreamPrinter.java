@@ -1,7 +1,6 @@
 package com.igormaznitsa.nanollvm.chat;
 
 import java.io.PrintStream;
-import java.util.List;
 
 public final class StreamPrinter {
 
@@ -22,6 +21,14 @@ public final class StreamPrinter {
     this.thinkOut = thinkOut;
     this.answerOut = answerOut;
     this.color = color;
+  }
+
+  public void reset() {
+    this.shownThink = "";
+    this.shownAnswer = "";
+    this.thinkStarted = false;
+    this.thinkClosed = false;
+    this.answerStarted = false;
   }
 
   public void update(final AssistantParts parts) {
@@ -46,28 +53,17 @@ public final class StreamPrinter {
     this.answerOut.flush();
   }
 
-  /**
-   * Writes advisor notes to the thinking stream before the main generate starts.
-   * Slot indices match configured subagents; blank/discarded replies show as
-   * {@code (no usable note)}.
-   */
-  public void emitAdvisorNotes(final List<String> notes) {
-    if (notes == null || notes.isEmpty()) {
-      return;
+  public void emitAdvisorNote(final int slot, final String note) {
+    String body = note == null || note.isBlank() ? "(no usable note)" : note.strip();
+    this.thinkOut.print("thinking> ");
+    if (this.color) {
+      this.thinkOut.print(ANSI_THINK);
     }
-    for (int i = 0; i < notes.size(); i++) {
-      String note = notes.get(i) == null ? "" : notes.get(i).strip();
-      String body = note.isEmpty() ? "(no usable note)" : note;
-      this.thinkOut.print("thinking> ");
-      if (this.color) {
-        this.thinkOut.print(ANSI_THINK);
-      }
-      this.thinkOut.printf("[subagent %d] %s", i + 1, body);
-      if (this.color) {
-        this.thinkOut.print(ANSI_RESET);
-      }
-      this.thinkOut.println();
+    this.thinkOut.printf("[advisor %d] %s", slot, body);
+    if (this.color) {
+      this.thinkOut.print(ANSI_RESET);
     }
+    this.thinkOut.println();
     this.thinkOut.flush();
   }
 

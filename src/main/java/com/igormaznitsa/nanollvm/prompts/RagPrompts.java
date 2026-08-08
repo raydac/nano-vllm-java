@@ -1,7 +1,7 @@
 package com.igormaznitsa.nanollvm.prompts;
 
 /**
- * Model-facing RAG prompt text and section markers shared with subagent grounding.
+ * Model-facing RAG prompt text and section markers shared with advisor grounding.
  */
 public final class RagPrompts {
 

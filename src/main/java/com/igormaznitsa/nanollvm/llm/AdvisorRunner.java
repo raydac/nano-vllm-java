@@ -8,23 +8,23 @@ import com.igormaznitsa.nanollvm.tokenizer.Tokenizer;
 import java.util.List;
 
 /**
- * Runs configured LLM subagents on the same engine (no history, no UI stream). Advisor notes
+ * Runs configured LLM advisors on the same engine (no history, no UI stream). Advisor notes
  * appear on the thinking stream; only grounded, non-conflicting notes are mixed into the main
  * user text as unverified hints.
  */
-public final class SubagentRunner {
+public final class AdvisorRunner {
 
-  private static final int MAX_SUBAGENT_TOKENS = 256;
-  private static final float SUBAGENT_TEMPERATURE = 0.3f;
+  private static final int MAX_ADVISOR_TOKENS = 256;
+  private static final float ADVISOR_TEMPERATURE = 0.3f;
 
-  private SubagentRunner() {
+  private AdvisorRunner() {
   }
 
   /**
-   * When the LLM has no subagent prompts, returns {@code modelUserText} unchanged. Otherwise
-   * consults each subagent and mixes their notes into the main prompt.
+   * When the LLM has no advisor prompts, returns {@code modelUserText} unchanged. Otherwise
+   * consults each advisor and mixes their notes into the main prompt.
    */
-  public static SubagentEnrichment enrich(
+  public static AdvisorEnrichment enrich(
     final LLM llm,
     final String modelUserText,
     final SamplingParams mainSampling
@@ -33,25 +33,25 @@ public final class SubagentRunner {
     requireNonNull(modelUserText, "modelUserText");
     requireNonNull(mainSampling, "mainSampling");
 
-    List<String> rolePrompts = llm.subagentPrompts();
+    List<String> rolePrompts = llm.advisorPrompts();
     if (rolePrompts.isEmpty()) {
-      return SubagentEnrichment.passthrough(modelUserText);
+      return AdvisorEnrichment.passthrough(modelUserText);
     }
 
     boolean compact = llm.tokenizer().isGemmaChat();
     List<String> prompts = rolePrompts.stream()
-      .map(role -> SubagentPrompt.isolated(llm.tokenizer(), role, modelUserText))
+      .map(role -> AdvisorPrompt.isolated(llm.tokenizer(), role, modelUserText))
       .toList();
-    SamplingParams sampling = subagentSampling(mainSampling);
-    List<String> answers = llm.subagentMode() == SubagentMode.PARALLEL
+    SamplingParams sampling = advisorSampling(mainSampling);
+    List<String> answers = llm.advisorMode() == AdvisorMode.PARALLEL
       ? runParallel(llm, prompts, sampling)
       : runSequential(llm, prompts, sampling);
     List<String> notes = answers.stream()
       .map(answer -> answer == null ? "" : answer.strip())
       .toList();
-    List<String> mixNotes = SubagentPrompt.selectNotesForMix(modelUserText, notes);
-    return new SubagentEnrichment(
-      SubagentPrompt.mix(modelUserText, mixNotes, compact),
+    List<String> mixNotes = AdvisorPrompt.selectNotesForMix(modelUserText, notes);
+    return new AdvisorEnrichment(
+      AdvisorPrompt.mix(modelUserText, mixNotes, compact),
       notes,
       mixNotes);
   }
@@ -89,11 +89,11 @@ public final class SubagentRunner {
     return answer;
   }
 
-  private static SamplingParams subagentSampling(final SamplingParams main) {
-    int maxTokens = Math.min(main.maxTokens(), MAX_SUBAGENT_TOKENS);
-    float temperature = Math.min(main.temperature(), SUBAGENT_TEMPERATURE);
+  private static SamplingParams advisorSampling(final SamplingParams main) {
+    int maxTokens = Math.min(main.maxTokens(), MAX_ADVISOR_TOKENS);
+    float temperature = Math.min(main.temperature(), ADVISOR_TEMPERATURE);
     if (temperature <= 1e-10f) {
-      temperature = SUBAGENT_TEMPERATURE;
+      temperature = ADVISOR_TEMPERATURE;
     }
     return new SamplingParams(temperature, maxTokens, false, main.topK(), main.topP());
   }

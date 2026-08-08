@@ -4,8 +4,8 @@ import static java.util.Objects.requireNonNull;
 
 import com.igormaznitsa.nanollvm.chat.ChatMessage;
 import com.igormaznitsa.nanollvm.chat.ChatMessages;
+import com.igormaznitsa.nanollvm.prompts.AdvisorPrompts;
 import com.igormaznitsa.nanollvm.prompts.RagPrompts;
-import com.igormaznitsa.nanollvm.prompts.SubagentPrompts;
 import com.igormaznitsa.nanollvm.tokenizer.Tokenizer;
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -16,23 +16,23 @@ import java.util.regex.Pattern;
 import java.util.stream.IntStream;
 
 /**
- * Builds isolated subagent chat prompts and mixes advisor answers into the main user text.
- * Wording lives in {@link SubagentPrompts} / {@link RagPrompts}.
+ * Builds isolated advisor chat prompts and mixes advisor answers into the main user text.
+ * Wording lives in {@link AdvisorPrompts} / {@link RagPrompts}.
  */
-public final class SubagentPrompt {
+public final class AdvisorPrompt {
 
   private static final Pattern TOKEN = Pattern.compile("[\\p{L}\\p{N}]+");
   private static final int CONTENTFUL_MIN_LEN = 4;
   private static final double GROUNDING_COVERAGE = 0.6;
 
-  private SubagentPrompt() {
+  private AdvisorPrompt() {
   }
 
   /**
-   * Role prompt plus shared grounded-extraction rules used for every subagent turn.
+   * Role prompt plus shared grounded-extraction rules used for every advisor turn.
    */
   public static String groundedRole(final String rolePrompt) {
-    return SubagentPrompts.groundedRole(rolePrompt);
+    return AdvisorPrompts.groundedRole(rolePrompt);
   }
 
   /**
@@ -53,7 +53,7 @@ public final class SubagentPrompt {
 
     boolean ragNoHits = ragTurnWithoutHits(user);
     List<ChatMessage> turn = new ArrayList<>(ChatMessages.newConversation(
-      SubagentPrompts.groundedRole(rolePrompt, ragNoHits)));
+      AdvisorPrompts.groundedRole(rolePrompt, ragNoHits)));
     turn.add(ChatMessage.user(user));
     return tokenizer.applyChatTemplate(ChatMessages.toTemplateMaps(turn), true, false);
   }
@@ -120,7 +120,7 @@ public final class SubagentPrompt {
     List<String> claimLines = IntStream.range(0, answers.size())
       .mapToObj(i -> {
         String note = answers.get(i) == null ? "" : answers.get(i).strip();
-        return note.isEmpty() ? "" : SubagentPrompts.claimLine(claimLabel(i), note);
+        return note.isEmpty() ? "" : AdvisorPrompts.claimLine(claimLabel(i), note);
       })
       .filter(line -> !line.isEmpty())
       .toList();
@@ -130,8 +130,8 @@ public final class SubagentPrompt {
 
     String claims = String.join("\n", claimLines);
     return compact
-      ? SubagentPrompts.mixCompact(claims, base)
-      : SubagentPrompts.mixFull(base, claims);
+      ? AdvisorPrompts.mixCompact(claims, base)
+      : AdvisorPrompts.mixFull(base, claims);
   }
 
   static String claimLabel(final int index) {
@@ -156,7 +156,7 @@ public final class SubagentPrompt {
       return false;
     }
     String stripped = note.strip();
-    if (SubagentPrompts.ABSTAIN_REPLY.matcher(stripped).matches()) {
+    if (AdvisorPrompts.ABSTAIN_REPLY.matcher(stripped).matches()) {
       return true;
     }
     String lower = stripped.toLowerCase(Locale.ROOT);
@@ -190,7 +190,7 @@ public final class SubagentPrompt {
     }
     int bodyStart = start + heading.length();
     int end = modelUserText.length();
-    for (String marker : SubagentPrompts.CONTEXT_BLOCK_END_MARKERS) {
+    for (String marker : AdvisorPrompts.CONTEXT_BLOCK_END_MARKERS) {
       int at = modelUserText.indexOf(marker, bodyStart);
       if (at >= 0 && at < end) {
         end = at;

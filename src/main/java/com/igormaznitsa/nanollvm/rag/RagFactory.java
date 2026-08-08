@@ -2,7 +2,8 @@ package com.igormaznitsa.nanollvm.rag;
 
 import static java.util.Objects.requireNonNull;
 
-import com.igormaznitsa.nanollvm.llm.EngineIo;
+import com.igormaznitsa.nanollvm.chat.LlmListener;
+import com.igormaznitsa.nanollvm.chat.LlmListeners;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
@@ -15,7 +16,7 @@ import java.util.Set;
  *
  * <p>Preprocessing is document-side only: section titles, sentence passages, load-time
  * preparsing (model vs search text, term frequencies), inverted BM25 — not user-reply rules.
- * Pass {@link EngineIo#system()} to print per-file extraction stats while loading.
+ * Pass {@link LlmListeners#toSystem()} to print per-file extraction stats while loading.
  */
 public final class RagFactory {
 
@@ -23,45 +24,45 @@ public final class RagFactory {
   }
 
   public static PreparedRag make(final Path folderOrFile) {
-    return make(folderOrFile, RagLoadOptions.defaults(), EngineIo.silent());
+    return make(folderOrFile, RagLoadOptions.defaults(), LlmListeners.silent());
   }
 
   public static PreparedRag make(final Path folderOrFile, final RagLoadOptions options) {
-    return make(folderOrFile, options, EngineIo.silent());
+    return make(folderOrFile, options, LlmListeners.silent());
   }
 
   public static PreparedRag make(
     final Path folderOrFile,
     final RagLoadOptions options,
-    final EngineIo io
+    final LlmListener io
   ) {
     return tryMake(folderOrFile, options, io).orElseThrow(() -> new IllegalStateException(
       "corpus has no non-blank chunks: " + folderOrFile.toAbsolutePath().normalize()));
   }
 
   /**
-   * Like {@link #make(Path, RagLoadOptions, EngineIo)} but returns empty when the path exists
+   * Like {@link #make(Path, RagLoadOptions, LlmListener)} but returns empty when the path exists
    * yet yields no indexable text (empty folder, only README, blank files).
    */
   public static Optional<PreparedRag> tryMake(final Path folderOrFile) {
-    return tryMake(folderOrFile, RagLoadOptions.defaults(), EngineIo.silent());
+    return tryMake(folderOrFile, RagLoadOptions.defaults(), LlmListeners.silent());
   }
 
   public static Optional<PreparedRag> tryMake(final Path folderOrFile,
                                               final RagLoadOptions options) {
-    return tryMake(folderOrFile, options, EngineIo.silent());
+    return tryMake(folderOrFile, options, LlmListeners.silent());
   }
 
   public static Optional<PreparedRag> tryMake(
     final Path folderOrFile,
     final RagLoadOptions options,
-    final EngineIo io
+    final LlmListener io
   ) {
     requireNonNull(folderOrFile, "folderOrFile");
     requireNonNull(options, "options");
-    EngineIo streams = io == null ? EngineIo.silent() : io;
+    LlmListener streams = io == null ? LlmListeners.silent() : io;
     Path path = folderOrFile.toAbsolutePath().normalize();
-    CorpusLoader.Builder corpus = CorpusLoader.builder().apply(options).io(streams);
+    CorpusLoader.Builder corpus = CorpusLoader.builder().apply(options).listen(streams);
     if (Files.isDirectory(path)) {
       corpus.addFolder(path);
     } else if (Files.isRegularFile(path)) {
@@ -76,8 +77,8 @@ public final class RagFactory {
       if (message == null || !message.startsWith("corpus has no")) {
         throw emptyCorpus;
       }
-      if (!streams.isSilent()) {
-        streams.infof("RAG skipped: no indexable text at %s%n", path);
+      if (!LlmListeners.isSilent(streams)) {
+        LlmListeners.infof(streams, null, "RAG skipped: no indexable text at %s%n", path);
       }
       return Optional.empty();
     }
@@ -94,7 +95,7 @@ public final class RagFactory {
     for (String text : texts) {
       corpus.add(text);
     }
-    return seal(corpus.build(), null, options, EngineIo.silent());
+    return seal(corpus.build(), null, options, LlmListeners.silent());
   }
 
   public static PreparedRag of(final List<String> texts) {
@@ -109,11 +110,11 @@ public final class RagFactory {
     final List<TextChunk> chunks,
     final Path sourceRoot,
     final RagLoadOptions options,
-    final EngineIo io
+    final LlmListener io
   ) {
     PreparedRag prepared = PreparedRag.fromChunks(chunks, sourceRoot, options);
-    if (!io.isSilent()) {
-      io.infof("RAG ready: %d chunk(s)%s%n",
+    if (!LlmListeners.isSilent(io)) {
+      LlmListeners.infof(io, null, "RAG ready: %d chunk(s)%s%n",
         prepared.size(),
         sourceRoot == null ? "" : " from " + sourceRoot);
     }
@@ -126,7 +127,7 @@ public final class RagFactory {
     private final CorpusLoader.Builder corpus = CorpusLoader.builder().apply(this.options);
     private Path sourceRoot;
     private boolean hasContent;
-    private EngineIo io = EngineIo.silent();
+    private LlmListener io = LlmListeners.silent();
 
     public Builder options(final RagLoadOptions options) {
       if (this.hasContent) {
@@ -142,11 +143,11 @@ public final class RagFactory {
     }
 
     /**
-     * Progress sink for per-file load lines. {@code null} → {@link EngineIo#silent()}.
+     * Progress sink for per-file load lines. {@code null} → {@link LlmListeners#silent()}.
      */
-    public Builder io(final EngineIo io) {
-      this.io = io == null ? EngineIo.silent() : io;
-      this.corpus.io(this.io);
+    public Builder listen(final LlmListener io) {
+      this.io = io == null ? LlmListeners.silent() : io;
+      this.corpus.listen(this.io);
       return this;
     }
 

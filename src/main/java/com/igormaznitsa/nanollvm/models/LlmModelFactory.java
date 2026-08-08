@@ -3,13 +3,14 @@ package com.igormaznitsa.nanollvm.models;
 import static com.igormaznitsa.nanollvm.utils.NanoVllmProps.CONFIG_JSON;
 import static java.util.Objects.requireNonNull;
 
+import com.igormaznitsa.nanollvm.chat.LlmListener;
+import com.igormaznitsa.nanollvm.chat.LlmListeners;
 import com.igormaznitsa.nanollvm.exceptions.ModelLoadException;
 import com.igormaznitsa.nanollvm.internal.GgufModelLoader;
 import com.igormaznitsa.nanollvm.internal.GgufModelLoader.LoadedGguf;
 import com.igormaznitsa.nanollvm.internal.GgufReader;
 import com.igormaznitsa.nanollvm.internal.ModelLoader;
 import com.igormaznitsa.nanollvm.llm.Config;
-import com.igormaznitsa.nanollvm.llm.EngineIo;
 import com.igormaznitsa.nanollvm.llm.LLM;
 import com.igormaznitsa.nanollvm.tensor.VectorMath;
 import com.igormaznitsa.nanollvm.tokenizer.Tokenizer;
@@ -29,16 +30,16 @@ public final class LlmModelFactory {
   }
 
   public static LlmModel make(final Path modelDir) {
-    return make(modelDir, EngineIo.silent());
+    return make(modelDir, LlmListeners.silent());
   }
 
   public static LlmModel make(final String modelPath) {
     return make(Path.of(requireNonNull(modelPath, "modelPath")));
   }
 
-  public static LlmModel make(final Path modelPath, final EngineIo io) {
+  public static LlmModel make(final Path modelPath, final LlmListener io) {
     requireNonNull(modelPath, "modelPath");
-    EngineIo streams = io == null ? EngineIo.silent() : io;
+    LlmListener streams = io == null ? LlmListeners.silent() : io;
     Path path = modelPath.toAbsolutePath().normalize();
     try {
       if (Files.isRegularFile(path) && path.getFileName().toString().toLowerCase(Locale.ROOT)
@@ -56,32 +57,32 @@ public final class LlmModelFactory {
     }
   }
 
-  private static LlmModel loadHf(final Path path, final EngineIo io) throws IOException {
+  private static LlmModel loadHf(final Path path, final LlmListener io) throws IOException {
     long t0 = System.nanoTime();
-    io.info("CPU backend: " + VectorMath.backendInfo());
+    LlmListeners.info(io, null, "CPU backend: " + VectorMath.backendInfo());
 
     Config.HfConfig hfConfig = Config.HfConfig.load(path.resolve(CONFIG_JSON));
     String arch = CausalLMFactory.detect(hfConfig);
     WeightSchema schema = CausalLMFactory.schema(hfConfig);
 
-    io.info("Loading " + arch + " weights…");
+    LlmListeners.info(io, null, "Loading " + arch + " weights…");
     WeightBag weights = ModelLoader.loadWeights(path, hfConfig, schema, io);
 
-    io.info("Building " + arch + " model graph…");
+    LlmListeners.info(io, null, "Building " + arch + " model graph…");
     long tGraph = System.nanoTime();
     CausalLM network = CausalLMFactory.create(hfConfig, weights);
-    io.infof("Model graph ready (%s) in %.1fs%n",
+    LlmListeners.infof(io, null, "Model graph ready (%s) in %.1fs%n",
         network.architectureName(), (System.nanoTime() - tGraph) / 1e9);
 
     Tokenizer tokenizer = Tokenizer.fromPretrained(path);
-    io.infof("Model loaded in %.1fs%n", (System.nanoTime() - t0) / 1e9);
+    LlmListeners.infof(io, null, "Model loaded in %.1fs%n", (System.nanoTime() - t0) / 1e9);
     return new LlmModel(path, hfConfig, network, tokenizer);
   }
 
-  private static LlmModel loadGguf(final Path path, final EngineIo io) throws IOException {
+  private static LlmModel loadGguf(final Path path, final LlmListener io) throws IOException {
     long t0 = System.nanoTime();
-    io.info("CPU backend: " + VectorMath.backendInfo());
-    io.info(
+    LlmListeners.info(io, null, "CPU backend: " + VectorMath.backendInfo());
+    LlmListeners.info(io, null,
       "GGUF weights dequantize to float32 — expect large heap (default -Xmx16g in .mvn/jvm.config).");
 
     LoadedGguf loaded = GgufModelLoader.load(path, io);
@@ -93,14 +94,15 @@ public final class LlmModelFactory {
         }
       }
 
-      io.info("Building " + CausalLMFactory.detect(loaded.config()) + " model graph…");
+      LlmListeners.info(io, null,
+        "Building " + CausalLMFactory.detect(loaded.config()) + " model graph…");
       long tGraph = System.nanoTime();
       CausalLM network = CausalLMFactory.create(loaded.config(), loaded.weights());
-      io.infof("Model graph ready (%s) in %.1fs%n",
+      LlmListeners.infof(io, null, "Model graph ready (%s) in %.1fs%n",
         network.architectureName(), (System.nanoTime() - tGraph) / 1e9);
 
       Tokenizer tokenizer = Tokenizer.fromGguf(reader);
-      io.infof("Model loaded in %.1fs%n", (System.nanoTime() - t0) / 1e9);
+      LlmListeners.infof(io, null, "Model loaded in %.1fs%n", (System.nanoTime() - t0) / 1e9);
       return new LlmModel(path, loaded.config(), network, tokenizer);
     }
   }

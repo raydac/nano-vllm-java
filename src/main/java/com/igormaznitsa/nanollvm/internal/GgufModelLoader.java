@@ -2,11 +2,11 @@ package com.igormaznitsa.nanollvm.internal;
 
 import static java.util.Objects.requireNonNull;
 
+import com.igormaznitsa.nanollvm.chat.LlmListener;
+import com.igormaznitsa.nanollvm.chat.LlmListeners;
 import com.igormaznitsa.nanollvm.llm.Config;
-import com.igormaznitsa.nanollvm.llm.EngineIo;
 import com.igormaznitsa.nanollvm.models.WeightBag;
 import com.igormaznitsa.nanollvm.tensor.Tensor;
-
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.LinkedHashMap;
@@ -24,10 +24,10 @@ public final class GgufModelLoader {
   private GgufModelLoader() {
   }
 
-  public static LoadedGguf load(final Path ggufPath, final EngineIo io) throws IOException {
-    EngineIo streams = io == null ? EngineIo.silent() : io;
+  public static LoadedGguf load(final Path ggufPath, final LlmListener io) throws IOException {
+    LlmListener streams = io == null ? LlmListeners.silent() : io;
     Path path = requireNonNull(ggufPath, "ggufPath").toAbsolutePath().normalize();
-    streams.infof("Loading GGUF from %s%n", path);
+    LlmListeners.infof(streams, null, "Loading GGUF from %s%n", path);
 
     GgufReader reader = GgufReader.open(path);
     String arch = reader.metaString("general.architecture", "").toLowerCase(Locale.ROOT);
@@ -38,7 +38,7 @@ public final class GgufModelLoader {
     }
 
     Config.HfConfig config = buildConfig(reader, arch);
-    streams.infof(
+    LlmListeners.infof(streams, null,
       "GGUF %s: layers=%d hidden=%d ff=%d heads=%d/%d convL=%d%n",
       arch,
       config.numHiddenLayers(),
@@ -176,10 +176,10 @@ public final class GgufModelLoader {
   private static final class Progress {
     private final String label;
     private final int total;
-    private final EngineIo io;
+    private final LlmListener io;
     private int done;
 
-    Progress(final String label, final int total, final EngineIo io) {
+    Progress(final String label, final int total, final LlmListener io) {
       this.label = label;
       this.total = Math.max(1, total);
       this.io = io;
@@ -188,12 +188,12 @@ public final class GgufModelLoader {
     void step(final String detail) {
       this.done++;
       if (this.done == 1 || this.done == this.total || this.done % 8 == 0) {
-        this.io.infof("%s [%d/%d] %s%n", this.label, this.done, this.total, detail);
+        LlmListeners.infof(io, null, "%s [%d/%d] %s%n", this.label, this.done, this.total, detail);
       }
     }
 
     void finish(final String detail) {
-      this.io.infof("%s done: %s%n", this.label, detail);
+      LlmListeners.infof(io, null, "%s done: %s%n", this.label, detail);
     }
   }
 }

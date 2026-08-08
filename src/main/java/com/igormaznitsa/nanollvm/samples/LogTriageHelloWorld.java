@@ -1,5 +1,6 @@
 package com.igormaznitsa.nanollvm.samples;
 
+import com.igormaznitsa.nanollvm.chat.LlmListeners;
 import com.igormaznitsa.nanollvm.llm.LLM;
 import com.igormaznitsa.nanollvm.models.LlmModel;
 import com.igormaznitsa.nanollvm.models.LlmModelFactory;
@@ -48,7 +49,7 @@ public final class LogTriageHelloWorld {
       .skipWarmup()
       .disableMultiCpu()
       .maxModelLen(2048)
-      .withSystemIo()
+      .listen(LlmListeners.toSystem())
       .build()) {
       System.out.println(llm.chat(128).send(prompt).answer());
     }

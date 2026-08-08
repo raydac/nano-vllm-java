@@ -1,5 +1,6 @@
 package com.igormaznitsa.nanollvm.samples;
 
+import com.igormaznitsa.nanollvm.chat.LlmListeners;
 import com.igormaznitsa.nanollvm.llm.LLM;
 import com.igormaznitsa.nanollvm.llm.SamplingParams;
 import com.igormaznitsa.nanollvm.samples.utils.BundledModels;
@@ -12,7 +13,7 @@ import java.util.concurrent.ThreadLocalRandom;
  * Command-line throughput smoke test for the inference engine.
  *
  * <p>Loads a model via {@link BundledModels#resolveDefault(String[])} (same resolution as
- * {@link Example}), builds an {@link LLM} with CLI progress ({@link LLM.Builder#withSystemIo()}),
+ * {@link Example}), builds an {@link LLM} with CLI progress ({@link LlmListeners#toSystem()}),
  * and runs one batched {@link LLM#generate} call over several concurrent sequences. Prompts are
  * random token-id lists (not real text), so output quality is meaningless; the goal is to stress
  * scheduling, KV cache paging, and the forward path and print wall-clock throughput (tokens per second).
@@ -53,7 +54,7 @@ public final class Bench {
         .kvcacheBlockSize(KV_BLOCK_SIZE)
         .numKvcacheBlocks(kvBlocks)
         .skipWarmup()
-        .withSystemIo()
+      .listen(LlmListeners.toSystem())
         .build()) {
       List<List<Integer>> prompts = new ArrayList<>();
       List<SamplingParams> params = new ArrayList<>();

@@ -2579,9 +2579,9 @@ You do not need to read every file. Use the tables to jump, then skim the named 
 
 | Folder / type                                                                          | Role in the story                                    |
 |----------------------------------------------------------------------------------------|------------------------------------------------------|
-| `llm/` — `LLM`, `LLM.Builder`, `Config`, `EngineIo`, `SamplingParams`, `SubagentRunner` | Front door; quiet vs CLI I/O; optional subagents |
+| `llm/` — `LLM`, `LLM.Builder`, `Config`, `SamplingParams`                              | Front door; optional advisors                       |
 | `models/LlmModel`, `LlmModelFactory`, `WeightBag`                                          | Shared immutable loaded model + weight bag       |
-| `chat/` — `ChatSession`, `ChatMessage`, `ChatReply`, `AssistantParts`, `StreamPrinter` | Dialog, history, `<think>` split, streaming          |
+| `chat/` — `ChatSession`, `LlmListener`, `LlmTextKind`, `ChatReply`, `StreamPrinter` | Dialog + unified text/status events                  |
 | `tokenizer/Tokenizer`                                                                  | `tokenizer.json` / GGUF vocab → encode / decode / chat template   |
 | `Config.HfConfig` (in `llm/Config`)                                                    | `config.json` blueprint + per-LLM engine knobs       |
 | `internal/ModelLoader`, `internal/SafetensorsReader`, `internal/Gguf*`                 | Load safetensors / GGUF weights into `WeightBag`     |
@@ -2591,7 +2591,7 @@ You do not need to read every file. Use the tables to jump, then skim the named 
 | `models/CausalLM`, `CausalLMFactory`, `Qwen3ForCausalLM`, `Gemma3ForCausalLM`, `Lfm2ForCausalLM` | Architecture graph |
 | `layers/Attention`, `Sampler`, `Linear`, `Norms`, …                                    | Attention, sampling, projections, RMSNorm/RoPE       |
 | `tensor/Tensor`, `Ops`, `VectorMath`                                                   | Arrays and kernels                                   |
-| `prompts/ChatPrompts`, `RagPrompts`, `SubagentPrompts`                                 | Default system / RAG / advisor wording               |
+| `prompts/ChatPrompts`, `RagPrompts`, `AdvisorPrompts`                                 | Default system / RAG / advisor wording               |
 | `rag/` — `RagFactory`, `PreparedRag`, `RagSession`, …                                  | Text RAG: prepare docs once, retrieve, chat          |
 | `samples/Example`, `samples/Bench`, `samples/LogTriageHelloWorld` (not exported)       | Runnable demos                                       |
 
@@ -2600,7 +2600,7 @@ You do not need to read every file. Use the tables to jump, then skim the named 
 | Story idea                       | Primary type                                                         | Methods / entry points to open                                                                                |
 |----------------------------------|----------------------------------------------------------------------|---------------------------------------------------------------------------------------------------------------|
 | Open a model                     | `LlmModelFactory`, `LlmModel`, `LLM.Builder`                               | `LlmModelFactory.make(path)`; `LLM.builder(model)` or `LLM.builder(path)`; `.systemPrompt(…)`, `.build()`        |
-| Chat turn                        | `ChatSession`                                                        | `llm.chat(maxTokens)`, `.send(user)`, `.streamTo(…)`, `.clear()`                                              |
+| Chat turn                        | `ChatSession`                                                        | `llm.chat(maxTokens)`, `.listen(…)`, `.streamTo(…)`, `.send(user)`, `.clear()`                              |
 | One-shot / raw text              | `LLM`                                                                | `chatOnce(…)`, `complete(…)`, `generate(…)`                                                                   |
 | Cancel / timeout                 | `LLM`                                                                | `cancel()`; `generate(…, timeout, onToken)`                                                                   |
 | Tokenize                         | `Tokenizer` (on `LlmModel`)                                             | `LlmModel.tokenizer()`; `encode`, `decode`, `applyChatTemplate(…, enableThinking)`                               |
@@ -2645,7 +2645,7 @@ String grounded = llm.rag(rag).topK(2).ask("What is the capital of France?");
 }
 ```
 
-Interactive CLI wiring lives in `samples.Example.main`: `LLM.builder(…).withSystemIo().build()`, then either
+Interactive CLI wiring lives in `samples.Example.main`: `LLM.builder(…).listen(LlmListeners.toSystem()).build()`, then either
 `llm.chat(…).streamTo(…)` or, when `./rag` exists, `llm.rag(prepared).streamTo(…)` (chapter 17).
 
 ### Sample B — one generate tick (Sense A loop)
@@ -2756,8 +2756,9 @@ src/main/java/com/igormaznitsa/nanollvm/
   samples/Example.java         ← CLI chat / RAG demo (not exported; module main)
   samples/Bench.java           ← throughput smoke test (not exported)
   llm/LLM.java                 ← start here for API
-  llm/Config.java / EngineIo.java / SamplingParams.java
-  llm/SubagentRunner.java / SubagentPrompt.java / SubagentMode.java
+  llm/Config.java / SamplingParams.java
+  chat/LlmListener.java / LlmListeners.java / LlmTextKind.java
+  llm/AdvisorRunner.java / AdvisorPrompt.java / AdvisorMode.java
   chat/ChatSession.java        ← dialog + thinking split
   rag/RagFactory.java          ← prepare documents once
   rag/PreparedRag.java         ← shareable corpus + BM25 index (+ Passage record)
@@ -2770,7 +2771,7 @@ src/main/java/com/igormaznitsa/nanollvm/
   models/LlmModel.java / LlmModelFactory.java / CausalLMFactory.java
   models/Qwen3ForCausalLM.java / Gemma3ForCausalLM.java / Lfm2ForCausalLM.java
   tokenizer/Tokenizer.java
-  prompts/ChatPrompts.java / RagPrompts.java / SubagentPrompts.java
+  prompts/ChatPrompts.java / RagPrompts.java / AdvisorPrompts.java
   internal/ModelLoader.java / SafetensorsReader.java
   internal/GgufModelLoader.java / GgufReader.java / GgufDequant.java
   internal/Context.java        ← per-step KV / conv slot maps

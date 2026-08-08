@@ -5,7 +5,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import com.igormaznitsa.nanollvm.llm.EngineIo;
+import com.igormaznitsa.nanollvm.chat.LlmListener;
+import com.igormaznitsa.nanollvm.chat.LlmListeners;
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
 import java.nio.file.Files;
@@ -218,11 +219,11 @@ class RagRetrievalTest {
 
     ByteArrayOutputStream err = new ByteArrayOutputStream();
     PrintStream sink = new PrintStream(err, true, UTF_8);
-    EngineIo io = EngineIo.of(sink, sink);
+    LlmListener io = LlmListeners.ofStatusStreams(sink, sink);
 
     PreparedRag prepared = RagFactory.builder()
       .options(RagLoadOptions.forTinyModels())
-      .io(io)
+      .listen(io)
       .addFile(note)
       .build();
 

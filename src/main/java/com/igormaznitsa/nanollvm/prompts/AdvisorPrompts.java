@@ -6,9 +6,9 @@ import java.util.List;
 import java.util.regex.Pattern;
 
 /**
- * Model-facing subagent role text, grounded-extraction rules, and mix templates.
+ * Model-facing advisor role text, grounded-extraction rules, and mix templates.
  */
-public final class SubagentPrompts {
+public final class AdvisorPrompts {
 
   public static final String ROLE_PRACTICAL = """
     Practical extractor: pull concrete facts, places, actions, and constraints from Context.
@@ -63,7 +63,7 @@ public final class SubagentPrompts {
     "\nAdvisor notes",
     "\nUnverified");
 
-  private SubagentPrompts() {
+  private AdvisorPrompts() {
   }
 
   public static String[] demoRoles() {

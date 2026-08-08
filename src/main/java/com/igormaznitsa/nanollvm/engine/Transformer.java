@@ -1,9 +1,10 @@
 package com.igormaznitsa.nanollvm.engine;
 
+import com.igormaznitsa.nanollvm.chat.LlmListener;
+import com.igormaznitsa.nanollvm.chat.LlmListeners;
 import com.igormaznitsa.nanollvm.internal.Context;
 import com.igormaznitsa.nanollvm.layers.Sampler;
 import com.igormaznitsa.nanollvm.llm.Config;
-import com.igormaznitsa.nanollvm.llm.EngineIo;
 import com.igormaznitsa.nanollvm.models.CausalLM;
 import com.igormaznitsa.nanollvm.models.LlmModel;
 import com.igormaznitsa.nanollvm.tensor.Tensor;
@@ -68,7 +69,7 @@ public final class Transformer implements AutoCloseable {
    * @param config engine limits used to size the KV arena
    */
   public Transformer(final LlmModel model, final Config config) {
-    this(model, config, EngineIo.silent());
+    this(model, config, LlmListeners.silent());
   }
 
   /**
@@ -79,18 +80,18 @@ public final class Transformer implements AutoCloseable {
    * @param config engine limits used to size the KV arena
    * @param io     progress sink for KV / conv allocation messages; {@code null} → silent
    */
-  public Transformer(final LlmModel model, final Config config, final EngineIo io) {
+  public Transformer(final LlmModel model, final Config config, final LlmListener io) {
     // Capture engine config and resolve progress sink (null → silent)
     this.config = config;
-    final EngineIo io1 = io == null ? EngineIo.silent() : io;
+    final LlmListener io1 = io == null ? LlmListeners.silent() : io;
     this.blockSize = config.kvcacheBlockSize();
     this.network = model.network();
 
     // Allocate paged KV arena sized from config (or heap-aware estimate)
-    io1.info("Allocating KV cache…");
+    LlmListeners.info(io1, null, "Allocating KV cache…");
     long tKv = System.nanoTime();
     this.kvCache = this.allocateKvCache();
-    io1.infof("KV cache ready: %d blocks (%.1fs)%n",
+    LlmListeners.infof(io1, null, "KV cache ready: %d blocks (%.1fs)%n",
         this.config.numKvcacheBlocks(),
         (System.nanoTime() - tKv) / 1e9);
 
@@ -98,7 +99,7 @@ public final class Transformer implements AutoCloseable {
     Config.HfConfig hf = this.config.hfConfig();
     if (hf.convLCache() > 0) {
       this.convCache = new ConvStateArena(hf.numHiddenLayers(), hf.hiddenSize(), hf.convLCache());
-      io1.info("Conv state arena ready (" + this.convCache + ")");
+      LlmListeners.info(io1, null, "Conv state arena ready (" + this.convCache + ")");
     } else {
       this.convCache = null;
     }

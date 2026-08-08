@@ -16,14 +16,16 @@ import com.igormaznitsa.nanollvm.chat.AssistantParts;
 import com.igormaznitsa.nanollvm.chat.ChatMessage;
 import com.igormaznitsa.nanollvm.chat.ChatMessages;
 import com.igormaznitsa.nanollvm.chat.ChatRole;
+import com.igormaznitsa.nanollvm.chat.LlmListener;
+import com.igormaznitsa.nanollvm.chat.LlmListeners;
+import com.igormaznitsa.nanollvm.chat.LlmTextKind;
 import com.igormaznitsa.nanollvm.engine.BlockManager;
 import com.igormaznitsa.nanollvm.engine.Sequence;
+import com.igormaznitsa.nanollvm.llm.AdvisorMode;
 import com.igormaznitsa.nanollvm.llm.Config;
-import com.igormaznitsa.nanollvm.llm.EngineIo;
 import com.igormaznitsa.nanollvm.llm.LLM;
 import com.igormaznitsa.nanollvm.llm.SamplingDefaults;
 import com.igormaznitsa.nanollvm.llm.SamplingParams;
-import com.igormaznitsa.nanollvm.llm.SubagentMode;
 import com.igormaznitsa.nanollvm.models.LlmModel;
 import com.igormaznitsa.nanollvm.models.LlmModelFactory;
 import com.igormaznitsa.nanollvm.prompts.ChatPrompts;
@@ -44,14 +46,18 @@ import org.junit.jupiter.api.Test;
 class CoreUnitTest {
 
   @Test
-  void engineIoSilentAndSystem() {
-    assertTrue(EngineIo.silent().isSilent());
-    assertFalse(EngineIo.system().isSilent());
-    EngineIo.silent().info("must not reach the console");
-    EngineIo custom = EngineIo.of(System.out, System.err);
-    assertFalse(custom.isSilent());
-    assertEquals(System.out, custom.out());
-    assertEquals(System.err, custom.err());
+  void llmListenerSilentAndStatus() {
+    assertTrue(LlmListeners.isSilent(LlmListeners.silent()));
+    assertFalse(LlmListeners.isSilent(LlmListeners.toSystem()));
+    LlmListeners.info(LlmListeners.silent(), null, "must not reach the console");
+
+    var captured = new java.util.ArrayList<String>();
+    LlmListener probe = (source, event) -> captured.add(event.kind() + ":" + event.text());
+    LlmListeners.info(probe, null, "hello");
+    LlmListeners.progressf(probe, null, "gen %d", 1);
+    assertEquals(2, captured.size());
+    assertTrue(captured.getFirst().startsWith(LlmTextKind.STATUS_INFO + ":hello"));
+    assertEquals(LlmTextKind.STATUS_PROGRESS + ":gen 1", captured.get(1));
   }
 
   @Test
@@ -67,9 +73,8 @@ class CoreUnitTest {
         .tensorParallelSize(1)
         .enforceEager(true)
         .skipWarmup()
-        .quiet()
-        .withSystemIo()
-        .io(EngineIo.silent())
+      .listen(LlmListeners.toSystem())
+      .listen(LlmListeners.silent())
         .warmup(false)
         .systemPrompt("Answer briefly.")
         .noSystemPrompt()
@@ -93,30 +98,30 @@ class CoreUnitTest {
   }
 
   @Test
-  void setSubagentsStoresModeAndPromptsWhenWeightsPresent() {
+  void setAdvisorsStoresModeAndPromptsWhenWeightsPresent() {
     var path = BundledModels.find(BundledModels.QWEN3_0_6B);
     org.junit.jupiter.api.Assumptions.assumeTrue(path.isPresent(), "Qwen3-0.6B not downloaded");
 
     LlmModel model = LlmModelFactory.make(path.get());
     try (LLM llm = LLM.builder(model).maxModelLen(256).numKvcacheBlocks(32).skipWarmup().build()) {
-      assertTrue(llm.subagentPrompts().isEmpty());
-      assertEquals(SubagentMode.SEQUENTIAL, llm.subagentMode());
+      assertTrue(llm.advisorPrompts().isEmpty());
+      assertEquals(AdvisorMode.SEQUENTIAL, llm.advisorMode());
 
-      llm.setSubagents(SubagentMode.PARALLEL, "  Fact check  ", "Argue risks");
-      assertEquals(SubagentMode.PARALLEL, llm.subagentMode());
-      assertEquals(List.of("Fact check", "Argue risks"), llm.subagentPrompts());
+      llm.setAdvisors(AdvisorMode.PARALLEL, "  Fact check  ", "Argue risks");
+      assertEquals(AdvisorMode.PARALLEL, llm.advisorMode());
+      assertEquals(List.of("Fact check", "Argue risks"), llm.advisorPrompts());
 
       assertThrows(
         IllegalArgumentException.class,
-        () -> llm.setSubagents(SubagentMode.SEQUENTIAL, "ok", "  "));
+        () -> llm.setAdvisors(AdvisorMode.SEQUENTIAL, "ok", "  "));
 
-      llm.setSubagents(SubagentMode.SEQUENTIAL, "   ", "");
-      assertTrue(llm.subagentPrompts().isEmpty());
-      assertEquals(SubagentMode.SEQUENTIAL, llm.subagentMode());
+      llm.setAdvisors(AdvisorMode.SEQUENTIAL, "   ", "");
+      assertTrue(llm.advisorPrompts().isEmpty());
+      assertEquals(AdvisorMode.SEQUENTIAL, llm.advisorMode());
 
-      llm.setSubagents(SubagentMode.PARALLEL, "only");
-      llm.setSubagents();
-      assertTrue(llm.subagentPrompts().isEmpty());
+      llm.setAdvisors(AdvisorMode.PARALLEL, "only");
+      llm.setAdvisors();
+      assertTrue(llm.advisorPrompts().isEmpty());
     }
   }
 

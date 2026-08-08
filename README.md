@@ -106,7 +106,7 @@ mvn -q exec:java -Dexec.mainClass=com.igormaznitsa.nanollvm.samples.LogTriageHel
 # or: … -Dexec.args=/opt/models/Gemma3-270M
 ```
 
-More API samples (streaming, RAG, GGUF, subagents) are in [Library quick start](#library-quick-start).
+More API samples (streaming, RAG, GGUF, advisors) are in [Library quick start](#library-quick-start).
 
 ## Key features
 
@@ -116,7 +116,7 @@ More API samples (streaming, RAG, GGUF, subagents) are in [Library quick start](
 - Optional multi-thread CPU matmul (`cpuThreads` / `allCpuThreads` / `disableMultiCpu`); default = all processors
 - GPT-2 byte BPE, Gemma Metaspace BPE, and GGUF-embedded tokenizers
 - Optional **BM25 text RAG** over a local `rag/` corpus (used automatically by the Example CLI)
-- Optional **subagent** advisors before each chat/RAG turn (`LLM.setSubagents`)
+- Optional **advisors** before each chat/RAG turn (`LLM.setAdvisors`)
 
 ## Requirements
 
@@ -281,7 +281,7 @@ NANOVLLM_MODEL=models/Qwen3-0.6B mvn -q exec:java
 **RAG mode:** if the directory `rag/` exists (the repo ships Grimm / Little Red Riding Hood `.txt` and fact cards),
 Example builds a shared BM25 index and uses the `rag?>` prompt. Otherwise it uses plain chat (`?>`).
 
-**Subagents (Example only):** after load, advisors are wired by architecture — **Gemma** 3 roles (PARALLEL), **Qwen**
+**Advisors (Example only):** after load, advisors are wired by architecture — **Gemma** 3 roles (PARALLEL), **Qwen**
 2 roles (PARALLEL), **LFM** none. Advisor notes appear on the thinking stream; grounded RAG mixes only Context-supported
 hints into the main prompt.
 
@@ -290,7 +290,7 @@ Example session (ask about the demo corpus):
 ```text
 Loading model from …/models/Qwen3-0.6B
 RAG: prepared BM25 over …/rag (… chunks, shared index)
-Subagents: 2 (practical, abstract) PARALLEL for Qwen.
+Advisors: 2 (practical, abstract) PARALLEL for Qwen.
 Type a message and press Enter. Commands: /exit  /quit  /clear
 
 rag?> who are the grimm brothers?
@@ -363,7 +363,7 @@ import com.igormaznitsa.nanollvm.llm.LLM;
 import java.nio.file.Path;
 
 Path modelDir = Path.of("models/Qwen3-0.6B"); // your local HF (or .gguf) path
-LlmModel model = LlmModelFactory.make(modelDir);    // quiet; LlmModelFactory.make(dir, EngineIo.system()) for progress
+LlmModel model = LlmModelFactory.make(modelDir);    // quiet; LlmModelFactory.make(dir, LlmListeners.toSystem()) for progress
 
 try (LLM llm = LLM.builder(model)
     .enforceEager(true)
@@ -380,12 +380,12 @@ try (LLM llm = LLM.builder(model)
 Path convenience (private `LlmModel` inside the builder):
 
 ```java
+import com.igormaznitsa.nanollvm.chat.LlmListeners;
 import com.igormaznitsa.nanollvm.llm.LLM;
-import com.igormaznitsa.nanollvm.models.LlmModelFactory;
 
 import java.nio.file.Path;
 
-try (LLM llm = LLM.builder(Path.of("models/Qwen3-0.6B")).withSystemIo().build()) {
+try (LLM llm = LLM.builder(Path.of("models/Qwen3-0.6B")).listen(LlmListeners.toSystem()).build()) {
   System.out.println(llm.chatOnce("Say hi in one sentence."));
 }
 ```
@@ -393,14 +393,14 @@ try (LLM llm = LLM.builder(Path.of("models/Qwen3-0.6B")).withSystemIo().build())
 ### GGUF / LFM2
 
 ```java
-import com.igormaznitsa.nanollvm.llm.EngineIo;
+import com.igormaznitsa.nanollvm.chat.LlmListeners;
 import com.igormaznitsa.nanollvm.llm.LLM;
 import com.igormaznitsa.nanollvm.models.LlmModel;
 import com.igormaznitsa.nanollvm.models.LlmModelFactory;
 
 import java.nio.file.Path;
 
-LlmModel model = LlmModelFactory.make(Path.of("models/LFM2.5-2.6B-Q4_K_M.gguf"), EngineIo.system());
+LlmModel model = LlmModelFactory.make(Path.of("models/LFM2.5-2.6B-Q4_K_M.gguf"), LlmListeners.toSystem());
 try (LLM llm = LLM.builder(model)
     .maxModelLen(2048)
     .allCpuThreads()
@@ -411,10 +411,33 @@ try (LLM llm = LLM.builder(model)
 
 ### Streaming chat
 
+One `LlmListener` covers status (`STATUS_INFO` / `STATUS_PROGRESS`) and chat text
+(`TEXT_THINKING` / `TEXT_ASSISTANT` / …). CLI PrintStreams remain sugar over the same path:
+
 ```java
-try (LLM llm = LLM.builder(model).build()) {
+import com.igormaznitsa.nanollvm.chat.LlmListeners;
+import com.igormaznitsa.nanollvm.chat.LlmTextKind;
+
+try (LLM llm = LLM.builder(model)
+    .listen(LlmListeners.toSystem())  // status → stderr/stdout
+    .build()) {
   llm.chat(256)
-      .streamTo(System.err, System.out, true)  // thinking → stderr, answer → stdout
+      .listen((source, event) -> {
+        switch (event.kind()) {
+          case TEXT_THINKING -> System.err.print(event.text());
+          case TEXT_ASSISTANT -> System.out.print(event.text());
+          case TEXT_ADVISOR_NOTE -> System.err.printf("[advisor %d] %s%n", event.slot(), event.text());
+          case TEXT_DIAGNOSTICS -> System.err.println(event.text());
+          case STATUS_INFO, STATUS_PROGRESS -> { /* already handled by toSystem on the LLM */ }
+        }
+      })
+      .send("Explain paged KV cache in one short paragraph.");
+}
+
+// Equivalent CLI helper for chat channels:
+try (LLM llm = LLM.builder(model).listen(LlmListeners.toSystem()).build()) {
+  llm.chat(256)
+      .streamTo(System.err, System.out, true)  // → LlmListeners.toPrintStreams(...)
       .send("Explain paged KV cache in one short paragraph.");
 }
 ```
@@ -432,19 +455,19 @@ try (LLM llm = LLM.builder(model).build()) {
 }
 ```
 
-### Subagents
+### Advisors
 
 Isolated advisor generates run **before** each chat/RAG turn (no history). Notes show on the thinking stream; for RAG
 hits, only Context-grounded notes are mixed into the main prompt.
 
 ```java
-import com.igormaznitsa.nanollvm.llm.SubagentMode;
-import com.igormaznitsa.nanollvm.prompts.SubagentPrompts;
+import com.igormaznitsa.nanollvm.llm.AdvisorMode;
+import com.igormaznitsa.nanollvm.prompts.AdvisorPrompts;
 
 try (LLM llm = LLM.builder(model).build()) {
-  llm.setSubagents(SubagentMode.PARALLEL, SubagentPrompts.demoRolesQwen());
-  // Gemma: SubagentPrompts.demoRolesGemma() — three roles
-  // Clear: llm.setSubagents();
+  llm.setAdvisors(AdvisorMode.PARALLEL, AdvisorPrompts.demoRolesQwen());
+  // Gemma: AdvisorPrompts.demoRolesGemma() — three roles
+  // Clear: llm.setAdvisors();
 
   System.out.println(llm.chat(256).send("Summarize the user question briefly.").answer());
 }
@@ -457,7 +480,7 @@ try (LLM llm = LLM.builder(model).build()) {
 Index documents once (UTF-8 `.txt` / `.md` / … and `.pdf` via `PdfTextExtractor`), share `PreparedRag` across LLMs:
 
 ```java
-import com.igormaznitsa.nanollvm.llm.EngineIo;
+import com.igormaznitsa.nanollvm.chat.LlmListeners;
 import com.igormaznitsa.nanollvm.llm.LLM;
 import com.igormaznitsa.nanollvm.rag.PreparedRag;
 import com.igormaznitsa.nanollvm.rag.RagFactory;
@@ -466,7 +489,7 @@ import com.igormaznitsa.nanollvm.rag.RagLoadOptions;
 import java.nio.file.Path;
 
 PreparedRag rag = RagFactory.make(Path.of("rag")); // silent
-// progress: RagFactory.make(Path.of("rag"), RagLoadOptions.defaults(), EngineIo.system());
+// progress: RagFactory.make(Path.of("rag"), RagLoadOptions.defaults(), LlmListeners.toSystem());
 // tiny models: RagFactory.make(Path.of("rag"), RagLoadOptions.forTinyModels());
 
 try (LLM llm = LLM.builder(model).build()) {

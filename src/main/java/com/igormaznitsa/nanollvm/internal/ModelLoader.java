@@ -3,14 +3,13 @@ package com.igormaznitsa.nanollvm.internal;
 import static com.igormaznitsa.nanollvm.models.WeightNames.GATE_UP_PROJ;
 import static com.igormaznitsa.nanollvm.models.WeightNames.QKV_PROJ;
 
+import com.igormaznitsa.nanollvm.chat.LlmListener;
+import com.igormaznitsa.nanollvm.chat.LlmListeners;
 import com.igormaznitsa.nanollvm.llm.Config;
-import com.igormaznitsa.nanollvm.llm.EngineIo;
 import com.igormaznitsa.nanollvm.models.WeightBag;
 import com.igormaznitsa.nanollvm.models.WeightSchema;
 import com.igormaznitsa.nanollvm.tensor.Tensor;
-
 import java.io.IOException;
-import java.io.PrintStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -33,9 +32,9 @@ public final class ModelLoader {
       final Path modelDir,
       final Config.HfConfig hfConfig,
       final WeightSchema schema,
-      final EngineIo io
+      final LlmListener io
   ) throws IOException {
-    EngineIo streams = io == null ? EngineIo.silent() : io;
+    LlmListener streams = io == null ? LlmListeners.silent() : io;
     List<Path> files = SafetensorsReader.listSafetensors(modelDir);
     if (files.isEmpty()) {
       throw new IllegalArgumentException("no .safetensors files in " + modelDir);
@@ -45,7 +44,7 @@ public final class ModelLoader {
     for (Path file : files) {
       fileBytes += Files.size(file);
     }
-    streams.infof("Loading weights from %s (%.2f GiB, %d file%s)%n",
+    LlmListeners.infof(streams, null, "Loading weights from %s (%.2f GiB, %d file%s)%n",
         modelDir,
         fileBytes / (1024.0 * 1024.0 * 1024.0),
         files.size(),
@@ -293,18 +292,16 @@ public final class ModelLoader {
   private static final class Progress {
     private final String label;
     private final int total;
-    private final PrintStream err;
-    private final boolean silent;
+    private final LlmListener io;
     private final long startNanos = System.nanoTime();
     private int current;
     private String detail = "";
     private boolean finished;
 
-    Progress(String label, int total, EngineIo io) {
+    Progress(String label, int total, LlmListener io) {
       this.label = label;
       this.total = Math.max(1, total);
-      this.err = io.err();
-      this.silent = io.isSilent();
+      this.io = io;
       this.render();
     }
 
@@ -326,17 +323,16 @@ public final class ModelLoader {
         return;
       }
       this.finished = true;
-      if (this.silent) {
+      if (LlmListeners.isSilent(io)) {
         return;
       }
       double seconds = (System.nanoTime() - this.startNanos) / 1e9;
-      this.err.printf(Locale.ROOT, "\r%s: done in %.1fs%s%n",
+      LlmListeners.infof(io, null, "\r%s: done in %.1fs%s%n",
           this.label, seconds, message == null || message.isBlank() ? "" : " — " + message);
-      this.err.flush();
     }
 
     private void render() {
-      if (this.finished || this.silent) {
+      if (this.finished || LlmListeners.isSilent(io)) {
         return;
       }
       double fraction = (double) this.current / this.total;
@@ -350,9 +346,8 @@ public final class ModelLoader {
       String shortDetail = this.detail.length() <= 48
           ? this.detail
           : "…" + this.detail.substring(this.detail.length() - 47);
-      this.err.printf(Locale.ROOT, "\r%s: [%s] %3.0f%% (%d/%d) ETA %s  %s   ",
+      LlmListeners.infof(io, null, "\r%s: [%s] %3.0f%% (%d/%d) ETA %s  %s   ",
           this.label, bar, fraction * 100.0, this.current, this.total, eta, shortDetail);
-      this.err.flush();
     }
   }
 }

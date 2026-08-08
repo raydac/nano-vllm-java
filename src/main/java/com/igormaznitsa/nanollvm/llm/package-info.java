@@ -1,5 +1,6 @@
 /**
- * Inference engine API: {@link LLM}, runtime {@link Config}, {@link EngineIo}, and {@link SamplingParams}.
+ * Inference engine API: {@link LLM}, runtime {@link Config}, and {@link SamplingParams}.
+ * Status and chat text share {@link com.igormaznitsa.nanollvm.chat.LlmListener}.
  * <p>
  * Load weights via {@link com.igormaznitsa.nanollvm.models.LlmModelFactory} into a shared {@link com.igormaznitsa.nanollvm.models.LlmModel},
  * then {@link LLM#builder(com.igormaznitsa.nanollvm.models.LlmModel)} (or path convenience

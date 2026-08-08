@@ -5,23 +5,23 @@ import static java.util.Objects.requireNonNull;
 import java.util.List;
 
 /**
- * Result of the optional subagent pass: enriched user text, raw advisor notes for the thinking
+ * Result of the optional advisor pass: enriched user text, raw advisor notes for the thinking
  * stream, and the filtered notes actually mixed into the main prompt.
  */
-public record SubagentEnrichment(
+public record AdvisorEnrichment(
   String modelUserText,
   List<String> advisorNotes,
   List<String> groundedNotes
 ) {
 
-  public SubagentEnrichment {
+  public AdvisorEnrichment {
     requireNonNull(modelUserText, "modelUserText");
     advisorNotes = List.copyOf(requireNonNull(advisorNotes, "advisorNotes"));
     groundedNotes = List.copyOf(requireNonNull(groundedNotes, "groundedNotes"));
   }
 
-  public static SubagentEnrichment passthrough(final String modelUserText) {
-    return new SubagentEnrichment(
+  public static AdvisorEnrichment passthrough(final String modelUserText) {
+    return new AdvisorEnrichment(
       requireNonNull(modelUserText, "modelUserText"), List.of(), List.of());
   }
 

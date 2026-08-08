@@ -3,7 +3,8 @@ package com.igormaznitsa.nanollvm.rag;
 import static java.nio.charset.StandardCharsets.UTF_8;
 import static java.util.Objects.requireNonNull;
 
-import com.igormaznitsa.nanollvm.llm.EngineIo;
+import com.igormaznitsa.nanollvm.chat.LlmListener;
+import com.igormaznitsa.nanollvm.chat.LlmListeners;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.file.FileVisitResult;
@@ -49,7 +50,7 @@ final class CorpusLoader {
     private boolean atomicSentences = false;
     private boolean dedupe = true;
     private Set<String> folderExtensions = DEFAULT_EXTENSIONS;
-    private EngineIo io = EngineIo.silent();
+    private LlmListener io = LlmListeners.silent();
     private Path reportRoot;
 
     private static String fingerprint(final String text) {
@@ -88,10 +89,10 @@ final class CorpusLoader {
     }
 
     /**
-     * Progress sink for per-file load lines. {@code null} → {@link EngineIo#silent()}.
+     * Progress sink for per-file load lines. {@code null} → {@link LlmListeners#silent()}.
      */
-    public Builder io(final EngineIo io) {
-      this.io = io == null ? EngineIo.silent() : io;
+    public Builder listen(final LlmListener io) {
+      this.io = io == null ? LlmListeners.silent() : io;
       return this;
     }
 
@@ -189,7 +190,7 @@ final class CorpusLoader {
         throw new IllegalArgumentException("not a directory: " + root);
       }
       this.reportRoot = root;
-      this.io.infof("RAG scanning %s …%n", root);
+      LlmListeners.infof(io, null, "RAG scanning %s …%n", root);
       try {
         Files.walkFileTree(root, new SimpleFileVisitor<>() {
           @Override
@@ -217,14 +218,15 @@ final class CorpusLoader {
     }
 
     private void reportFileProcessed(final Path path, final String body, final int chunkCount) {
-      if (this.io.isSilent()) {
+      if (LlmListeners.isSilent(io)) {
         return;
       }
       int chars = body == null ? 0 : body.length();
-      this.io.infof("RAG %s: %d char(s) → %d chunk(s)%n",
+      LlmListeners.infof(io, null, "RAG %s: %d char(s) → %d chunk(s)%n",
         this.displayPath(path), chars, chunkCount);
       if (chars == 0) {
-        this.io.info("RAG warning: no text extracted from " + this.displayPath(path));
+        LlmListeners.info(io, null,
+          "RAG warning: no text extracted from " + this.displayPath(path));
       }
     }
 

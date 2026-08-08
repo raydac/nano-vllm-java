@@ -6,6 +6,8 @@ import com.igormaznitsa.nanollvm.chat.ChatMessage;
 import com.igormaznitsa.nanollvm.chat.ChatMessages;
 import com.igormaznitsa.nanollvm.chat.ChatReply;
 import com.igormaznitsa.nanollvm.chat.ChatSession;
+import com.igormaznitsa.nanollvm.chat.LlmListener;
+import com.igormaznitsa.nanollvm.chat.LlmListeners;
 import com.igormaznitsa.nanollvm.engine.Scheduler;
 import com.igormaznitsa.nanollvm.engine.Sequence;
 import com.igormaznitsa.nanollvm.engine.Transformer;
@@ -42,7 +44,7 @@ import java.util.stream.IntStream;
  *         .maxModelLen(2048)
  *         .systemPrompt("Answer briefly.")  // optional
  *         .build()) {
- *     llm.setSubagents(SubagentMode.PARALLEL,
+ *     llm.setAdvisors(AdvisorMode.PARALLEL,
  *         "List key facts from the request.",
  *         "Note risks or contradictions.");
  *     String reply = llm.chat(256).send("Hello").answer();
@@ -62,8 +64,9 @@ import java.util.stream.IntStream;
  * </ul>
  *
  * <h2>Defaults</h2>
- * Construction is <em>library-quiet</em> ({@link EngineIo#silent()}). CLI tools should call
- * {@link Builder#withSystemIo()}. Architecture is auto-detected from {@code config.json}
+ * Construction is <em>library-quiet</em> ({@link LlmListeners#silent()}). CLI tools should pass
+ * {@link LlmListeners#toSystem()} via {@link Builder#listen(LlmListener)}. Architecture is auto-detected from
+ * {@code config.json}
  * (override with {@code -Dnanovllm.arch=qwen3|gemma3}).
  *
  * <h2>Thread safety</h2>
@@ -76,7 +79,7 @@ import java.util.stream.IntStream;
  * @see LlmModel
  * @see LlmModelFactory
  * @see ChatSession
- * @see EngineIo
+ * @see LlmListener
  * @see SamplingParams
  * @see RagFactory
  * @see PreparedRag
@@ -88,16 +91,16 @@ public final class LLM implements AutoCloseable {
 
   private final LlmModel model;
   private final Config config;
-  private final EngineIo io;
+  private final LlmListener listener;
   private final String systemPromptOverride;
   private final Transformer transformer;
   private final Tokenizer tokenizer;
   private final Scheduler scheduler;
   private final Object generateLock = new Object();
   private final AtomicBoolean cancelRequested = new AtomicBoolean();
-  private final Object subagentLock = new Object();
-  private List<String> subagentPrompts = List.of();
-  private SubagentMode subagentMode = SubagentMode.SEQUENTIAL;
+  private final Object advisorLock = new Object();
+  private List<String> advisorPrompts = List.of();
+  private AdvisorMode advisorMode = AdvisorMode.SEQUENTIAL;
 
   /**
    * Loads {@code modelPath} with default builder settings (quiet I/O, warmup on).
@@ -132,14 +135,14 @@ public final class LLM implements AutoCloseable {
       VectorMath.configureCpuThreads(cpuThreads);
       this.model = builder.resolveModel();
       this.config = builder.toConfig(this.model, cpuThreads);
-      this.io = builder.io;
+      this.listener = builder.listener;
       this.systemPromptOverride = builder.systemPromptOverride;
       Sequence.setBlockSize(this.config.kvcacheBlockSize());
       this.tokenizer = this.model.tokenizer();
       this.applyTokenizerStopTokens();
-      this.transformer = new Transformer(this.model, this.config, this.io);
+      this.transformer = new Transformer(this.model, this.config, this.listener);
       this.scheduler = new Scheduler(this.config);
-      this.io.info("CPU matmul: " + VectorMath.backendInfo());
+      LlmListeners.info(this.listener, this, "CPU matmul: " + VectorMath.backendInfo());
     } catch (ModelLoadException e) {
       throw e;
     } catch (RuntimeException e) {
@@ -192,13 +195,14 @@ public final class LLM implements AutoCloseable {
 
   private void warmup() {
     // JIT / cache warm-up: one short generate so the first real request is not cold
-    this.io.info("Warming up (prefill + decode)…");
+    LlmListeners.info(this.listener, this, "Warming up (prefill + decode)…");
     long startedAtNanos = System.nanoTime();
     this.generate(
         List.of(this.syntheticWarmupPrompt()),
         new SamplingParams(0.6f, WARMUP_DECODE_TOKENS, true),
         false);
-    this.io.infof("Warmup done in %.1fs%n", (System.nanoTime() - startedAtNanos) / 1e9);
+    LlmListeners.infof(this.listener, this, "Warmup done in %.1fs%n",
+      (System.nanoTime() - startedAtNanos) / 1e9);
   }
 
   private List<Integer> syntheticWarmupPrompt() {
@@ -317,7 +321,7 @@ public final class LLM implements AutoCloseable {
   /**
    * Generates completions for one or more prompts, optionally printing batch progress.
    *
-   * @param useTqdm when {@code true} and I/O is not silent, prints batch progress to {@link EngineIo#out()}
+   * @param useTqdm when {@code true} and I/O is not silent, prints batch progress via {@link LlmListener}
    */
   public List<GenerationOutput> generate(final List<?> prompts, final Object samplingParams,
                                          final boolean useTqdm) {
@@ -514,18 +518,19 @@ public final class LLM implements AutoCloseable {
       final int totalPrompts,
       final long startedAtNanos
   ) {
-    // Internal: CLI-style progress only when requested and EngineIo is not silent
+    // Internal: CLI-style progress only when requested and listener is not silent
     if (!showProgress) {
       return;
     }
     double elapsedSeconds = (System.nanoTime() - startedAtNanos) / 1e9;
-    this.io.progressf("\rGenerating %d/%d (%.1fs)", completed, totalPrompts, elapsedSeconds);
+    LlmListeners.progressf(this.listener, this, "\rGenerating %d/%d (%.1fs)", completed,
+      totalPrompts, elapsedSeconds);
   }
 
   private void finishProgressLine(final boolean showProgress) {
     // Internal: move past the \r progress line before returning text
     if (showProgress) {
-      this.io.out().println();
+      LlmListeners.progressf(this.listener, this, "%n");
     }
   }
 
@@ -539,7 +544,7 @@ public final class LLM implements AutoCloseable {
 
   private boolean shouldShowProgress(final boolean useTqdm) {
     // Internal: never spam progress into silent (library-default) I/O
-    return useTqdm && !this.io.isSilent();
+    return useTqdm && !LlmListeners.isSilent(this.listener);
   }
 
   private List<GenerationOutput> decodeCompletedOutputs(
@@ -676,8 +681,8 @@ public final class LLM implements AutoCloseable {
   /**
    * Status / progress streams used by load and optional generate progress.
    */
-  public EngineIo io() {
-    return this.io;
+  public LlmListener listener() {
+    return this.listener;
   }
 
   /**
@@ -693,12 +698,12 @@ public final class LLM implements AutoCloseable {
   }
 
   /**
-   * Clears configured subagents. Chat / RAG turns then skip the advisor pass.
+   * Clears configured advisors. Chat / RAG turns then skip the advisor pass.
    */
-  public void setSubagents() {
-    synchronized (this.subagentLock) {
-      this.subagentPrompts = List.of();
-      this.subagentMode = SubagentMode.SEQUENTIAL;
+  public void setAdvisors() {
+    synchronized (this.advisorLock) {
+      this.advisorPrompts = List.of();
+      this.advisorMode = AdvisorMode.SEQUENTIAL;
     }
   }
 
@@ -707,14 +712,14 @@ public final class LLM implements AutoCloseable {
    * Empty varargs or blank-only prompts clear the configuration. Non-blank lists are trimmed;
    * any blank entry among them is rejected.
    *
-   * <p>{@link SubagentMode#PARALLEL} batches all advisors in one {@link #generate};
-   * {@link SubagentMode#SEQUENTIAL} runs one generate per advisor.
+   * <p>{@link AdvisorMode#PARALLEL} batches all advisors in one {@link #generate};
+   * {@link AdvisorMode#SEQUENTIAL} runs one generate per advisor.
    */
-  public void setSubagents(final SubagentMode mode, final String... prompts) {
+  public void setAdvisors(final AdvisorMode mode, final String... prompts) {
     requireNonNull(mode, "mode");
     requireNonNull(prompts, "prompts");
     if (prompts.length == 0) {
-      this.setSubagents();
+      this.setAdvisors();
       return;
     }
 
@@ -722,34 +727,34 @@ public final class LLM implements AutoCloseable {
       .map(prompt -> requireNonNull(prompt, "prompt").strip())
       .toList();
     if (cleaned.stream().allMatch(String::isEmpty)) {
-      this.setSubagents();
+      this.setAdvisors();
       return;
     }
     if (cleaned.stream().anyMatch(String::isEmpty)) {
-      throw new IllegalArgumentException("subagent prompts must not be blank");
+      throw new IllegalArgumentException("advisor prompts must not be blank");
     }
 
-    synchronized (this.subagentLock) {
-      this.subagentMode = mode;
-      this.subagentPrompts = List.copyOf(cleaned);
-    }
-  }
-
-  /**
-   * Immutable snapshot of configured subagent role prompts (empty when none).
-   */
-  public List<String> subagentPrompts() {
-    synchronized (this.subagentLock) {
-      return this.subagentPrompts;
+    synchronized (this.advisorLock) {
+      this.advisorMode = mode;
+      this.advisorPrompts = List.copyOf(cleaned);
     }
   }
 
   /**
-   * Execution mode for {@link #subagentPrompts()}; defaults to {@link SubagentMode#SEQUENTIAL}.
+   * Immutable snapshot of configured advisor role prompts (empty when none).
    */
-  public SubagentMode subagentMode() {
-    synchronized (this.subagentLock) {
-      return this.subagentMode;
+  public List<String> advisorPrompts() {
+    synchronized (this.advisorLock) {
+      return this.advisorPrompts;
+    }
+  }
+
+  /**
+   * Execution mode for {@link #advisorPrompts()}; defaults to {@link AdvisorMode#SEQUENTIAL}.
+   */
+  public AdvisorMode advisorMode() {
+    synchronized (this.advisorLock) {
+      return this.advisorMode;
     }
   }
 
@@ -775,7 +780,7 @@ public final class LLM implements AutoCloseable {
   /**
    * Fluent configurator for {@link LLM}.
    *
-   * <p>Defaults: {@link EngineIo#silent()}, eager execution, warmup enabled, no system-prompt
+   * <p>Defaults: {@link LlmListeners#silent()}, eager execution, warmup enabled, no system-prompt
    * override (model default via {@link ChatPrompts}).
    *
    * <p>Provide either a shared {@link LlmModel} via {@link LLM#builder(LlmModel)} or a model directory
@@ -785,7 +790,7 @@ public final class LLM implements AutoCloseable {
 
     private final LlmModel sharedModel;
     private final Path modelDir;
-    private EngineIo io = EngineIo.silent();
+    private LlmListener listener = LlmListeners.silent();
     private int maxNumBatchedTokens = 16384;
     private int maxNumSeqs = 512;
     private int maxModelLen = 4096;
@@ -812,25 +817,12 @@ public final class LLM implements AutoCloseable {
     }
 
     /**
-     * Custom status streams; {@code null} is treated as {@link EngineIo#silent()}.
+     * Status / chat event sink; {@code null} is treated as {@link LlmListeners#silent()}.
+     * CLI tools typically pass {@link LlmListeners#toSystem()}.
      */
-    public Builder io(final EngineIo io) {
-      this.io = io == null ? EngineIo.silent() : io;
+    public Builder listen(final LlmListener listener) {
+      this.listener = listener == null ? LlmListeners.silent() : listener;
       return this;
-    }
-
-    /**
-     * Routes engine status to {@link System#out} / {@link System#err} (CLI-friendly).
-     */
-    public Builder withSystemIo() {
-      return this.io(EngineIo.system());
-    }
-
-    /**
-     * Explicit quiet mode (also the default).
-     */
-    public Builder quiet() {
-      return this.io(EngineIo.silent());
     }
 
     /**
@@ -980,7 +972,7 @@ public final class LLM implements AutoCloseable {
       if (this.sharedModel != null) {
         return this.sharedModel;
       }
-      return LlmModelFactory.make(this.modelDir, this.io);
+      return LlmModelFactory.make(this.modelDir, this.listener);
     }
 
     private Path modelPath() {

@@ -4,6 +4,7 @@ import static java.util.Objects.requireNonNull;
 
 import com.igormaznitsa.nanollvm.chat.ChatReply;
 import com.igormaznitsa.nanollvm.chat.ChatSession;
+import com.igormaznitsa.nanollvm.chat.LlmListener;
 import com.igormaznitsa.nanollvm.llm.LLM;
 import com.igormaznitsa.nanollvm.llm.SamplingParams;
 import com.igormaznitsa.nanollvm.prompts.RagPrompts;
@@ -135,6 +136,11 @@ public final class RagSession {
   public RagSession streamTo(final PrintStream thinkOut, final PrintStream answerOut,
                              final boolean color) {
     this.chat.streamTo(thinkOut, answerOut, color);
+    return this;
+  }
+
+  public RagSession listen(final LlmListener listener) {
+    this.chat.listen(listener);
     return this;
   }
 

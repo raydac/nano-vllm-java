@@ -8,11 +8,11 @@ import static com.igormaznitsa.nanollvm.utils.NanoVllmProps.PROP_COLOR;
 import static com.igormaznitsa.nanollvm.utils.NanoVllmProps.PROP_MODEL;
 
 import com.igormaznitsa.nanollvm.chat.ChatSession;
-import com.igormaznitsa.nanollvm.llm.EngineIo;
+import com.igormaznitsa.nanollvm.chat.LlmListeners;
+import com.igormaznitsa.nanollvm.llm.AdvisorMode;
 import com.igormaznitsa.nanollvm.llm.LLM;
 import com.igormaznitsa.nanollvm.llm.SamplingParams;
-import com.igormaznitsa.nanollvm.llm.SubagentMode;
-import com.igormaznitsa.nanollvm.prompts.SubagentPrompts;
+import com.igormaznitsa.nanollvm.prompts.AdvisorPrompts;
 import com.igormaznitsa.nanollvm.rag.PreparedRag;
 import com.igormaznitsa.nanollvm.rag.RagFactory;
 import com.igormaznitsa.nanollvm.rag.RagHit;
@@ -20,7 +20,6 @@ import com.igormaznitsa.nanollvm.rag.RagLoadOptions;
 import com.igormaznitsa.nanollvm.rag.RagSession;
 import com.igormaznitsa.nanollvm.samples.utils.BundledModels;
 import com.igormaznitsa.nanollvm.samples.utils.BundledRag;
-
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
@@ -88,9 +87,9 @@ public final class Example {
           .tensorParallelSize(1)
           .maxNumSeqs(4)
           .maxModelLen(2048)
-          .withSystemIo()
+        .listen(LlmListeners.toSystem())
           .build()) {
-        configureDemoSubagents(llm);
+        configureDemoAdvisors(llm);
         if (preparedRag.isPresent()) {
           runRagChat(in, llm, preparedRag.get(), color);
         } else {
@@ -100,24 +99,24 @@ public final class Example {
     }
   }
 
-  private static void configureDemoSubagents(final LLM llm) {
+  private static void configureDemoAdvisors(final LLM llm) {
     String arch = llm.model().architectureName();
     if (ARCH_GEMMA3.equals(arch)) {
-      llm.setSubagents(SubagentMode.PARALLEL, SubagentPrompts.demoRolesGemma());
+      llm.setAdvisors(AdvisorMode.PARALLEL, AdvisorPrompts.demoRolesGemma());
       System.out.println(
-        "Subagents: 3 (practical, abstract, consequence) PARALLEL for Gemma.");
+        "Advisors: 3 (practical, abstract, consequence) PARALLEL for Gemma.");
       return;
     }
     if (ARCH_QWEN3.equals(arch)) {
-      llm.setSubagents(SubagentMode.PARALLEL, SubagentPrompts.demoRolesQwen());
-      System.out.println("Subagents: 2 (practical, abstract) PARALLEL for Qwen.");
+      llm.setAdvisors(AdvisorMode.PARALLEL, AdvisorPrompts.demoRolesQwen());
+      System.out.println("Advisors: 2 (practical, abstract) PARALLEL for Qwen.");
       return;
     }
     if (ARCH_LFM2.equals(arch)) {
-      System.out.println("Subagents: off for LFM.");
+      System.out.println("Advisors: off for LFM.");
       return;
     }
-    System.out.println("Subagents: off (architecture " + arch + ").");
+    System.out.println("Advisors: off (architecture " + arch + ").");
   }
 
   private static Optional<PreparedRag> loadPreparedRag(final boolean tinyModel) {
@@ -128,7 +127,8 @@ public final class Example {
     System.out.println("Preparing RAG corpus from " + root.get());
     RagLoadOptions options =
       tinyModel ? RagLoadOptions.forTinyModels() : RagLoadOptions.defaults();
-    Optional<PreparedRag> prepared = RagFactory.tryMake(root.get(), options, EngineIo.system());
+    Optional<PreparedRag> prepared =
+      RagFactory.tryMake(root.get(), options, LlmListeners.toSystem());
     if (prepared.isEmpty()) {
       System.out.println("RAG: no documents in " + root.get() + " — plain chat.");
     }
