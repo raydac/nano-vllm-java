@@ -14,6 +14,8 @@ import com.igormaznitsa.nanollvm.llm.Config;
 import com.igormaznitsa.nanollvm.llm.LLM;
 import com.igormaznitsa.nanollvm.models.internal.CausalLM;
 import com.igormaznitsa.nanollvm.models.internal.CausalLMFactory;
+import com.igormaznitsa.nanollvm.models.internal.EmbeddingEncoder;
+import com.igormaznitsa.nanollvm.models.internal.EmbeddingEncoderFactory;
 import com.igormaznitsa.nanollvm.models.internal.WeightBag;
 import com.igormaznitsa.nanollvm.models.internal.WeightSchema;
 import com.igormaznitsa.nanollvm.tensor.MatmulRuntime;
@@ -28,50 +30,29 @@ import java.util.Locale;
  *
  * <p>One {@link LlmModel} may be reused by any number of {@link LLM} instances until
  * {@link LlmModel#close()}. Load is blocking I/O on the calling thread; the returned model is safe
- * to share across threads while open.
+ * to share across threads while open. BERT embedding GGUFs load through the same entry points and
+ * expose {@link LlmModel#embed(CharSequence)}.
  *
  * <p>GGUF stays packed by default. Pass {@code allowUnpackParameters=true} to dequantize to float32
- * during load (mmap → float tensors; no packed heap copy).
+ * during load (mmap → float tensors; no packed heap residency).
  */
 public final class LlmModelFactory {
 
   private LlmModelFactory() {
   }
 
-  /**
-   * Loads weights with silent progress I/O.
-   *
-   * @throws ModelLoadException if the path is missing or the model cannot be loaded
-   */
   public static LlmModel make(final Path modelDir) {
     return make(modelDir, LlmListeners.silent(), false);
   }
 
-  /**
-   * Loads weights from a path string with silent progress I/O.
-   *
-   * @throws ModelLoadException if the path is missing or the model cannot be loaded
-   */
   public static LlmModel make(final String modelPath) {
     return make(Path.of(requireNonNull(modelPath, "modelPath")));
   }
 
-  /**
-   * Loads weights, reporting progress through {@code io} (null → silent). GGUF stays packed.
-   *
-   * @throws ModelLoadException if the path is missing or the model cannot be loaded
-   */
   public static LlmModel make(final Path modelPath, final LlmListener io) {
     return make(modelPath, io, false);
   }
 
-  /**
-   * Loads weights, reporting progress through {@code io} (null → silent).
-   *
-   * @param allowUnpackParameters when {@code true}, GGUF tensors are expanded to float32 at load
-   *                              (no packed heap residency); HF safetensors ignore this flag
-   * @throws ModelLoadException if the path is missing or the model cannot be loaded
-   */
   public static LlmModel make(
     final Path modelPath,
     final LlmListener io,
@@ -136,23 +117,64 @@ public final class LlmModelFactory {
 
     LoadedGguf loaded = GgufModelLoader.load(path, io, allowUnpackParameters);
     try (GgufReader reader = loaded.reader()) {
-      WeightSchema schema = CausalLMFactory.schema(loaded.config());
-      for (String required : schema.expectedParameters()) {
-        if (!loaded.weights().has(required)) {
-          throw new IllegalStateException("missing required GGUF weight: " + required);
-        }
+      if (EmbeddingEncoderFactory.isEmbeddingArchitecture(loaded.config())) {
+        return loadGgufEmbedding(path, loaded, reader, io, t0);
       }
-
-      LlmListeners.info(io, null,
-        "Building " + CausalLMFactory.detect(loaded.config()) + " model graph…");
-      long tGraph = System.nanoTime();
-      CausalLM network = CausalLMFactory.create(loaded.config(), loaded.weights());
-      LlmListeners.infof(io, null, "Model graph ready (%s) in %.1fs%n",
-        network.architectureName(), (System.nanoTime() - tGraph) / 1e9);
-
-      Tokenizer tokenizer = Tokenizer.fromGguf(reader);
-      LlmListeners.infof(io, null, "Model loaded in %.1fs%n", (System.nanoTime() - t0) / 1e9);
-      return new LlmModel(path, loaded.config(), loaded.weights(), network, tokenizer);
+      return loadGgufCausal(path, loaded, reader, io, t0);
     }
+  }
+
+  private static LlmModel loadGgufCausal(
+    final Path path,
+    final LoadedGguf loaded,
+    final GgufReader reader,
+    final LlmListener io,
+    final long startedAtNanos
+  ) {
+    WeightSchema schema = CausalLMFactory.schema(loaded.config());
+    for (String required : schema.expectedParameters()) {
+      if (!loaded.weights().has(required)) {
+        throw new IllegalStateException("missing required GGUF weight: " + required);
+      }
+    }
+
+    LlmListeners.info(io, null,
+      "Building " + CausalLMFactory.detect(loaded.config()) + " model graph…");
+    long tGraph = System.nanoTime();
+    CausalLM network = CausalLMFactory.create(loaded.config(), loaded.weights());
+    LlmListeners.infof(io, null, "Model graph ready (%s) in %.1fs%n",
+      network.architectureName(), (System.nanoTime() - tGraph) / 1e9);
+
+    Tokenizer tokenizer = Tokenizer.fromGguf(reader);
+    LlmListeners.infof(io, null, "Model loaded in %.1fs%n",
+      (System.nanoTime() - startedAtNanos) / 1e9);
+    return new LlmModel(path, loaded.config(), loaded.weights(), network, tokenizer);
+  }
+
+  private static LlmModel loadGgufEmbedding(
+    final Path path,
+    final LoadedGguf loaded,
+    final GgufReader reader,
+    final LlmListener io,
+    final long startedAtNanos
+  ) {
+    WeightSchema schema = EmbeddingEncoderFactory.schema(loaded.config());
+    for (String required : schema.expectedParameters()) {
+      if (!loaded.weights().has(required)) {
+        throw new IllegalStateException("missing required GGUF weight: " + required);
+      }
+    }
+
+    LlmListeners.info(io, null,
+      "Building " + EmbeddingEncoderFactory.detect(loaded.config()) + " embedding graph…");
+    long tGraph = System.nanoTime();
+    EmbeddingEncoder encoder = EmbeddingEncoderFactory.create(loaded.config(), loaded.weights());
+    LlmListeners.infof(io, null, "Embedding graph ready (%s) in %.1fs%n",
+      encoder.architectureName(), (System.nanoTime() - tGraph) / 1e9);
+
+    Tokenizer tokenizer = Tokenizer.fromGguf(reader);
+    LlmListeners.infof(io, null, "Model loaded in %.1fs%n",
+      (System.nanoTime() - startedAtNanos) / 1e9);
+    return new LlmModel(path, loaded.config(), loaded.weights(), encoder, tokenizer);
   }
 }

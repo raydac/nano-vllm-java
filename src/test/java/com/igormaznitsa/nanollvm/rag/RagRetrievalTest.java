@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.igormaznitsa.nanollvm.BundledModelAssumptions;
 import com.igormaznitsa.nanollvm.chat.LlmListener;
 import com.igormaznitsa.nanollvm.chat.LlmListeners;
 import java.io.ByteArrayOutputStream;
@@ -132,9 +133,10 @@ class RagRetrievalTest {
 
   @Test
   void longNaturalGrimmQuestionHitsTinyModelCorpus() {
+    Path ragDir = BundledModelAssumptions.requireBundledRag();
     PreparedRag rag = RagFactory.builder()
       .options(RagLoadOptions.forTinyModels())
-      .addFolder(Path.of("rag"))
+      .addFolder(ragDir)
       .build();
 
     String q = "who are the grimm brothers and what did they do?";
@@ -148,7 +150,7 @@ class RagRetrievalTest {
 
   @Test
   void fatherQueriesHitBundledCorpusWithoutRewrite() {
-    PreparedRag rag = RagFactory.make(Path.of("rag"));
+    PreparedRag rag = RagFactory.make(BundledModelAssumptions.requireBundledRag());
 
     assertTrue(RagSession.Retrieval.shortFollowUp("who was their father?"));
     assertTrue(RagSession.Retrieval.shortFollowUp("father of grimm brothers"));
@@ -164,7 +166,7 @@ class RagRetrievalTest {
 
   @Test
   void rewriteNoneFallsBackToAnchorExpansion() {
-    PreparedRag rag = RagFactory.make(Path.of("rag"));
+    PreparedRag rag = RagFactory.make(BundledModelAssumptions.requireBundledRag());
     Optional<String> chosen = RagSession.Retrieval.queryAfterRewrite(
       "who was their father?",
       "who are the grimm brothers?",
@@ -178,7 +180,7 @@ class RagRetrievalTest {
 
   @Test
   void rewriteOutsideCorpusFallsBackToAnchorExpansion() {
-    PreparedRag rag = RagFactory.make(Path.of("rag"));
+    PreparedRag rag = RagFactory.make(BundledModelAssumptions.requireBundledRag());
     Optional<String> chosen = RagSession.Retrieval.queryAfterRewrite(
       "who was their father?",
       "who are the grimm brothers?",

@@ -4,7 +4,6 @@ import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 import com.igormaznitsa.nanollvm.internal.Context;
 import com.igormaznitsa.nanollvm.internal.GgufDequant;
@@ -13,7 +12,6 @@ import com.igormaznitsa.nanollvm.layers.ShortConv;
 import com.igormaznitsa.nanollvm.models.internal.PackedWeight;
 import com.igormaznitsa.nanollvm.models.internal.WeightBag;
 import com.igormaznitsa.nanollvm.prompts.ChatPrompts;
-import com.igormaznitsa.nanollvm.samples.utils.BundledModels;
 import com.igormaznitsa.nanollvm.tensor.EmbeddingKernel;
 import com.igormaznitsa.nanollvm.tensor.LinearKernel;
 import com.igormaznitsa.nanollvm.tensor.MatmulRuntime;
@@ -24,7 +22,6 @@ import java.nio.ByteOrder;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import org.junit.jupiter.api.Test;
 
 final class GgufUnitTest {
@@ -399,10 +396,9 @@ final class GgufUnitTest {
 
   @Test
   void lfm2GgufTokenizerUsesChatMlWithoutThinkInvite() throws Exception {
-    Optional<Path> path = BundledModels.find(BundledModels.LFM2_5_2_6B_GGUF);
-    assumeTrue(path.isPresent(), "LFM2 GGUF not downloaded");
+    Path path = BundledModelAssumptions.requireLfm2Gguf();
 
-    try (GgufReader reader = GgufReader.open(path.get())) {
+    try (GgufReader reader = GgufReader.open(path)) {
       Tokenizer tok = Tokenizer.fromGguf(reader);
       assertFalse(tok.isGemmaChat());
       assertFalse(tok.invitesThinking());

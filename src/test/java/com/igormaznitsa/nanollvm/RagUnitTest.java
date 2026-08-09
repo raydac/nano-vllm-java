@@ -202,9 +202,8 @@ class RagUnitTest {
 
   @Test
   void bundledFairyTaleCorpusRejectsUnrelatedCapitalsQuery() {
-    var root = com.igormaznitsa.nanollvm.samples.utils.BundledRag.find();
-    org.junit.jupiter.api.Assumptions.assumeTrue(root.isPresent(), "run tests from project root");
-    PreparedRag prepared = RagFactory.make(root.get(), RagLoadOptions.forTinyModels());
+    Path root = BundledModelAssumptions.requireBundledRag();
+    PreparedRag prepared = RagFactory.make(root, RagLoadOptions.forTinyModels());
     assertTrue(prepared.size() > 0);
     assertTrue(prepared.isOutsideCorpus("capital of France Paris"));
     assertTrue(prepared.retrieve("capital of France Paris", 3).isEmpty());

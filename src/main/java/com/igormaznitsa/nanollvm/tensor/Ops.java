@@ -263,6 +263,62 @@ public final class Ops {
     return out;
   }
 
+  /**
+   * PyTorch-style GELU approximate with tanh (used by BERT / Gemma gates).
+   */
+  public static Tensor gelu(final Tensor x) {
+    Tensor out = Tensor.zeros(x.shape());
+    float[] xd = x.data();
+    float[] od = out.data();
+    int xOff = x.offset();
+    int n = x.numel();
+    for (int i = 0; i < n; i++) {
+      od[i] = geluPytorchTanh(xd[xOff + i]);
+    }
+    return out;
+  }
+
+  /**
+   * LayerNorm along the last axis: {@code (x - mean) / sqrt(var + eps) * weight + bias}.
+   */
+  public static Tensor layerNorm(
+    final Tensor x,
+    final Tensor weight,
+    final Tensor bias,
+    final float eps
+  ) {
+    int[] shape = x.rawShape();
+    int last = shape[shape.length - 1];
+    int rows = x.numel() / last;
+    Tensor out = Tensor.zeros(x.shape());
+    float[] xd = x.data();
+    float[] wd = weight.data();
+    float[] bd = bias.data();
+    float[] od = out.data();
+    int xOff = x.offset();
+    int wOff = weight.offset();
+    int bOff = bias.offset();
+    for (int r = 0; r < rows; r++) {
+      int xBase = xOff + r * last;
+      int oBase = r * last;
+      float sum = 0f;
+      for (int i = 0; i < last; i++) {
+        sum += xd[xBase + i];
+      }
+      float mean = sum / last;
+      float var = 0f;
+      for (int i = 0; i < last; i++) {
+        float d = xd[xBase + i] - mean;
+        var += d * d;
+      }
+      float inv = (float) (1.0 / Math.sqrt(var / last + eps));
+      for (int i = 0; i < last; i++) {
+        od[oBase + i] = (xd[xBase + i] - mean) * inv * wd[wOff + i] + bd[bOff + i];
+      }
+    }
+    return out;
+  }
+
   private static void requireSameShape(
     final Tensor left,
     final Tensor right,

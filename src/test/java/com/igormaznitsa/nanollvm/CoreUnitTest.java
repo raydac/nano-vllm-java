@@ -33,7 +33,6 @@ import com.igormaznitsa.nanollvm.llm.SamplingParams;
 import com.igormaznitsa.nanollvm.models.LlmModel;
 import com.igormaznitsa.nanollvm.models.LlmModelFactory;
 import com.igormaznitsa.nanollvm.prompts.ChatPrompts;
-import com.igormaznitsa.nanollvm.samples.utils.BundledModels;
 import com.igormaznitsa.nanollvm.tensor.FloatKernels;
 import com.igormaznitsa.nanollvm.tensor.FloatKernelsFactory;
 import com.igormaznitsa.nanollvm.tensor.MatmulRuntime;
@@ -66,10 +65,9 @@ class CoreUnitTest {
 
   @Test
   void llmBuilderIsFluentAndDefaultsQuiet() {
-    var path = BundledModels.find(BundledModels.QWEN3_0_6B);
-    org.junit.jupiter.api.Assumptions.assumeTrue(path.isPresent(), "Qwen3-0.6B not downloaded");
+    Path path = BundledModelAssumptions.requireQwen3();
 
-    LlmModel model = LlmModelFactory.make(path.get());
+    LlmModel model = LlmModelFactory.make(path);
     try (model) {
       LLM.Builder builder = LLM.builder(model);
       assertSame(builder, builder
@@ -94,10 +92,9 @@ class CoreUnitTest {
 
   @Test
   void sharedModelIsReusedAcrossLlmsWhenWeightsPresent() {
-    var path = BundledModels.find(BundledModels.QWEN3_0_6B);
-    org.junit.jupiter.api.Assumptions.assumeTrue(path.isPresent(), "Qwen3-0.6B not downloaded");
+    Path path = BundledModelAssumptions.requireQwen3();
 
-    LlmModel model = LlmModelFactory.make(path.get());
+    LlmModel model = LlmModelFactory.make(path);
     try (model;
          LLM a = LLM.builder(model).maxModelLen(256).numKvcacheBlocks(32).build();
          LLM b = LLM.builder(model).maxModelLen(256).numKvcacheBlocks(32).build()) {
@@ -111,10 +108,9 @@ class CoreUnitTest {
 
   @Test
   void closedLlmAndModelRejectFurtherUseWhenWeightsPresent() {
-    var path = BundledModels.find(BundledModels.QWEN3_0_6B);
-    org.junit.jupiter.api.Assumptions.assumeTrue(path.isPresent(), "Qwen3-0.6B not downloaded");
+    Path path = BundledModelAssumptions.requireQwen3();
 
-    LlmModel model = LlmModelFactory.make(path.get());
+    LlmModel model = LlmModelFactory.make(path);
     LLM llm = LLM.builder(model).maxModelLen(256).numKvcacheBlocks(32).build();
     llm.close();
     assertTrue(llm.isClosed());
@@ -131,10 +127,9 @@ class CoreUnitTest {
 
   @Test
   void advisorsConfiguredOnBuilderWhenWeightsPresent() {
-    var path = BundledModels.find(BundledModels.QWEN3_0_6B);
-    org.junit.jupiter.api.Assumptions.assumeTrue(path.isPresent(), "Qwen3-0.6B not downloaded");
+    Path path = BundledModelAssumptions.requireQwen3();
 
-    LlmModel model = LlmModelFactory.make(path.get());
+    LlmModel model = LlmModelFactory.make(path);
     LlmAdvisor facts = LlmAdvisor.builder().name("Facts").prompt("Fact check").build();
     LlmAdvisor risks = LlmAdvisor.builder().name("Risks").prompt("Argue risks").build();
     try (model) {
@@ -273,11 +268,9 @@ class CoreUnitTest {
 
   @Test
   void bundledQwenModelIsPresent() {
-    var path = com.igormaznitsa.nanollvm.samples.utils.BundledModels.find(
-      com.igormaznitsa.nanollvm.samples.utils.BundledModels.QWEN3_0_6B);
-    assertTrue(path.isPresent(), "run models/download-qwen3-0.6b.sh");
-    assertTrue(isRegularFile(path.get().resolve("config.json")));
-    assertTrue(isRegularFile(path.get().resolve("model.safetensors")));
+    Path path = BundledModelAssumptions.requireQwen3();
+    assertTrue(isRegularFile(path.resolve("config.json")));
+    assertTrue(isRegularFile(path.resolve("model.safetensors")));
   }
 
   @Test
@@ -368,12 +361,11 @@ class CoreUnitTest {
 
   @Test
   void disableMultiCpuWinsOverCpuThreadsSystemPropertyWhenWeightsPresent() {
-    var path = BundledModels.find(BundledModels.QWEN3_0_6B);
-    org.junit.jupiter.api.Assumptions.assumeTrue(path.isPresent(), "Qwen3-0.6B not downloaded");
+    Path path = BundledModelAssumptions.requireQwen3();
 
     String previous = System.getProperty("nanollvm.cpu.threads");
     System.setProperty("nanollvm.cpu.threads", "8");
-    try (LlmModel model = LlmModelFactory.make(path.get());
+    try (LlmModel model = LlmModelFactory.make(path);
          LLM llm = LLM.builder(model)
            .disableMultiCpu()
            .maxModelLen(256)
@@ -448,8 +440,7 @@ class CoreUnitTest {
     assertEquals("ащ", com.igormaznitsa.nanollvm.tokenizer.Tokenizer.decodeUtf8Complete(
       "ащ".getBytes(java.nio.charset.StandardCharsets.UTF_8)));
 
-    var path = com.igormaznitsa.nanollvm.samples.utils.BundledModels.require(
-      com.igormaznitsa.nanollvm.samples.utils.BundledModels.QWEN3_0_6B);
+    Path path = BundledModelAssumptions.requireQwen3();
     var tok = com.igormaznitsa.nanollvm.tokenizer.Tokenizer.fromPretrained(path);
     List<Integer> ids = tok.encode("обычное средство щелочное");
     for (int n = 1; n <= ids.size(); n++) {
@@ -461,8 +452,7 @@ class CoreUnitTest {
 
   @Test
   void tokenizerEncodesSpecialTokensAtomically() {
-    var path = com.igormaznitsa.nanollvm.samples.utils.BundledModels.require(
-      com.igormaznitsa.nanollvm.samples.utils.BundledModels.QWEN3_0_6B);
+    Path path = BundledModelAssumptions.requireQwen3();
     var tok = com.igormaznitsa.nanollvm.tokenizer.Tokenizer.fromPretrained(path);
     List<Integer> ids = tok.encode(
         "<|im_start|>user\nhello<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n");
@@ -652,8 +642,7 @@ class CoreUnitTest {
 
   @Test
   void qwenTokenizerIsNotGemmaChat() {
-    var path = com.igormaznitsa.nanollvm.samples.utils.BundledModels.require(
-      com.igormaznitsa.nanollvm.samples.utils.BundledModels.QWEN3_0_6B);
+    Path path = BundledModelAssumptions.requireQwen3();
     var tok = com.igormaznitsa.nanollvm.tokenizer.Tokenizer.fromPretrained(path);
     assertFalse(tok.isGemmaChat());
     assertTrue(tok.invitesThinking());
@@ -718,10 +707,8 @@ class CoreUnitTest {
 
   @Test
   void gemmaSmokeWhenWeightsPresent() {
-    var path = com.igormaznitsa.nanollvm.samples.utils.BundledModels.find(
-      com.igormaznitsa.nanollvm.samples.utils.BundledModels.GEMMA3_270M);
-    org.junit.jupiter.api.Assumptions.assumeTrue(path.isPresent(), "Gemma3-270M not downloaded");
-    var tok = com.igormaznitsa.nanollvm.tokenizer.Tokenizer.fromPretrained(path.get());
+    Path path = BundledModelAssumptions.requireGemma3();
+    var tok = com.igormaznitsa.nanollvm.tokenizer.Tokenizer.fromPretrained(path);
     assertTrue(tok.isGemmaChat());
     assertEquals(List.of(23391), tok.encode("hello"));
     assertEquals(List.of(23391, 1902), tok.encode("hello world"));
@@ -740,7 +727,7 @@ class CoreUnitTest {
     assertFalse(ChatPrompts.GEMMA_CHAT_SYSTEM.contains("<think>"));
     Config.HfConfig hf = null;
     try {
-      hf = Config.HfConfig.load(path.get().resolve("config.json"));
+      hf = Config.HfConfig.load(path.resolve("config.json"));
     } catch (Exception e) {
       throw new AssertionError(e);
     }

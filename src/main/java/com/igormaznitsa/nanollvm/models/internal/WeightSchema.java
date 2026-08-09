@@ -1,5 +1,6 @@
 package com.igormaznitsa.nanollvm.models.internal;
 
+import static com.igormaznitsa.nanollvm.models.internal.WeightNames.ARCH_BERT;
 import static com.igormaznitsa.nanollvm.models.internal.WeightNames.ARCH_GEMMA3;
 import static com.igormaznitsa.nanollvm.models.internal.WeightNames.ARCH_LFM2;
 import static com.igormaznitsa.nanollvm.models.internal.WeightNames.ARCH_QWEN3;
@@ -7,8 +8,11 @@ import static com.igormaznitsa.nanollvm.models.internal.WeightNames.DOWN_PROJ_WE
 import static com.igormaznitsa.nanollvm.models.internal.WeightNames.EMBED_TOKENS;
 import static com.igormaznitsa.nanollvm.models.internal.WeightNames.GATE_UP_PROJ_WEIGHT;
 import static com.igormaznitsa.nanollvm.models.internal.WeightNames.GGUF_OUTPUT;
+import static com.igormaznitsa.nanollvm.models.internal.WeightNames.GGUF_POSITION_EMBD;
 import static com.igormaznitsa.nanollvm.models.internal.WeightNames.GGUF_TOKEN_EMBD;
 import static com.igormaznitsa.nanollvm.models.internal.WeightNames.GGUF_TOKEN_EMBD_NORM;
+import static com.igormaznitsa.nanollvm.models.internal.WeightNames.GGUF_TOKEN_EMBD_NORM_BIAS;
+import static com.igormaznitsa.nanollvm.models.internal.WeightNames.GGUF_TOKEN_TYPES;
 import static com.igormaznitsa.nanollvm.models.internal.WeightNames.INPUT_LAYERNORM;
 import static com.igormaznitsa.nanollvm.models.internal.WeightNames.K_NORM_WEIGHT;
 import static com.igormaznitsa.nanollvm.models.internal.WeightNames.LM_HEAD;
@@ -56,6 +60,7 @@ public final class WeightSchema {
       case ARCH_GEMMA3 -> gemma3(config);
       case ARCH_QWEN3 -> qwen3(config);
       case ARCH_LFM2 -> lfm2(config);
+      case ARCH_BERT -> bert(config);
       default -> throw new IllegalArgumentException("unsupported architecture '" + arch + "'");
     };
   }
@@ -143,6 +148,35 @@ public final class WeightSchema {
       expected.add(GGUF_OUTPUT);
     }
     return new WeightSchema(Map.of(), expected, optional);
+  }
+
+  public static WeightSchema bert(final Config.HfConfig config) {
+    Set<String> expected = new LinkedHashSet<>();
+    expected.add(GGUF_TOKEN_EMBD);
+    expected.add(GGUF_TOKEN_EMBD_NORM);
+    expected.add(GGUF_TOKEN_EMBD_NORM_BIAS);
+    expected.add(GGUF_POSITION_EMBD);
+    expected.add(GGUF_TOKEN_TYPES);
+    for (int i = 0; i < config.numHiddenLayers(); i++) {
+      String blk = ggufBlk(i);
+      expected.add(blk + "attn_q.weight");
+      expected.add(blk + "attn_q.bias");
+      expected.add(blk + "attn_k.weight");
+      expected.add(blk + "attn_k.bias");
+      expected.add(blk + "attn_v.weight");
+      expected.add(blk + "attn_v.bias");
+      expected.add(blk + "attn_output.weight");
+      expected.add(blk + "attn_output.bias");
+      expected.add(blk + "attn_output_norm.weight");
+      expected.add(blk + "attn_output_norm.bias");
+      expected.add(blk + "ffn_up.weight");
+      expected.add(blk + "ffn_up.bias");
+      expected.add(blk + "ffn_down.weight");
+      expected.add(blk + "ffn_down.bias");
+      expected.add(blk + "layer_output_norm.weight");
+      expected.add(blk + "layer_output_norm.bias");
+    }
+    return new WeightSchema(Map.of(), expected, Set.of());
   }
 
   public Map<String, Object[]> packedModulesMapping() {

@@ -18,6 +18,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -116,6 +117,10 @@ public final class Tokenizer {
   private final boolean gemmaChat;
   /** Metaspace only: prepend {@code ▁} before a chunk (HF Metaspace pretok); Gemma replace-only is false. */
   private final boolean prependMetaSpace;
+  /**
+   * WordPiece / BERT: lowercase before encode (uncased models).
+   */
+  private final boolean lowercase;
   /** When {@code true}, ChatML generation prompt may open an empty {@code <think>} block unless disabled. */
   private final boolean inviteThinking;
 
@@ -132,6 +137,7 @@ public final class Tokenizer {
       final Style style,
       final boolean gemmaChat,
       final boolean prependMetaSpace,
+      final boolean lowercase,
       final boolean inviteThinking
   ) {
     this.vocab = vocab;
@@ -158,6 +164,7 @@ public final class Tokenizer {
     this.style = style;
     this.gemmaChat = gemmaChat;
     this.prependMetaSpace = prependMetaSpace;
+    this.lowercase = lowercase;
     this.inviteThinking = inviteThinking;
   }
 
@@ -275,7 +282,7 @@ public final class Tokenizer {
       // HF Gemma: inviteThinking=false; Qwen-style ChatML paths invite thinking by default
       return new Tokenizer(
           vocab, merges, addedTexts, specialTexts, eos, stopIds, pad,
-        chatTemplate, byteFallback, style, gemmaChat, prependMetaSpace, !gemmaChat
+        chatTemplate, byteFallback, style, gemmaChat, prependMetaSpace, false, !gemmaChat
       );
     } catch (IOException e) {
       throw new ModelLoadException("failed to load tokenizer from " + modelDir, e);
@@ -316,13 +323,22 @@ public final class Tokenizer {
     }
 
     String ggmlModel = source.metaString("tokenizer.ggml.model", "gpt2").toLowerCase(Locale.ROOT);
+    boolean bertWordPiece = ggmlModel.contains("bert");
+    for (String marker : List.of("[PAD]", "[UNK]", "[CLS]", "[SEP]", "[MASK]")) {
+      if (vocab.containsKey(marker)) {
+        addedTexts.add(marker);
+        specialTexts.add(marker);
+      }
+    }
     boolean metaspace =
       tokens.stream().limit(4000).filter(t -> t.startsWith(META_SPACE)).count() > 200
         || ggmlModel.contains("llama")
         || ggmlModel.contains("spm");
-    Style style = metaspace ? Style.METASPACE_BPE : Style.GPT2_BYTE_BPE;
+    Style style = bertWordPiece
+      ? Style.WORDPIECE
+      : (metaspace ? Style.METASPACE_BPE : Style.GPT2_BYTE_BPE);
     // LFM GGUF uses metaspace alphabets but does not prepend ▁ the way HF Metaspace pretok does
-    boolean prependMetaSpace = metaspace && !ggmlModel.contains("lfm");
+    boolean prependMetaSpace = (metaspace || bertWordPiece) && !ggmlModel.contains("lfm");
 
     int eos = source.metaInt("tokenizer.ggml.eos_token_id", -1);
     if (eos < 0) {
@@ -353,7 +369,7 @@ public final class Tokenizer {
 
     return new Tokenizer(
       vocab, merges, addedTexts, specialTexts, eos, stopIds, pad,
-      chatTemplate, byteFallback, style, gemmaChat, prependMetaSpace, false
+      chatTemplate, byteFallback, style, gemmaChat, prependMetaSpace, bertWordPiece, false
     );
   }
 
@@ -536,7 +552,7 @@ public final class Tokenizer {
     return new Tokenizer(
         vocab, Map.of(), Set.of(), Set.of(),
         vocabSize - 1, List.of(vocabSize - 1), vocabSize - 1,
-      null, true, Style.GPT2_BYTE_BPE, false, false, false
+      null, true, Style.GPT2_BYTE_BPE, false, false, false, false
     );
   }
 
@@ -634,6 +650,13 @@ public final class Tokenizer {
   }
 
   /**
+   * Vocabulary id for {@code token}, or empty when absent.
+   */
+  public Optional<Integer> tokenId(final String token) {
+    return Optional.ofNullable(this.vocab.get(requireNonNull(token, "token")));
+  }
+
+  /**
    * {@code true} when chat turns should use Gemma {@code <start_of_turn>} / {@code <end_of_turn>}
    * formatting rather than ChatML {@code <|im_start|>}.
    *
@@ -661,10 +684,66 @@ public final class Tokenizer {
    * @return immutable token-id list
    */
   public List<Integer> encode(final String text) {
-    List<Integer> ids = this.style == Style.METASPACE_BPE
-      ? this.encodeMetaspace(text)
-      : this.encodeGpt2(text);
-    return List.copyOf(ids);
+    requireNonNull(text, "text");
+    String prepared = this.lowercase ? text.toLowerCase(Locale.ROOT) : text;
+    return switch (this.style) {
+      case WORDPIECE -> this.encodeWordPiece(prepared);
+      case METASPACE_BPE -> this.encodeMetaspace(prepared);
+      case GPT2_BYTE_BPE -> this.encodeGpt2(prepared);
+    };
+  }
+
+  private List<Integer> encodeWordPiece(final String text) {
+    List<Integer> ids = new ArrayList<>();
+    int i = 0;
+    while (i < text.length()) {
+      String special = this.matchAdded(text, i);
+      if (special != null) {
+        ids.add(this.vocab.get(special));
+        i += special.length();
+        continue;
+      }
+      int nextSpecial = this.findNextAdded(text, i);
+      String chunk = text.substring(i, nextSpecial);
+      if (!chunk.isEmpty()) {
+        String prepared = chunk.replace(" ", META_SPACE);
+        if (this.prependMetaSpace) {
+          prepared = META_SPACE + prepared;
+        }
+        ids.addAll(this.greedyWordPiece(prepared));
+      }
+      i = nextSpecial;
+    }
+    return ids;
+  }
+
+  private List<Integer> greedyWordPiece(final String text) {
+    List<Integer> ids = new ArrayList<>();
+    int i = 0;
+    Integer unk = this.vocab.get("[UNK]");
+    while (i < text.length()) {
+      int matchedEnd = -1;
+      Integer matchedId = null;
+      for (int end = text.length(); end > i; end--) {
+        Integer id = this.vocab.get(text.substring(i, end));
+        if (id != null) {
+          matchedEnd = end;
+          matchedId = id;
+          break;
+        }
+      }
+      if (matchedId == null) {
+        if (unk == null) {
+          throw new IllegalStateException("missing vocab piece at index " + i + " and no [UNK]");
+        }
+        ids.add(unk);
+        i += Character.charCount(text.codePointAt(i));
+      } else {
+        ids.add(matchedId);
+        i = matchedEnd;
+      }
+    }
+    return ids;
   }
 
   // GPT-2 path: greedy added-token match, else regex pieces → byte symbols → BPE
@@ -763,7 +842,7 @@ public final class Tokenizer {
       }
       sb.append(tok);
     }
-    if (this.style == Style.METASPACE_BPE) {
+    if (this.style == Style.METASPACE_BPE || this.style == Style.WORDPIECE) {
       return this.decodeMetaspace(sb.toString());
     }
     return this.tokensToUtf8(sb.toString());
@@ -1039,6 +1118,10 @@ public final class Tokenizer {
     /** GPT-2 byte-level BPE (Qwen / ChatML family). */
     GPT2_BYTE_BPE,
     /** SentencePiece-style BPE with {@code ▁} word boundaries (Gemma / many SPM exports). */
-    METASPACE_BPE
+    METASPACE_BPE,
+    /**
+     * BERT WordPiece / greedy longest-match (GGUF {@code tokenizer.ggml.model=bert}).
+     */
+    WORDPIECE
   }
 }

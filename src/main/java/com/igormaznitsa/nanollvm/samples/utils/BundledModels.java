@@ -25,6 +25,8 @@ public final class BundledModels {
   public static final String GEMMA3_270M = DEFAULT_MODELS_DIR + "/Gemma3-270M";
   public static final String LFM2_5_2_6B_GGUF =
     DEFAULT_MODELS_DIR + "/LFM2.5-2.6B-Q4_K_M.gguf";
+  public static final String GTE_SMALL_GGUF =
+    DEFAULT_MODELS_DIR + "/gte-small.Q2_K.gguf";
 
   private BundledModels() {
   }
@@ -68,7 +70,7 @@ public final class BundledModels {
         "model not found: " + modelPathOrName
             + " (expected under " + modelsRoot()
           + "). Run models/download-qwen3-0.6b.sh, models/download-gemma3-270m.sh, "
-          + "or models/download-lfm2.5-2.6b-gguf.sh, "
+          + "models/download-lfm2.5-2.6b-gguf.sh, or models/download-gte-small-gguf.sh, "
             + "or pass a model path / -D" + PROP_MODEL + "=… / " + ENV_MODEL + "."
     ));
   }

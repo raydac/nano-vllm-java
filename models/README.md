@@ -47,6 +47,30 @@ Windows: `.\models\download-lfm2.5-2.6b-gguf.ps1` or `models\download-lfm2.5-2.6
 
 Creates `models/LFM2.5-2.6B-Q4_K_M.gguf`.
 
+## gte-small GGUF (optional, embeddings)
+
+[ChristianAzinn/gte-small-gguf](https://huggingface.co/ChristianAzinn/gte-small-gguf) — Alibaba GTE-small as GGUF
+(**BERT embedding / feature extraction**, not a causal chat model). Scripts fetch the **smallest** quant
+(`gte-small.Q2_K.gguf`, ~25 MB). MIT license; no HF gate.
+
+```bash
+./models/download-gte-small-gguf.sh
+```
+
+Windows: `.\models\download-gte-small-gguf.ps1` or `models\download-gte-small-gguf.cmd`.
+
+Creates `models/gte-small.Q2_K.gguf`. Context length up to 512 tokens.
+
+Load like any other model, then embed:
+
+```java
+try (LlmModel model = LlmModelFactory.make(Path.of("models/gte-small.Q2_K.gguf"))) {
+  float[] v = model.embed("hello world"); // L2-normalized, dim = hidden size
+}
+```
+
+Sample: `com.igormaznitsa.nanollvm.samples.EmbedHelloWorld`. Do not use with `LLM.builder` / chat.
+
 ## Selecting a model
 
 | Mechanism          | Example                                                                                           |

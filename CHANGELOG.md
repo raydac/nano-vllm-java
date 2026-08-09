@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased] — 1.1.0-SNAPSHOT
 
+### Added
+- Transparent GGUF BERT embedding support (e.g. GTE-small): load via `LlmModelFactory.make` and call `LlmModel.embed(...)` with text or token ids; `LLM.builder` rejects embedding-only models; `Example` menu option runs an embedding REPL.
+- GGML dequant for Q3_K and IQ4_NL (needed by common small embedding GGUF quants).
+
 ## [1.0.0] — 2026-08-09
 
 First public release of the **nano-vllm-java** CPU inference library

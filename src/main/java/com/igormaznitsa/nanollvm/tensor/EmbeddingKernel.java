@@ -3,6 +3,8 @@ package com.igormaznitsa.nanollvm.tensor;
 import static com.igormaznitsa.nanollvm.internal.GgufDequant.TYPE_BF16;
 import static com.igormaznitsa.nanollvm.internal.GgufDequant.TYPE_F16;
 import static com.igormaznitsa.nanollvm.internal.GgufDequant.TYPE_F32;
+import static com.igormaznitsa.nanollvm.internal.GgufDequant.TYPE_IQ4_NL;
+import static com.igormaznitsa.nanollvm.internal.GgufDequant.TYPE_Q3_K;
 import static com.igormaznitsa.nanollvm.internal.GgufDequant.TYPE_Q4_0;
 import static com.igormaznitsa.nanollvm.internal.GgufDequant.TYPE_Q4_K;
 import static com.igormaznitsa.nanollvm.internal.GgufDequant.TYPE_Q6_K;
@@ -27,9 +29,11 @@ public sealed interface EmbeddingKernel permits DenseEmbeddingKernel, PackedEmbe
     requireNonNull(weight, "weight");
     return switch (weight.ggmlType()) {
       case TYPE_Q4_K -> packed(weight, "packed-q4_k-embed", TYPE_Q4_K);
+      case TYPE_Q3_K -> packed(weight, "packed-q3_k-embed", TYPE_Q3_K);
       case TYPE_Q4_0 -> packed(weight, "packed-q4_0-embed", TYPE_Q4_0);
       case TYPE_Q6_K -> packed(weight, "packed-q6_k-embed", TYPE_Q6_K);
       case TYPE_Q8_0 -> packed(weight, "packed-q8_0-embed", TYPE_Q8_0);
+      case TYPE_IQ4_NL -> packed(weight, "packed-iq4_nl-embed", TYPE_IQ4_NL);
       case TYPE_F16 -> packed(weight, "packed-f16-embed", TYPE_F16);
       case TYPE_BF16 -> packed(weight, "packed-bf16-embed", TYPE_BF16);
       case TYPE_F32 -> DenseEmbeddingKernel.of(weight.materialize());

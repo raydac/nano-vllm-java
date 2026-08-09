@@ -1341,6 +1341,11 @@ public final class LLM implements AutoCloseable {
       if (this.sharedModel.isClosed()) {
         throw new IllegalStateException("LlmModel is closed");
       }
+      if (this.sharedModel.isEmbeddingModel()) {
+        throw new IllegalStateException(
+          "model is an embedding encoder (" + this.sharedModel.architectureName()
+            + "); use LlmModel.embed(...) instead of LLM.builder");
+      }
       if (!this.advisors.isEmpty()) {
         this.advisors = Builder.requireUniqueAdvisors(this.advisors);
       }

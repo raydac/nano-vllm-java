@@ -7,6 +7,7 @@ import com.igormaznitsa.nanollvm.chat.LlmListeners;
 import com.igormaznitsa.nanollvm.llm.Config;
 import com.igormaznitsa.nanollvm.models.internal.PackedWeight;
 import com.igormaznitsa.nanollvm.models.internal.WeightBag;
+import com.igormaznitsa.nanollvm.models.internal.WeightNames;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.LinkedHashMap;
@@ -17,9 +18,9 @@ import java.util.stream.IntStream;
 import java.util.stream.Stream;
 
 /**
- * Loads an LFM2 (or compatible) GGUF file into {@link Config.HfConfig} + {@link WeightBag}.
- * Default keeps large matrices GGML-packed; {@code allowUnpackParameters} dequantizes each tensor
- * to float32 from the mmap during load (no packed heap copy).
+ * Loads GGUF checkpoints (LFM2 causal, BERT embedding) into {@link Config.HfConfig} +
+ * {@link WeightBag}. Default keeps large matrices GGML-packed; {@code allowUnpackParameters}
+ * dequantizes each tensor to float32 from the mmap during load (no packed heap copy).
  */
 public final class GgufModelLoader {
 
@@ -41,22 +42,38 @@ public final class GgufModelLoader {
 
     GgufReader reader = GgufReader.open(path);
     String arch = reader.metaString("general.architecture", "").toLowerCase(Locale.ROOT);
-    if (!arch.contains("lfm2")) {
+    try {
+      if (arch.contains("bert")) {
+        return loadWeights(reader, buildBertConfig(reader), streams, allowUnpackParameters, arch);
+      }
+      if (arch.contains("lfm2")) {
+        return loadWeights(reader, buildLfm2Config(reader, arch), streams, allowUnpackParameters,
+          arch);
+      }
+    } catch (RuntimeException e) {
       reader.close();
-      throw new IllegalArgumentException(
-        "unsupported GGUF architecture '" + arch + "' (expected lfm2)");
+      throw e;
     }
+    reader.close();
+    throw new IllegalArgumentException(
+      "unsupported GGUF architecture '" + arch + "' (expected lfm2|bert)");
+  }
 
-    Config.HfConfig config = buildConfig(reader, arch);
+  private static LoadedGguf loadWeights(
+    final GgufReader reader,
+    final Config.HfConfig config,
+    final LlmListener streams,
+    final boolean allowUnpackParameters,
+    final String arch
+  ) throws IOException {
     LlmListeners.infof(streams, null,
-      "GGUF %s: layers=%d hidden=%d ff=%d heads=%d/%d convL=%d%n",
+      "GGUF %s: layers=%d hidden=%d ff=%d heads=%d/%d%n",
       arch,
       config.numHiddenLayers(),
       config.hiddenSize(),
       config.intermediateSize(),
       config.numAttentionHeads(),
-      config.numKeyValueHeads(),
-      config.convLCache());
+      config.numKeyValueHeads());
 
     Map<String, Object> weights = new LinkedHashMap<>();
     Progress progress = new Progress("GGUF weights", reader.tensorCount(), streams);
@@ -88,7 +105,55 @@ public final class GgufModelLoader {
     return new LoadedGguf(config, new WeightBag(weights), reader);
   }
 
-  private static Config.HfConfig buildConfig(final GgufReader reader, final String arch) {
+  private static Config.HfConfig buildBertConfig(final GgufReader reader) {
+    String prefix = "bert";
+    int hidden = reader.metaInt(prefix + ".embedding_length", 0);
+    int layers = reader.metaInt(prefix + ".block_count", 0);
+    int intermediate = reader.metaInt(prefix + ".feed_forward_length", 0);
+    int heads = reader.metaInt(prefix + ".attention.head_count", 0);
+    float normEps = reader.metaFloat(prefix + ".attention.layer_norm_epsilon", 1e-12f);
+    int context = reader.metaInt(prefix + ".context_length", 512);
+    int vocab = reader.metaStringArray("tokenizer.ggml.tokens").size();
+    if (vocab == 0) {
+      vocab = reader.metaInt(prefix + ".vocab_size", 0);
+    }
+    if (hidden <= 0 || layers <= 0 || heads <= 0 || intermediate <= 0 || vocab <= 0) {
+      throw new IllegalStateException(
+        "incomplete BERT GGUF metadata (hidden/layers/heads/ff/vocab)");
+    }
+    if (hidden % heads != 0) {
+      throw new IllegalStateException(
+        "BERT hiddenSize %d not divisible by heads %d".formatted(hidden, heads));
+    }
+    int headDim = hidden / heads;
+    return new Config.HfConfig(
+      vocab,
+      hidden,
+      intermediate,
+      layers,
+      heads,
+      heads,
+      headDim,
+      context,
+      normEps,
+      "gelu",
+      false,
+      true,
+      10_000f,
+      null,
+      "float32",
+      WeightNames.ARCH_BERT,
+      List.of("BertForEmbedding"),
+      "gelu",
+      0,
+      List.of(),
+      10_000f,
+      0f,
+      0
+    );
+  }
+
+  private static Config.HfConfig buildLfm2Config(final GgufReader reader, final String arch) {
     String prefix = arch.contains("lfm2moe") ? "lfm2moe" : "lfm2";
     int hidden = reader.metaInt(prefix + ".embedding_length", 0);
     int layers = reader.metaInt(prefix + ".block_count", 0);
@@ -190,9 +255,6 @@ public final class GgufModelLoader {
   public record LoadedGguf(Config.HfConfig config, WeightBag weights, GgufReader reader) {
   }
 
-  /**
-   * Tiny progress helper (same UX as {@link ModelLoader}).
-   */
   private static final class Progress {
     private final String label;
     private final int total;

@@ -44,6 +44,25 @@ public final class Norms {
     }
   }
 
+  /**
+   * Immutable LayerNorm with affine weight and bias (BERT).
+   */
+  public static final class LayerNorm {
+    private final float eps;
+    private final Tensor weight;
+    private final Tensor bias;
+
+    public LayerNorm(final Tensor weight, final Tensor bias, final float eps) {
+      this.weight = requireNonNull(weight, "weight");
+      this.bias = requireNonNull(bias, "bias");
+      this.eps = eps;
+    }
+
+    public Tensor forward(final Tensor x) {
+      return Ops.layerNorm(x, this.weight, this.bias, this.eps);
+    }
+  }
+
   public static final class RotaryEmbedding {
     private static final Map<String, RotaryEmbedding> CACHE = new HashMap<>();
 

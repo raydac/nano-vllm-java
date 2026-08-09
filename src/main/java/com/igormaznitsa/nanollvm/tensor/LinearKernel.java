@@ -3,6 +3,8 @@ package com.igormaznitsa.nanollvm.tensor;
 import static com.igormaznitsa.nanollvm.internal.GgufDequant.TYPE_BF16;
 import static com.igormaznitsa.nanollvm.internal.GgufDequant.TYPE_F16;
 import static com.igormaznitsa.nanollvm.internal.GgufDequant.TYPE_F32;
+import static com.igormaznitsa.nanollvm.internal.GgufDequant.TYPE_IQ4_NL;
+import static com.igormaznitsa.nanollvm.internal.GgufDequant.TYPE_Q3_K;
 import static com.igormaznitsa.nanollvm.internal.GgufDequant.TYPE_Q4_0;
 import static com.igormaznitsa.nanollvm.internal.GgufDequant.TYPE_Q4_K;
 import static com.igormaznitsa.nanollvm.internal.GgufDequant.TYPE_Q6_K;
@@ -28,9 +30,11 @@ public sealed interface LinearKernel permits DenseF32LinearKernel, PackedLinearK
   static LinearKernel of(final PackedWeight weight) {
     return switch (weight.ggmlType()) {
       case TYPE_Q4_K -> packed(weight, "packed-q4_k", TYPE_Q4_K);
+      case TYPE_Q3_K -> packed(weight, "packed-q3_k", TYPE_Q3_K);
       case TYPE_Q4_0 -> packed(weight, "packed-q4_0", TYPE_Q4_0);
       case TYPE_Q6_K -> packed(weight, "packed-q6_k", TYPE_Q6_K);
       case TYPE_Q8_0 -> packed(weight, "packed-q8_0", TYPE_Q8_0);
+      case TYPE_IQ4_NL -> packed(weight, "packed-iq4_nl", TYPE_IQ4_NL);
       case TYPE_F16 -> packed(weight, "packed-f16", TYPE_F16);
       case TYPE_BF16 -> packed(weight, "packed-bf16", TYPE_BF16);
       case TYPE_F32 -> DenseF32LinearKernel.of(weight.materialize());

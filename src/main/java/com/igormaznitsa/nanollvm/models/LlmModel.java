@@ -8,30 +8,33 @@ import com.igormaznitsa.nanollvm.llm.Config;
 import com.igormaznitsa.nanollvm.llm.LLM;
 import com.igormaznitsa.nanollvm.models.internal.CausalLM;
 import com.igormaznitsa.nanollvm.models.internal.CausalLMFactory;
+import com.igormaznitsa.nanollvm.models.internal.EmbeddingEncoder;
 import com.igormaznitsa.nanollvm.models.internal.LlmModelAccess;
 import com.igormaznitsa.nanollvm.models.internal.WeightBag;
+import com.igormaznitsa.nanollvm.tensor.MatmulRuntime;
 import com.igormaznitsa.nanollvm.tokenizer.Tokenizer;
 
 import java.nio.file.Path;
+import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.locks.ReentrantLock;
 
 /**
- * Loaded causal LM: architecture weights, HF config, and tokenizer.
+ * Loaded model: architecture weights, HF/GGUF config, and tokenizer.
  *
- * <p>Safe to share across threads and across many {@link LLM} instances. Mutable inference
- * state (KV cache, scheduler, sampling) lives on each {@link LLM}, not here.
+ * <p>Safe to share across threads and across many {@link LLM} instances (causal models). Mutable
+ * inference state (KV cache, scheduler, sampling) lives on each {@link LLM}, not here. Embedding
+ * models expose {@link #embed(CharSequence)} instead of chat/generate.
  *
  * <p>GGUF models keep quantized weights packed by default. Prefer unpacking at load with
  * {@link LlmModelFactory#make(Path, LlmListener, boolean)} ({@code true}) so float32 is built
  * directly from the mmap with no packed heap copy. {@link LLM.Builder#allowUnpackParameters()}
- * late-unpacks an already-packed model by installing a dense graph; packed tensors already bound
- * by existing engines are left intact (peak RAM may briefly hold packed + dense).
+ * late-unpacks an already-packed causal model by installing a dense graph; packed tensors already
+ * bound by existing engines are left intact (peak RAM may briefly hold packed + dense).
  *
  * <p>Construct via {@link LlmModelFactory#make(Path)}. Closing an {@link LLM} does not unload
- * this model — call {@link #close()} after every bound {@link LLM} is closed. The inference graph
- * is module-internal — applications use {@link LLM}, not a network accessor.
+ * this model — call {@link #close()} after every bound {@link LLM} is closed.
  *
  * @see LlmModelFactory
  * @see LLM
@@ -47,6 +50,7 @@ public final class LlmModel implements AutoCloseable {
   private final Tokenizer tokenizer;
   private final AtomicReference<WeightBag> weights;
   private final AtomicReference<CausalLM> network;
+  private final AtomicReference<EmbeddingEncoder> encoder;
   private final ReentrantLock unpackLock = new ReentrantLock();
   private final AtomicBoolean closed = new AtomicBoolean();
 
@@ -57,62 +61,135 @@ public final class LlmModel implements AutoCloseable {
     final CausalLM network,
     final Tokenizer tokenizer
   ) {
+    this(path, hfConfig, weights, network, null, tokenizer);
+  }
+
+  LlmModel(
+    final Path path,
+    final Config.HfConfig hfConfig,
+    final WeightBag weights,
+    final EmbeddingEncoder encoder,
+    final Tokenizer tokenizer
+  ) {
+    this(path, hfConfig, weights, null, encoder, tokenizer);
+  }
+
+  private LlmModel(
+    final Path path,
+    final Config.HfConfig hfConfig,
+    final WeightBag weights,
+    final CausalLM network,
+    final EmbeddingEncoder encoder,
+    final Tokenizer tokenizer
+  ) {
+    if ((network == null) == (encoder == null)) {
+      throw new IllegalArgumentException("exactly one of network or encoder must be set");
+    }
     this.path = requireNonNull(path, "path").toAbsolutePath().normalize();
     this.hfConfig = requireNonNull(hfConfig, "hfConfig");
     this.weights = new AtomicReference<>(requireNonNull(weights, "weights"));
-    this.network = new AtomicReference<>(requireNonNull(network, "network"));
+    this.network = new AtomicReference<>(network);
+    this.encoder = new AtomicReference<>(encoder);
     this.tokenizer = requireNonNull(tokenizer, "tokenizer");
   }
 
-  /**
-   * Filesystem path this model was loaded from (absolute, normalized).
-   */
   public Path path() {
     this.assertNotClosed();
     return this.path;
   }
 
-  /**
-   * HuggingFace / GGUF-derived architecture config sealed at load.
-   */
   public Config.HfConfig hfConfig() {
     this.assertNotClosed();
     return this.hfConfig;
   }
 
-  /**
-   * Tokenizer bound to this model; immutable and safe to share.
-   */
   public Tokenizer tokenizer() {
     this.assertNotClosed();
     return this.tokenizer;
   }
 
-  /**
-   * Detected architecture label (e.g. {@code qwen3}, {@code gemma3}, {@code lfm2}).
-   */
   public String architectureName() {
+    if (this.isEmbeddingModel()) {
+      return this.requireEncoder().architectureName();
+    }
     return this.requireNetwork().architectureName();
   }
 
-  /**
-   * {@code true} when this model still holds GGUF-packed tensors that can be expanded to float32.
-   */
+  public boolean isCausalModel() {
+    this.assertNotClosed();
+    return this.network.get() != null;
+  }
+
+  public boolean isEmbeddingModel() {
+    this.assertNotClosed();
+    return this.encoder.get() != null;
+  }
+
   public boolean hasPackedWeights() {
     return this.requireWeights().hasPacked();
   }
 
-  /**
-   * {@code true} after {@link #close()} has released owned weight resources.
-   */
   public boolean isClosed() {
     return this.closed.get();
   }
 
   /**
-   * Releases owned weight resources (packed GGUF payloads and model-held graph refs).
-   * Idempotent. Close every bound {@link LLM} first so engines drop their network references.
+   * Encodes {@code text} to a single L2-normalized embedding vector (embedding models only).
+   * Tokenizes and wraps with {@code [CLS]} / {@code [SEP]} when present in the vocab.
    */
+  public float[] embed(final CharSequence text) {
+    requireNonNull(text, "text");
+    return this.embedAll(List.of(text))[0];
+  }
+
+  /**
+   * Encodes each text to an L2-normalized embedding vector (embedding models only).
+   */
+  public float[][] embed(final List<? extends CharSequence> texts) {
+    requireNonNull(texts, "texts");
+    return this.embedAll(texts);
+  }
+
+  /**
+   * Encodes already-tokenized ids to a single L2-normalized embedding (embedding models only).
+   * Ids are used as-is — include special tokens such as {@code [CLS]} / {@code [SEP]} when required.
+   */
+  public float[] embed(final int[] tokenIds) {
+    requireNonNull(tokenIds, "tokenIds");
+    if (tokenIds.length == 0) {
+      throw new IllegalArgumentException("tokenIds must not be empty");
+    }
+    return this.requireEncoder().encode(tokenIds.clone(), MatmulRuntime.sequential());
+  }
+
+  private float[][] embedAll(final List<? extends CharSequence> texts) {
+    EmbeddingEncoder active = this.requireEncoder();
+    if (texts.isEmpty()) {
+      return new float[0][];
+    }
+    MatmulRuntime runtime = MatmulRuntime.sequential();
+    float[][] out = new float[texts.size()][];
+    for (int i = 0; i < texts.size(); i++) {
+      CharSequence text = requireNonNull(texts.get(i), "texts[" + i + "]");
+      out[i] = active.encode(this.wrapClsSep(this.tokenizer.encode(text.toString())), runtime);
+    }
+    return out;
+  }
+
+  private int[] wrapClsSep(final List<Integer> pieces) {
+    int cls = this.tokenizer.tokenId("[CLS]").orElseThrow(
+      () -> new IllegalStateException("embedding tokenizer missing [CLS]"));
+    int sep = this.tokenizer.tokenId("[SEP]").orElseThrow(
+      () -> new IllegalStateException("embedding tokenizer missing [SEP]"));
+    int[] ids = new int[pieces.size() + 2];
+    ids[0] = cls;
+    for (int i = 0; i < pieces.size(); i++) {
+      ids[i + 1] = pieces.get(i);
+    }
+    ids[ids.length - 1] = sep;
+    return ids;
+  }
+
   @Override
   public void close() {
     if (!this.closed.compareAndSet(false, true)) {
@@ -123,6 +200,7 @@ public final class LlmModel implements AutoCloseable {
     try {
       WeightBag bag = this.weights.getAndSet(null);
       this.network.set(null);
+      this.encoder.set(null);
       if (bag != null) {
         bag.releaseResources();
       }
@@ -132,6 +210,11 @@ public final class LlmModel implements AutoCloseable {
   }
 
   private CausalLM resolveNetwork(final boolean allowUnpackParameters, final LlmListener io) {
+    if (this.isEmbeddingModel()) {
+      throw new IllegalStateException(
+        "model is an embedding encoder (" + this.architectureName()
+          + "); use LlmModel.embed(...) instead of LLM");
+    }
     CausalLM current = this.requireNetwork();
     if (!allowUnpackParameters) {
       return current;
@@ -139,10 +222,10 @@ public final class LlmModel implements AutoCloseable {
     if (!this.requireWeights().hasPacked()) {
       return current;
     }
-    return this.unpackToDense(io == null ? LlmListeners.silent() : io);
+    return this.unpackCausalToDense(io == null ? LlmListeners.silent() : io);
   }
 
-  private CausalLM unpackToDense(final LlmListener io) {
+  private CausalLM unpackCausalToDense(final LlmListener io) {
     this.unpackLock.lock();
     try {
       WeightBag currentWeights = this.requireWeights();
@@ -168,7 +251,22 @@ public final class LlmModel implements AutoCloseable {
     this.assertNotClosed();
     CausalLM current = this.network.get();
     if (current == null) {
-      throw new IllegalStateException("LlmModel is closed");
+      throw new IllegalStateException(
+        this.encoder.get() != null
+          ? "model is an embedding encoder; use LlmModel.embed(...)"
+          : "LlmModel is closed");
+    }
+    return current;
+  }
+
+  private EmbeddingEncoder requireEncoder() {
+    this.assertNotClosed();
+    EmbeddingEncoder current = this.encoder.get();
+    if (current == null) {
+      throw new IllegalStateException(
+        this.network.get() != null
+          ? "model is causal; use LLM for generate/chat"
+          : "LlmModel is closed");
     }
     return current;
   }
