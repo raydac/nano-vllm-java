@@ -9,6 +9,7 @@ import com.igormaznitsa.nanollvm.models.internal.PackedWeight;
 import com.igormaznitsa.nanollvm.models.internal.WeightBag;
 import com.igormaznitsa.nanollvm.models.internal.WeightNames;
 import java.io.IOException;
+import java.nio.ByteBuffer;
 import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -41,6 +42,31 @@ public final class GgufModelLoader {
     LlmListeners.infof(streams, null, "Loading GGUF from %s%n", path);
 
     GgufReader reader = GgufReader.open(path);
+    return load(reader, path.toString(), streams, allowUnpackParameters);
+  }
+
+  /**
+   * @since 1.1.0
+   */
+  public static LoadedGguf load(
+      final ByteBuffer data,
+      final Path virtualPath,
+      final LlmListener io,
+      final boolean allowUnpackParameters
+  ) throws IOException {
+    LlmListener streams = io == null ? LlmListeners.silent() : io;
+    Path path = requireNonNull(virtualPath, "virtualPath").toAbsolutePath().normalize();
+    LlmListeners.infof(streams, null, "Loading GGUF from memory (%s)%n", path);
+    GgufReader reader = GgufReader.open(requireNonNull(data, "data"), path);
+    return load(reader, path.toString(), streams, allowUnpackParameters);
+  }
+
+  private static LoadedGguf load(
+      final GgufReader reader,
+      final String label,
+      final LlmListener streams,
+      final boolean allowUnpackParameters
+  ) throws IOException {
     String arch = reader.metaString("general.architecture", "").toLowerCase(Locale.ROOT);
     try {
       if (arch.contains("bert")) {
@@ -56,7 +82,7 @@ public final class GgufModelLoader {
     }
     reader.close();
     throw new IllegalArgumentException(
-      "unsupported GGUF architecture '" + arch + "' (expected lfm2|bert)");
+        "unsupported GGUF architecture '" + arch + "' (expected lfm2|bert) in " + label);
   }
 
   private static LoadedGguf loadWeights(

@@ -25,6 +25,8 @@ import java.util.stream.IntStream;
 /**
  * BERT encoder for GGUF embedding models (e.g. GTE-small): token+position+type embeddings,
  * post-LN transformer blocks, mean pooling, L2 normalize.
+ *
+ * @since 1.1.0
  */
 public final class BertForEmbedding implements EmbeddingEncoder {
 

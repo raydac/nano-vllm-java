@@ -46,6 +46,8 @@ public final class Norms {
 
   /**
    * Immutable LayerNorm with affine weight and bias (BERT).
+   *
+   * @since 1.1.0
    */
   public static final class LayerNorm {
     private final float eps;

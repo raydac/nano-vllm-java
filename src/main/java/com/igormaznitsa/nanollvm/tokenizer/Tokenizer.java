@@ -180,9 +180,51 @@ public final class Tokenizer {
     try {
       Path tokenizerJson = modelDir.resolve("tokenizer.json");
       if (!Files.isRegularFile(tokenizerJson)) {
-        return bare(modelDir);
+        return bare(Files.isRegularFile(modelDir.resolve(CONFIG_JSON))
+          ? Files.readString(modelDir.resolve(CONFIG_JSON))
+          : null);
       }
-      Map<String, Object> root = Json.parseObject(Files.readString(tokenizerJson));
+      String tokenizerConfig = null;
+      Path config = modelDir.resolve("tokenizer_config.json");
+      if (Files.isRegularFile(config)) {
+        tokenizerConfig = Files.readString(config);
+      }
+      String generationConfig = null;
+      Path genConfig = modelDir.resolve("generation_config.json");
+      if (Files.isRegularFile(genConfig)) {
+        generationConfig = Files.readString(genConfig);
+      }
+      String modelConfig = null;
+      Path cfg = modelDir.resolve(CONFIG_JSON);
+      if (Files.isRegularFile(cfg)) {
+        modelConfig = Files.readString(cfg);
+      }
+      return fromJsonDocuments(
+        Files.readString(tokenizerJson),
+        tokenizerConfig,
+        generationConfig,
+        modelConfig);
+    } catch (IOException e) {
+      throw new ModelLoadException("failed to load tokenizer from " + modelDir, e);
+    }
+  }
+
+  /**
+   * Builds a tokenizer from in-memory HF JSON sidecars (no filesystem access).
+   *
+   * @since 1.1.0
+   */
+  public static Tokenizer fromJsonDocuments(
+    final String tokenizerJson,
+    final String tokenizerConfigJson,
+    final String generationConfigJson,
+    final String modelConfigJson
+  ) {
+    if (tokenizerJson == null || tokenizerJson.isBlank()) {
+      return bare(modelConfigJson);
+    }
+    try {
+      Map<String, Object> root = Json.parseObject(tokenizerJson);
       Map<String, Object> model = Json.asObject(root.get("model"));
       Map<String, Object> vocabObj = Json.asObject(model.get("vocab"));
       Map<String, Integer> vocab = new LinkedHashMap<>();
@@ -234,18 +276,17 @@ public final class Tokenizer {
         }
       }
 
-      Path config = modelDir.resolve("tokenizer_config.json");
       String chatTemplate = null;
       String eosToken = null;
       String padToken = null;
-      if (Files.isRegularFile(config)) {
-        Map<String, Object> tc = Json.parseObject(Files.readString(config));
+      if (tokenizerConfigJson != null && !tokenizerConfigJson.isBlank()) {
+        Map<String, Object> tc = Json.parseObject(tokenizerConfigJson);
         chatTemplate = Json.asString(tc.get("chat_template"));
         eosToken = tokenString(tc.get("eos_token"));
         padToken = tokenString(tc.get("pad_token"));
       }
 
-      boolean gemmaChat = isGemmaStyle(modelDir, vocab, chatTemplate, root);
+      boolean gemmaChat = isGemmaStyle(modelConfigJson, vocab, chatTemplate, root);
       Style style =
           gemmaChat || usesMetaspace(root, vocab) ? Style.METASPACE_BPE : Style.GPT2_BYTE_BPE;
       boolean prependMetaSpace = shouldPrependMetaSpace(root);
@@ -258,9 +299,8 @@ public final class Tokenizer {
       addStopIfPresent(vocab, stopIds, "<eos>");
       addStopIfPresent(vocab, stopIds, "<end_of_turn>");
 
-      Path genConfig = modelDir.resolve("generation_config.json");
-      if (Files.isRegularFile(genConfig)) {
-        Map<String, Object> gc = Json.parseObject(Files.readString(genConfig));
+      if (generationConfigJson != null && !generationConfigJson.isBlank()) {
+        Map<String, Object> gc = Json.parseObject(generationConfigJson);
         Object eosField = gc.get("eos_token_id");
         if (eosField instanceof List<?> list) {
           for (Object o : list) {
@@ -279,13 +319,12 @@ public final class Tokenizer {
 
       boolean byteFallback =
           Json.asBoolean(model.get("byte_fallback"), style == Style.GPT2_BYTE_BPE);
-      // HF Gemma: inviteThinking=false; Qwen-style ChatML paths invite thinking by default
       return new Tokenizer(
           vocab, merges, addedTexts, specialTexts, eos, stopIds, pad,
         chatTemplate, byteFallback, style, gemmaChat, prependMetaSpace, false, !gemmaChat
       );
-    } catch (IOException e) {
-      throw new ModelLoadException("failed to load tokenizer from " + modelDir, e);
+    } catch (RuntimeException e) {
+      throw new ModelLoadException("failed to load tokenizer from JSON documents", e);
     }
   }
 
@@ -387,18 +426,17 @@ public final class Tokenizer {
 
   // Detect Gemma chat formatting from template, vocab markers, and config.json model_type
   private static boolean isGemmaStyle(
-      final Path modelDir,
+    final String modelConfigJson,
       final Map<String, Integer> vocab,
       final String chatTemplate,
       final Map<String, Object> tokenizerRoot
-  ) throws IOException {
+  ) {
     if (chatTemplate != null && chatTemplate.contains("start_of_turn")) {
       return true;
     }
     if (vocab.containsKey("<start_of_turn>") || vocab.containsKey("<bos>")) {
-      Path cfg = modelDir.resolve(CONFIG_JSON);
-      if (Files.isRegularFile(cfg)) {
-        String mt = Json.asString(Json.parseObject(Files.readString(cfg)).get("model_type"));
+      if (modelConfigJson != null && !modelConfigJson.isBlank()) {
+        String mt = Json.asString(Json.parseObject(modelConfigJson).get("model_type"));
         if (mt != null && mt.toLowerCase(Locale.ROOT).contains("gemma")) {
           return true;
         }
@@ -538,12 +576,11 @@ public final class Tokenizer {
   }
 
   // Last-resort tokenizer when tokenizer.json is missing (tiny identity map over first 256 chars)
-  private static Tokenizer bare(final Path modelDir) throws IOException {
-    Path config = modelDir.resolve(CONFIG_JSON);
+  private static Tokenizer bare(final String modelConfigJson) {
     int vocabSize = 151936;
-    if (Files.isRegularFile(config)) {
+    if (modelConfigJson != null && !modelConfigJson.isBlank()) {
       vocabSize =
-          Json.asInt(Json.parseObject(Files.readString(config)).get("vocab_size"), vocabSize);
+        Json.asInt(Json.parseObject(modelConfigJson).get("vocab_size"), vocabSize);
     }
     Map<String, Integer> vocab = new LinkedHashMap<>();
     for (int i = 0; i < Math.min(256, vocabSize); i++) {
@@ -651,6 +688,8 @@ public final class Tokenizer {
 
   /**
    * Vocabulary id for {@code token}, or empty when absent.
+   *
+   * @since 1.1.0
    */
   public Optional<Integer> tokenId(final String token) {
     return Optional.ofNullable(this.vocab.get(requireNonNull(token, "token")));

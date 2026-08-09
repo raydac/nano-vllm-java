@@ -25,6 +25,9 @@ public final class BundledModels {
   public static final String GEMMA3_270M = DEFAULT_MODELS_DIR + "/Gemma3-270M";
   public static final String LFM2_5_2_6B_GGUF =
     DEFAULT_MODELS_DIR + "/LFM2.5-2.6B-Q4_K_M.gguf";
+  /**
+   * @since 1.1.0
+   */
   public static final String GTE_SMALL_GGUF =
     DEFAULT_MODELS_DIR + "/gte-small.Q2_K.gguf";
 

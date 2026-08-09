@@ -9,6 +9,7 @@ import com.igormaznitsa.nanollvm.exceptions.ModelLoadException;
 import com.igormaznitsa.nanollvm.internal.GgufModelLoader;
 import com.igormaznitsa.nanollvm.internal.GgufModelLoader.LoadedGguf;
 import com.igormaznitsa.nanollvm.internal.GgufReader;
+import com.igormaznitsa.nanollvm.internal.ModelFileBundle;
 import com.igormaznitsa.nanollvm.internal.ModelLoader;
 import com.igormaznitsa.nanollvm.llm.Config;
 import com.igormaznitsa.nanollvm.llm.LLM;
@@ -26,7 +27,8 @@ import java.nio.file.Path;
 import java.util.Locale;
 
 /**
- * Loads a {@link LlmModel} from a HuggingFace model directory or a {@code .gguf} file.
+ * Loads a {@link LlmModel} from a HuggingFace model directory, a {@code .gguf} file, or a
+ * {@link ModelFileSource} (classpath / custom streams read into heap; no filesystem cache).
  *
  * <p>One {@link LlmModel} may be reused by any number of {@link LLM} instances until
  * {@link LlmModel#close()}. Load is blocking I/O on the calling thread; the returned model is safe
@@ -34,25 +36,76 @@ import java.util.Locale;
  * expose {@link LlmModel#embed(CharSequence)}.
  *
  * <p>GGUF stays packed by default. Pass {@code allowUnpackParameters=true} to dequantize to float32
- * during load (mmap → float tensors; no packed heap residency).
+ * during load (mmap or in-memory buffer → float tensors; no packed heap residency).
+ *
+ * <p>Filesystem {@link #make(Path)} overloads load directly from disk and do not route through
+ * {@link ModelFileSource}.
  */
 public final class LlmModelFactory {
 
   private LlmModelFactory() {
   }
 
-  public static LlmModel make(final Path modelDir) {
-    return make(modelDir, LlmListeners.silent(), false);
+  /**
+   * Loads a model from disk with silent progress output and packed GGUF weights (when applicable).
+   *
+   * @param modelPath filesystem path to either an HF model <em>folder</em>
+   *                  ({@code config.json} + {@code *.safetensors}) or a single {@code .gguf}
+   *                  <em>file</em>; must exist
+   * @return loaded model; caller must {@link LlmModel#close()} after all bound {@link LLM} engines
+   * @throws NullPointerException if {@code modelPath} is {@code null}
+   * @throws ModelLoadException   if the path is missing, unsupported, or load fails
+   */
+  public static LlmModel make(final Path modelPath) {
+    return make(modelPath, LlmListeners.silent(), false);
   }
 
+  /**
+   * Loads a model from a filesystem path string (same rules as {@link #make(Path)}).
+   *
+   * @param modelPath absolute or relative path to an HF model <em>folder</em> or a {@code .gguf}
+   *                  <em>file</em>; non-blank
+   * @return loaded model; caller must {@link LlmModel#close()} after all bound {@link LLM} engines
+   * @throws NullPointerException if {@code modelPath} is {@code null}
+   * @throws ModelLoadException   if the path is missing, unsupported, or load fails
+   */
   public static LlmModel make(final String modelPath) {
     return make(Path.of(requireNonNull(modelPath, "modelPath")));
   }
 
+  /**
+   * Loads a model from disk with progress/status events and packed GGUF weights (when applicable).
+   *
+   * @param modelPath filesystem path to an HF model <em>folder</em> or a {@code .gguf} <em>file</em>;
+   *                  must exist
+   * @param io        receives load progress ({@link LlmListeners#info}); {@code null} is treated as
+   *                  {@link LlmListeners#silent()}
+   * @return loaded model; caller must {@link LlmModel#close()} after all bound {@link LLM} engines
+   * @throws NullPointerException if {@code modelPath} is {@code null}
+   * @throws ModelLoadException   if the path is missing, unsupported, or load fails
+   */
   public static LlmModel make(final Path modelPath, final LlmListener io) {
     return make(modelPath, io, false);
   }
 
+  /**
+   * Loads a model from disk with progress/status events and optional GGUF unpack-at-load.
+   *
+   * <p>Hugging Face <em>folders</em> always materialize dense float weights from safetensors. For a
+   * {@code .gguf} <em>file</em>, {@code allowUnpackParameters=false} keeps quantized tensors packed
+   * (lower peak RAM, slower matmul unless later unpacked via
+   * {@link LLM.Builder#allowUnpackParameters()}); {@code true} dequantizes to float32 during this
+   * call.
+   *
+   * @param modelPath             filesystem path to an HF model <em>folder</em> or a {@code .gguf}
+   *                              <em>file</em>; must exist
+   * @param io                    receives load progress; {@code null} → silent
+   * @param allowUnpackParameters {@code true} to dequantize GGUF weights to float32 at load;
+   *                              ignored for HF safetensors folders
+   * @return loaded model; caller must {@link LlmModel#close()} after all bound {@link LLM} engines
+   * @throws NullPointerException if {@code modelPath} is {@code null}
+   * @throws ModelLoadException   if the path is missing, unsupported, or load fails
+   */
   public static LlmModel make(
     final Path modelPath,
     final LlmListener io,
@@ -64,12 +117,13 @@ public final class LlmModelFactory {
     try {
       if (Files.isRegularFile(path) && path.getFileName().toString().toLowerCase(Locale.ROOT)
         .endsWith(".gguf")) {
-        return loadGguf(path, streams, allowUnpackParameters);
+        return loadGgufFile(path, streams, allowUnpackParameters);
       }
       if (!Files.isDirectory(path)) {
-        throw new ModelLoadException("model path is not a directory or .gguf file: " + path);
+        throw new ModelLoadException(
+          "model path is not an HF model folder or .gguf file: " + path);
       }
-      return loadHf(path, streams);
+      return loadHfFolder(path, streams);
     } catch (ModelLoadException e) {
       throw e;
     } catch (RuntimeException | IOException e) {
@@ -77,16 +131,168 @@ public final class LlmModelFactory {
     }
   }
 
-  private static LlmModel loadHf(final Path path, final LlmListener io) throws IOException {
+  /**
+   * Loads a model from a {@link ModelFileSource} with silent progress and packed GGUF (when
+   * applicable). Bytes are read into heap memory; nothing is written to a disk cache.
+   *
+   * @param source supplies HF sidecars / safetensors (or {@link ModelFileId#GGUF}) via streams;
+   *               non-{@code null}
+   * @return loaded model; {@link LlmModel#path()} is a virtual label under {@code /nanollvm-memory}
+   * @throws NullPointerException if {@code source} is {@code null}
+   * @throws ModelLoadException   if required files are missing or load fails
+   * @since 1.1.0
+   */
+  public static LlmModel make(final ModelFileSource source) {
+    return make(source, LlmListeners.silent(), false);
+  }
+
+  /**
+   * Loads a model from a {@link ModelFileSource} with progress events and packed GGUF (when
+   * applicable). Bytes stay in heap; no filesystem cache.
+   *
+   * @param source supplies model file bytes; non-{@code null}
+   * @param io     receives load progress; {@code null} → silent
+   * @return loaded model; {@link LlmModel#path()} is a virtual in-memory label
+   * @throws NullPointerException if {@code source} is {@code null}
+   * @throws ModelLoadException   if required files are missing or load fails
+   * @since 1.1.0
+   */
+  public static LlmModel make(final ModelFileSource source, final LlmListener io) {
+    return make(source, io, false);
+  }
+
+  /**
+   * Loads a model from a {@link ModelFileSource} with progress events and optional GGUF unpack.
+   *
+   * <p>Use {@link ModelFileSources#classpath(ClassLoader, String)} /
+   * {@link ModelFileSources#classpathGguf(ClassLoader, String)} for JAR resources, or a custom
+   * source when bytes come from elsewhere. Entire weight files are buffered in RAM before the
+   * graph is built.
+   *
+   * @param source                supplies model file bytes; non-{@code null}
+   * @param io                    receives load progress; {@code null} → silent
+   * @param allowUnpackParameters {@code true} to dequantize GGUF to float32 at load; ignored for
+   *                              HF safetensors folders
+   * @return loaded model; {@link LlmModel#path()} is a virtual in-memory label
+   * @throws NullPointerException if {@code source} is {@code null}
+   * @throws ModelLoadException   if required files are missing or load fails
+   * @since 1.1.0
+   */
+  public static LlmModel make(
+    final ModelFileSource source,
+    final LlmListener io,
+    final boolean allowUnpackParameters
+  ) {
+    requireNonNull(source, "source");
+    LlmListener streams = io == null ? LlmListeners.silent() : io;
+    try {
+      ModelFileBundle bundle = ModelFileBundle.load(source, streams);
+      if (bundle.isGguf()) {
+        return loadGguf(bundle, streams, allowUnpackParameters);
+      }
+      return loadHf(bundle, streams);
+    } catch (ModelLoadException e) {
+      throw e;
+    } catch (RuntimeException | IOException e) {
+      throw new ModelLoadException("failed to load model from " + source.displayName(), e);
+    }
+  }
+
+  /**
+   * Loads an HF-style model <em>folder</em> from the classpath (silent).
+   *
+   * <p>Resolves {@link ModelFileId} names and weight shards under {@code resourceFolder}
+   * (e.g. {@code models/Qwen3-0.6B} → {@code models/Qwen3-0.6B/config.json}).
+   *
+   * @param loader         class loader that can see the resources (often the application module
+   *                       loader); non-{@code null}
+   * @param resourceFolder classpath <em>folder</em> prefix without a leading slash (not a file
+   *                       path); non-blank
+   * @return loaded model buffered from classpath streams
+   * @throws NullPointerException     if {@code loader} or {@code resourceFolder} is {@code null}
+   * @throws IllegalArgumentException if {@code resourceFolder} is blank
+   * @throws ModelLoadException       if required resources are missing or load fails
+   * @since 1.1.0
+   */
+  public static LlmModel fromClasspath(final ClassLoader loader, final String resourceFolder) {
+    return make(ModelFileSources.classpath(loader, resourceFolder));
+  }
+
+  /**
+   * Loads an HF-style model <em>folder</em> from the classpath with progress events.
+   *
+   * @param loader                class loader that can see the resources; non-{@code null}
+   * @param resourceFolder        classpath <em>folder</em> prefix without a leading slash; non-blank
+   * @param io                    receives load progress; {@code null} → silent
+   * @param allowUnpackParameters unused for standard HF classpath folders (kept for API symmetry
+   *                              with GGUF loaders)
+   * @return loaded model buffered from classpath streams
+   * @throws NullPointerException     if {@code loader} or {@code resourceFolder} is {@code null}
+   * @throws IllegalArgumentException if {@code resourceFolder} is blank
+   * @throws ModelLoadException       if required resources are missing or load fails
+   * @since 1.1.0
+   */
+  public static LlmModel fromClasspath(
+    final ClassLoader loader,
+    final String resourceFolder,
+    final LlmListener io,
+    final boolean allowUnpackParameters
+  ) {
+    return make(ModelFileSources.classpath(loader, resourceFolder), io, allowUnpackParameters);
+  }
+
+  /**
+   * Loads a single GGUF <em>file</em> from the classpath (silent, weights stay packed).
+   *
+   * @param loader           class loader that can see the resource; non-{@code null}
+   * @param ggufResourceFile exact classpath path to one {@code .gguf} <em>file</em> (e.g.
+   *                         {@code models/gte-small.Q2_K.gguf}); no leading slash; non-blank
+   * @return loaded model (causal or embedding, depending on GGUF architecture)
+   * @throws NullPointerException     if {@code loader} or {@code ggufResourceFile} is {@code null}
+   * @throws IllegalArgumentException if {@code ggufResourceFile} is blank
+   * @throws ModelLoadException       if the resource is missing or load fails
+   * @since 1.1.0
+   */
+  public static LlmModel fromClasspathGguf(final ClassLoader loader,
+                                           final String ggufResourceFile) {
+    return make(ModelFileSources.classpathGguf(loader, ggufResourceFile));
+  }
+
+  /**
+   * Loads a single GGUF <em>file</em> from the classpath with progress and optional unpack-at-load.
+   *
+   * @param loader                class loader that can see the resource; non-{@code null}
+   * @param ggufResourceFile      exact classpath path to one {@code .gguf} <em>file</em>; no
+   *                              leading slash; non-blank
+   * @param io                    receives load progress; {@code null} → silent
+   * @param allowUnpackParameters {@code true} to dequantize GGUF weights to float32 during load
+   * @return loaded model (causal or embedding, depending on GGUF architecture)
+   * @throws NullPointerException     if {@code loader} or {@code ggufResourceFile} is {@code null}
+   * @throws IllegalArgumentException if {@code ggufResourceFile} is blank
+   * @throws ModelLoadException       if the resource is missing or load fails
+   * @since 1.1.0
+   */
+  public static LlmModel fromClasspathGguf(
+    final ClassLoader loader,
+    final String ggufResourceFile,
+    final LlmListener io,
+    final boolean allowUnpackParameters
+  ) {
+    return make(
+      ModelFileSources.classpathGguf(loader, ggufResourceFile), io, allowUnpackParameters);
+  }
+
+  private static LlmModel loadHfFolder(final Path modelFolder, final LlmListener io)
+    throws IOException {
     long t0 = System.nanoTime();
     LlmListeners.info(io, null, "CPU backend: " + MatmulRuntime.sequential().backendInfo());
 
-    Config.HfConfig hfConfig = Config.HfConfig.load(path.resolve(CONFIG_JSON));
+    Config.HfConfig hfConfig = Config.HfConfig.load(modelFolder.resolve(CONFIG_JSON));
     String arch = CausalLMFactory.detect(hfConfig);
     WeightSchema schema = CausalLMFactory.schema(hfConfig);
 
     LlmListeners.info(io, null, "Loading " + arch + " weights…");
-    WeightBag weights = ModelLoader.loadWeights(path, hfConfig, schema, io);
+    WeightBag weights = ModelLoader.loadWeights(modelFolder, hfConfig, schema, io);
 
     LlmListeners.info(io, null, "Building " + arch + " model graph…");
     long tGraph = System.nanoTime();
@@ -94,13 +300,41 @@ public final class LlmModelFactory {
     LlmListeners.infof(io, null, "Model graph ready (%s) in %.1fs%n",
         network.architectureName(), (System.nanoTime() - tGraph) / 1e9);
 
-    Tokenizer tokenizer = Tokenizer.fromPretrained(path);
+    Tokenizer tokenizer = Tokenizer.fromPretrained(modelFolder);
     LlmListeners.infof(io, null, "Model loaded in %.1fs%n", (System.nanoTime() - t0) / 1e9);
-    return new LlmModel(path, hfConfig, weights, network, tokenizer);
+    return new LlmModel(modelFolder, hfConfig, weights, network, tokenizer);
   }
 
-  private static LlmModel loadGguf(
-    final Path path,
+  private static LlmModel loadHf(final ModelFileBundle bundle, final LlmListener io)
+    throws IOException {
+    long t0 = System.nanoTime();
+    LlmListeners.info(io, null, "CPU backend: " + MatmulRuntime.sequential().backendInfo());
+
+    Config.HfConfig hfConfig = Config.HfConfig.parse(bundle.configJson());
+    String arch = CausalLMFactory.detect(hfConfig);
+    WeightSchema schema = CausalLMFactory.schema(hfConfig);
+
+    LlmListeners.info(io, null, "Loading " + arch + " weights…");
+    WeightBag weights = ModelLoader.loadWeights(
+      bundle.safetensors(), bundle.displayName(), hfConfig, schema, io);
+
+    LlmListeners.info(io, null, "Building " + arch + " model graph…");
+    long tGraph = System.nanoTime();
+    CausalLM network = CausalLMFactory.create(hfConfig, weights);
+    LlmListeners.infof(io, null, "Model graph ready (%s) in %.1fs%n",
+      network.architectureName(), (System.nanoTime() - tGraph) / 1e9);
+
+    Tokenizer tokenizer = Tokenizer.fromJsonDocuments(
+      bundle.textFile(ModelFileId.TOKENIZER).orElse(null),
+      bundle.textFile(ModelFileId.TOKENIZER_CONFIG).orElse(null),
+      bundle.textFile(ModelFileId.GENERATION_CONFIG).orElse(null),
+      bundle.configJson());
+    LlmListeners.infof(io, null, "Model loaded in %.1fs%n", (System.nanoTime() - t0) / 1e9);
+    return new LlmModel(bundle.virtualPath(), hfConfig, weights, network, tokenizer);
+  }
+
+  private static LlmModel loadGgufFile(
+    final Path ggufFile,
     final LlmListener io,
     final boolean allowUnpackParameters
   ) throws IOException {
@@ -115,17 +349,43 @@ public final class LlmModelFactory {
           + "LLM.Builder.allowUnpackParameters() for float32 speed.");
     }
 
-    LoadedGguf loaded = GgufModelLoader.load(path, io, allowUnpackParameters);
+    LoadedGguf loaded = GgufModelLoader.load(ggufFile, io, allowUnpackParameters);
     try (GgufReader reader = loaded.reader()) {
       if (EmbeddingEncoderFactory.isEmbeddingArchitecture(loaded.config())) {
-        return loadGgufEmbedding(path, loaded, reader, io, t0);
+        return loadGgufEmbedding(ggufFile, loaded, reader, io, t0);
       }
-      return loadGgufCausal(path, loaded, reader, io, t0);
+      return loadGgufCausal(ggufFile, loaded, reader, io, t0);
+    }
+  }
+
+  private static LlmModel loadGguf(
+    final ModelFileBundle bundle,
+    final LlmListener io,
+    final boolean allowUnpackParameters
+  ) throws IOException {
+    long t0 = System.nanoTime();
+    LlmListeners.info(io, null, "CPU backend: " + MatmulRuntime.sequential().backendInfo());
+    if (allowUnpackParameters) {
+      LlmListeners.info(io, null,
+        "GGUF: unpacking to float32 during load (memory buffer → dense).");
+    } else {
+      LlmListeners.info(io, null,
+        "GGUF weights stay packed; use LlmModelFactory.make(source, io, true) or "
+          + "LLM.Builder.allowUnpackParameters() for float32 speed.");
+    }
+
+    LoadedGguf loaded = GgufModelLoader.load(
+      bundle.ggufBuffer(), bundle.virtualPath(), io, allowUnpackParameters);
+    try (GgufReader reader = loaded.reader()) {
+      if (EmbeddingEncoderFactory.isEmbeddingArchitecture(loaded.config())) {
+        return loadGgufEmbedding(bundle.virtualPath(), loaded, reader, io, t0);
+      }
+      return loadGgufCausal(bundle.virtualPath(), loaded, reader, io, t0);
     }
   }
 
   private static LlmModel loadGgufCausal(
-    final Path path,
+    final Path modelPath,
     final LoadedGguf loaded,
     final GgufReader reader,
     final LlmListener io,
@@ -148,11 +408,11 @@ public final class LlmModelFactory {
     Tokenizer tokenizer = Tokenizer.fromGguf(reader);
     LlmListeners.infof(io, null, "Model loaded in %.1fs%n",
       (System.nanoTime() - startedAtNanos) / 1e9);
-    return new LlmModel(path, loaded.config(), loaded.weights(), network, tokenizer);
+    return new LlmModel(modelPath, loaded.config(), loaded.weights(), network, tokenizer);
   }
 
   private static LlmModel loadGgufEmbedding(
-    final Path path,
+    final Path modelPath,
     final LoadedGguf loaded,
     final GgufReader reader,
     final LlmListener io,
@@ -175,6 +435,6 @@ public final class LlmModelFactory {
     Tokenizer tokenizer = Tokenizer.fromGguf(reader);
     LlmListeners.infof(io, null, "Model loaded in %.1fs%n",
       (System.nanoTime() - startedAtNanos) / 1e9);
-    return new LlmModel(path, loaded.config(), loaded.weights(), encoder, tokenizer);
+    return new LlmModel(modelPath, loaded.config(), loaded.weights(), encoder, tokenizer);
   }
 }

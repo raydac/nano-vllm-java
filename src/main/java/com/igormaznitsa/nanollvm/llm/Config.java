@@ -312,7 +312,14 @@ public final class Config {
     }
 
     public static HfConfig load(final Path configJson) throws IOException {
-      Map<String, Object> m = Json.parseObject(Files.readString(configJson));
+      return parse(Files.readString(configJson));
+    }
+
+    /**
+     * @since 1.1.0
+     */
+    public static HfConfig parse(final String configJson) {
+      Map<String, Object> m = Json.parseObject(requireNonNull(configJson, "configJson"));
       int hiddenSize = Json.asInt(m.get("hidden_size"), 0);
       int numAttentionHeads = Json.asInt(m.get("num_attention_heads"), 0);
       if (numAttentionHeads == 0) {

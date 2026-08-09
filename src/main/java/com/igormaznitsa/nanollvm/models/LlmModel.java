@@ -115,11 +115,17 @@ public final class LlmModel implements AutoCloseable {
     return this.requireNetwork().architectureName();
   }
 
+  /**
+   * @since 1.1.0
+   */
   public boolean isCausalModel() {
     this.assertNotClosed();
     return this.network.get() != null;
   }
 
+  /**
+   * @since 1.1.0
+   */
   public boolean isEmbeddingModel() {
     this.assertNotClosed();
     return this.encoder.get() != null;
@@ -136,6 +142,8 @@ public final class LlmModel implements AutoCloseable {
   /**
    * Encodes {@code text} to a single L2-normalized embedding vector (embedding models only).
    * Tokenizes and wraps with {@code [CLS]} / {@code [SEP]} when present in the vocab.
+   *
+   * @since 1.1.0
    */
   public float[] embed(final CharSequence text) {
     requireNonNull(text, "text");
@@ -144,6 +152,8 @@ public final class LlmModel implements AutoCloseable {
 
   /**
    * Encodes each text to an L2-normalized embedding vector (embedding models only).
+   *
+   * @since 1.1.0
    */
   public float[][] embed(final List<? extends CharSequence> texts) {
     requireNonNull(texts, "texts");
@@ -153,6 +163,8 @@ public final class LlmModel implements AutoCloseable {
   /**
    * Encodes already-tokenized ids to a single L2-normalized embedding (embedding models only).
    * Ids are used as-is — include special tokens such as {@code [CLS]} / {@code [SEP]} when required.
+   *
+   * @since 1.1.0
    */
   public float[] embed(final int[] tokenIds) {
     requireNonNull(tokenIds, "tokenIds");

@@ -280,6 +280,8 @@ public final class Ops {
 
   /**
    * LayerNorm along the last axis: {@code (x - mean) / sqrt(var + eps) * weight + bias}.
+   *
+   * @since 1.1.0
    */
   public static Tensor layerNorm(
     final Tensor x,

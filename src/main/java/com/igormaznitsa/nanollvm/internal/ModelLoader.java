@@ -50,43 +50,85 @@ public final class ModelLoader {
         files.size(),
         files.size() == 1 ? "" : "s");
 
+    List<WeightSource> sources = files.stream()
+      .map(
+        file -> new WeightSource(file.getFileName().toString(), () -> SafetensorsReader.open(file)))
+      .toList();
+    return assembleWeights(sources, modelDir.toString(), hfConfig, schema, streams);
+  }
+
+  /**
+   * @since 1.1.0
+   */
+  public static WeightBag loadWeights(
+    final List<ModelFileBundle.NamedBytes> blobs,
+    final String label,
+    final Config.HfConfig hfConfig,
+    final WeightSchema schema,
+    final LlmListener io
+  ) throws IOException {
+    LlmListener streams = io == null ? LlmListeners.silent() : io;
+    if (blobs.isEmpty()) {
+      throw new IllegalArgumentException("no .safetensors blobs for " + label);
+    }
+    long fileBytes = blobs.stream().mapToLong(b -> b.bytes().length).sum();
+    LlmListeners.infof(streams, null, "Loading weights from %s (%.2f GiB, %d file%s)%n",
+      label,
+      fileBytes / (1024.0 * 1024.0 * 1024.0),
+      blobs.size(),
+      blobs.size() == 1 ? "" : "s");
+    List<WeightSource> sources = blobs.stream()
+      .map(blob -> new WeightSource(
+        blob.name(),
+        () -> SafetensorsReader.open(blob.buffer(), blob.name())))
+      .toList();
+    return assembleWeights(sources, label, hfConfig, schema, streams);
+  }
+
+  private static WeightBag assembleWeights(
+    final List<WeightSource> sources,
+    final String label,
+    final Config.HfConfig hfConfig,
+    final WeightSchema schema,
+    final LlmListener streams
+  ) throws IOException {
     Map<String, Object[]> packed = schema.packedModulesMapping();
     List<PlannedTensor> plan = new ArrayList<>();
-    for (Path file : files) {
-      try (SafetensorsReader probe = SafetensorsReader.open(file)) {
+    for (WeightSource source : sources) {
+      try (SafetensorsReader probe = source.open()) {
         for (String weightName : probe.keys()) {
           ResolvedParam resolved = resolveParam(weightName, schema, packed);
           if (resolved == null) {
             continue;
           }
-          plan.add(new PlannedTensor(file, weightName, resolved.paramName(), resolved.shardId(),
+          plan.add(new PlannedTensor(source, weightName, resolved.paramName(), resolved.shardId(),
               probe.byteSize(weightName)));
         }
       }
     }
     if (plan.isEmpty()) {
-      throw new IllegalStateException("no matching weight tensors found in " + modelDir);
+      throw new IllegalStateException("no matching weight tensors found in " + label);
     }
 
     WeightAssembler assembler = new WeightAssembler(hfConfig);
     Progress progress = new Progress("Weights", plan.size(), streams);
     long loadedBytes = 0L;
-    Path currentFile = null;
+    WeightSource current = null;
     SafetensorsReader reader = null;
     try {
       for (PlannedTensor item : plan) {
-        if (reader == null || !item.file().equals(currentFile)) {
+        if (reader == null || item.source() != current) {
           if (reader != null) {
             reader.close();
           }
-          currentFile = item.file();
-          reader = SafetensorsReader.open(currentFile);
+          current = item.source();
+          reader = current.open();
         }
         Tensor tensor = reader.getTensor(item.weightName());
         assembler.accept(item.paramName(), item.shardId(), tensor);
         loadedBytes += item.byteSize();
         progress.step("%s | %s (%.0f MiB)".formatted(
-            item.file().getFileName(),
+          item.source().label(),
             item.weightName(),
             loadedBytes / (1024.0 * 1024.0)));
       }
@@ -140,13 +182,24 @@ public final class ModelLoader {
   private record ResolvedParam(String paramName, Object shardId) {
   }
 
+  @FunctionalInterface
+  private interface ReaderOpen {
+    SafetensorsReader open() throws IOException;
+  }
+
   private record PlannedTensor(
-      Path file,
+    WeightSource source,
       String weightName,
       String paramName,
       Object shardId,
       long byteSize
   ) {
+  }
+
+  private record WeightSource(String label, ReaderOpen opener) {
+    SafetensorsReader open() throws IOException {
+      return this.opener.open();
+    }
   }
 
   private static final class WeightAssembler {

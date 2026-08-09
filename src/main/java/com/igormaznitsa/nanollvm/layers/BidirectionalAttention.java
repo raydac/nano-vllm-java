@@ -6,6 +6,8 @@ import com.igormaznitsa.nanollvm.tensor.Tensor;
 
 /**
  * Full (non-causal) multi-head self-attention for encoder models. No KV cache.
+ *
+ * @since 1.1.0
  */
 public final class BidirectionalAttention {
 

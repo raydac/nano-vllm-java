@@ -8,7 +8,6 @@ import com.igormaznitsa.nanollvm.utils.ResourceLimits;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
-import java.nio.MappedByteBuffer;
 import java.nio.channels.FileChannel;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -18,40 +17,62 @@ import java.util.Map;
 
 public final class SafetensorsReader implements AutoCloseable {
 
-  private final Path path;
+  private final String label;
   private final FileChannel channel;
-  private final MappedByteBuffer map;
+  private final ByteBuffer map;
   private final Map<String, TensorInfo> tensors;
   private final long dataOffset;
 
   public SafetensorsReader(final Path path) throws IOException {
-    this.path = requireNonNull(path, "path");
+    requireNonNull(path, "path");
+    this.label = path.toString();
     ResourceLimits limits = ResourceLimits.current();
     this.channel = FileChannel.open(path);
     long size = this.channel.size();
     if (size > Integer.MAX_VALUE) {
       throw new IOException("safetensors larger than 2GiB mmap limit: " + path);
     }
-    this.map = this.channel.map(FileChannel.MapMode.READ_ONLY, 0, size);
-    this.map.order(ByteOrder.LITTLE_ENDIAN);
+    this.map =
+      this.channel.map(FileChannel.MapMode.READ_ONLY, 0, size).order(ByteOrder.LITTLE_ENDIAN);
+    this.tensors = new LinkedHashMap<>();
+    this.dataOffset = parseHeader(this.map, size, limits, this.label, this.tensors);
+  }
+
+  private SafetensorsReader(final String label, final ByteBuffer data) throws IOException {
+    this.label = requireNonNull(label, "label");
+    this.channel = null;
+    ByteBuffer map = data.duplicate().order(ByteOrder.LITTLE_ENDIAN);
+    map.clear();
+    this.map = map;
+    this.tensors = new LinkedHashMap<>();
+    this.dataOffset = parseHeader(
+      this.map, map.remaining(), ResourceLimits.current(), this.label, this.tensors);
+  }
+
+  private static long parseHeader(
+    final ByteBuffer map,
+    final long size,
+    final ResourceLimits limits,
+    final String label,
+    final Map<String, TensorInfo> tensors
+  ) throws IOException {
     if (size < 8) {
-      throw new IOException("safetensors header truncated: " + path);
+      throw new IOException("safetensors header truncated: " + label);
     }
-    long headerLen = Integer.toUnsignedLong(this.map.getInt(0));
+    long headerLen = Integer.toUnsignedLong(map.getInt(0));
     if (headerLen > limits.maxSafetensorsHeaderBytes()) {
       throw new IOException(
         "safetensors header length " + headerLen + " exceeds maxSafetensorsHeaderBytes ("
           + limits.maxSafetensorsHeaderBytes() + ")");
     }
     if (8L + headerLen > size) {
-      throw new IOException("safetensors header extends past file end: " + path);
+      throw new IOException("safetensors header extends past file end: " + label);
     }
     byte[] headerBytes = new byte[(int) headerLen];
-    this.map.position(8);
-    this.map.get(headerBytes);
-    this.dataOffset = 8L + headerLen;
+    map.position(8);
+    map.get(headerBytes);
+    long dataOffset = 8L + headerLen;
     Map<String, Object> header = Json.parseObject(new String(headerBytes, UTF_8));
-    this.tensors = new LinkedHashMap<>();
     for (var e : header.entrySet()) {
       if ("__metadata__".equals(e.getKey())) {
         continue;
@@ -66,12 +87,21 @@ public final class SafetensorsReader implements AutoCloseable {
       }
       long start = Json.asLong(offsets.get(0), 0);
       long end = Json.asLong(offsets.get(1), 0);
-      this.tensors.put(e.getKey(), new TensorInfo(dtype, shape, start, end));
+      tensors.put(e.getKey(), new TensorInfo(dtype, shape, start, end));
     }
+    return dataOffset;
   }
 
   public static SafetensorsReader open(final Path path) throws IOException {
     return new SafetensorsReader(path);
+  }
+
+  /**
+   * @since 1.1.0
+   */
+  public static SafetensorsReader open(final ByteBuffer data, final String label)
+    throws IOException {
+    return new SafetensorsReader(label, requireNonNull(data, "data"));
   }
 
   public static float float16ToFloat(final int h) {
@@ -89,6 +119,10 @@ public final class SafetensorsReader implements AutoCloseable {
           .sorted()
           .toList();
     }
+  }
+
+  public String label() {
+    return this.label;
   }
 
   public Iterable<String> keys() {
@@ -142,7 +176,7 @@ public final class SafetensorsReader implements AutoCloseable {
         }
       }
       default ->
-          throw new UnsupportedOperationException("dtype " + info.dtype + " in " + this.path);
+        throw new UnsupportedOperationException("dtype " + info.dtype + " in " + this.label);
     }
     return Tensor.of(data, info.shape);
   }
@@ -157,7 +191,9 @@ public final class SafetensorsReader implements AutoCloseable {
 
   @Override
   public void close() throws IOException {
-    this.channel.close();
+    if (this.channel != null) {
+      this.channel.close();
+    }
   }
 
   private record TensorInfo(String dtype, int[] shape, long start, long end) {

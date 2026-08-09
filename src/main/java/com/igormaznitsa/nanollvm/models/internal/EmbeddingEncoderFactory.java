@@ -7,6 +7,8 @@ import com.igormaznitsa.nanollvm.llm.Config;
 
 /**
  * Builds an immutable {@link EmbeddingEncoder} from HF/GGUF config + {@link WeightBag}.
+ *
+ * @since 1.1.0
  */
 public final class EmbeddingEncoderFactory {
 

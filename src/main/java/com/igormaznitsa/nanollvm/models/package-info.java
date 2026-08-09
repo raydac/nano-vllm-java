@@ -1,5 +1,6 @@
 /**
- * Application model surface: {@link LlmModel} and {@link LlmModelFactory}.
+ * Application model surface: {@link LlmModel}, {@link LlmModelFactory}, and stream-backed load
+ * helpers ({@link ModelFileId}, {@link ModelFileSource}, {@link ModelFileSources}).
  *
  * <p>{@link LlmModel} is safe to share across threads and across many
  * {@link com.igormaznitsa.nanollvm.llm.LLM} instances until {@link LlmModel#close()}. Close each

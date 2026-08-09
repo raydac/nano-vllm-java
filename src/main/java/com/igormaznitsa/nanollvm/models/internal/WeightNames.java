@@ -10,6 +10,9 @@ public final class WeightNames {
   public static final String ARCH_GEMMA3 = "gemma3";
   public static final String ARCH_QWEN3 = "qwen3";
   public static final String ARCH_LFM2 = "lfm2";
+  /**
+   * @since 1.1.0
+   */
   public static final String ARCH_BERT = "bert";
 
   public static final String EMBED_TOKENS = "model.embed_tokens.weight";
@@ -18,8 +21,11 @@ public final class WeightNames {
 
   public static final String GGUF_TOKEN_EMBD = "token_embd.weight";
   public static final String GGUF_TOKEN_EMBD_NORM = "token_embd_norm.weight";
+  /** @since 1.1.0 */
   public static final String GGUF_TOKEN_EMBD_NORM_BIAS = "token_embd_norm.bias";
+  /** @since 1.1.0 */
   public static final String GGUF_POSITION_EMBD = "position_embd.weight";
+  /** @since 1.1.0 */
   public static final String GGUF_TOKEN_TYPES = "token_types.weight";
   public static final String GGUF_OUTPUT = "output.weight";
 

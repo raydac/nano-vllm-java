@@ -10,7 +10,6 @@ import com.igormaznitsa.nanollvm.utils.ResourceLimits;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
-import java.nio.MappedByteBuffer;
 import java.nio.channels.FileChannel;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -29,7 +28,7 @@ public final class GgufReader implements AutoCloseable, GgufTokenizerSource {
 
   private final Path path;
   private final FileChannel channel;
-  private final MappedByteBuffer map;
+  private final ByteBuffer map;
   private final Map<String, Object> metadata;
   private final Map<String, TensorInfo> tensors;
   private final long tensorDataBase;
@@ -43,14 +42,42 @@ public final class GgufReader implements AutoCloseable, GgufTokenizerSource {
     if (size > Integer.MAX_VALUE) {
       throw new IOException("GGUF larger than 2GiB mmap limit: " + this.path);
     }
-    this.map = this.channel.map(FileChannel.MapMode.READ_ONLY, 0, size);
-    this.map.order(ByteOrder.LITTLE_ENDIAN);
+    this.map =
+      this.channel.map(FileChannel.MapMode.READ_ONLY, 0, size).order(ByteOrder.LITTLE_ENDIAN);
+    this.metadata = new LinkedHashMap<>();
+    this.tensors = new LinkedHashMap<>();
+    this.tensorDataBase = this.parseContainer(this.map, size);
+  }
 
-    int magic = this.map.getInt(0);
+  private GgufReader(final Path virtualPath, final ByteBuffer data) throws IOException {
+    this.path = requireNonNull(virtualPath, "virtualPath").toAbsolutePath().normalize();
+    this.limits = ResourceLimits.current();
+    this.channel = null;
+    ByteBuffer map = data.duplicate().order(ByteOrder.LITTLE_ENDIAN);
+    map.clear();
+    this.map = map;
+    this.metadata = new LinkedHashMap<>();
+    this.tensors = new LinkedHashMap<>();
+    this.tensorDataBase = this.parseContainer(this.map, map.remaining());
+  }
+
+  /**
+   * @since 1.1.0
+   */
+  public static GgufReader open(final ByteBuffer data, final Path virtualPath) throws IOException {
+    return new GgufReader(virtualPath, requireNonNull(data, "data"));
+  }
+
+  public static GgufReader open(final Path path) throws IOException {
+    return new GgufReader(path);
+  }
+
+  private long parseContainer(final ByteBuffer map, final long size) throws IOException {
+    int magic = map.getInt(0);
     if (magic != GGUF_MAGIC) {
       throw new IOException("not a GGUF file (bad magic): " + this.path);
     }
-    int version = this.map.getInt(4);
+    int version = map.getInt(4);
     if (version != 2 && version != 3) {
       throw new IOException("unsupported GGUF version " + version + " in " + this.path);
     }
@@ -62,7 +89,6 @@ public final class GgufReader implements AutoCloseable, GgufTokenizerSource {
       throw new IOException("invalid GGUF counts in " + this.path);
     }
 
-    this.metadata = new LinkedHashMap<>();
     for (long i = 0; i < kvCount; i++) {
       String key = cursor.readString();
       int valueType = cursor.readU32AsInt();
@@ -78,7 +104,6 @@ public final class GgufReader implements AutoCloseable, GgufTokenizerSource {
       }
     }
 
-    this.tensors = new LinkedHashMap<>();
     for (long i = 0; i < tensorCount; i++) {
       String name = cursor.readString();
       int nDims = cursor.readU32AsInt();
@@ -101,11 +126,7 @@ public final class GgufReader implements AutoCloseable, GgufTokenizerSource {
           relativeOffset));
     }
 
-    this.tensorDataBase = align(cursor.position, alignment);
-  }
-
-  public static GgufReader open(final Path path) throws IOException {
-    return new GgufReader(path);
+    return align(cursor.position, alignment);
   }
 
   private static int[] toJavaShape(final List<Long> ggmlDims) {
@@ -258,7 +279,9 @@ public final class GgufReader implements AutoCloseable, GgufTokenizerSource {
 
   @Override
   public void close() throws IOException {
-    this.channel.close();
+    if (this.channel != null) {
+      this.channel.close();
+    }
   }
 
   public record TensorInfo(

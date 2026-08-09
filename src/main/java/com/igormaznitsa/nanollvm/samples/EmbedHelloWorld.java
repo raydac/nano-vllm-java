@@ -11,6 +11,8 @@ import java.nio.file.Path;
  *
  * <p>Args: optional {@code .gguf} path (default {@code models/gte-small.Q2_K.gguf}).
  * Example: {@code mvn -q exec:java -Dexec.mainClass=com.igormaznitsa.nanollvm.samples.EmbedHelloWorld}
+ *
+ * @since 1.1.0
  */
 public final class EmbedHelloWorld {
 

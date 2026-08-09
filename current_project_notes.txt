@@ -3,8 +3,11 @@
 - **ResourceLimits** (exported utils): process-wide defaults + builder; RAG/PDF/JSON/GGUF/safetensors/corpus/history budgets
 - CausalLM: Qwen3 + Gemma3 + LFM2 (GGUF); tokenizers GPT-2 BPE / Metaspace / GGUF-embedded / BERT WordPiece
 - **GGUF BERT embeddings** (e.g. gte-small): same `LlmModelFactory.make` → `LlmModel.embed`; `LLM.builder` rejects embedding models; Q3_K + IQ4_NL dequant
+- **ModelFileSource**: `ModelFileId` → `InputStream` (+ weight shards); load into heap only (no disk cache); `make(Path)` stays direct disk I/O
 - **GGUF:** packed by default; `LlmModelFactory.make(path, io, true)` unpacks at load; `LLM.Builder.allowUnpackParameters()` late-unpacks packed models
-- Library: `LlmModelFactory.make` → shared `LlmModel` (`AutoCloseable`); `LLM.Builder` (warmup **off** by default); close **LLM first**, then **model**
+- Library: `LlmModelFactory.make` → shared `LlmModel` (`AutoCloseable`); also `make(ModelFileSource)` / `fromClasspath*` (stream → heap; no disk cache); `LLM.Builder` (warmup **off** by default); close **LLM first**, then **model**
+
+
 - **Advisors:** `advisors(LlmAdvisorMixer, LlmAdvisor…)`; unique non-blank names; one batched `generate`
 - Engine: `Transformer` owns per-LLM arenas + explicit step `Context`; `MatmulRuntime` per `LLM`; `kvHeapFraction` (default 0.25) for KV auto-size
 - `LLM.generate` / `close` use `ReentrantLock`; `assertNotClosed` on infrequent entry points; props = **`nanollvm.*` / `NANOLLVM_*` only**
@@ -76,3 +79,4 @@
 - English `description.md` only
 - Unreassigned method/ctor params must be `final`
 - Do not add temporary large PDFs under `rag/` into the repo
+- New public types/methods after a release must carry `@since X.Y.Z` matching the upcoming version (e.g. `@since 1.1.0` on the 1.1.0 line)
