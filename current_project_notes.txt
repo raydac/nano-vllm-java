@@ -1,5 +1,5 @@
 ## 1. Implementation Progress
-- Maven **`1.0.0`**; enforcer Java `[21,)`, Maven `[3.9,)`; JPMS module `com.igormaznitsa.nanollvm`; POM description = CPU LLM inference library
+- Maven **`1.1.0-SNAPSHOT`** (released **1.0.0** 2026-08-09); enforcer Java `[21,)`, Maven `[3.9,)`; JPMS module `com.igormaznitsa.nanollvm`
 - **ResourceLimits** (exported utils): process-wide defaults + builder; RAG/PDF/JSON/GGUF/safetensors/corpus/history budgets
 - CausalLM: Qwen3 + Gemma3 + LFM2 (GGUF); tokenizers GPT-2 BPE / Metaspace / GGUF-embedded
 - **GGUF:** packed by default; `LlmModelFactory.make(path, io, true)` unpacks at load; `LLM.Builder.allowUnpackParameters()` late-unpacks packed models
@@ -11,7 +11,7 @@
 
 - **Samples:** linear `main` flows (`HelloWorld`, `LogTriageHelloWorld`, `Bench`, `Example`); `BundledModels` / `BundledRag` / `OrderedConsole` in `samples.utils`
 - **RAG:** `RagFactory` → `PreparedRag`; package-private `CorpusLoader`; public API ~10 types (+ `PdfTextExtractor`)
-- Docs: `CHANGELOG.md` dated **1.0.0 — 2026-08-09**; `security_audit.txt`, README / `description.md` aligned
+- Docs: `CHANGELOG.md` — **1.0.0** released; next work under **[Unreleased] — 1.1.0-SNAPSHOT**
 
 
 ## 2. Architecture & Technical Discoveries
@@ -31,8 +31,8 @@
 
 
 ## 4. Current Work In Progress
-- **Done:** `LlmModel` AutoCloseable + closed guards; LLM `isClosed` / `assertNotClosed`; samples linearized
-- Optional next GGUF perf backlog remains (not release-blocking)
+- Development line **`1.1.0-SNAPSHOT`** (post-1.0.0)
+- Optional GGUF perf backlog (mmap, FP16, smaller default KV, fused packed GEMM)
 
 
 ## 5. Known Issues & Limitations
@@ -51,7 +51,7 @@
 
 ## 7. Useful References
 - `security_audit.txt` — 1.0.0 threat-model summary
-- `CHANGELOG.md` — 1.0.0 (2026-08-09) user-facing notes
+- `CHANGELOG.md` — 1.0.0 released; active line 1.1.0-SNAPSHOT
 - `README.md` — Hello World, CLI, library samples
 - Build: `mvn22 -q test` / `MAVEN_OPTS="-Xmx8g" mvn22 -q exec:java`
 - Library: `try (LlmModel m = LlmModelFactory.make(path); LLM llm = LLM.builder(m)…)` — engines close before model
