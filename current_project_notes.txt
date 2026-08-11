@@ -6,6 +6,7 @@
 - **ModelFileSource**: `ModelFileId` → `InputStream` (+ weight shards); load into heap only (no disk cache); `make(Path)` stays direct disk I/O
 - **GGUF:** packed by default; `LlmModelFactory.make(path, io, true)` unpacks at load; `LLM.Builder.allowUnpackParameters()` late-unpacks packed models
 - Library: `LlmModelFactory.make` → shared `LlmModel` (`AutoCloseable`); also `make(ModelFileSource)` / `fromClasspath*` (stream → heap; no disk cache); `LLM.Builder` (warmup **off** by default); close **LLM first**, then **model**
+- **`description.md`:** audited vs 1.1.0 code (API errors fixed; load vs engine, packed GGUF modes, JPMS, RAG short-follow-up=6, close order clarified)
 
 
 - **Advisors:** `advisors(LlmAdvisorMixer, LlmAdvisor…)`; unique non-blank names; one batched `generate`
@@ -40,6 +41,7 @@
 ## 4. Current Work In Progress
 - Development line **`1.1.0-SNAPSHOT`** (post-1.0.0)
 - Optional GGUF perf backlog (mmap, FP16, smaller default KV, fused packed GEMM)
+- `description.md` audited vs code (2026-08-11): fixed factual API/docs drift + foggy load/RAG/JPMS explanations; **ch. 21** curated learning literature; all ch.20–21 URLs HTTP-verified (Gemma→`/docs`, RRF→cormack.uwaterloo.ca, safetensors GitHub org move)
 
 
 ## 5. Known Issues & Limitations
@@ -80,7 +82,7 @@
 - Do **not** update root `README.md` for SNAPSHOT/unreleased work — it documents the last published release; use `CHANGELOG.md` / `models/README.md` / samples until release
 - Optional `.matmulExecutor(ExecutorService)`; never shut down by `LLM.close()`
 - Optional: use Optional as return only (never method params)
-- English `description.md` only (ch. 7b BERT embeddings, ch. 17 dense/hybrid + classpath RAG — **since 1.1.0**)
+- English `description.md` only (ch. 7b BERT embeddings, ch. 17 dense/hybrid + classpath RAG — **since 1.1.0**; ch. 21 suggested literature)
 - Unreassigned method/ctor params must be `final`
 - Do not add temporary large PDFs under `rag/` into the repo
 - New public types/methods after a release must carry `@since X.Y.Z` matching the upcoming version (e.g. `@since 1.1.0` on the 1.1.0 line)

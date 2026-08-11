@@ -14,7 +14,8 @@ encoding sentences to vectors with a **BERT-family embedding** GGUF. Java packag
 `com.igormaznitsa.nanollvm`.
 
 Where a topic has a standard paper or format specification, a short **Further reading** note lists links. Those are
-optional depth; the exposition here is self-contained.
+optional depth; the exposition here is self-contained. A curated **learning path** (what to read in which order) is
+**chapter 21**; **chapter 20** is a flat bookmark index of the same family of links.
 
 Where a topic has a home in this library, an **In the code** note names the Java types and methods that implement it
 (package `com.igormaznitsa.nanollvm`). Those notes are signposts — **chapter 16** collects the full map, samples, and
@@ -31,7 +32,7 @@ file paths.
 5. [`config.json` — the blueprint field by field](#5-configjson--the-blueprint-field-by-field)
 6. [`tokenizer.json` — the dictionary file field by field](#6-tokenizerjson--the-dictionary-file-field-by-field)
 7. [Tensors and `*.safetensors` — parameters on disk](#7-tensors-and-safetensors--parameters-on-disk)
-7a. [GGUF and LFM2 — format, dequant, hybrid chat](#7a-gguf-and-lfm2--quantized-single-file-models)
+7a. [GGUF and LFM2 — quantized single-file models](#7a-gguf-and-lfm2--quantized-single-file-models)
 7b. [BERT embedding GGUFs — sentence vectors (**since 1.1.0**)](#7b-bert-embedding-ggufs--sentence-vectors-since-110)
 8. [Attention: kinds of looking-back, and how they work](#8-attention-kinds-of-looking-back-and-how-they-work)
 9. [The thinking process: how it is organized and how it works with the model](#9-the-thinking-process-how-it-is-organized-and-how-it-works-with-the-model)
@@ -47,6 +48,7 @@ file paths.
 18. [Word list](#18-word-list)
 19. [Honest limits](#19-honest-limits)
 20. [External reading index](#20-external-reading-index)
+21. [Suggested literature (learning path)](#21-suggested-literature-learning-path)
 
 ---
 
@@ -146,7 +148,8 @@ A separate file, the **tokenizer**, holds that dictionary and the rules for chop
 confused about who is speaking. Without those markers, a dialogue looks like an undifferentiated blob of prose.
 **Chapter 6** opens `tokenizer.json` field by field.
 
-**In the code:** `tokenizer.Tokenizer` — `fromPretrained`, `encode`, `decode`, `applyChatTemplate` (chapter 16).
+**In the code:** `tokenizer.Tokenizer` — `fromPretrained` / `fromGguf`, `encode`, `decode`, `applyChatTemplate`
+(chapter 16).
 
 **Further reading:** subword BPE was popularized for translation in
 [Sennrich et al., *Neural Machine Translation of Rare Words with Subword Units*](https://arxiv.org/abs/1508.07909);
@@ -166,8 +169,16 @@ desk until the program can use them.
 
 ### Where the crate comes from
 
-You (or a download script in this project’s `models/` folder) fetch a **model directory** from a public model hub. That
-directory is not a single magical file. It is a small collection of roles:
+You (or a download script in this project’s `models/` folder) fetch weights from a public model hub. This port accepts
+**three** crate shapes — do not mix their stories:
+
+| Crate shape | What you point at | Typical cargo |
+|-------------|-------------------|---------------|
+| **Hugging Face folder** | A directory | `config.json` + `tokenizer.json` + `*.safetensors` (Qwen3 / Gemma3) |
+| **Single GGUF file** | One `.gguf` | Metadata + embedded tokenizer + quantized weights (LFM2 chat, or BERT embeddings **since 1.1.0**) |
+| **Stream / classpath** (**since 1.1.0**) | A `ModelFileSource` (or `fromClasspath*` helpers) | Same roles as above, but bytes come from streams into **heap** (no disk cache); `make(Path)` stays direct disk I/O |
+
+Hugging Face folder example:
 
 ```text
 models/Qwen3-0.6B/          (example)
@@ -177,8 +188,8 @@ models/Qwen3-0.6B/          (example)
   (sometimes more shards, license notes, extras…)
 ```
 
-Until these files are **read into memory and wired into empty structure**, the program cannot answer anything. Loading
-is that wiring.
+Until the chosen crate is **read into memory and wired into empty structure**, the program cannot answer anything.
+Loading is that wiring.
 
 ### Three kinds of cargo (do not mix them up)
 
@@ -225,22 +236,27 @@ Think of a librarian preparing a reading desk:
    Extra files or unrecognized names are ignored. Only registered shelves get filled.
 
 6. **Open the dictionary**  
-   Tokenizer files are loaded separately. They never become part of the neural arithmetic; they stand at the door,
-   translating.
+   Tokenizer files (or the GGUF-embedded vocab) are loaded separately. They never become part of the neural arithmetic;
+   they stand at the door, translating.
 
-7. **Lay out blank notebooks**  
-   Memory pages for Keys and Values during conversation are **created empty** here. They are not downloaded knowledge;
-   they are scratch paper for the current text.
+Those six steps seal an immutable **`LlmModel`** (weights + tokenizer + blueprint). Opening a chat **engine** is a
+second, separate act:
 
-8. **Optional warm-up**  
-   A tiny pretend question is run once so the first real answer is not also paying start-up costs.
+7. **Lay out blank notebooks** (when you build an `LLM`)  
+   Memory pages for Keys and Values during conversation are **created empty** on each `LLM`. They are not downloaded
+   knowledge; they are scratch paper for that engine’s current text. Share one `LlmModel` across many engines; each
+   engine gets its own notebooks.
 
-After this, the **learned shelves stay fixed**. Chat does not rewrite the model files. Only the notebooks and temporary
-worksheets change while answering.
+8. **Optional warm-up** (also on `LLM.Builder`, **off by default**)  
+   A tiny pretend question may run once so the first real answer is not also paying start-up costs. Call
+   `.warmup()` if you want it; `LlmModelFactory.make` never warms up by itself.
 
-**In the code:** `LlmModelFactory.make` runs `CausalLMFactory` + `internal.ModelLoader.loadWeights` +
-`Tokenizer.fromPretrained` and seals weights into an immutable `LlmModel`. Each `LLM` then allocates its own KV arena via
-`Transformer` (chapter 16).
+After load, the **learned shelves stay fixed**. Chat does not rewrite the model files. Only the notebooks and temporary
+worksheets change while answering. Close order: close each **`LLM` first**, then the shared **`LlmModel`**.
+
+**In the code:** `LlmModelFactory.make` (Path, `ModelFileSource`, or `fromClasspath*`) seals an immutable `LlmModel`.
+Causal graphs use internal `CausalLMFactory` + weight loaders; embedding GGUFs use `EmbeddingEncoderFactory`. Each
+`LLM.builder(model).build()` allocates its own KV arena via `Transformer` (chapter 16).
 
 **Further reading:** Hub layout and `from_pretrained`-style folders are covered in Hugging Face
 [Transformers docs](https://huggingface.co/docs/transformers); this Java port is inspired
@@ -248,12 +264,12 @@ by [nano-vllm](https://github.com/GeeeekExplorer/nano-vllm) and the serving idea
 [vLLM / PagedAttention](https://arxiv.org/abs/2309.06180).
 
 ```text
-  disk crate                    memory after load
-  ─────────                    ─────────────────
+  disk crate                    memory after LlmModelFactory.make
+  ─────────                    ────────────────────────────────
   blueprint          ──►       sizes & recipe chosen
   dictionary         ──►       encode / decode ready
   weight crates      ──►       full shelves (fixed)
-  (nothing yet)      ──►       empty KV notebooks
+  (nothing yet)      ──►       (KV notebooks appear later, per LLM)
 ```
 
 ### What each shelf is *for* when answers begin
@@ -268,10 +284,11 @@ by [nano-vllm](https://github.com/GeeeekExplorer/nano-vllm) and the serving idea
 | Final vocabulary scorer   | Turn the last portrait into “how good is each next token?”            |
 
 If loading failed halfway, you would have a building with missing furniture: some rooms empty, answers nonsense or
-crashes. A successful load means: **every expected shelf has its numbers**, dictionary ready, notebooks allocated.
+crashes. A successful **model** load means: **every expected shelf has its numbers**, dictionary ready. A successful
+**engine** open means notebooks are allocated for that `LLM`.
 
-**In the code (shelves):** `internal.ModelLoader.loadWeights` merges shards into a `WeightBag`; `CausalLMFactory.create`
-builds an immutable graph from that bag. Notebooks via per-`LLM` `KvCacheArena` bound into `internal.Context` for
+**In the code (shelves):** internal `ModelLoader` / `GgufModelLoader` merge into a `WeightBag`; `CausalLMFactory` (or
+embedding factory) builds an immutable graph. Notebooks via per-`LLM` `KvCacheArena` bound into `internal.Context` for
 `Attention` (chapter 16).
 
 ### Why the first load feels slow and heavy
@@ -334,10 +351,11 @@ A Gemma file adds things like `layer_types`, `sliding_window`, `hidden_activatio
 
 | Field           | Means                                                                                 | Used for                                              | If missing                                         |
 |-----------------|---------------------------------------------------------------------------------------|-------------------------------------------------------|----------------------------------------------------|
-| `model_type`    | Short family name (`qwen3`, `gemma3_text`, …)                                         | Auto-detect Qwen3 vs Gemma3 graph (`CausalLMFactory`) | Fall through to `architectures`, else assume Qwen3 |
+| `model_type`    | Short family name (`qwen3`, `gemma3_text`, …)                                         | Auto-detect causal graph (`CausalLMFactory`: Qwen3 / Gemma3; GGUF also `lfm2`) | Fall through to `architectures`, else assume Qwen3 |
 | `architectures` | List of class-style names from Hugging Face (`Qwen3ForCausalLM`, `Gemma3ForCausalLM`) | Same detection if `model_type` is unclear             | Optional                                           |
 
-You can override detection with `-Dnanollvm.arch=qwen3` or `gemma3` without editing the file.
+You can override causal detection with `-Dnanollvm.arch=qwen3`, `gemma3`, or `lfm2` without editing the file. Embedding
+GGUFs use a separate detector (`bert`) and never go through `LLM.builder` (chapter 7b).
 
 **Examples from real folders**
 
@@ -622,16 +640,19 @@ consult it.
 
 ### Blueprint vs engine knobs (do not confuse)
 
-| Comes from `config.json`                  | Comes from this program’s builder / runtime                                         |
+| Comes from `config.json` / GGUF metadata  | Comes from this program’s builder / runtime                                         |
 |-------------------------------------------|-------------------------------------------------------------------------------------|
 | Layer count, widths, heads, RoPE, windows | `maxModelLen` (capped by blueprint), KV page size, number of KV pages, batch limits |
-| Which recipe (Qwen/Gemma)                 | `-Dnanollvm.arch=…` override                                                        |
-| `torch_dtype` hint                        | Always float32 compute after load                                                   |
+| Which recipe (Qwen / Gemma / LFM2 / BERT) | `-Dnanollvm.arch=…` override (causal); embedding GGUFs detected separately          |
+| `torch_dtype` hint                        | Always float32 activations; GGUF weights may stay packed until unpack               |
+| (not in blueprint)                        | `kvHeapFraction` (default **0.25**) — share of heap used to size the KV arena       |
+| (not in blueprint)                        | CPU matmul threads / optional caller `ExecutorService`; warmup on/off               |
 
 The blueprint says what the **model is**. The builder says how hard you ask your **machine** to run it.
 
 **In the code:** `Config.HfConfig.load` fills the blueprint; `LLM.Builder` / `Config` set runtime knobs such as
-`maxModelLen`, KV pages, and batch limits (chapter 16).
+`maxModelLen`, `kvHeapFraction`, KV pages, batch limits, and matmul threading (chapter 16). Process-wide parser /
+corpus caps live in exported `utils.ResourceLimits` (**since 1.1.0**).
 
 **Further reading:** configuration objects in the Python ecosystem —
 [Hugging Face `PretrainedConfig`](https://huggingface.co/docs/transformers/main/en/main_classes/configuration); model
@@ -645,13 +666,19 @@ cards on the Hub usually ship the same `config.json` this chapter describes.
 If `config.json` is the architect’s plan for the neural building, **`tokenizer.json`** is the **spelling book**: how
 human text becomes token numbers and back. It is also JSON, but its job is linguistic plumbing, not layer widths.
 
-This project loads it in `Tokenizer.fromPretrained`. Companion files often sit beside it:
+This project loads Hugging Face folders with `Tokenizer.fromPretrained`. Companion files often sit beside
+`tokenizer.json`:
 
 | File                     | Role here                                                                  |
 |--------------------------|----------------------------------------------------------------------------|
 | `tokenizer.json`         | Vocab, merges, normalizer / pre-tokenizer / decoder pipeline, added tokens |
 | `tokenizer_config.json`  | Often holds `chat_template`, `eos_token`, `pad_token` names                |
 | `generation_config.json` | May list extra `eos_token_id` values used as stop ids                      |
+
+**GGUF path (chapter 7a / 7b):** there may be no separate `tokenizer.json`. The same public `Tokenizer` type is built
+from embedded `tokenizer.ggml.*` metadata via `Tokenizer.fromGguf` / `GgufTokenizerSource` — BPE for many chat exports,
+WordPiece for BERT embedding GGUFs. This chapter’s field-by-field tour is still the HF JSON shape; GGUF just stores a
+subset of the same ideas inside one file.
 
 Without a usable tokenizer, the model cannot turn your sentence into the ids the embedding table expects.
 
@@ -793,6 +820,12 @@ Everyday story:
 
 The loader chooses **METASPACE_BPE** vs **GPT2_BYTE_BPE** by inspecting pre-tokenizer/decoder nodes and vocab clues
 (Gemma chat markers, etc.).
+
+#### C. WordPiece / GGUF-embedded (BERT embeddings, **since 1.1.0**)
+
+BERT-family embedding GGUFs often set `tokenizer.ggml.model=bert`. Encoding is **greedy longest-match WordPiece**
+(often with lowercase and metaspace-style `▁` pieces), not the BPE merge loop above. Apps never select a public
+`Tokenizer.Style` enum — style is chosen inside `Tokenizer` when the model loads. Details: chapter 7b.
 
 ### How encode / decode use the file (organization)
 
@@ -1005,7 +1038,7 @@ the graph (chapter 16). Conceptual tensor definitions: chapter 10.
 
 **Further reading:** format overview in the
 [Safetensors documentation](https://huggingface.co/docs/safetensors); binary layout notes in the
-[safetensors GitHub README](https://github.com/huggingface/safetensors).
+[safetensors GitHub README](https://github.com/safetensors/safetensors).
 
 
 ---
@@ -1014,18 +1047,27 @@ the graph (chapter 16). Conceptual tensor definitions: chapter 10.
 
 Chapter 7 described **safetensors**: a JSON catalog plus a raw float/BF16 payload. **GGUF** is the other on-disk
 container this project can open (popular with llama.cpp). One file holds **typed metadata**, an embedded **tokenizer**,
-and **GGML-typed weight blocks** (often quantized). This engine supports **GGUF v2/v3** for architecture **`lfm2`**: it
-keeps weights **packed** in RAM by default and **dequantizes rows/tiles during matmul and embedding**. Each
-`Linear` / LM-head binds a `LinearKernel` at construction (`dense-f32` with decode-1, or packed with a
+and **GGML-typed weight blocks** (often quantized). This engine supports **GGUF v2/v3** for:
+
+- architecture **`lfm2`** — hybrid short-convolution + GQA **chat** models (this section);
+- architecture **`bert`** — sentence-embedding encoders (**chapter 7b**, **since 1.1.0**).
+
+For causal LFM2 it keeps weights **packed** in RAM by default and **dequantizes rows/tiles during matmul and embedding**.
+Each `Linear` / LM-head binds a `LinearKernel` at construction (`dense-f32` with decode-1, or packed with a
 GGML-type-fixed dequant lambda). Token embeddings bind a matching `EmbeddingKernel`.
 `GgufDequant.dequantizeRange` writes block quants **straight into the caller float buffer** (a one-block scratch
-only when a range starts mid-block). Prefer
-`LlmModelFactory.make(path, io, true)` to unpack **during load** (mmap → float32; no packed heap copy). Late
-`LLM.Builder.allowUnpackParameters()` still works on a packed model (releases packed bytes while materializing).
-Activations and the KV cache
-remain float32 either way. A ~1.7 GB Q4_K_M 2.6B
-file stays near that size for packed weights;
-default `-Xmx16g` in `.mvn/jvm.config` is still useful headroom for KV / scratch.
+only when a range starts mid-block).
+
+**Three unpack stories (do not conflate them):**
+
+| Mode | How you ask | What happens to weight RAM |
+|------|-------------|----------------------------|
+| **Packed (default)** | `LlmModelFactory.make(path)` | Quant blocks stay in heap; dequant on each matmul/embed use |
+| **Unpack at load** | `make(path, io, true)` | mmap → float32 while loading; **no** packed heap copy of those tensors |
+| **Late unpack** | `LLM.Builder.allowUnpackParameters()` on a packed model | Materializes float32 via `WeightBag.asDense()`; **packed payloads may remain** until no other engine still needs them (peak RAM can hold both) |
+
+Activations and the KV cache remain float32 either way. A ~1.7 GB Q4_K_M 2.6B file stays near that size for packed
+weights; default `-Xmx16g` in `.mvn/jvm.config` is still useful headroom for KV / scratch.
 
 ### Why GGUF exists (vs safetensors)
 
@@ -1077,8 +1119,10 @@ Each **tensor info** records:
 | `30` BF16 | bfloat16 | Expand to Java `float` |
 | `2` Q4_0 | 32-elem blocks (scale + nibbles) | Packed; in-place row/block dequant → float |
 | `8` Q8_0 | 32-elem blocks | Packed; in-place row/block dequant → float |
+| `11` Q3_K | 256-elem K-quants | Packed; in-place row/block dequant → float (**since 1.1.0**; common on small embedding GGUFs) |
 | `12` Q4_K | 256-elem K-quants | Packed; in-place row/block dequant → float |
 | `14` Q6_K | 256-elem K-quants | Packed; in-place row/block dequant → float |
+| `20` IQ4_NL | 32-elem IQ blocks | Packed; in-place row/block dequant → float (**since 1.1.0**) |
 
 A **Q4_K_M** file typically mixes **Q4_K** and **Q6_K** tensors. Weights stay packed; activations use float32 after
 per-row dequant inside the bound `LinearKernel` / `EmbeddingKernel` (via `GgufDequant.dequantizeRange`).
@@ -1089,7 +1133,7 @@ Useful keys this loader / tokenizer read (names vary slightly by export):
 
 | Key pattern | Role |
 |-------------|------|
-| `general.architecture` | Must contain `lfm2` for this port |
+| `general.architecture` | Must look like `lfm2` for this chat path (`bert` → chapter 7b) |
 | `lfm2.*` / `*.block_count`, `*.embedding_length`, … | Sizes → `Config.HfConfig` |
 | `lfm2.attention.head_count_kv` | Often a **per-layer array** (0 on conv layers) — use max > 0 as GQA kv heads |
 | `tokenizer.ggml.tokens` / `.merges` | Embedded vocab |
@@ -1128,23 +1172,25 @@ hello
 
 ### CPU matmul threads
 
-Dense `MatmulRuntime` / `FloatKernels.dot` can split the output axis across workers. `LLM` defaults to
-`Runtime.availableProcessors()` for all models (`LLM.Builder.cpuThreads(N)` / `.allCpuThreads()` /
-`.disableMultiCpu()`, or `-Dnanollvm.cpu.threads=N`). This helps
-multi-core decode; GGUF weight RAM stays near packed size (KV / activations are still float32).
+Dense `MatmulRuntime` / `FloatKernels.dot` can split the output axis across workers. Each **`LLM`** owns its own
+runtime. Defaults: `Runtime.availableProcessors()` (`LLM.Builder.cpuThreads(N)` / `.allCpuThreads()` /
+`.disableMultiCpu()`, or `-Dnanollvm.cpu.threads=N`). Builder thread count wins over the system property.
+`.disableMultiCpu()` / `cpuThreads(1)` use a **sequential** runtime (no worker pool — the calling thread only). An
+optional `.matmulExecutor(ExecutorService)` is never shut down by `LLM.close()`. This helps multi-core decode; GGUF
+weight RAM stays near packed size (KV / activations are still float32).
 
 ### Summary
 
 > **A `.gguf` file is a little-endian catalog of metadata + named GGML tensors, followed by an aligned payload of
 > float or block-quantized bytes. This port maps the file, keeps supported types packed (reversing 2D dims to HF
 > layout), and dequantizes rows in place during matmul / embedding into the same float32 activation path as
-> safetensors.**
+> safetensors. The same container also loads BERT embedding graphs (chapter 7b).**
 
-**In the code:** `internal.GgufReader` / `GgufDequant` / `GgufModelLoader`; `models.internal.PackedWeight`;
-`tensor.LinearKernel` / `EmbeddingKernel`; `models.Lfm2ForCausalLM`; short-conv state in
-`engine.ConvStateArena` bound from `Transformer` via `internal.Context`; tokenizer via `Tokenizer.fromGguf`; chat
-defaults via `ChatPrompts.systemFor(Tokenizer)` and `Tokenizer.invitesThinking()`; matmul workers via
-`LLM.Builder` / `MatmulRuntime`.
+**In the code (application entry):** `LlmModelFactory.make` / `make(…, true)` / `LLM.Builder.allowUnpackParameters()`;
+tokenizer via the sealed `LlmModel`. **Internal map:** `internal.GgufReader` / `GgufDequant` / `GgufModelLoader`;
+`models.internal.PackedWeight` / `Lfm2ForCausalLM`; `tensor.LinearKernel` / `EmbeddingKernel`; short-conv state in
+`engine.ConvStateArena` via `Transformer` / `internal.Context`; chat defaults via `ChatPrompts.systemFor(Tokenizer)`
+and `Tokenizer.invitesThinking()`; matmul via `MatmulRuntime` (per `LLM`).
 
 **Further reading:** [GGUF format notes](https://github.com/ggml-org/ggml/blob/master/docs/gguf.md); Liquid
 [LFM2 blog](https://www.liquid.ai/blog/liquid-foundation-models-v2-our-second-series-of-generative-ai-models);
@@ -1217,11 +1263,12 @@ text
 Weights may stay **GGUF-packed** and dequantize on use, like other GGUF graphs (chapter 7a). Supported quants for
 common small embedding files include paths that needed **Q3_K** / **IQ4_NL** dequant (**since 1.1.0**).
 
-**Tokenizer:** GGUF `tokenizer.ggml.model=bert` → WordPiece / greedy longest-match (`Tokenizer.Style.WORDPIECE`), often
-with lowercase and metaspace-style pieces.
+**Tokenizer:** GGUF `tokenizer.ggml.model=bert` → WordPiece / greedy longest-match (chosen inside `Tokenizer` when the
+GGUF loads — not a public enum apps set), often with lowercase and metaspace-style pieces.
 
-**In the code (graph):** `models.internal.BertForEmbedding`; blocks use `layers.BidirectionalAttention` (not the causal
-`Attention` used for chat); norms via `Norms.LayerNorm`; pooling and L2 live at the end of `encode`.
+**In the code (graph — internal):** `models.internal.BertForEmbedding`; blocks use `layers.BidirectionalAttention`
+(not the causal `Attention` used for chat); norms via `Norms.LayerNorm`; pooling and L2 live at the end of `encode`.
+**Public surface:** `LlmModel.isEmbeddingModel()` / `embed(…)`.
 
 ### What you use the vectors for
 
@@ -1501,13 +1548,14 @@ Each reading room also contains a large feed-forward block (MLP):
 Both happen in **every** room, stacked many times.
 
 **In the code:** `Attention.forward`, `storeKvCache`, `attendRange`; model path `Qwen3Attention.forward` /
-`Gemma3Attention.forward` (chapter 16).
+`Gemma3Attention.forward` / `Lfm2Attention.forward` (plus LFM2 short-conv layers; chapter 16).
 
 ### One sentence to keep
 
 > All generating models here use **causal self-attention**; they usually run it as **many heads with shared KV
 > notebooks (GQA)**; Gemma may **alternate local windows and global views**; the same rule is heavy at **prefill** and
 > lighter at **decode** thanks to notebooks.
+
 ---
 
 ## 9. The thinking process: how it is organized and how it works with the model
@@ -2355,15 +2403,16 @@ then this path for the **turn**:
 
 ```text
 OPEN (once)
-  LlmModelFactory#make (or LLM#builder(path) → make)
-      → CausalLMFactory#detect / #create
-      → internal.ModelLoader#loadWeights   (+ SafetensorsReader; merge into WeightBag)
-      → CausalLMFactory#create(hf, bag)    (immutable Qwen3/Gemma3/LFM2 graph)
-      → Tokenizer#fromPretrained
-  LLM#builder(LlmModel) → LLM.Builder#build → LLM.<init>
+  LlmModelFactory#make(Path | ModelFileSource | fromClasspath*)
+      → (HF folder) CausalLMFactory#detect / #create
+         + internal.ModelLoader#loadWeights (+ SafetensorsReader; merge into WeightBag)
+         + Tokenizer#fromPretrained
+      → (GGUF causal) GgufModelLoader → models.internal.Lfm2ForCausalLM + Tokenizer#fromGguf
+      → (GGUF bert) EmbeddingEncoderFactory → BertForEmbedding   // embed only; no LLM.builder
+  LLM#builder(LlmModel) → LLM.Builder#build → LLM.<init>         // causal models only
       → Transformer.<init>                 (binds shared model; allocates KvCacheArena)
       → Scheduler.<init>                   (owns BlockManager)
-      → LLM.Builder#warmup()               (optional; off by default)
+      → optional LLM.Builder#warmup()      (off by default)
 
 ONE TURN
   LLM#chat(maxTokens) → ChatSession#open → ChatSession#send("What is 2+2?")
@@ -2371,17 +2420,18 @@ ONE TURN
       → ChatMessages#truncateHistory
       → LLM#runAdvisors (optional; when Builder#advisors configured)
           → one batched LLM#generate for all LlmAdvisor roles
+          → returns AdvisorEnrichment (contains List<AdvisorResponse>)
           → LlmAdvisorMixer#mixPrompt(…, ChatHistory, prompt) → enriched model user text
       → ChatSession#generateTurn
           → Tokenizer#applyChatTemplate
           → LLM#generate
               → encode → Scheduler#add (new Sequence)
-              → loop while !scheduler idle:
-                    internal step
+              → loop while !Scheduler#isFinished:
+                    private stepUnlocked
                       → Scheduler#schedule          (BlockManager#allocate / #mayAppend)
                       → Transformer#step
                           → preparePrefill | prepareDecode
-                          → CausalLM#forward        (Qwen3ForCausalLM or Gemma3ForCausalLM)
+                          → CausalLM#forward        (Qwen3 / Gemma3 / Lfm2)
                           → CausalLM#computeLogits
                           → Sampler#forward
                       → Scheduler#postprocess       (append token / finish on stop)
@@ -2399,17 +2449,17 @@ That is the whole “2+2” turn in library terms. The subsections below zoom ea
 A few lines of Java (or the example app) open the model folder and say, in effect: *chat with me; keep answers short.*
 
 ```java
-LlmModel model = LlmModelFactory.make(modelDir);
-try(LLM llm = LLM.builder(model).maxModelLen(2048).build()){
-ChatReply reply = llm.chat(256).send("What is 2+2?");
-// reply.thinking() / reply.answer()
-}
+try (LlmModel model = LlmModelFactory.make(modelDir);
+     LLM llm = LLM.builder(model).maxModelLen(2048).build()) {
+  ChatReply reply = llm.chat(256).send("What is 2+2?");
+  // reply.thinking() / reply.answer()
+} // close LLM first (try-with-resources order), then LlmModel
 ```
 
 | Step            | Call                                   | Role                                               |
 |-----------------|----------------------------------------|----------------------------------------------------|
 | Load once       | `LlmModelFactory#make`                    | Immutable shared `LlmModel` (weights + tokenizer)     |
-| Start builder   | `LLM#builder(LlmModel)` / `builder(path)` | Fluent open; path overload loads a private `LlmModel` |
+| Start builder   | `LLM#builder(LlmModel)` only           | Fluent open; **no** path overload — load with the factory |
 | Finish open     | `LLM.Builder#build` → `LLM.<init>`     | Wire engine + per-LLM KV arena                     |
 | Start session   | `LLM#chat(int)` → `ChatSession#open`   | History + `SamplingDefaults#forTokenizer`          |
 | Ask             | `ChatSession#send`                     | One user turn through template → generate → parse  |
@@ -2428,14 +2478,14 @@ ChatReply reply = llm.chat(256).send("What is 2+2?");
 
 | Step            | Call                                                               | Role                                                      |
 |-----------------|--------------------------------------------------------------------|-----------------------------------------------------------|
-| Blueprint       | `Config.HfConfig#load` (via `LlmModelFactory`)                        | Read `config.json`                                        |
-| Empty graph     | `CausalLMFactory#detect` → `#create`                               | `Qwen3ForCausalLM` or `Gemma3ForCausalLM`                 |
-| Pour weights    | `internal.ModelLoader#loadWeights` → `WeightBag` → `CausalLMFactory#create` | Merge shards; construct immutable graph                   |
+| Blueprint       | `Config.HfConfig#load` (via `LlmModelFactory`)                        | Read `config.json` (HF) or GGUF metadata              |
+| Empty graph     | `CausalLMFactory#detect` → `#create` / GGUF loaders                   | `Qwen3ForCausalLM`, `Gemma3ForCausalLM`, or `Lfm2ForCausalLM` (all under `models.internal`) |
+| Pour weights    | `internal.ModelLoader#loadWeights` or `GgufModelLoader` → `WeightBag` | Merge shards / dequant path; construct immutable graph |
 | Seal            | (graph is immutable at construction)                               | No post-load weight mutation                              |
-| Dictionary      | `Tokenizer#fromPretrained`                                         | `tokenizer.json` + chat template / stop ids               |
+| Dictionary      | `Tokenizer#fromPretrained` or `#fromGguf`                          | HF JSON or GGUF-embedded vocab + chat template / stop ids |
 | Blank notebooks | `Transformer` → `KvCacheArena`                                     | Per-`LLM` KV pages; bound into `Context` for `Attention`  |
 | Waiting room    | `Scheduler.<init>` → `BlockManager.<init>`                         | Page pool for later allocate                              |
-| Optional        | `LLM.Builder#warmup()`                                             | Tiny generate after load so first real answer is not also cold-start (off by default) |
+| Optional        | `LLM.Builder#warmup()`                                             | Tiny generate after open so first real answer is not also cold-start (**off by default**) |
 
 ### Your sentence becomes numbers
 
@@ -2496,7 +2546,7 @@ which might be `<`, or `4`, or `The`, depending on style and chance.
 
 ```text
 LLM#generate
-  └─ LLM#step                         // first tick is usually prefill
+  └─ private stepUnlocked                 // first tick is usually prefill
        ├─ Scheduler#schedule          // BlockManager#canAllocate / #allocate; prefill=true
        ├─ Transformer#step(seqs, true)
        │    ├─ Transformer#preparePrefill   // ids, positions, Context slot maps / block tables
@@ -2566,7 +2616,7 @@ places attend to each other.
 **How it is called (each decode tick)** — same outer loop as prefill; only the middle changes:
 
 ```text
-LLM#step
+private stepUnlocked
   ├─ Scheduler#schedule              // prefill=false; BlockManager#mayAppend
   ├─ Transformer#step(seqs, false)
   │    ├─ Transformer#prepareDecode  // mostly the newest token + block tables
@@ -2577,8 +2627,9 @@ LLM#step
   └─ Scheduler#postprocess           // stop if eos / stop ids / maxTokens
 ```
 
-`LLM#generate` keeps calling `LLM#step` until `Scheduler#isFinished` (via `LLM#isFinished`). Each appended token may
-fire the `onToken` callback that `ChatSession#generateTurn` registered.
+`LLM#generate` keeps calling private `stepUnlocked` until `Scheduler#isFinished()` is true. There is **no** public
+`LLM#step` or `LLM#isFinished`. Each appended token may fire the `onToken` callback that `ChatSession#generateTurn`
+registered.
 
 **Thinking’s three roles in this same decode loop**
 
@@ -2639,14 +2690,14 @@ the finished stream for display (`thinking` vs `answer`).
   + Tokenizer#encode                  TEMPLATE + TOKENIZE  "What is 2+2?"
            │
            ▼
-  LLM#step (prefill)                  PREFILL (Sense A)
+  LLM#generate → stepUnlocked (prefill)   PREFILL (Sense A)
   Scheduler#schedule
   Transformer#step → CausalLM#forward
   Attention storeKv / prefill…           attention: every prompt place looks back; notebooks fill
   Sampler#forward                        thinking: silent only
            │
            ▼
-  LLM#step (decode) × N               DECODE LOOP (Sense A each step)
+  stepUnlocked (decode) × N           DECODE LOOP (Sense A each step)
   Attention#decode / #attendRange        attention: new token queries notebooks
   Sampler#forward                        thinking: optional <think> tokens (B/C)
   Scheduler#postprocess
@@ -2668,7 +2719,7 @@ You should be able to point at **both** the story and the library:
 | Open model             | `LlmModelFactory#make` → `LlmModel`; `LLM#builder(LlmModel)` → `Transformer.<init>` (`KvCacheArena`) |
 | Chat ask               | `ChatSession#send` → `#generateTurn` → `#finishTurn`                                        |
 | Template / ids         | `Tokenizer#applyChatTemplate` / `#encode` / `#decode`                                       |
-| Engine loop            | `LLM#generate` → `#step` → `Scheduler#schedule` / `#postprocess`                            |
+| Engine loop            | `LLM#generate` → private `stepUnlocked` → `Scheduler#schedule` / `#postprocess`             |
 | One forward+sample     | `Transformer#step` → `CausalLM#forward` / `#computeLogits` → `Sampler#forward`              |
 | Attention + notebooks  | `Context#bindKvCache` → `Attention#forward` (by `layerIndex`) / `#attendRange`              |
 | Visible thinking split | `AssistantParts#parse` (history keeps answer via `finishTurn`)                              |
@@ -2697,48 +2748,53 @@ You do not need to read every file. Use the tables to jump, then skim the named 
 
 ### Package layout (folders ↔ ideas)
 
-| Folder / type                                                                          | Role in the story                                    |
-|----------------------------------------------------------------------------------------|------------------------------------------------------|
-| `llm/` — `LLM`, `LLM.Builder`, `Config`, `SamplingParams`, `GenerationStats`, `LlmAdvisor`, `LlmAdvisorMixer`, `AdvisorResponse` | Front door; named advisors + mixer; stats |
-| `models/LlmModel`, `LlmModelFactory`, `WeightBag`                                          | Shared immutable loaded model + weight bag (causal **or** embedding **since 1.1.0**) |
-| `models/internal/BertForEmbedding`, `EmbeddingEncoder` (not exported)                    | BERT GGUF encode path (**since 1.1.0**) — use `LlmModel.embed`                      |
-| `chat/` — `ChatSession`, `ChatHistory`, `LlmListener`, `LlmTextKind`, `ChatReply`, `StreamPrinter` | Dialog + unified text/status events          |
-| `tokenizer/Tokenizer`                                                                  | `tokenizer.json` / GGUF vocab → encode / decode / chat template   |
-| `Config.HfConfig` (in `llm/Config`)                                                    | `config.json` blueprint + per-LLM engine knobs       |
-| `internal/ModelLoader`, `internal/SafetensorsReader`, `internal/Gguf*`                 | Load safetensors / GGUF weights into `WeightBag`     |
-| `utils/Json`, `utils/NanoLlvmProps`                                                    | JSON helpers; property/env knobs (`nanollvm.*` / `NANOLLVM_*`) |
-| `samples/utils/BundledModels`, `samples/utils/BundledRag` (not exported)               | Resolve local `models/` / `rag/` for demos & tests   |
-| `engine/Scheduler`, `Sequence`, `BlockManager`, `Transformer`, `KvCacheArena`          | Prefill/decode loop, pages, one forward+sample       |
-| `models/CausalLM`, `CausalLMFactory`, `Qwen3ForCausalLM`, `Gemma3ForCausalLM`, `Lfm2ForCausalLM` | Architecture graph |
-| `layers/Attention`, `Sampler`, `Linear`, `Norms`, …                                    | Attention, sampling, projections, RMSNorm/RoPE       |
-| `tensor/Tensor`, `Ops`, `VectorMath`, `MatmulRuntime`, `FloatKernels`                  | Arrays, float ops, parallel GEMM                     |
-| `tensor/LinearKernel`, `EmbeddingKernel` (+ `tensor/kernels/*`)                        | Dense / packed weight backends bound at layer build  |
-| `prompts/ChatPrompts`, `RagPrompts`, `AdvisorPrompts`                                 | Default system / RAG / advisor wording               |
-| `rag/` — `RagFactory`, `PreparedRag`, `DenseRagIndex`, `HybridRagIndex`, `RagSession`, … | Text RAG: BM25 and (since **1.1.0**) dense/hybrid + classpath docs |
-| `samples/Example`, `samples/Bench`, `samples/LogTriageHelloWorld`, `samples/EmbedHelloWorld` (not exported) | Runnable demos |
+**JPMS:** module `com.igormaznitsa.nanollvm` **exports** `models`, `llm`, `chat`, `rag`, `exceptions`, `tokenizer`,
+`utils`. Everything else below (`models.internal`, `engine`, `layers`, `tensor`, `internal`, `prompts`, `samples`) is
+**not exported** — fine to read in this guide; application code under the module system should stay on the exported
+packages.
+
+| Folder / type                                                                          | Role in the story                                    | Exported? |
+|----------------------------------------------------------------------------------------|------------------------------------------------------|-----------|
+| `llm/` — `LLM`, `LLM.Builder`, `Config`, `SamplingParams`, `GenerationStats`, `LlmAdvisor`, `LlmAdvisorMixer`, `AdvisorResponse`, `AdvisorEnrichment` | Front door; named advisors + mixer; stats | yes |
+| `models/` — `LlmModel`, `LlmModelFactory`, `ModelFileId`, `ModelFileSource`, `ModelFileSources` | Shared immutable loaded model + stream/classpath sources (**since 1.1.0**) | yes |
+| `models.internal/` — `WeightBag`, `CausalLM*`, `BertForEmbedding`, `EmbeddingEncoder`, … | Graphs, weight bags, BERT encode (use `LlmModel.embed`) | **no** |
+| `chat/` — `ChatSession`, `ChatHistory`, `ChatMessage`, `ChatMessages`, `LlmListener`, `LlmTextKind`, `ChatReply`, `StreamPrinter` | Dialog + unified text/status events | yes |
+| `tokenizer/Tokenizer`, `GgufTokenizerSource`                                           | HF / GGUF vocab → encode / decode / chat template   | yes |
+| `utils/NanoLlvmProps`, `ResourceLimits`                                                | Property/env knobs; process-wide parser/corpus caps (**since 1.1.0**) | yes |
+| `exceptions/`                                                                          | Typed library failures                               | yes |
+| `rag/` — `RagFactory`, `PreparedRag`, `DenseRagIndex`, `HybridRagIndex`, `RagSession`, `RagIndex`, `RagHit`, `RagLoadOptions`, … | Text RAG: BM25 and (since **1.1.0**) dense/hybrid + classpath docs | yes |
+| `internal/` — `ModelLoader`, `SafetensorsReader`, `Gguf*`, `Json`, `Context`           | Loaders, JSON helper, per-step context               | **no** |
+| `engine/` — `Scheduler`, `Sequence`, `BlockManager`, `Transformer`, `KvCacheArena`     | Prefill/decode loop, pages, one forward+sample       | **no** |
+| `layers/` — `Attention`, `BidirectionalAttention`, `Sampler`, `Linear`, `Norms`, …     | Attention, sampling, projections, norms/RoPE         | **no** |
+| `tensor/` — `Tensor`, `Ops`, `MatmulRuntime`, `LinearKernel`, `EmbeddingKernel`, …     | Arrays, float ops, parallel GEMM                     | **no** |
+| `prompts/` — `ChatPrompts`, `RagPrompts`, `AdvisorPrompts`                             | Default system / RAG / advisor wording               | **no** |
+| `samples/` — `Example`, `HelloWorld`, `Bench`, `EmbedHelloWorld`, `LogTriageHelloWorld`, `utils/Bundled*` | Runnable demos | **no** |
+
+`Config.HfConfig` (in `llm/Config`) holds the blueprint plus per-LLM engine knobs (`maxModelLen`, `kvHeapFraction`, …).
 
 ### Concept → class → methods
 
 | Story idea                       | Primary type                                                         | Methods / entry points to open                                                                                |
 |----------------------------------|----------------------------------------------------------------------|---------------------------------------------------------------------------------------------------------------|
-| Open a model                     | `LlmModelFactory`, `LlmModel`, `LLM.Builder`                               | `LlmModelFactory.make(path)`; `LLM.builder(model)` for causal; `model.embed(…)` for BERT GGUF (**since 1.1.0**) |
-| Sentence embedding (BERT GGUF)   | `LlmModel`, `BertForEmbedding`                                             | `make(gteGguf)` → `isEmbeddingModel()` → `embed(text)` (chapter **7b**, **since 1.1.0**)                        |
-| Named advisors                   | `LlmAdvisor`, `LlmAdvisorMixer`, `AdvisorResponse`, `ChatHistory`          | `LLM.Builder.advisors(mixer, advisors…)`; `LLM#runAdvisors`; `ChatSession` emits `[Name]` notes                  |
+| Open a model                     | `LlmModelFactory`, `LlmModel`, `LLM.Builder`                               | `make(Path)` / `make(ModelFileSource)` / `fromClasspath*`; `LLM.builder(model)` for causal; `model.embed(…)` for BERT GGUF (**since 1.1.0**) |
+| Sentence embedding (BERT GGUF)   | `LlmModel` (internal `BertForEmbedding`)                                   | `make(gteGguf)` → `isEmbeddingModel()` → `embed(text)` (chapter **7b**, **since 1.1.0**)                        |
+| Named advisors                   | `LlmAdvisor`, `LlmAdvisorMixer`, `AdvisorEnrichment`, `ChatHistory`        | `Builder.advisors(mixer, …)` — unique non-blank names; `LLM#runAdvisors` → `AdvisorEnrichment`; one batched `generate` |
 | Chat turn                        | `ChatSession`                                                        | `llm.chat(maxTokens)`, `.listen(…)`, `.streamTo(…)`, `.send(user)`, `.clear()`                              |
 | One-shot / raw text              | `LLM`                                                                | `chatOnce(…)`, `complete(…)`, `generate(…)` → `GenerationOutput.stats()`                                      |
 | Token / timing stats             | `GenerationStats` / `ChatReply`                                      | `promptTokens`, `completionTokens`, `elapsedNanos`, `completionTokensPerSecond()`                             |
 | Cancel / timeout                 | `LLM`                                                                | `cancel()`; `generate(…, timeout, onToken)`                                                                   |
 | Tokenize                         | `Tokenizer` (on `LlmModel`)                                             | `LlmModel.tokenizer()`; `encode`, `decode`, `applyChatTemplate(…, enableThinking)`                               |
-| Token embedding / RoPE / LM head | `VocabParallelEmbedding`, `EmbeddingKernel`, `RotaryEmbedding`, `ParallelLMHead` | `embedTokens.forward` → `EmbeddingKernel.gather`; Gemma `scaleEmbed`; `RotaryEmbedding.forward`; LM head → `LinearKernel` |
-| Blueprint                        | `Config.HfConfig`                                                    | `HfConfig.load(config.json)`; `CausalLMFactory.detect/create`                                                 |
-| Pour weights                     | `LlmModelFactory`, `internal.ModelLoader`, `WeightBag`, `CausalLMFactory` | `loadWeights` → merge packed shards → `CausalLMFactory.create(hf, bag)` |
-| One engine tick                  | `LLM.step`, `Scheduler`, `Transformer`                               | `schedule` → `Transformer.step` → `postprocess`                                                               |
-| Forward + sample                 | `Transformer`, `CausalLM`, `Sampler`                                 | `network.forward` → `computeLogits` → `sampler.forward`                                                       |
+| Token embedding / RoPE / LM head | (internal) `VocabParallelEmbedding`, kernels, `RotaryEmbedding`, … | Via `CausalLM#forward` / LM head — not public app API                                                         |
+| Blueprint                        | `Config.HfConfig`                                                    | `HfConfig.load(config.json)`; internal `CausalLMFactory.detect/create`                                        |
+| Pour weights                     | `LlmModelFactory` + internal loaders / `WeightBag`                      | Sealed inside `make`; apps do not call `ModelLoader` directly                                                 |
+| One engine tick                  | `LLM` (private `stepUnlocked`), `Scheduler`, `Transformer`           | Inside `generate`: `schedule` → `Transformer.step` → `postprocess`                                            |
+| Forward + sample                 | `Transformer`, internal `CausalLM`, `Sampler`                        | `network.forward` → `computeLogits` → `sampler.forward`                                                       |
 | Attention + KV write             | `Attention`, `KvCacheArena`, `internal.Context`                      | `Context.bindKvCache`; `Attention.forward` by `layerIndex`; prefill/decode helpers                            |
 | Pages / prefix reuse             | `BlockManager`                                                       | `canAllocate`, `allocate`, `hashBlocks`, `mayAppend`                                                          |
 | Split thinking UI                | `AssistantParts`, `ChatReply`                                        | `AssistantParts.parse`, `salvageFromThinking`                                                                 |
 | Text RAG (prepare + retrieve)    | `RagFactory`, `PreparedRag`, `DenseRagIndex`, `HybridRagIndex`, `RagSession` | `RagFactory.make` / `withEmbeddings` → `llm.rag(index).send(…)` (chapter 17; dense/hybrid **since 1.1.0**) |
-| Math bricks                      | `Ops`, `LinearKernel`, `EmbeddingKernel`, `MatmulRuntime`            | norms / MLP gates / softmax; linear & embed via kernels                                                       |
+| Resource caps                    | `ResourceLimits`                                                     | Process-wide defaults + builder for file/PDF/JSON/GGUF/corpus/history budgets (**since 1.1.0**)               |
+| Math bricks                      | `Ops`, `LinearKernel`, `EmbeddingKernel`, `MatmulRuntime`            | norms / MLP gates / softmax; linear & embed via kernels (internal)                                            |
 
 ### Sample A — library use (what most apps call)
 
@@ -2749,29 +2805,35 @@ import com.igormaznitsa.nanollvm.llm.LLM;
 
 import java.nio.file.Path;
 
-LlmModel model = LlmModelFactory.make(Path.of("models/Qwen3-0.6B"));
-try(LLM llm = LLM.builder(model)
-        .maxModelLen(2048)
-        .systemPrompt("Answer briefly and factually.")  // Qwen-style; Gemma often empty
-        // optional: .advisors(LlmAdvisorMixer.defaults(),
-        //     LlmAdvisor.builder().name("Facts").prompt("…").build(), …)
-        .build()){
+try (LlmModel model = LlmModelFactory.make(Path.of("models/Qwen3-0.6B"));
+     LLM llm = LLM.builder(model)
+         .maxModelLen(2048)
+         .kvHeapFraction(0.25f)                 // default; sizes KV arena vs heap
+         .systemPrompt("Answer briefly and factually.")  // Qwen-style; Gemma often empty
+         // optional: .advisors(LlmAdvisorMixer.defaults(),
+         //     LlmAdvisor.builder().name("Facts").prompt("…").build(), …)
+         // optional: .warmup()  // off by default
+         // optional: .allowUnpackParameters()  // late float32 for packed GGUF
+         .build()) {
 
-// Multi-turn (history + template + optional <think> parse)
-String reply = llm.chat(256).send("What is 2+2?").answer();
+  // Multi-turn (history + template + optional <think> parse)
+  String reply = llm.chat(256).send("What is 2+2?").answer();
 
-// One-shot chat
-String once = llm.chatOnce("What is 2+2?");
+  // One-shot chat
+  String once = llm.chatOnce("What is 2+2?");
 
-// Raw continuation (no chat template)
-String raw = llm.complete("The capital of France is");
+  // Raw continuation (no chat template)
+  String raw = llm.complete("The capital of France is");
 
-// Text RAG — prepare documents once (like LlmModel), share freely
-var rag = com.igormaznitsa.nanollvm.rag.RagFactory.make(Path.of("docs"));
-// since 1.1.0: classpath docs — RagFactory.makeResource("docs/a.md")
-//             or .builder().addResource(…); hybrid — withEmbeddings(rag, embedModel)
-String grounded = llm.rag(rag).topK(2).send("What is the capital of France?").answer();
-}
+  // Text RAG — prepare documents once (like LlmModel), share freely
+  var rag = com.igormaznitsa.nanollvm.rag.RagFactory.make(Path.of("docs"));
+  // since 1.1.0: classpath docs — RagFactory.makeResource("docs/a.md")
+  //             or .builder().addResource(…); hybrid — withEmbeddings(rag, embedModel)
+  String grounded = llm.rag(rag).topK(2).send("What is the capital of France?").answer();
+} // close LLM before LlmModel (try-with-resources closes in reverse declaration order)
+
+// Embedding GGUF (since 1.1.0): never LLM.builder — call model.embed (chapter 7b)
+// Classpath / streams: LlmModelFactory.make(ModelFileSources.classpath(…)) or fromClasspath*
 ```
 
 Interactive CLI wiring lives in `samples.Example.main`: load status and chat share
@@ -2781,7 +2843,7 @@ RAG-mode menu (none / BM25 / dense / hybrid — dense needs gte-small; **since 1
 
 ### Sample B — one generate tick (Sense A loop)
 
-`LLM.generate` repeatedly calls `step()` until the scheduler is idle. Each `step()` is:
+`LLM.generate` repeatedly calls **private** `stepUnlocked()` until `scheduler.isFinished()`. Each tick is:
 
 ```text
 Scheduler.schedule()          // pick prefill or decode batch
@@ -2793,10 +2855,9 @@ Scheduler.schedule()          // pick prefill or decode batch
     → Scheduler.postprocess(…)   // append token, finish on stop / maxTokens
 ```
 
-Compressed from `LLM.step` / `Transformer.step`:
+Compressed from private `stepUnlocked` / `Transformer.step` (conceptual — `stepUnlocked` is not public):
 
 ```java
-// conceptual — names match the real methods
 ScheduleResult scheduled = scheduler.schedule();
 List<Integer> tokenIds = transformer.step(scheduled.sequences(), scheduled.prefill());
 scheduler.postprocess(scheduled.sequences(), tokenIds, scheduled.prefill(), appendedOut);
@@ -2823,16 +2884,13 @@ That is the code behind “write notebooks at prefill; reread them at decode.”
 ### Sample D — loading shelves
 
 ```text
-LlmModelFactory.make(dir):
-  Config loads HfConfig from config.json
-  internal.ModelLoader.loadWeights(dir, hf, schema):
-      for each *.safetensors name
-          resolve packed q_proj/k_proj/… → qkv_proj (merge into WeightBag)
-          SafetensorsReader.getTensor(name)  // BF16/F16 → float[]
-  CausalLMFactory.create(hf, weights) builds immutable Qwen3ForCausalLM, Gemma3ForCausalLM, or Lfm2ForCausalLM
-  Tokenizer.fromPretrained(dir)
-LLM.builder(model).build():
-  Transformer allocates KvCacheArena (per LLM); internal.Context.bindKvCache on each step
+LlmModelFactory.make(dir|gguf|ModelFileSource):
+  HF: Config loads HfConfig from config.json
+      internal.ModelLoader.loadWeights → WeightBag → CausalLMFactory.create (Qwen/Gemma)
+      Tokenizer.fromPretrained
+  GGUF: GgufModelLoader → Lfm2ForCausalLM or BertForEmbedding; Tokenizer.fromGguf
+LLM.builder(causalModel).build():   // rejected for embedding models
+  Transformer allocates KvCacheArena (per LLM); optional warmup / allowUnpackParameters
 ```
 
 ### Sample E — chat thinking path (Sense C)
@@ -2840,9 +2898,9 @@ LLM.builder(model).build():
 ```text
 ChatSession.send(user)
   history.add(user message)
-  truncateHistory(…)
+  ChatMessages.truncateHistory(…)
   LLM.runAdvisors(modelUser, priorUsers, sampling)   // optional; Builder.advisors(mixer, …)
-      → batched generate → List<AdvisorResponse>
+      → batched generate → AdvisorEnrichment (List<AdvisorResponse> inside)
       → mixer.mixPrompt(llm, responses, ChatHistory, prompt)
   Tokenizer.applyChatTemplate(history with mixed user, …)
   LLM.generate(prompt, sampling, onToken → AssistantParts.parse(partial decode))
@@ -2851,8 +2909,9 @@ ChatSession.send(user)
 ```
 
 Key types: `ChatSession.send` / `generateTurn` / `finishTurn`, `LlmAdvisor` / `LlmAdvisorMixer` /
-`AdvisorResponse` / `ChatHistory`, `AssistantParts.parse`, `ChatPrompts.systemFor`,
-`SamplingDefaults.forTokenizer` (Gemma top-k 64).
+`AdvisorEnrichment` / `AdvisorResponse` / `ChatHistory`, `AssistantParts.parse`, `ChatPrompts.systemFor`,
+`SamplingDefaults.forTokenizer` (Gemma top-k 64). Advisors need **unique non-blank names**; they share one batched
+`generate` and must not interleave with another `generate` on the same `LLM`.
 
 ### Sample F — where “2+2” meets attention in the model graph
 
@@ -2884,7 +2943,7 @@ model.embed(text)
 // Dense RAG: DenseRagIndex.of(prepared, model) / RagFactory.withEmbeddings (ch. 17)
 ```
 
-Narrative: **chapter 7b**. Demo: `samples.EmbedHelloWorld`, `Example` menu option 4.
+Narrative: **chapter 7b**. Demo: `samples.EmbedHelloWorld`, `Example` menu “gte-small (embeddings)”.
 
 ### Sample G — text RAG (prepare once, ask many times)
 
@@ -2911,14 +2970,13 @@ Narrative and design notes: **chapter 17**.
 
 ```text
 src/main/java/com/igormaznitsa/nanollvm/
-  samples/Example.java         ← CLI chat / RAG demo (not exported; module main)
-  samples/Bench.java           ← throughput smoke test (not exported)
+  samples/Example.java / HelloWorld.java / Bench.java / EmbedHelloWorld.java / LogTriageHelloWorld.java
   llm/LLM.java                 ← start here for API
   llm/Config.java / SamplingParams.java
   chat/LlmListener.java / LlmListeners.java / LlmTextKind.java
   llm/AdvisorRunner.java / AdvisorPrompt.java
   llm/LlmAdvisor.java / LlmAdvisorMixer.java / AdvisorResponse.java / AdvisorEnrichment.java
-  chat/ChatSession.java / ChatHistory.java   ← dialog + thinking split; mixer history snapshot
+  chat/ChatSession.java / ChatHistory.java / ChatMessage.java / ChatMessages.java
   rag/RagFactory.java          ← prepare documents once (Path, text, classpath)
   rag/PreparedRag.java         ← shareable corpus + BM25 index (+ Passage record)
   rag/DenseRagIndex.java       ← since 1.1.0: embedding cosine index
@@ -2926,31 +2984,33 @@ src/main/java/com/igormaznitsa/nanollvm/
   rag/RagSession.java          ← retrieve → prompt → chat (UserMessage, QueryRewrite)
   rag/CorpusLoader.java        ← package-private load/chunk pipeline
   rag/PdfTextExtractor.java
-  engine/Transformer.java      ← forward + sample
+  engine/Transformer.java      ← forward + sample (not exported)
   engine/Scheduler.java        ← prefill/decode batches
   layers/Attention.java        ← QKV cache + attendRange
-  models/LlmModel.java / LlmModelFactory.java / CausalLMFactory.java
+  models/LlmModel.java / LlmModelFactory.java
+  models/ModelFileId.java / ModelFileSource.java / ModelFileSources.java   ← since 1.1.0
+  models/internal/CausalLMFactory.java / WeightBag.java
   models/internal/BertForEmbedding.java / EmbeddingEncoder.java   ← since 1.1.0
-  models/Qwen3ForCausalLM.java / Gemma3ForCausalLM.java / Lfm2ForCausalLM.java
+  models/internal/Qwen3ForCausalLM.java / Gemma3ForCausalLM.java / Lfm2ForCausalLM.java
   layers/BidirectionalAttention.java   ← BERT embed path (since 1.1.0)
-  tokenizer/Tokenizer.java             ← includes WordPiece for BERT GGUF
-  samples/EmbedHelloWorld.java         ← since 1.1.0
+  tokenizer/Tokenizer.java / GgufTokenizerSource.java
   prompts/ChatPrompts.java / RagPrompts.java / AdvisorPrompts.java
-  internal/ModelLoader.java / SafetensorsReader.java
+  internal/ModelLoader.java / SafetensorsReader.java / Json.java
   internal/GgufModelLoader.java / GgufReader.java / GgufDequant.java
   internal/Context.java        ← per-step KV / conv slot maps
-  utils/Json.java / NanoLlvmProps.java
-  samples/utils/BundledModels.java / BundledRag.java
-  samples/Example.java / Bench.java / LogTriageHelloWorld.java
+  utils/NanoLlvmProps.java / ResourceLimits.java   ← ResourceLimits since 1.1.0
+  samples/utils/BundledModels.java / BundledRag.java / OrderedConsole.java
   tensor/LinearKernel.java / EmbeddingKernel.java / MatmulRuntime.java
   tensor/kernels/DenseF32LinearKernel.java / PackedLinearKernel.java / …
+  exceptions/…
 ```
 
 ### Threading reminder (API contract)
 
-One `LLM` must not run concurrent `generate` / chat calls. `LLM.cancel()` is safe from another thread and clears
-in-flight work via the scheduler. One `PreparedRag` may be shared across many `LLM`s (chapter 17). Dense / hybrid
-indexes (**since 1.1.0**) additionally need a live embedding `LlmModel` for query-time `embed`.
+One `LLM` must not run concurrent `generate` / chat / `runAdvisors` calls. `LLM.cancel()` is safe from another thread
+and clears in-flight work via the scheduler. One `LlmModel` / `PreparedRag` may be shared across many `LLM`s
+(chapter 17). Dense / hybrid indexes (**since 1.1.0**) additionally need a live embedding `LlmModel` for query-time
+`embed`. Close engines before the shared model.
 
 ---
 
@@ -3050,12 +3110,14 @@ Load an embedding GGUF with the same factory as chat models, then call `embed` �
 
 ```java
 PreparedRag lexical = RagFactory.make(Path.of("docs"));
-try (LlmModel embed = LlmModelFactory.make(Path.of("models/gte-small.Q2_K.gguf"));
-     LLM llm = LLM.builder(chatModel).build()) {
-  RagIndex index = RagFactory.withEmbeddings(lexical, embed); // HybridRagIndex
-  // or: DenseRagIndex.of(lexical, embed);
+LlmModel embed = LlmModelFactory.make(Path.of("models/gte-small.Q2_K.gguf"));
+RagIndex index = RagFactory.withEmbeddings(lexical, embed); // HybridRagIndex
+// or: DenseRagIndex.of(lexical, embed);
+
+try (LLM llm = LLM.builder(chatModel).build()) {
   llm.rag(index).topK(3).send("What city is France's capital?");
 }
+// Keep `embed` open while `index` is in use; close the embedding model only after the index is unused.
 ```
 
 - **`DenseRagIndex`:** at build time embeds every chunk; at query time embeds the question and ranks by cosine (dot
@@ -3070,14 +3132,15 @@ try (LlmModel embed = LlmModelFactory.make(Path.of("models/gte-small.Q2_K.gguf")
 ```text
 user text
    │
-   ├─ (optional) if the turn has fewer than 3 tokens and a longer prior user turn exists,
-   │             retrieval query = prior turn + current   // structural only
+   ├─ (optional) if the turn has fewer than 6 tokens and a longer prior user turn exists,
+   │             retrieval query = prior turn + current   // structural only (SHORT_FOLLOW_UP_MAX_TOKENS)
    │
    ▼
 RagIndex.retrieve(query, topK)  →  List<RagHit>
    │  PreparedRag: BM25 + coverage/length re-rank
    │  DenseRagIndex: cosine over passage vectors          (since 1.1.0)
    │  HybridRagIndex: BM25 + dense fused by RRF           (since 1.1.0)
+   │  off-topic: index may refuse (hybrid needs both sides to agree)
    ▼
 RagSession.formatUserMessage(hits, user text, maxContextChars, compact?)
    │  (internal: UserMessage.format; wording in prompts.RagPrompts)
@@ -3100,9 +3163,10 @@ the conversation log stays readable; the generator gets the cards.
 When several BM25 passages match, `PreparedRag.retrieve` re-ranks by query term coverage and passage length — compact
 grounding without corpus-specific filename rules. Grounded turns also clamp sampling temperature.
 
-Very short follow-ups (token **count**, not a word list) expand the **retrieval** string with the previous longer user
-turn so a one-word reply does not become a random lexical hunt through the corpus. The model still receives the current
-user text in history; chat context does the conversational work.
+Very short follow-ups (token count under **6**, not a word list) expand the **retrieval** string with the previous
+longer user turn so a one-word reply does not become a random lexical hunt through the corpus. The model still receives
+the current user text in history; chat context does the conversational work. Query path may also use nested
+`QueryRewrite` (isolated LLM keywords) and prefer a prior source when the index supports it.
 
 **In the code (query):** `RagSession.send` → `RagIndex.retrieve` → `RagSession.formatUserMessage` (or
 `UserMessage.format`) → `ChatSession.sendPrepared`. Short follow-ups may use nested `QueryRewrite` (isolated LLM
@@ -3158,6 +3222,8 @@ Short glossary. For the Java home of each idea, prefer the **In the code** notes
 | Term you may meet     | Meaning                                                                                          |
 |-----------------------|--------------------------------------------------------------------------------------------------|
 | `LlmModel`            | Pretrained parameters plus tokenizer and blueprint used for inference                            |
+| `ModelFileSource`     | Stream/classpath (or custom) source of model bytes (**since 1.1.0**; no disk cache)              |
+| `ResourceLimits`      | Process-wide caps for parsers, corpus, PDF/JSON/GGUF sizes, history (**since 1.1.0**)            |
 | Loading               | Reading blueprint + dictionary + weight tensors into memory and wiring them                      |
 | `config.json`         | Architectural hyperparameters (sizes, norms, RoPE) — not the learned weights                     |
 | `tokenizer.json`      | Vocab, BPE merges, and text pipeline (string ↔ token ids)                                        |
@@ -3238,8 +3304,9 @@ If this guide did its job, you can now explain to another non-specialist:
 That is enough to understand what this Java program is doing — and what it is not.
 
 **In the code (limits mirrored by design):** CPU kernels in `Ops` / `VectorMath`; no GPU path; one `LLM` is not safe for
-concurrent `generate` — use `cancel()` from another thread only to abort (chapter 16). RAG is lexical BM25, not a
-learned retriever (chapter 17).
+concurrent `generate` — use `cancel()` from another thread only to abort (chapter 16). RAG defaults to lexical BM25;
+**since 1.1.0** dense / hybrid embedding retrieval is also available (`DenseRagIndex` / `HybridRagIndex`, chapter 17).
+Close `LLM` engines before a shared `LlmModel`.
 
 ---
 
@@ -3260,7 +3327,7 @@ Implementation homes stay in the **In the code** notes, **chapter 16**, **chapte
 | HF Tokenizers              | [Documentation](https://huggingface.co/docs/tokenizers/index)                                                                      |
 | Chat templates             | [Transformers guide](https://huggingface.co/docs/transformers/chat_templating)                                                     |
 | Model `config` class          | [PretrainedConfig](https://huggingface.co/docs/transformers/main/en/main_classes/configuration)                                    |
-| Safetensors                | [HF docs](https://huggingface.co/docs/safetensors) · [GitHub format notes](https://github.com/huggingface/safetensors)             |
+| Safetensors                | [HF docs](https://huggingface.co/docs/safetensors) · [GitHub format notes](https://github.com/safetensors/safetensors)             |
 | GGUF                       | [ggml GGUF docs](https://github.com/ggml-org/ggml/blob/master/docs/gguf.md) · (this guide §7a — layout, dtypes, LFM2)              |
 | BERT (original paper)      | [Devlin et al. (arXiv)](https://arxiv.org/abs/1810.04805) · (this guide §7b — embedding GGUFs **since 1.1.0**)                    |
 | LFM2                       | [Liquid LFM2 blog](https://www.liquid.ai/blog/liquid-foundation-models-v2-our-second-series-of-generative-ai-models) · [LFM2.5-2.6B-GGUF](https://huggingface.co/LiquidAI/LFM2.5-2.6B-GGUF) |
@@ -3280,5 +3347,134 @@ Implementation homes stay in the **In the code** notes, **chapter 16**, **chapte
 | BM25 / Okapi ranking       | [Robertson & Zaragoza survey (PDF)](https://www.staff.city.ac.uk/~sbrp622/papers/foundations_bm25_review.pdf)                      |
 | Text RAG in this project   | (this guide ch. 17 — BM25; dense/hybrid + classpath **since 1.1.0**)                                                               |
 | BERT embed + dense RAG     | (this guide §7b + ch. 17 — `LlmModel.embed`, `DenseRagIndex`, `withEmbeddings`)                                                    |
+
+For a **curated learning order** (what to read first, and why it helps this project), see **chapter 21**.
+
+**Link check:** every URL in chapters 20–21 was HTTP-checked against live hosts (2026-08-11). Prefer the arXiv abs page, the PDF host named here, or the project GitHub/docs URL — do not invent alternate slugs.
+
+---
+
+## 21. Suggested literature (learning path)
+
+Chapter 20 is a **bookmark table** of links already cited in this guide. This chapter is a **reading list**: a small set
+of papers, format docs, and tutorials ordered so a careful reader can build intuition for *this* codebase — inference,
+not training; CPU; Qwen / Gemma / LFM2 / BERT-GGUF; BM25 and dense RAG.
+
+**Provenance:** every link below names a real paper, format doc, blog, Hub page, or video that was resolved live
+(HTTP 200 / valid PDF / arXiv title match / YouTube oEmbed) on **2026-08-11**. Titles match the cited work (e.g. arXiv
+IDs below are the canonical abs pages). If a host moves, prefer the **stable identifier** (arXiv id, DOI where given,
+or the project’s own docs) over a guessed new URL.
+
+You do not need every item. Prefer the path that matches what felt foggy while reading chapters 1–19.
+
+### How to use this list
+
+1. Skim the **Why here** column before opening a link.
+2. Pair each reading with the matching **guide chapter** (and, when ready, chapter 16’s code map).
+3. Treat blogs and annotated notebooks as scaffolding; treat the arXiv papers as the durable definitions.
+
+### A. Foundations (what a Transformer *is*)
+
+| Read | Why here | Guide |
+|------|----------|-------|
+| [Vaswani et al., *Attention Is All You Need*](https://arxiv.org/abs/1706.03762) | Defines multi-head attention, encoder/decoder stacks, and the vocabulary this whole field shares. | ch. 2, 8, 10 |
+| [The Annotated Transformer](https://nlp.seas.harvard.edu/annotated-transformer/) (Harvard NLP) | Line-by-line companion to Vaswani — formulas next to code-shaped exposition. | ch. 8, 10 |
+| [Jay Alammar, *The Illustrated Transformer*](https://jalammar.github.io/illustrated-transformer/) | Visual walkthrough of Q/K/V and multi-head attention for readers who want pictures before papers. | ch. 8 |
+| [Andrej Karpathy, *Let's build GPT*](https://www.youtube.com/watch?v=kCc8FmEb1nY) (video) | From-scratch next-token intuition (training demo); clarifies what **inference** reuses after training is done. | ch. 2, 11, 15 |
+
+### B. Tokens, chat wrapping, and configs
+
+| Read | Why here | Guide |
+|------|----------|-------|
+| [Sennrich et al., subword BPE](https://arxiv.org/abs/1508.07909) | Why text becomes mergeable scraps instead of whole words. | ch. 3, 6 |
+| [OpenAI GPT-2 report (PDF)](https://cdn.openai.com/better-language-models/language_models_are_unsupervised_multitask_learners.pdf) | Byte-level BPE as used by many chat tokenizers (Qwen-style path here). | ch. 6 |
+| [Hugging Face Tokenizers docs](https://huggingface.co/docs/tokenizers/index) | Shape of `tokenizer.json` (normalizer / pre-tokenizer / model / decoder). | ch. 6 |
+| [Chat templating guide](https://huggingface.co/docs/transformers/chat_templating) | Role markers and `chat_template` — what `applyChatTemplate` implements. | ch. 3, 14, 15 |
+| [PretrainedConfig](https://huggingface.co/docs/transformers/main/en/main_classes/configuration) | Mental model for `config.json` fields this loader reads. | ch. 5 |
+
+### C. Weights on disk (safetensors & GGUF)
+
+| Read | Why here | Guide |
+|------|----------|-------|
+| [Safetensors documentation](https://huggingface.co/docs/safetensors) · [format notes](https://github.com/safetensors/safetensors) | Named tensors + dtype payload without pickle — HF folder path in this port. | ch. 7 |
+| [GGUF format notes (ggml)](https://github.com/ggml-org/ggml/blob/master/docs/gguf.md) | Single-file metadata + GGML quants — LFM2 chat and BERT embedding loads. | ch. 7a, 7b |
+| [Liquid LFM2 overview](https://www.liquid.ai/blog/liquid-foundation-models-v2-our-second-series-of-generative-ai-models) · [LFM2.5-2.6B-GGUF](https://huggingface.co/LiquidAI/LFM2.5-2.6B-GGUF) | Hybrid short-conv + GQA architecture this GGUF chat path targets. | ch. 7a |
+
+### D. Attention variants and positional math used here
+
+| Read | Why here | Guide |
+|------|----------|-------|
+| [Su et al., RoFormer / RoPE](https://arxiv.org/abs/2104.09864) | Rotary positions on Q/K — relative distance without absolute embedding tables. | ch. 5, 8, 10 |
+| [Shazeer, Multi-Query Attention](https://arxiv.org/abs/1911.02150) | Extreme KV sharing; ancestor of GQA thrift. | ch. 8 |
+| [Ainslie et al., GQA](https://arxiv.org/abs/2305.13245) | Grouped-query attention — the usual KV-notebook sharing in modern chat models. | ch. 8, 12 |
+| [Zhang & Sennrich, RMSNorm](https://arxiv.org/abs/1910.07467) | Normalization used on many decoder stacks here. | ch. 10 |
+| [Shazeer, SwiGLU](https://arxiv.org/abs/2002.05202) | Gated MLP form behind much of Qwen-style feed-forward bulk. | ch. 10 |
+
+### E. Inference serving ideas (KV cache, paging)
+
+| Read | Why here | Guide |
+|------|----------|-------|
+| [Kwon et al., vLLM / PagedAttention](https://arxiv.org/abs/2309.06180) · [vLLM](https://github.com/vllm-project/vllm) | Why KV lives in **pages** and why prefill ≠ decode cost — inspiration for this engine’s block manager. | ch. 12, 13, 15 |
+| [nano-vllm](https://github.com/GeeeekExplorer/nano-vllm) | Compact Python reference this Java port is conceptually close to. | ch. 4, 16 |
+
+### F. Sampling and “thinking” as text
+
+| Read | Why here | Guide |
+|------|----------|-------|
+| [Holtzman et al., nucleus (top-p) sampling](https://arxiv.org/abs/1904.09751) | Why greedy argmax is not the only (or best) draw from logits. | ch. 11 |
+| [Wei et al., chain-of-thought prompting](https://arxiv.org/abs/2201.11903) | Written intermediate steps as ordinary tokens — Sense B in this guide. | ch. 9 |
+| Softmax ([Wikipedia](https://en.wikipedia.org/wiki/Softmax_function)) | Scores → probabilities before temperature / top-k / top-p. | ch. 10, 11 |
+
+### G. Embeddings, BERT, and RAG
+
+| Read | Why here | Guide |
+|------|----------|-------|
+| [Devlin et al., BERT](https://arxiv.org/abs/1810.04805) | Bidirectional encoder — ancestor of the GGUF embedding path (`LlmModel.embed`). | ch. 7b, 8 |
+| [Reimers & Gurevych, Sentence-BERT](https://arxiv.org/abs/1908.10084) | Why mean-pooled encoders became practical **sentence vectors** for similarity search. | ch. 7b, 17 |
+| [Lewis et al., RAG](https://arxiv.org/abs/2005.11401) | Original retrieval-augmented generation framing (retrieve → condition generation). | ch. 17 |
+| [Robertson & Zaragoza, BM25 foundations (PDF)](https://www.staff.city.ac.uk/~sbrp622/papers/foundations_bm25_review.pdf) | Lexical ranking behind `PreparedRag`. | ch. 17 |
+| [Cormack et al., Reciprocal Rank Fusion (PDF)](https://cormack.uwaterloo.ca/cormacksigir09-rrf.pdf) | Fusing ranked lists — spirit of hybrid BM25 + dense RRF here. | ch. 17 |
+
+*(Dense demo weights: search Hugging Face for **gte-small** / related GTE checkpoints; this repo’s script downloads a quantized GGUF.)*
+
+### H. Model families this port actually opens
+
+These are **optional depth** once the mechanics above are clear. Prefer the Hub model card + `config.json` beside any
+technical report.
+
+| Family | Starting points | Guide |
+|--------|-----------------|-------|
+| **Qwen3** | Model cards on [Hugging Face (Qwen)](https://huggingface.co/Qwen); this repo’s `models/download-*.sh` | ch. 5, 15 |
+| **Gemma3** | [Gemma docs](https://ai.google.dev/gemma/docs) · example Hub card [google/gemma-3-270m-it](https://huggingface.co/google/gemma-3-270m-it) | ch. 5, 8 (sliding window) |
+| **LFM2** | Liquid blog + GGUF card linked in §C | ch. 7a |
+| **BERT / GTE embeddings** | Devlin + Sentence-BERT above; Hub **gte-small** | ch. 7b |
+
+### I. Java / platform notes (only as needed)
+
+This guide is not a Java textbook. When the **code map** (chapter 16) is the bottleneck:
+
+| Topic | Where |
+|-------|--------|
+| Module exports vs internals | `src/main/java/module-info.java` (exported: `models`, `llm`, `chat`, `rag`, `exceptions`, `tokenizer`, `utils`) |
+| Optional Vector API | JDK incubating `jdk.incubator.vector` — used when present; scalar fallback otherwise |
+| Build / run | project `README.md`, `pom.xml`, `.mvn/jvm.config` (heap / module flags) |
+
+### A short recommended order
+
+If you want one linear path through the literature:
+
+1. Illustrated Transformer **or** Annotated Transformer → Vaswani abstract/sections on attention.  
+2. GPT-2 BPE section + HF chat templating.  
+3. Safetensors **or** GGUF notes (whichever crate you open first).  
+4. RoPE + GQA papers (short).  
+5. PagedAttention / vLLM paper (KV paging intuition) + glance at nano-vllm.  
+6. Holtzman (sampling) + Wei (chain-of-thought) as needed.  
+7. BM25 survey + Lewis RAG; Sentence-BERT if you use dense / hybrid (**since 1.1.0**).  
+8. Return to **chapter 16** and read the named classes with the papers as vocabulary.
+
+### One-sentence close
+
+> **Papers define the vocabulary; this guide maps that vocabulary onto a small CPU Java inference engine — load fixed
+> weights, attend with a paged KV notebook, optionally retrieve documents, then sample the next token.**
 
 ---
