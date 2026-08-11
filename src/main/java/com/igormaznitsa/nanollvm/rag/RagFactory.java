@@ -356,8 +356,8 @@ public final class RagFactory {
     @Override
     public String toString() {
       return "RagFactory.Builder{options=%s, source=%s}".formatted(
-          this.options,
-          this.sourceRoot == null ? "-" : this.sourceRoot);
+        this.options,
+        this.sourceRoot == null ? "-" : this.sourceRoot);
     }
   }
 }

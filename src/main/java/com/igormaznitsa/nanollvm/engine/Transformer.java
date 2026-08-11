@@ -61,12 +61,12 @@ public final class Transformer implements AutoCloseable {
 
   private final Config config;
   private final int blockSize;
-  private CausalLM network;
-  private KvCacheArena kvCache;
-  private ConvStateArena convCache;
   private final MatmulRuntime matmul;
   private final Context stepContext = new Context();
   private final Sampler sampler = new Sampler();
+  private CausalLM network;
+  private KvCacheArena kvCache;
+  private ConvStateArena convCache;
   private volatile boolean closed;
 
   /**
@@ -127,8 +127,8 @@ public final class Transformer implements AutoCloseable {
     long tKv = System.nanoTime();
     this.kvCache = this.allocateKvCache();
     LlmListeners.infof(io1, null, "KV cache ready: %d blocks (%.1fs)%n",
-        this.config.numKvcacheBlocks(),
-        (System.nanoTime() - tKv) / 1e9);
+      this.config.numKvcacheBlocks(),
+      (System.nanoTime() - tKv) / 1e9);
 
     // Short-conv models (e.g. LFM2) need a parallel per-layer conv state arena
     Config.HfConfig hf = this.config.hfConfig();
@@ -211,7 +211,7 @@ public final class Transformer implements AutoCloseable {
   private List<Integer> sampleTokens(final Tensor logits, final SamplingControls sampling) {
     // Sampler.forward returns int[]; box to List for the scheduler postprocess API
     return this.toTokenIdList(this.sampler.forward(
-        logits, sampling.temperatures(), sampling.topKs(), sampling.topPs()));
+      logits, sampling.temperatures(), sampling.topKs(), sampling.topPs()));
   }
 
   /**
@@ -289,11 +289,11 @@ public final class Transformer implements AutoCloseable {
     }
 
     return new KvCacheArena(
-        hf.numHiddenLayers(),
-        this.config.numKvcacheBlocks(),
-        this.blockSize,
-        hf.numKeyValueHeads(),
-        hf.headDim());
+      hf.numHiddenLayers(),
+      this.config.numKvcacheBlocks(),
+      this.blockSize,
+      hf.numKeyValueHeads(),
+      hf.headDim());
   }
 
   /**
@@ -387,19 +387,19 @@ public final class Transformer implements AutoCloseable {
     // Block tables needed when K context exceeds Q (prefix cache hit) and tables exist
     int[][] blockTables = null;
     if (cuSeqlensK.getLast() > cuSeqlensQ.getLast() &&
-        anyBlockTable) {
+      anyBlockTable) {
       blockTables = this.prepareBlockTables(seqs);
     }
 
     // Publish varlen attention metadata; layers read this via Context during forward
     this.stepContext.set(
-        true,
-        cuSeqlensQ.stream().mapToInt(Integer::intValue).toArray(),
-        cuSeqlensK.stream().mapToInt(Integer::intValue).toArray(),
-        maxSeqlenQ,
-        maxSeqlenK,
-        slotMapping.stream().mapToInt(Integer::intValue).toArray(),
-        null,
+      true,
+      cuSeqlensQ.stream().mapToInt(Integer::intValue).toArray(),
+      cuSeqlensK.stream().mapToInt(Integer::intValue).toArray(),
+      maxSeqlenQ,
+      maxSeqlenK,
+      slotMapping.stream().mapToInt(Integer::intValue).toArray(),
+      null,
       blockTables,
       seqIds.stream().mapToInt(Integer::intValue).toArray()
     );
@@ -430,7 +430,7 @@ public final class Transformer implements AutoCloseable {
       seqIds[i] = seq.seqId();
       // Physical slot for the append write inside the last allocated KV block
       slotMapping[i] = seq.blockTable().getLast() * this.blockSize
-          + seq.lastBlockNumTokens() - 1;
+        + seq.lastBlockNumTokens() - 1;
     }
 
     // Decode Context: no cu-seqlens; contextLens + blockTables drive attention reads

@@ -193,20 +193,20 @@ public final class PreparedRag implements RagIndex {
     }
     List<RagHit> hits = this.bm25Retrieve(query, Math.max(topK * 4, topK));
     return hits.stream()
-        .map(hit -> new RagHit(hit.chunk(), groundedScore(hit, terms)))
+      .map(hit -> new RagHit(hit.chunk(), groundedScore(hit, terms)))
       .filter(hit -> termCoverage(hit.chunk().text(), terms) > 0.0)
-        .sorted(Comparator
-            .comparingDouble(RagHit::score).reversed()
-            .thenComparingInt(hit -> hit.chunk().text().length()))
-        .limit(topK)
-        .toList();
+      .sorted(Comparator
+        .comparingDouble(RagHit::score).reversed()
+        .thenComparingInt(hit -> hit.chunk().text().length()))
+      .limit(topK)
+      .toList();
   }
 
   @Override
   public String toString() {
     return "PreparedRag{passages=%d, source=%s}".formatted(
-        this.size(),
-        this.sourceRoot == null ? "inline" : this.sourceRoot);
+      this.size(),
+      this.sourceRoot == null ? "inline" : this.sourceRoot);
   }
 
   private List<String> selectedQueryTerms(final String query) {
@@ -356,11 +356,8 @@ public final class PreparedRag implements RagIndex {
       if (token.length() >= 5) {
         tokens.add(token.substring(0, token.length() - 2));
       }
-      if (token.length() >= 5) {
-        String prefix = token.substring(0, Math.min(5, token.length()));
-        if (!prefix.equals(token)) {
-          tokens.add(prefix);
-        }
+      if (token.length() > 5) {
+        tokens.add(token.substring(0, 5));
       }
     }
 

@@ -28,10 +28,6 @@ public record ChatReply(
     this(thinking, answer, thinkOpen, GenerationStats.NONE);
   }
 
-  public ChatReply withStats(final GenerationStats generateStats) {
-    return new ChatReply(this.thinking, this.answer, this.thinkOpen, generateStats);
-  }
-
   static ChatReply from(final AssistantParts parts) {
     return new ChatReply(parts.thinking(), parts.answer(), parts.thinkOpen());
   }
@@ -54,6 +50,10 @@ public record ChatReply(
 
   public static String stripChatMarkup(final String text) {
     return AssistantParts.stripChatMarkup(text);
+  }
+
+  public ChatReply withStats(final GenerationStats generateStats) {
+    return new ChatReply(this.thinking, this.answer, this.thinkOpen, generateStats);
   }
 
   public String text() {

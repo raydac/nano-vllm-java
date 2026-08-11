@@ -21,11 +21,17 @@ public final class WeightNames {
 
   public static final String GGUF_TOKEN_EMBD = "token_embd.weight";
   public static final String GGUF_TOKEN_EMBD_NORM = "token_embd_norm.weight";
-  /** @since 1.1.0 */
+  /**
+   * @since 1.1.0
+   */
   public static final String GGUF_TOKEN_EMBD_NORM_BIAS = "token_embd_norm.bias";
-  /** @since 1.1.0 */
+  /**
+   * @since 1.1.0
+   */
   public static final String GGUF_POSITION_EMBD = "position_embd.weight";
-  /** @since 1.1.0 */
+  /**
+   * @since 1.1.0
+   */
   public static final String GGUF_TOKEN_TYPES = "token_types.weight";
   public static final String GGUF_OUTPUT = "output.weight";
 
@@ -45,11 +51,11 @@ public final class WeightNames {
   public static final String DOWN_PROJ_WEIGHT = "down_proj.weight";
 
   public static final Map<String, Object[]> PACKED_MODULES_MAPPING = Map.of(
-      "q_proj", new Object[] {QKV_PROJ, "q"},
-      "k_proj", new Object[] {QKV_PROJ, "k"},
-      "v_proj", new Object[] {QKV_PROJ, "v"},
-      "gate_proj", new Object[] {GATE_UP_PROJ, 0},
-      "up_proj", new Object[] {GATE_UP_PROJ, 1}
+    "q_proj", new Object[] {QKV_PROJ, "q"},
+    "k_proj", new Object[] {QKV_PROJ, "k"},
+    "v_proj", new Object[] {QKV_PROJ, "v"},
+    "gate_proj", new Object[] {GATE_UP_PROJ, 0},
+    "up_proj", new Object[] {GATE_UP_PROJ, 1}
   );
 
   private WeightNames() {

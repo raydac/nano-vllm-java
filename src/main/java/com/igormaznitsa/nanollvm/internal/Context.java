@@ -37,15 +37,15 @@ public final class Context {
   }
 
   public void set(
-      final boolean isPrefill,
-      final int[] cuSeqlensQ,
-      final int[] cuSeqlensK,
-      final int maxSeqlenQ,
-      final int maxSeqlenK,
-      final int[] slotMapping,
-      final int[] contextLens,
-      final int[][] blockTables,
-      final int[] seqIds
+    final boolean isPrefill,
+    final int[] cuSeqlensQ,
+    final int[] cuSeqlensK,
+    final int maxSeqlenQ,
+    final int maxSeqlenK,
+    final int[] slotMapping,
+    final int[] contextLens,
+    final int[][] blockTables,
+    final int[] seqIds
   ) {
     this.prefill = isPrefill;
     this.cuSeqlensQ = cuSeqlensQ;

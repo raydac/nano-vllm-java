@@ -31,7 +31,7 @@ import java.util.regex.Pattern;
 final class CorpusLoader {
 
   private static final Set<String> DEFAULT_EXTENSIONS = Set.of(
-      ".txt", ".md", ".markdown", ".rst", ".csv", ".tsv", ".json", ".xml", ".html", ".htm",
+    ".txt", ".md", ".markdown", ".rst", ".csv", ".tsv", ".json", ".xml", ".html", ".htm",
     ".properties", ".yml", ".yaml", ".log", ".java", ".kt", ".py", ".js", ".ts", ".css",
     ".pdf");
 
@@ -67,7 +67,7 @@ final class CorpusLoader {
 
   private static String packageRelativeClasspath(final Class<?> anchor, final String relative) {
     String pkg = anchor.getPackageName();
-    if (pkg == null || pkg.isBlank()) {
+    if (pkg.isBlank()) {
       return relative;
     }
     return pkg.replace('.', '/') + "/" + relative;
@@ -139,9 +139,9 @@ final class CorpusLoader {
     public Builder apply(final RagLoadOptions options) {
       requireNonNull(options, "options");
       return this.maxChunkChars(options.maxChunkChars())
-          .chunkOverlap(options.chunkOverlap())
-          .preprocess(options.preprocess())
-          .atomicSentences(options.atomicSentences())
+        .chunkOverlap(options.chunkOverlap())
+        .preprocess(options.preprocess())
+        .atomicSentences(options.atomicSentences())
         .dedupe(options.dedupe())
         .resourceLimits(options.resourceLimits());
     }
@@ -154,9 +154,9 @@ final class CorpusLoader {
     public Builder folderExtensions(final Set<String> extensions) {
       requireNonNull(extensions, "extensions");
       this.folderExtensions = extensions.stream()
-          .map(ext -> ext.startsWith(".") ? ext.toLowerCase(Locale.ROOT)
-              : ("." + ext).toLowerCase(Locale.ROOT))
-          .collect(java.util.stream.Collectors.toUnmodifiableSet());
+        .map(ext -> ext.startsWith(".") ? ext.toLowerCase(Locale.ROOT)
+          : ("." + ext).toLowerCase(Locale.ROOT))
+        .collect(java.util.stream.Collectors.toUnmodifiableSet());
       return this;
     }
 
@@ -172,13 +172,13 @@ final class CorpusLoader {
       requireNonNull(id, "id");
       requireNonNull(source, "source");
       this.pending.addAll(Chunking.split(
-          id,
-          source,
-          text,
-          this.maxChunkChars,
-          this.chunkOverlap,
-          this.preprocess,
-          this.atomicSentences));
+        id,
+        source,
+        text,
+        this.maxChunkChars,
+        this.chunkOverlap,
+        this.preprocess,
+        this.atomicSentences));
       return this;
     }
 
@@ -203,12 +203,12 @@ final class CorpusLoader {
         this.accountRead(size);
         String source = path.toString();
         List<TextChunk> chunks = Chunking.split(
-            source,
-            source,
-            body,
-            this.maxChunkChars,
-            this.chunkOverlap,
-            this.preprocess,
+          source,
+          source,
+          body,
+          this.maxChunkChars,
+          this.chunkOverlap,
+          this.preprocess,
           this.atomicSentences);
         this.pending.addAll(chunks);
         this.reportLoaded(this.displayPath(path), body, chunks.size());
@@ -256,11 +256,11 @@ final class CorpusLoader {
       try (InputStream in = anchor.getResourceAsStream(raw)) {
         if (in == null) {
           throw new IllegalArgumentException(
-              "classpath resource not found for " + anchor.getName() + ": " + raw);
+            "classpath resource not found for " + anchor.getName() + ": " + raw);
         }
         String label = raw.startsWith("/")
-            ? normalizeClasspathPath(raw, "resourcePath")
-            : packageRelativeClasspath(anchor, raw);
+          ? normalizeClasspathPath(raw, "resourcePath")
+          : packageRelativeClasspath(anchor, raw);
         return this.addResourceBytes(label, in.readAllBytes());
       } catch (IOException e) {
         throw new UncheckedIOException("failed to read classpath resource: " + raw, e);
@@ -290,17 +290,17 @@ final class CorpusLoader {
       String source = "classpath:" + classpathPath;
       this.requireBudget(source, bytes.length);
       String body = isPdfName(classpathPath)
-          ? PdfTextExtractor.extract(bytes, this.resourceLimits)
-          : new String(bytes, UTF_8);
+        ? PdfTextExtractor.extract(bytes, this.resourceLimits)
+        : new String(bytes, UTF_8);
       this.accountRead(bytes.length);
       List<TextChunk> chunks = Chunking.split(
-          source,
-          source,
-          body,
-          this.maxChunkChars,
-          this.chunkOverlap,
-          this.preprocess,
-          this.atomicSentences);
+        source,
+        source,
+        body,
+        this.maxChunkChars,
+        this.chunkOverlap,
+        this.preprocess,
+        this.atomicSentences);
       this.pending.addAll(chunks);
       this.reportLoaded(source, body, chunks.size());
       return this;
@@ -309,7 +309,7 @@ final class CorpusLoader {
     private void requireBudget(final String label, final long size) {
       if (size > this.resourceLimits.maxFileBytes()) {
         throw new IllegalArgumentException(
-            "file exceeds maxFileBytes (" + this.resourceLimits.maxFileBytes() + "): " + label);
+          "file exceeds maxFileBytes (" + this.resourceLimits.maxFileBytes() + "): " + label);
       }
       if (this.filesRead >= this.resourceLimits.maxCorpusFiles()) {
         throw new IllegalStateException(
@@ -367,8 +367,8 @@ final class CorpusLoader {
 
     List<TextChunk> build() {
       List<TextChunk> prepared = this.dedupe
-          ? this.dedupeChunks(this.pending)
-          : this.pending.stream().filter(chunk -> !chunk.isBlank()).toList();
+        ? this.dedupeChunks(this.pending)
+        : this.pending.stream().filter(chunk -> !chunk.isBlank()).toList();
       if (prepared.isEmpty()) {
         throw new IllegalStateException("corpus has no non-blank chunks");
       }
@@ -381,7 +381,7 @@ final class CorpusLoader {
       }
       int chars = body == null ? 0 : body.length();
       LlmListeners.infof(io, null, "RAG %s: %d char(s) → %d chunk(s)%n",
-          display, chars, chunkCount);
+        display, chars, chunkCount);
       if (chars == 0) {
         LlmListeners.info(io, null, "RAG warning: no text extracted from " + display);
       }

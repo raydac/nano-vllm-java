@@ -60,8 +60,8 @@ public final class ScalarFloatKernels extends FloatKernels {
    */
   @Override
   public void scaleAdd(
-      final float[] src, final int srcOff, final float[] weight, final int wOff, final float scale,
-      final float[] dst, final int dstOff, final int n
+    final float[] src, final int srcOff, final float[] weight, final int wOff, final float scale,
+    final float[] dst, final int dstOff, final int n
   ) {
     for (int i = 0; i < n; i++) {
       dst[dstOff + i] = src[srcOff + i] * scale * weight[wOff + i];

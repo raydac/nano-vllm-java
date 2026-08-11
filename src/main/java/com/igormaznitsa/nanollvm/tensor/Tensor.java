@@ -103,7 +103,7 @@ public final class Tensor {
     requireNonNull(data, "data");
     if (data.length != n) {
       throw new IllegalArgumentException(
-          "data length %d != shape numel %d".formatted(data.length, n));
+        "data length %d != shape numel %d".formatted(data.length, n));
     }
     return new Tensor(data, s, 0, n);
   }
@@ -245,7 +245,7 @@ public final class Tensor {
     int[] s = requireShape(newShape);
     if (numel(s) != this.size) {
       throw new IllegalArgumentException(
-          "cannot reshape %s to %s".formatted(Arrays.toString(this.shape), Arrays.toString(s)));
+        "cannot reshape %s to %s".formatted(Arrays.toString(this.shape), Arrays.toString(s)));
     }
     return new Tensor(this.data, s, this.offset, this.size);
   }

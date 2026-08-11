@@ -317,11 +317,6 @@ public final class MatmulRuntime implements AutoCloseable {
     }
   }
 
-  @FunctionalInterface
-  public interface PackedRowDequant {
-    void dequantizeRow(int row, float[] dst);
-  }
-
   private void awaitAll(final List<Callable<Void>> tasks) {
     try {
       List<Future<Void>> futures = this.pool.invokeAll(tasks);
@@ -341,6 +336,11 @@ public final class MatmulRuntime implements AutoCloseable {
       }
       throw new IllegalStateException("CPU matmul failed", cause);
     }
+  }
+
+  @FunctionalInterface
+  public interface PackedRowDequant {
+    void dequantizeRow(int row, float[] dst);
   }
 
   public static final class Builder {

@@ -49,10 +49,10 @@ public final class GgufModelLoader {
    * @since 1.1.0
    */
   public static LoadedGguf load(
-      final ByteBuffer data,
-      final Path virtualPath,
-      final LlmListener io,
-      final boolean allowUnpackParameters
+    final ByteBuffer data,
+    final Path virtualPath,
+    final LlmListener io,
+    final boolean allowUnpackParameters
   ) throws IOException {
     LlmListener streams = io == null ? LlmListeners.silent() : io;
     Path path = requireNonNull(virtualPath, "virtualPath").toAbsolutePath().normalize();
@@ -62,10 +62,10 @@ public final class GgufModelLoader {
   }
 
   private static LoadedGguf load(
-      final GgufReader reader,
-      final String label,
-      final LlmListener streams,
-      final boolean allowUnpackParameters
+    final GgufReader reader,
+    final String label,
+    final LlmListener streams,
+    final boolean allowUnpackParameters
   ) throws IOException {
     String arch = reader.metaString("general.architecture", "").toLowerCase(Locale.ROOT);
     try {
@@ -82,7 +82,7 @@ public final class GgufModelLoader {
     }
     reader.close();
     throw new IllegalArgumentException(
-        "unsupported GGUF architecture '" + arch + "' (expected lfm2|bert) in " + label);
+      "unsupported GGUF architecture '" + arch + "' (expected lfm2|bert) in " + label);
   }
 
   private static LoadedGguf loadWeights(

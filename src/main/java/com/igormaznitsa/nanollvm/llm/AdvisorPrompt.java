@@ -217,9 +217,6 @@ final class AdvisorPrompt {
     return RagPrompts.facts(modelUserText);
   }
 
-  private record IndexedNote(int index, String note) {
-  }
-
   static boolean isGroundedInContext(final String note, final Set<String> contextTerms) {
     if (contextTerms.isEmpty()) {
       return false;
@@ -245,5 +242,8 @@ final class AdvisorPrompt {
       }
     }
     return Set.copyOf(terms);
+  }
+
+  private record IndexedNote(int index, String note) {
   }
 }

@@ -871,16 +871,16 @@ public final class PdfTextExtractor {
       this.maxRangeSpan = limits.maxCmapRangeSpan();
     }
 
-    int maxRangeSpan() {
-      return this.maxRangeSpan;
-    }
-
     private static int bytesToCode(final byte[] raw, final int offset, final int width) {
       int code = 0;
       for (int i = 0; i < width; i++) {
         code = (code << 8) | (raw[offset + i] & 0xFF);
       }
       return code;
+    }
+
+    int maxRangeSpan() {
+      return this.maxRangeSpan;
     }
 
     void noteCodeWidth(final int width) {

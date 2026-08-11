@@ -101,8 +101,8 @@ public final class VectorFloatKernels extends FloatKernels {
    */
   @Override
   public void scaleAdd(
-      final float[] src, final int srcOff, final float[] weight, final int wOff, final float scale,
-      final float[] dst, final int dstOff, final int n
+    final float[] src, final int srcOff, final float[] weight, final int wOff, final float scale,
+    final float[] dst, final int dstOff, final int n
   ) {
     int i = 0;
     FloatVector vScale = FloatVector.broadcast(SPECIES, scale);

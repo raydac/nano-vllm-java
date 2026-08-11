@@ -47,7 +47,7 @@ public record Qwen3ForCausalLM(Qwen3Model model, ParallelLMHead lmHead) implemen
   private static Qwen3ForCausalLM assemble(final Config.HfConfig config, final WeightBag weights) {
     Qwen3Model model = new Qwen3Model(config, weights);
     Tensor lmWeight = weights.find(LM_HEAD)
-        .orElseGet(() -> model.embedTokens().weight());
+      .orElseGet(() -> model.embedTokens().weight());
     return new Qwen3ForCausalLM(model, new ParallelLMHead(lmWeight));
   }
 
@@ -69,8 +69,8 @@ public record Qwen3ForCausalLM(Qwen3Model model, ParallelLMHead lmHead) implemen
   @Override
   public List<Attention> attentionLayers() {
     return this.model.layers().stream()
-        .map(layer -> layer.selfAttn().attn())
-        .toList();
+      .map(layer -> layer.selfAttn().attn())
+      .toList();
   }
 
   @Override
@@ -84,18 +84,18 @@ public record Qwen3ForCausalLM(Qwen3Model model, ParallelLMHead lmHead) implemen
   }
 
   record Qwen3Attention(
-      Linear.Qkv qkvProj,
-      Linear.Row oProj,
-      RotaryEmbedding rotaryEmb,
-      Attention attn,
-      RMSNorm qNorm,
-      RMSNorm kNorm,
-      boolean qkvBias,
-      int numHeads,
-      int numKvHeads,
-      int headDim,
-      int qSize,
-      int kvSize
+    Linear.Qkv qkvProj,
+    Linear.Row oProj,
+    RotaryEmbedding rotaryEmb,
+    Attention attn,
+    RMSNorm qNorm,
+    RMSNorm kNorm,
+    boolean qkvBias,
+    int numHeads,
+    int numKvHeads,
+    int headDim,
+    int qSize,
+    int kvSize
   ) {
     Qwen3Attention(Config.HfConfig config, WeightBag weights, int layerIndex) {
       this(assemble(config, weights, layerIndex));
@@ -103,16 +103,16 @@ public record Qwen3ForCausalLM(Qwen3Model model, ParallelLMHead lmHead) implemen
 
     private Qwen3Attention(final Qwen3Attention assembled) {
       this(
-          assembled.qkvProj, assembled.oProj, assembled.rotaryEmb, assembled.attn,
-          assembled.qNorm, assembled.kNorm, assembled.qkvBias,
-          assembled.numHeads, assembled.numKvHeads, assembled.headDim,
-          assembled.qSize, assembled.kvSize);
+        assembled.qkvProj, assembled.oProj, assembled.rotaryEmb, assembled.attn,
+        assembled.qNorm, assembled.kNorm, assembled.qkvBias,
+        assembled.numHeads, assembled.numKvHeads, assembled.headDim,
+        assembled.qSize, assembled.kvSize);
     }
 
     private static Qwen3Attention assemble(
-        final Config.HfConfig config,
-        final WeightBag weights,
-        final int layerIndex
+      final Config.HfConfig config,
+      final WeightBag weights,
+      final int layerIndex
     ) {
       int numHeads = config.numAttentionHeads();
       int numKvHeads = config.numKeyValueHeads();
@@ -128,21 +128,21 @@ public record Qwen3ForCausalLM(Qwen3Model model, ParallelLMHead lmHead) implemen
       String p = selfAttn(layerIndex);
       Tensor qkvWeight = weights.require(p + QKV_PROJ_WEIGHT);
       Linear.Qkv qkvProj = qkvBias
-          ? new Linear.Qkv(qkvWeight, Tensor.zeros(qkvWeight.size(0)))
-          : new Linear.Qkv(qkvWeight);
+        ? new Linear.Qkv(qkvWeight, Tensor.zeros(qkvWeight.size(0)))
+        : new Linear.Qkv(qkvWeight);
       return new Qwen3Attention(
-          qkvProj,
-          new Linear.Row(weights.require(p + O_PROJ_WEIGHT)),
-          RotaryEmbedding.get(headDim, headDim, config.maxPositionEmbeddings(), ropeTheta),
-          new Attention(numHeads, headDim, scaling, numKvHeads, layerIndex),
-          qkvBias ? null : new RMSNorm(weights.require(p + Q_NORM_WEIGHT), config.rmsNormEps()),
-          qkvBias ? null : new RMSNorm(weights.require(p + K_NORM_WEIGHT), config.rmsNormEps()),
-          qkvBias,
-          numHeads,
-          numKvHeads,
-          headDim,
-          qSize,
-          kvSize);
+        qkvProj,
+        new Linear.Row(weights.require(p + O_PROJ_WEIGHT)),
+        RotaryEmbedding.get(headDim, headDim, config.maxPositionEmbeddings(), ropeTheta),
+        new Attention(numHeads, headDim, scaling, numKvHeads, layerIndex),
+        qkvBias ? null : new RMSNorm(weights.require(p + Q_NORM_WEIGHT), config.rmsNormEps()),
+        qkvBias ? null : new RMSNorm(weights.require(p + K_NORM_WEIGHT), config.rmsNormEps()),
+        qkvBias,
+        numHeads,
+        numKvHeads,
+        headDim,
+        qSize,
+        kvSize);
     }
 
     Tensor forward(final Tensor positions, final Tensor hiddenStates, final Context context) {
@@ -162,7 +162,7 @@ public record Qwen3ForCausalLM(Qwen3Model model, ParallelLMHead lmHead) implemen
 
     private Tensor normHeads(final Tensor x, final RMSNorm norm) {
       return norm.forward(x.reshape(x.size(0) * x.size(1), this.headDim))
-          .reshape(x.size(0), x.size(1), this.headDim);
+        .reshape(x.size(0), x.size(1), this.headDim);
     }
   }
 
@@ -182,8 +182,8 @@ public record Qwen3ForCausalLM(Qwen3Model model, ParallelLMHead lmHead) implemen
       }
       String p = mlp(layerIndex);
       return new Qwen3MLP(
-          new Linear.Merged(weights.require(p + GATE_UP_PROJ_WEIGHT)),
-          new Linear.Row(weights.require(p + DOWN_PROJ_WEIGHT)));
+        new Linear.Merged(weights.require(p + GATE_UP_PROJ_WEIGHT)),
+        new Linear.Row(weights.require(p + DOWN_PROJ_WEIGHT)));
     }
 
     Tensor forward(final Tensor x, final Context context) {
@@ -192,10 +192,10 @@ public record Qwen3ForCausalLM(Qwen3Model model, ParallelLMHead lmHead) implemen
   }
 
   record Qwen3DecoderLayer(
-      Qwen3Attention selfAttn,
-      Qwen3MLP mlp,
-      RMSNorm inputLayernorm,
-      RMSNorm postAttentionLayernorm
+    Qwen3Attention selfAttn,
+    Qwen3MLP mlp,
+    RMSNorm inputLayernorm,
+    RMSNorm postAttentionLayernorm
   ) {
     Qwen3DecoderLayer(Config.HfConfig config, WeightBag weights, int layerIndex) {
       this(assemble(config, weights, layerIndex));
@@ -203,21 +203,21 @@ public record Qwen3ForCausalLM(Qwen3Model model, ParallelLMHead lmHead) implemen
 
     private Qwen3DecoderLayer(final Qwen3DecoderLayer assembled) {
       this(
-          assembled.selfAttn, assembled.mlp,
-          assembled.inputLayernorm, assembled.postAttentionLayernorm);
+        assembled.selfAttn, assembled.mlp,
+        assembled.inputLayernorm, assembled.postAttentionLayernorm);
     }
 
     private static Qwen3DecoderLayer assemble(
-        final Config.HfConfig config,
-        final WeightBag weights,
-        final int layerIndex
+      final Config.HfConfig config,
+      final WeightBag weights,
+      final int layerIndex
     ) {
       String p = layer(layerIndex);
       return new Qwen3DecoderLayer(
-          new Qwen3Attention(config, weights, layerIndex),
-          new Qwen3MLP(config, weights, layerIndex),
-          new RMSNorm(weights.require(p + INPUT_LAYERNORM), config.rmsNormEps()),
-          new RMSNorm(weights.require(p + POST_ATTENTION_LAYERNORM), config.rmsNormEps()));
+        new Qwen3Attention(config, weights, layerIndex),
+        new Qwen3MLP(config, weights, layerIndex),
+        new RMSNorm(weights.require(p + INPUT_LAYERNORM), config.rmsNormEps()),
+        new RMSNorm(weights.require(p + POST_ATTENTION_LAYERNORM), config.rmsNormEps()));
     }
 
     Tensor[] forward(
@@ -243,9 +243,9 @@ public record Qwen3ForCausalLM(Qwen3Model model, ParallelLMHead lmHead) implemen
   }
 
   record Qwen3Model(
-      VocabParallelEmbedding embedTokens,
-      List<Qwen3DecoderLayer> layers,
-      RMSNorm norm
+    VocabParallelEmbedding embedTokens,
+    List<Qwen3DecoderLayer> layers,
+    RMSNorm norm
   ) {
     Qwen3Model(Config.HfConfig config, WeightBag weights) {
       this(assemble(config, weights));
@@ -261,9 +261,9 @@ public record Qwen3ForCausalLM(Qwen3Model model, ParallelLMHead lmHead) implemen
         built.add(new Qwen3DecoderLayer(config, weights, i));
       }
       return new Qwen3Model(
-          new VocabParallelEmbedding(weights.require(EMBED_TOKENS)),
-          List.copyOf(built),
-          new RMSNorm(weights.require(MODEL_NORM), config.rmsNormEps()));
+        new VocabParallelEmbedding(weights.require(EMBED_TOKENS)),
+        List.copyOf(built),
+        new RMSNorm(weights.require(MODEL_NORM), config.rmsNormEps()));
     }
 
     Tensor forward(final Tensor inputIds, final Tensor positions, final Context context) {

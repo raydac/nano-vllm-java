@@ -123,19 +123,19 @@ public final class LlmListeners {
     return null;
   }
 
-  private record Composite(LlmListener left, LlmListener right) implements LlmListener {
-    @Override
-    public void onText(final LLM source, final LlmTextEvent event) {
-      this.left.onText(source, event);
-      this.right.onText(source, event);
-    }
-  }
-
   enum Silent implements LlmListener {
     INSTANCE;
 
     @Override
     public void onText(final LLM source, final LlmTextEvent event) {
+    }
+  }
+
+  private record Composite(LlmListener left, LlmListener right) implements LlmListener {
+    @Override
+    public void onText(final LLM source, final LlmTextEvent event) {
+      this.left.onText(source, event);
+      this.right.onText(source, event);
     }
   }
 

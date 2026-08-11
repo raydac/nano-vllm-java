@@ -16,11 +16,11 @@ package com.igormaznitsa.nanollvm.llm;
  * @see SamplingDefaults
  */
 public record SamplingParams(
-    float temperature,
-    int maxTokens,
-    boolean ignoreEos,
-    int topK,
-    float topP
+  float temperature,
+  int maxTokens,
+  boolean ignoreEos,
+  int topK,
+  float topP
 ) {
 
   public SamplingParams {

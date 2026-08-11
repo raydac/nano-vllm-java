@@ -44,10 +44,10 @@ public final class ChatMessages {
    * Mutates {@code history} in place.
    */
   public static void truncateHistory(
-      final List<ChatMessage> history,
-      final Tokenizer tokenizer,
-      final int maxModelLen,
-      final int maxTokens
+    final List<ChatMessage> history,
+    final Tokenizer tokenizer,
+    final int maxModelLen,
+    final int maxTokens
   ) {
     int budget = Math.max(64, maxModelLen - maxTokens - PROMPT_MARGIN);
     boolean enableThinking = tokenizer.invitesThinking();
@@ -74,8 +74,8 @@ public final class ChatMessages {
    */
   public static void scrubSetupBoilerplateTurns(final List<ChatMessage> history) {
     IntStream.range(0, history.size())
-        .filter(i -> history.get(i).role() == ChatRole.ASSISTANT
-            && ChatPrompts.isSetupBoilerplate(history.get(i).content()))
-        .forEach(i -> history.set(i, ChatMessage.assistant("Hello!")));
+      .filter(i -> history.get(i).role() == ChatRole.ASSISTANT
+        && ChatPrompts.isSetupBoilerplate(history.get(i).content()))
+      .forEach(i -> history.set(i, ChatMessage.assistant("Hello!")));
   }
 }

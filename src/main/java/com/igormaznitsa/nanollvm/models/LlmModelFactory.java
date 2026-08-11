@@ -298,7 +298,7 @@ public final class LlmModelFactory {
     long tGraph = System.nanoTime();
     CausalLM network = CausalLMFactory.create(hfConfig, weights);
     LlmListeners.infof(io, null, "Model graph ready (%s) in %.1fs%n",
-        network.architectureName(), (System.nanoTime() - tGraph) / 1e9);
+      network.architectureName(), (System.nanoTime() - tGraph) / 1e9);
 
     Tokenizer tokenizer = Tokenizer.fromPretrained(modelFolder);
     LlmListeners.infof(io, null, "Model loaded in %.1fs%n", (System.nanoTime() - t0) / 1e9);

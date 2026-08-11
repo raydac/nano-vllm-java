@@ -29,10 +29,10 @@ public final class ModelLoader {
   }
 
   public static WeightBag loadWeights(
-      final Path modelDir,
-      final Config.HfConfig hfConfig,
-      final WeightSchema schema,
-      final LlmListener io
+    final Path modelDir,
+    final Config.HfConfig hfConfig,
+    final WeightSchema schema,
+    final LlmListener io
   ) throws IOException {
     LlmListener streams = io == null ? LlmListeners.silent() : io;
     List<Path> files = SafetensorsReader.listSafetensors(modelDir);
@@ -45,10 +45,10 @@ public final class ModelLoader {
       fileBytes += Files.size(file);
     }
     LlmListeners.infof(streams, null, "Loading weights from %s (%.2f GiB, %d file%s)%n",
-        modelDir,
-        fileBytes / (1024.0 * 1024.0 * 1024.0),
-        files.size(),
-        files.size() == 1 ? "" : "s");
+      modelDir,
+      fileBytes / (1024.0 * 1024.0 * 1024.0),
+      files.size(),
+      files.size() == 1 ? "" : "s");
 
     List<WeightSource> sources = files.stream()
       .map(
@@ -102,7 +102,7 @@ public final class ModelLoader {
             continue;
           }
           plan.add(new PlannedTensor(source, weightName, resolved.paramName(), resolved.shardId(),
-              probe.byteSize(weightName)));
+            probe.byteSize(weightName)));
         }
       }
     }
@@ -129,8 +129,8 @@ public final class ModelLoader {
         loadedBytes += item.byteSize();
         progress.step("%s | %s (%.0f MiB)".formatted(
           item.source().label(),
-            item.weightName(),
-            loadedBytes / (1024.0 * 1024.0)));
+          item.weightName(),
+          loadedBytes / (1024.0 * 1024.0)));
       }
       progress.finish("%.0f MiB loaded".formatted(loadedBytes / (1024.0 * 1024.0)));
     } catch (RuntimeException | IOException e) {
@@ -152,9 +152,9 @@ public final class ModelLoader {
   }
 
   private static ResolvedParam resolveParam(
-      final String weightName,
-      final WeightSchema schema,
-      final Map<String, Object[]> packed
+    final String weightName,
+    final WeightSchema schema,
+    final Map<String, Object[]> packed
   ) {
     for (var e : packed.entrySet()) {
       String key = e.getKey();
@@ -179,20 +179,20 @@ public final class ModelLoader {
     Tensor finish();
   }
 
-  private record ResolvedParam(String paramName, Object shardId) {
-  }
-
   @FunctionalInterface
   private interface ReaderOpen {
     SafetensorsReader open() throws IOException;
   }
 
+  private record ResolvedParam(String paramName, Object shardId) {
+  }
+
   private record PlannedTensor(
     WeightSource source,
-      String weightName,
-      String paramName,
-      Object shardId,
-      long byteSize
+    String weightName,
+    String paramName,
+    Object shardId,
+    long byteSize
   ) {
   }
 
@@ -284,9 +284,9 @@ public final class ModelLoader {
       int in = this.weight.size(1);
       for (int o = 0; o < shardSize; o++) {
         System.arraycopy(
-            loaded.data(), loaded.offset() + o * in,
-            this.weight.data(), (shardOffset + o) * in,
-            in);
+          loaded.data(), loaded.offset() + o * in,
+          this.weight.data(), (shardOffset + o) * in,
+          in);
       }
     }
 
@@ -324,9 +324,9 @@ public final class ModelLoader {
       int in = this.weight.size(1);
       for (int o = 0; o < shardSize; o++) {
         System.arraycopy(
-            loaded.data(), loaded.offset() + o * in,
-            this.weight.data(), (shardOffset + o) * in,
-            in);
+          loaded.data(), loaded.offset() + o * in,
+          this.weight.data(), (shardOffset + o) * in,
+          in);
       }
       this.seen[id] = true;
     }
@@ -381,7 +381,7 @@ public final class ModelLoader {
       }
       double seconds = (System.nanoTime() - this.startNanos) / 1e9;
       LlmListeners.infof(io, null, "\r%s: done in %.1fs%s%n",
-          this.label, seconds, message == null || message.isBlank() ? "" : " — " + message);
+        this.label, seconds, message == null || message.isBlank() ? "" : " — " + message);
     }
 
     private void render() {
@@ -394,13 +394,13 @@ public final class ModelLoader {
       String bar = "=".repeat(Math.max(0, filled)) + " ".repeat(Math.max(0, width - filled));
       double elapsed = (System.nanoTime() - this.startNanos) / 1e9;
       String eta = this.current <= 0 || fraction <= 0
-          ? "--"
-          : formatSeconds(elapsed * (1.0 - fraction) / fraction);
+        ? "--"
+        : formatSeconds(elapsed * (1.0 - fraction) / fraction);
       String shortDetail = this.detail.length() <= 48
-          ? this.detail
-          : "…" + this.detail.substring(this.detail.length() - 47);
+        ? this.detail
+        : "…" + this.detail.substring(this.detail.length() - 47);
       LlmListeners.infof(io, null, "\r%s: [%s] %3.0f%% (%d/%d) ETA %s  %s   ",
-          this.label, bar, fraction * 100.0, this.current, this.total, eta, shortDetail);
+        this.label, bar, fraction * 100.0, this.current, this.total, eta, shortDetail);
     }
   }
 }

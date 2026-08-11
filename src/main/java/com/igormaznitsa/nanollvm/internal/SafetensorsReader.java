@@ -115,9 +115,9 @@ public final class SafetensorsReader implements AutoCloseable {
   public static List<Path> listSafetensors(final Path modelDir) throws IOException {
     try (var stream = Files.list(modelDir)) {
       return stream
-          .filter(p -> p.getFileName().toString().endsWith(".safetensors"))
-          .sorted()
-          .toList();
+        .filter(p -> p.getFileName().toString().endsWith(".safetensors"))
+        .sorted()
+        .toList();
     }
   }
 

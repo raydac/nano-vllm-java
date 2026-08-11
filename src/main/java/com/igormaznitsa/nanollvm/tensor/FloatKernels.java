@@ -114,7 +114,7 @@ public abstract class FloatKernels {
    * @param n      number of elements to write
    */
   public abstract void scaleAdd(
-      final float[] src, final int srcOff, final float[] weight, final int wOff, final float scale,
-      final float[] dst, final int dstOff, final int n
+    final float[] src, final int srcOff, final float[] weight, final int wOff, final float scale,
+    final float[] dst, final int dstOff, final int n
   );
 }

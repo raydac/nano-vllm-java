@@ -24,12 +24,12 @@ public final class Attention {
   }
 
   public Attention(
-      final int numHeads,
-      final int headDim,
-      final float scale,
-      final int numKvHeads,
-      final int slidingWindow,
-      final int layerIndex
+    final int numHeads,
+    final int headDim,
+    final float scale,
+    final int numKvHeads,
+    final int slidingWindow,
+    final int layerIndex
   ) {
     this.numHeads = numHeads;
     this.headDim = headDim;
@@ -58,11 +58,11 @@ public final class Attention {
   }
 
   private void storeKvCache(
-      final Tensor key,
-      final Tensor value,
-      final int[] slotMapping,
-      final Tensor kCache,
-      final Tensor vCache
+    final Tensor key,
+    final Tensor value,
+    final int[] slotMapping,
+    final Tensor kCache,
+    final Tensor vCache
   ) {
     int n = key.size(0);
     int d = this.numKvHeads * this.headDim;
@@ -72,9 +72,9 @@ public final class Attention {
         continue;
       }
       System.arraycopy(key.data(), key.offset() + i * d, kCache.data(),
-          kCache.offset() + slot * d, d);
+        kCache.offset() + slot * d, d);
       System.arraycopy(value.data(), value.offset() + i * d, vCache.data(),
-          vCache.offset() + slot * d, d);
+        vCache.offset() + slot * d, d);
     }
   }
 
@@ -149,8 +149,8 @@ public final class Attention {
   }
 
   private void attendRange(
-      final Tensor q, final Tensor k, final Tensor v, final Tensor out,
-      final int qStart, final int qEnd, final int kIndexBase, final int kLen, final boolean causal
+    final Tensor q, final Tensor k, final Tensor v, final Tensor out,
+    final int qStart, final int qEnd, final int kIndexBase, final int kLen, final boolean causal
   ) {
     int qLen = qEnd - qStart;
     int work = qLen * this.numHeads;

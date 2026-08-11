@@ -90,13 +90,7 @@ public final class ModelFileSources {
     return trimmed;
   }
 
-  private static final class FolderSource implements ModelFileSource {
-
-    private final Path folder;
-
-    FolderSource(final Path folder) {
-      this.folder = folder;
-    }
+  private record FolderSource(Path folder) implements ModelFileSource {
 
     @Override
     public InputStream open(final ModelFileId id) throws IOException {
@@ -119,13 +113,7 @@ public final class ModelFileSources {
     }
   }
 
-  private static final class GgufFileSource implements ModelFileSource {
-
-    private final Path ggufFile;
-
-    GgufFileSource(final Path ggufFile) {
-      this.ggufFile = ggufFile;
-    }
+  private record GgufFileSource(Path ggufFile) implements ModelFileSource {
 
     @Override
     public InputStream open(final ModelFileId id) throws IOException {
@@ -138,15 +126,8 @@ public final class ModelFileSources {
     }
   }
 
-  private static final class ClasspathFolderSource implements ModelFileSource {
-
-    private final ClassLoader loader;
-    private final String resourceFolder;
-
-    ClasspathFolderSource(final ClassLoader loader, final String resourceFolder) {
-      this.loader = loader;
-      this.resourceFolder = resourceFolder;
-    }
+  private record ClasspathFolderSource(ClassLoader loader, String resourceFolder)
+    implements ModelFileSource {
 
     @Override
     public InputStream open(final ModelFileId id) {
@@ -168,15 +149,8 @@ public final class ModelFileSources {
     }
   }
 
-  private static final class ClasspathGgufFileSource implements ModelFileSource {
-
-    private final ClassLoader loader;
-    private final String ggufResourceFile;
-
-    ClasspathGgufFileSource(final ClassLoader loader, final String ggufResourceFile) {
-      this.loader = loader;
-      this.ggufResourceFile = ggufResourceFile;
-    }
+  private record ClasspathGgufFileSource(ClassLoader loader, String ggufResourceFile)
+    implements ModelFileSource {
 
     @Override
     public InputStream open(final ModelFileId id) {

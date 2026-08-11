@@ -70,11 +70,11 @@ public final class BundledModels {
 
   public static Path require(final String modelPathOrName) {
     return find(modelPathOrName).orElseThrow(() -> new IllegalStateException(
-        "model not found: " + modelPathOrName
-            + " (expected under " + modelsRoot()
-          + "). Run models/download-qwen3-0.6b.sh, models/download-gemma3-270m.sh, "
-          + "models/download-lfm2.5-2.6b-gguf.sh, or models/download-gte-small-gguf.sh, "
-            + "or pass a model path / -D" + PROP_MODEL + "=… / " + ENV_MODEL + "."
+      "model not found: " + modelPathOrName
+        + " (expected under " + modelsRoot()
+        + "). Run models/download-qwen3-0.6b.sh, models/download-gemma3-270m.sh, "
+        + "models/download-lfm2.5-2.6b-gguf.sh, or models/download-gte-small-gguf.sh, "
+        + "or pass a model path / -D" + PROP_MODEL + "=… / " + ENV_MODEL + "."
     ));
   }
 
@@ -101,9 +101,9 @@ public final class BundledModels {
     String bare = stripModelsPrefix(key);
 
     Path[] candidates = {
-        root.resolve(bare),
-        cwd.resolve(key),
-        cwd.resolve(DEFAULT_MODELS_DIR).resolve(bare),
+      root.resolve(bare),
+      cwd.resolve(key),
+      cwd.resolve(DEFAULT_MODELS_DIR).resolve(bare),
     };
     for (Path candidate : candidates) {
       if (isModel(candidate)) {
@@ -131,8 +131,8 @@ public final class BundledModels {
 
   private static boolean isHfModelDir(final Path dir) {
     return Files.isDirectory(dir)
-        && Files.isRegularFile(dir.resolve(CONFIG_JSON))
-        && hasSafetensors(dir);
+      && Files.isRegularFile(dir.resolve(CONFIG_JSON))
+      && hasSafetensors(dir);
   }
 
   private static boolean isDirWithGguf(final Path dir) {

@@ -97,7 +97,7 @@ public final class Norms {
                                       final int maxPosition, final float base) {
       String key = headSize + ":" + rotaryDim + ":" + maxPosition + ":" + base;
       return CACHE.computeIfAbsent(key,
-          k -> new RotaryEmbedding(headSize, rotaryDim, maxPosition, base));
+        k -> new RotaryEmbedding(headSize, rotaryDim, maxPosition, base));
     }
 
     public Tensor[] forward(final Tensor positions, final Tensor query, final Tensor key) {

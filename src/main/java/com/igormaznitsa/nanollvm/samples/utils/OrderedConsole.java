@@ -27,6 +27,7 @@ public final class OrderedConsole {
   private final Object drainLock = new Object();
   private final PrintStream outStream;
   private final PrintStream infoStream;
+
   public OrderedConsole(final PrintStream out) {
     this(out, out);
   }

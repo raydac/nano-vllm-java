@@ -50,7 +50,7 @@ public record Gemma3ForCausalLM(Gemma3Model model, ParallelLMHead lmHead) implem
     Gemma3Model model = new Gemma3Model(config, weights);
     // Gemma3-270M has no lm_head in the checkpoint; HF ties embeddings.
     Tensor lmWeight = weights.find(LM_HEAD)
-        .orElseGet(() -> model.embedTokens().weight());
+      .orElseGet(() -> model.embedTokens().weight());
     return new Gemma3ForCausalLM(model, new ParallelLMHead(lmWeight));
   }
 
@@ -72,8 +72,8 @@ public record Gemma3ForCausalLM(Gemma3Model model, ParallelLMHead lmHead) implem
   @Override
   public List<Attention> attentionLayers() {
     return this.model.layers().stream()
-        .map(layer -> layer.selfAttn().attn())
-        .toList();
+      .map(layer -> layer.selfAttn().attn())
+      .toList();
   }
 
   @Override
@@ -87,17 +87,17 @@ public record Gemma3ForCausalLM(Gemma3Model model, ParallelLMHead lmHead) implem
   }
 
   record Gemma3Attention(
-      Linear.Qkv qkvProj,
-      Linear.Row oProj,
-      RotaryEmbedding rotaryEmb,
-      Attention attn,
-      RMSNorm qNorm,
-      RMSNorm kNorm,
-      int numHeads,
-      int numKvHeads,
-      int headDim,
-      int qSize,
-      int kvSize
+    Linear.Qkv qkvProj,
+    Linear.Row oProj,
+    RotaryEmbedding rotaryEmb,
+    Attention attn,
+    RMSNorm qNorm,
+    RMSNorm kNorm,
+    int numHeads,
+    int numKvHeads,
+    int headDim,
+    int qSize,
+    int kvSize
   ) {
     Gemma3Attention(Config.HfConfig config, WeightBag weights, int layerIndex) {
       this(assemble(config, weights, layerIndex));
@@ -105,16 +105,16 @@ public record Gemma3ForCausalLM(Gemma3Model model, ParallelLMHead lmHead) implem
 
     private Gemma3Attention(final Gemma3Attention assembled) {
       this(
-          assembled.qkvProj, assembled.oProj, assembled.rotaryEmb, assembled.attn,
-          assembled.qNorm, assembled.kNorm,
-          assembled.numHeads, assembled.numKvHeads, assembled.headDim,
-          assembled.qSize, assembled.kvSize);
+        assembled.qkvProj, assembled.oProj, assembled.rotaryEmb, assembled.attn,
+        assembled.qNorm, assembled.kNorm,
+        assembled.numHeads, assembled.numKvHeads, assembled.headDim,
+        assembled.qSize, assembled.kvSize);
     }
 
     private static Gemma3Attention assemble(
-        final Config.HfConfig config,
-        final WeightBag weights,
-        final int layerIndex
+      final Config.HfConfig config,
+      final WeightBag weights,
+      final int layerIndex
     ) {
       int numHeads = config.numAttentionHeads();
       int numKvHeads = config.numKeyValueHeads();
@@ -124,17 +124,17 @@ public record Gemma3ForCausalLM(Gemma3Model model, ParallelLMHead lmHead) implem
       int window = sliding ? config.slidingWindow() : 0;
       String p = selfAttn(layerIndex);
       return new Gemma3Attention(
-          new Linear.Qkv(weights.require(p + QKV_PROJ_WEIGHT)),
-          new Linear.Row(weights.require(p + O_PROJ_WEIGHT)),
-          RotaryEmbedding.get(headDim, headDim, config.maxPositionEmbeddings(), ropeBase),
-          new Attention(numHeads, headDim, config.attentionScale(), numKvHeads, window, layerIndex),
-          new RMSNorm(weights.require(p + Q_NORM_WEIGHT), config.rmsNormEps(), true),
-          new RMSNorm(weights.require(p + K_NORM_WEIGHT), config.rmsNormEps(), true),
-          numHeads,
-          numKvHeads,
-          headDim,
-          numHeads * headDim,
-          numKvHeads * headDim);
+        new Linear.Qkv(weights.require(p + QKV_PROJ_WEIGHT)),
+        new Linear.Row(weights.require(p + O_PROJ_WEIGHT)),
+        RotaryEmbedding.get(headDim, headDim, config.maxPositionEmbeddings(), ropeBase),
+        new Attention(numHeads, headDim, config.attentionScale(), numKvHeads, window, layerIndex),
+        new RMSNorm(weights.require(p + Q_NORM_WEIGHT), config.rmsNormEps(), true),
+        new RMSNorm(weights.require(p + K_NORM_WEIGHT), config.rmsNormEps(), true),
+        numHeads,
+        numKvHeads,
+        headDim,
+        numHeads * headDim,
+        numKvHeads * headDim);
     }
 
     Tensor forward(final Tensor positions, final Tensor hiddenStates, final Context context) {
@@ -152,7 +152,7 @@ public record Gemma3ForCausalLM(Gemma3Model model, ParallelLMHead lmHead) implem
 
     private Tensor normHeads(final Tensor x, final RMSNorm norm) {
       return norm.forward(x.reshape(x.size(0) * x.size(1), this.headDim))
-          .reshape(x.size(0), x.size(1), this.headDim);
+        .reshape(x.size(0), x.size(1), this.headDim);
     }
   }
 
@@ -173,8 +173,8 @@ public record Gemma3ForCausalLM(Gemma3Model model, ParallelLMHead lmHead) implem
       }
       String p = mlp(layerIndex);
       return new Gemma3MLP(
-          new Linear.Merged(weights.require(p + GATE_UP_PROJ_WEIGHT)),
-          new Linear.Row(weights.require(p + DOWN_PROJ_WEIGHT)));
+        new Linear.Merged(weights.require(p + GATE_UP_PROJ_WEIGHT)),
+        new Linear.Row(weights.require(p + DOWN_PROJ_WEIGHT)));
     }
 
     Tensor forward(final Tensor x, final Context context) {
@@ -184,12 +184,12 @@ public record Gemma3ForCausalLM(Gemma3Model model, ParallelLMHead lmHead) implem
   }
 
   record Gemma3DecoderLayer(
-      Gemma3Attention selfAttn,
-      Gemma3MLP mlp,
-      RMSNorm inputLayernorm,
-      RMSNorm postAttentionLayernorm,
-      RMSNorm preFeedforwardLayernorm,
-      RMSNorm postFeedforwardLayernorm
+    Gemma3Attention selfAttn,
+    Gemma3MLP mlp,
+    RMSNorm inputLayernorm,
+    RMSNorm postAttentionLayernorm,
+    RMSNorm preFeedforwardLayernorm,
+    RMSNorm postFeedforwardLayernorm
   ) {
     Gemma3DecoderLayer(Config.HfConfig config, WeightBag weights, int layerIndex) {
       this(assemble(config, weights, layerIndex));
@@ -197,24 +197,24 @@ public record Gemma3ForCausalLM(Gemma3Model model, ParallelLMHead lmHead) implem
 
     private Gemma3DecoderLayer(final Gemma3DecoderLayer assembled) {
       this(
-          assembled.selfAttn, assembled.mlp,
-          assembled.inputLayernorm, assembled.postAttentionLayernorm,
-          assembled.preFeedforwardLayernorm, assembled.postFeedforwardLayernorm);
+        assembled.selfAttn, assembled.mlp,
+        assembled.inputLayernorm, assembled.postAttentionLayernorm,
+        assembled.preFeedforwardLayernorm, assembled.postFeedforwardLayernorm);
     }
 
     private static Gemma3DecoderLayer assemble(
-        final Config.HfConfig config,
-        final WeightBag weights,
-        final int layerIndex
+      final Config.HfConfig config,
+      final WeightBag weights,
+      final int layerIndex
     ) {
       String p = layer(layerIndex);
       return new Gemma3DecoderLayer(
-          new Gemma3Attention(config, weights, layerIndex),
-          new Gemma3MLP(config, weights, layerIndex),
-          new RMSNorm(weights.require(p + INPUT_LAYERNORM), config.rmsNormEps(), true),
-          new RMSNorm(weights.require(p + POST_ATTENTION_LAYERNORM), config.rmsNormEps(), true),
-          new RMSNorm(weights.require(p + PRE_FEEDFORWARD_LAYERNORM), config.rmsNormEps(), true),
-          new RMSNorm(weights.require(p + POST_FEEDFORWARD_LAYERNORM), config.rmsNormEps(), true));
+        new Gemma3Attention(config, weights, layerIndex),
+        new Gemma3MLP(config, weights, layerIndex),
+        new RMSNorm(weights.require(p + INPUT_LAYERNORM), config.rmsNormEps(), true),
+        new RMSNorm(weights.require(p + POST_ATTENTION_LAYERNORM), config.rmsNormEps(), true),
+        new RMSNorm(weights.require(p + PRE_FEEDFORWARD_LAYERNORM), config.rmsNormEps(), true),
+        new RMSNorm(weights.require(p + POST_FEEDFORWARD_LAYERNORM), config.rmsNormEps(), true));
     }
 
     Tensor forward(final Tensor positions, final Tensor hiddenStates, final Context context) {
@@ -244,10 +244,10 @@ public record Gemma3ForCausalLM(Gemma3Model model, ParallelLMHead lmHead) implem
   }
 
   record Gemma3Model(
-      VocabParallelEmbedding embedTokens,
-      List<Gemma3DecoderLayer> layers,
-      RMSNorm norm,
-      float embedScale
+    VocabParallelEmbedding embedTokens,
+    List<Gemma3DecoderLayer> layers,
+    RMSNorm norm,
+    float embedScale
   ) {
     Gemma3Model(Config.HfConfig config, WeightBag weights) {
       this(assemble(config, weights));
@@ -263,10 +263,10 @@ public record Gemma3ForCausalLM(Gemma3Model model, ParallelLMHead lmHead) implem
         built.add(new Gemma3DecoderLayer(config, weights, i));
       }
       return new Gemma3Model(
-          new VocabParallelEmbedding(weights.require(EMBED_TOKENS)),
-          List.copyOf(built),
-          new RMSNorm(weights.require(MODEL_NORM), config.rmsNormEps(), true),
-          (float) Math.sqrt(config.hiddenSize()));
+        new VocabParallelEmbedding(weights.require(EMBED_TOKENS)),
+        List.copyOf(built),
+        new RMSNorm(weights.require(MODEL_NORM), config.rmsNormEps(), true),
+        (float) Math.sqrt(config.hiddenSize()));
     }
 
     Tensor forward(final Tensor inputIds, final Tensor positions, final Context context) {

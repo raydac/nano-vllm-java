@@ -25,7 +25,7 @@ import java.util.Optional;
 public final class FloatKernelsFactory {
 
   private static final String VECTOR_KERNELS =
-      "com.igormaznitsa.nanollvm.tensor.vector.VectorFloatKernels";
+    "com.igormaznitsa.nanollvm.tensor.vector.VectorFloatKernels";
 
   /**
    * Resolved once at class init — Vector incubator module + kernels class loadable.
@@ -52,15 +52,15 @@ public final class FloatKernelsFactory {
       case "vector" -> {
         if (!VECTOR_API_AVAILABLE) {
           throw new IllegalStateException(
-              "Vector API kernels requested (-D" + PROP_KERNELS
-                  + "=vector) but Vector API is unavailable"
+            "Vector API kernels requested (-D" + PROP_KERNELS
+              + "=vector) but Vector API is unavailable"
           );
         }
         yield new VectorFloatKernels();
       }
       case "auto" -> createBestAvailable();
       default -> throw new IllegalArgumentException(
-          "Unknown -D" + PROP_KERNELS + "=" + mode + " (use auto|vector|scalar)"
+        "Unknown -D" + PROP_KERNELS + "=" + mode + " (use auto|vector|scalar)"
       );
     };
   }

@@ -86,8 +86,8 @@ public final class Scheduler {
     this.maxNumSeqs = config.maxNumSeqs();
     this.maxNumBatchedTokens = config.maxNumBatchedTokens();
     this.stopTokenIds = config.stopTokenIds().isEmpty()
-        ? List.of(config.eos())
-        : List.copyOf(config.stopTokenIds());
+      ? List.of(config.eos())
+      : List.copyOf(config.stopTokenIds());
     this.blockSize = config.kvcacheBlockSize();
     this.blockManager = new BlockManager(config.numKvcacheBlocks(), config.kvcacheBlockSize());
     this.onSequenceReleased = requireNonNull(onSequenceReleased, "onSequenceReleased");
@@ -139,8 +139,8 @@ public final class Scheduler {
   public void add(final Sequence seq) {
     if (seq.blockSize() != this.blockSize) {
       throw new IllegalArgumentException(
-          "sequence blockSize " + seq.blockSize()
-              + " does not match scheduler blockSize " + this.blockSize);
+        "sequence blockSize " + seq.blockSize()
+          + " does not match scheduler blockSize " + this.blockSize);
     }
     this.waiting.addLast(seq);
   }
@@ -294,20 +294,20 @@ public final class Scheduler {
    * @param appendedOut nullable collector of newly appended completion tokens for streaming UIs
    */
   public void postprocess(
-      final List<Sequence> seqs,
-      final List<Integer> tokenIds,
-      final boolean isPrefill,
-      final List<int[]> appendedOut
+    final List<Sequence> seqs,
+    final List<Integer> tokenIds,
+    final boolean isPrefill,
+    final List<int[]> appendedOut
   ) {
     IntStream.range(0, seqs.size())
-        .forEach(i -> this.postprocessOne(seqs.get(i), tokenIds.get(i), isPrefill, appendedOut));
+      .forEach(i -> this.postprocessOne(seqs.get(i), tokenIds.get(i), isPrefill, appendedOut));
   }
 
   private void postprocessOne(
-      final Sequence seq,
-      final int tokenId,
-      final boolean isPrefill,
-      final List<int[]> appendedOut
+    final Sequence seq,
+    final int tokenId,
+    final boolean isPrefill,
+    final List<int[]> appendedOut
   ) {
     this.blockManager.hashBlocks(seq);
     seq.addCachedTokens(seq.numScheduledTokens());
@@ -329,7 +329,7 @@ public final class Scheduler {
 
   private boolean shouldFinish(final Sequence seq, final int tokenId) {
     return (!seq.ignoreEos() && this.stopTokenIds.contains(tokenId))
-        || seq.numCompletionTokens() == seq.maxTokens();
+      || seq.numCompletionTokens() == seq.maxTokens();
   }
 
   private void finishSequence(final Sequence seq) {

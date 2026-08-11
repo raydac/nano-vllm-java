@@ -46,9 +46,9 @@ public final class WeightSchema {
   private final Set<String> optionalParameters;
 
   private WeightSchema(
-      final Map<String, Object[]> packedModulesMapping,
-      final Set<String> expectedParameters,
-      final Set<String> optionalParameters
+    final Map<String, Object[]> packedModulesMapping,
+    final Set<String> expectedParameters,
+    final Set<String> optionalParameters
   ) {
     this.packedModulesMapping = Map.copyOf(requireNonNull(packedModulesMapping));
     this.expectedParameters = Set.copyOf(requireNonNull(expectedParameters));
@@ -185,7 +185,7 @@ public final class WeightSchema {
 
   public boolean accepts(final String paramName) {
     return this.expectedParameters.contains(paramName)
-        || this.optionalParameters.contains(paramName);
+      || this.optionalParameters.contains(paramName);
   }
 
   public boolean expects(final String paramName) {

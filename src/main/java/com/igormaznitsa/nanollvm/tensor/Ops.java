@@ -106,11 +106,11 @@ public final class Ops {
       biasData = bias.offset() == 0 ? bias.data() : bias.toFloatArray();
     }
     matmul.linear(
-        x.data(), x.offset(),
-        weight.data(), weight.offset(),
-        biasData,
-        y.data(), 0,
-        rows, in, out
+      x.data(), x.offset(),
+      weight.data(), weight.offset(),
+      biasData,
+      y.data(), 0,
+      rows, in, out
     );
     if (xs.length == 1) {
       return y.reshape(out);
@@ -356,8 +356,8 @@ public final class Ops {
    * {@code base + i} (gate) and {@code base + half + i} (up) in one pass. Output last dim is
    * {@code half}, leading axes preserved.
    *
-   * @param x         activations with even last dimension
-   * @param geluTanh  {@code true} → Gemma GELU-tanh; {@code false} → SiLU
+   * @param x        activations with even last dimension
+   * @param geluTanh {@code true} → Gemma GELU-tanh; {@code false} → SiLU
    * @return activated-and-multiplied tensor
    * @throws IllegalArgumentException if last dim is odd
    */
@@ -600,7 +600,7 @@ public final class Ops {
   private static void requireSameSize(final Tensor a, final Tensor b) {
     if (a.numel() != b.numel()) {
       throw new IllegalArgumentException(
-          "numel mismatch: %d vs %d".formatted(a.numel(), b.numel()));
+        "numel mismatch: %d vs %d".formatted(a.numel(), b.numel()));
     }
   }
 }

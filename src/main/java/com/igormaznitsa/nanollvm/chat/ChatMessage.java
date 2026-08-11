@@ -31,8 +31,8 @@ public record ChatMessage(ChatRole role, String content) {
   public static ChatMessage fromMap(final Map<String, String> map) {
     requireNonNull(map, "map");
     return new ChatMessage(
-        ChatRole.fromWire(map.get("role")),
-        map.getOrDefault("content", ""));
+      ChatRole.fromWire(map.get("role")),
+      map.getOrDefault("content", ""));
   }
 
   public Map<String, String> toMap() {

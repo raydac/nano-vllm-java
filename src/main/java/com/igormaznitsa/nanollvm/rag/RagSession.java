@@ -79,6 +79,18 @@ public final class RagSession {
     return new RagSession(chat.llm(), chat, index);
   }
 
+  public static String formatUserMessage(
+    final List<RagHit> hits,
+    final String question,
+    final int maxContextChars
+  ) {
+    return UserMessage.format(hits, question, maxContextChars);
+  }
+
+  public static String formatUserMessage(final List<RagHit> hits, final String question) {
+    return UserMessage.format(hits, question, Integer.MAX_VALUE);
+  }
+
   public RagSession topK(final int topK) {
     if (topK <= 0) {
       throw new IllegalArgumentException("topK must be > 0");
@@ -93,14 +105,6 @@ public final class RagSession {
     }
     this.maxContextChars = maxContextChars;
     return this;
-  }
-
-  public static String formatUserMessage(
-    final List<RagHit> hits,
-    final String question,
-    final int maxContextChars
-  ) {
-    return UserMessage.format(hits, question, maxContextChars);
   }
 
   /**
@@ -168,14 +172,10 @@ public final class RagSession {
     this.lastRetrievalQuery = "";
   }
 
-  public static String formatUserMessage(final List<RagHit> hits, final String question) {
-    return UserMessage.format(hits, question, Integer.MAX_VALUE);
-  }
-
   private void applyTurnSampling() {
     SamplingParams base = this.baseSampling != null
-        ? this.baseSampling
-        : this.chat.samplingParams();
+      ? this.baseSampling
+      : this.chat.samplingParams();
     int maxTokens = base.maxTokens();
     float temperature = base.temperature();
     if (this.lastHits.isEmpty()) {

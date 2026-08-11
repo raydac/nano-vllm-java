@@ -51,7 +51,7 @@ public final class Tokenizer {
 
   // GPT-2 pretokenize regex: contractions, letters, numbers, punctuation, whitespace runs
   private static final Pattern GPT2_PATTERN = Pattern.compile(
-      "'s|'t|'re|'ve|'m|'ll|'d| ?\\p{L}+| ?\\p{N}+| ?[^\\s\\p{L}\\p{N}]+|\\s+(?!\\S)|\\s+"
+    "'s|'t|'re|'ve|'m|'ll|'d| ?\\p{L}+| ?\\p{N}+| ?[^\\s\\p{L}\\p{N}]+|\\s+(?!\\S)|\\s+"
   );
   // SentencePiece / Metaspace word-boundary marker (U+2581)
   private static final String META_SPACE = "\u2581";
@@ -93,52 +93,78 @@ public final class Tokenizer {
    * Token string → vocabulary id (includes added / special tokens).
    */
   private final Map<String, Integer> vocab;
-  /** Vocabulary id → token string (inverse of {@link #vocab}). */
+  /**
+   * Vocabulary id → token string (inverse of {@link #vocab}).
+   */
   private final Map<Integer, String> idToToken;
-  /** BPE merge key {@code "left right"} → rank (lower rank merges first). */
+  /**
+   * BPE merge key {@code "left right"} → rank (lower rank merges first).
+   */
   private final Map<String, Integer> merges;
-  /** Added/special token strings sorted longest-first for greedy matching during encode/decode. */
+  /**
+   * Added/special token strings sorted longest-first for greedy matching during encode/decode.
+   */
   private final List<String> addedTokensByLength;
-  /** Vocab ids omitted from {@link #decode(List, boolean)} when {@code skipSpecialTokens} is true. */
+  /**
+   * Vocab ids omitted from {@link #decode(List, boolean)} when {@code skipSpecialTokens} is true.
+   */
   private final Set<Integer> skipTokenIds;
-  /** Primary end-of-sequence id used by the engine when stop lists are empty. */
+  /**
+   * Primary end-of-sequence id used by the engine when stop lists are empty.
+   */
   private final int eosTokenId;
-  /** All stop ids (EOS plus extras from config / known marker strings). */
+  /**
+   * All stop ids (EOS plus extras from config / known marker strings).
+   */
   private final List<Integer> stopTokenIds;
-  /** Padding id (often same as EOS when the model has no dedicated pad). */
+  /**
+   * Padding id (often same as EOS when the model has no dedicated pad).
+   */
   private final int padTokenId;
-  /** Raw HF / GGUF chat template string when present; used to detect ChatML vs Gemma markers. */
+  /**
+   * Raw HF / GGUF chat template string when present; used to detect ChatML vs Gemma markers.
+   */
   private final String chatTemplate;
-  /** When a BPE piece is missing from vocab, fall back to byte / {@code <0x..>} pieces. */
+  /**
+   * When a BPE piece is missing from vocab, fall back to byte / {@code <0x..>} pieces.
+   */
   private final boolean byteFallback;
-  /** Active encode/decode algorithm ({@link Style#GPT2_BYTE_BPE} or {@link Style#METASPACE_BPE}). */
+  /**
+   * Active encode/decode algorithm ({@link Style#GPT2_BYTE_BPE} or {@link Style#METASPACE_BPE}).
+   */
   private final Style style;
-  /** {@code true} when chat formatting uses Gemma {@code <start_of_turn>} turns (not ChatML). */
+  /**
+   * {@code true} when chat formatting uses Gemma {@code <start_of_turn>} turns (not ChatML).
+   */
   private final boolean gemmaChat;
-  /** Metaspace only: prepend {@code ▁} before a chunk (HF Metaspace pretok); Gemma replace-only is false. */
+  /**
+   * Metaspace only: prepend {@code ▁} before a chunk (HF Metaspace pretok); Gemma replace-only is false.
+   */
   private final boolean prependMetaSpace;
   /**
    * WordPiece / BERT: lowercase before encode (uncased models).
    */
   private final boolean lowercase;
-  /** When {@code true}, ChatML generation prompt may open an empty {@code <think>} block unless disabled. */
+  /**
+   * When {@code true}, ChatML generation prompt may open an empty {@code <think>} block unless disabled.
+   */
   private final boolean inviteThinking;
 
   private Tokenizer(
-      final Map<String, Integer> vocab,
-      final Map<String, Integer> merges,
-      final Set<String> addedTokenTexts,
-      final Set<String> skipTokenTexts,
-      final int eosTokenId,
-      final List<Integer> stopTokenIds,
-      final int padTokenId,
-      final String chatTemplate,
-      final boolean byteFallback,
-      final Style style,
-      final boolean gemmaChat,
-      final boolean prependMetaSpace,
-      final boolean lowercase,
-      final boolean inviteThinking
+    final Map<String, Integer> vocab,
+    final Map<String, Integer> merges,
+    final Set<String> addedTokenTexts,
+    final Set<String> skipTokenTexts,
+    final int eosTokenId,
+    final List<Integer> stopTokenIds,
+    final int padTokenId,
+    final String chatTemplate,
+    final boolean byteFallback,
+    final Style style,
+    final boolean gemmaChat,
+    final boolean prependMetaSpace,
+    final boolean lowercase,
+    final boolean inviteThinking
   ) {
     this.vocab = vocab;
     this.idToToken = new HashMap<>();
@@ -147,8 +173,8 @@ public final class Tokenizer {
     }
     this.merges = merges;
     this.addedTokensByLength = addedTokenTexts.stream()
-        .sorted(Comparator.comparingInt(String::length).reversed())
-        .toList();
+      .sorted(Comparator.comparingInt(String::length).reversed())
+      .toList();
     this.skipTokenIds = new HashSet<>();
     for (String text : skipTokenTexts) {
       Integer id = vocab.get(text);
@@ -170,7 +196,7 @@ public final class Tokenizer {
 
   /**
    * Loads a tokenizer from an HF model directory ({@code tokenizer.json} required for a full
-   * vocab; otherwise a tiny {@linkplain #bare(Path) bare} fallback is built from {@code config.json}).
+   * vocab; otherwise a tiny {@linkplain #bare(String) bare} fallback is built from {@code config.json}).
    *
    * @param modelDir directory containing tokenizer files; non-{@code null}
    * @return immutable tokenizer
@@ -247,12 +273,12 @@ public final class Tokenizer {
             vocab.put(content, id);
             addedTexts.add(content);
             if (Json.asBoolean(tok.get("special"), false)
-                || content.equals("<think>")
-                || content.equals("</think>")
-                || content.equals("<bos>")
-                || content.equals("<eos>")
-                || content.equals("<start_of_turn>")
-                || content.equals("<end_of_turn>")) {
+              || content.equals("<think>")
+              || content.equals("</think>")
+              || content.equals("<bos>")
+              || content.equals("<eos>")
+              || content.equals("<start_of_turn>")
+              || content.equals("<end_of_turn>")) {
               specialTexts.add(content);
             }
           }
@@ -288,7 +314,7 @@ public final class Tokenizer {
 
       boolean gemmaChat = isGemmaStyle(modelConfigJson, vocab, chatTemplate, root);
       Style style =
-          gemmaChat || usesMetaspace(root, vocab) ? Style.METASPACE_BPE : Style.GPT2_BYTE_BPE;
+        gemmaChat || usesMetaspace(root, vocab) ? Style.METASPACE_BPE : Style.GPT2_BYTE_BPE;
       boolean prependMetaSpace = shouldPrependMetaSpace(root);
 
       int eos = resolveEos(vocab, eosToken, gemmaChat);
@@ -318,9 +344,9 @@ public final class Tokenizer {
       }
 
       boolean byteFallback =
-          Json.asBoolean(model.get("byte_fallback"), style == Style.GPT2_BYTE_BPE);
+        Json.asBoolean(model.get("byte_fallback"), style == Style.GPT2_BYTE_BPE);
       return new Tokenizer(
-          vocab, merges, addedTexts, specialTexts, eos, stopIds, pad,
+        vocab, merges, addedTexts, specialTexts, eos, stopIds, pad,
         chatTemplate, byteFallback, style, gemmaChat, prependMetaSpace, false, !gemmaChat
       );
     } catch (RuntimeException e) {
@@ -334,7 +360,7 @@ public final class Tokenizer {
    *
    * @param source GGUF metadata reader; non-{@code null}
    * @return immutable tokenizer ({@link #invitesThinking()} is always {@code false} for this path)
-   * @throws ModelLoadException if {@code tokenizer.ggml.tokens} is missing/empty
+   * @throws ModelLoadException   if {@code tokenizer.ggml.tokens} is missing/empty
    * @throws NullPointerException if {@code source} is {@code null}
    */
   public static Tokenizer fromGguf(final GgufTokenizerSource source) {
@@ -427,9 +453,9 @@ public final class Tokenizer {
   // Detect Gemma chat formatting from template, vocab markers, and config.json model_type
   private static boolean isGemmaStyle(
     final String modelConfigJson,
-      final Map<String, Integer> vocab,
-      final String chatTemplate,
-      final Map<String, Object> tokenizerRoot
+    final Map<String, Integer> vocab,
+    final String chatTemplate,
+    final Map<String, Object> tokenizerRoot
   ) {
     if (chatTemplate != null && chatTemplate.contains("start_of_turn")) {
       return true;
@@ -449,7 +475,7 @@ public final class Tokenizer {
   private static boolean usesMetaspace(final Map<String, Object> root,
                                        final Map<String, Integer> vocab) {
     if (containsMetaspaceNode(root.get("pre_tokenizer")) ||
-        containsMetaspaceNode(root.get("decoder"))) {
+      containsMetaspaceNode(root.get("decoder"))) {
       return true;
     }
     if (normalizerReplacesSpaceWithMeta(root.get("normalizer"))) {
@@ -587,8 +613,8 @@ public final class Tokenizer {
       vocab.put(String.valueOf((char) i), i);
     }
     return new Tokenizer(
-        vocab, Map.of(), Set.of(), Set.of(),
-        vocabSize - 1, List.of(vocabSize - 1), vocabSize - 1,
+      vocab, Map.of(), Set.of(), Set.of(),
+      vocabSize - 1, List.of(vocabSize - 1), vocabSize - 1,
       null, true, Style.GPT2_BYTE_BPE, false, false, false, false
     );
   }
@@ -710,7 +736,7 @@ public final class Tokenizer {
    * LFM2 GGUF and Gemma return {@code false}.
    *
    * @return {@code true} when {@link #applyChatTemplate(List, boolean, boolean)} may emit an empty
-   *     think block when thinking is disabled
+   * think block when thinking is disabled
    */
   public boolean invitesThinking() {
     return this.inviteThinking;
@@ -929,7 +955,7 @@ public final class Tokenizer {
         firstUser = false;
       }
       sb.append("<start_of_turn>").append(role).append('\n')
-          .append(content).append("<end_of_turn>\n");
+        .append(content).append("<end_of_turn>\n");
     }
     if (addGenerationPrompt) {
       sb.append("<start_of_turn>model\n");
@@ -964,7 +990,7 @@ public final class Tokenizer {
     List<Byte> bytes = new ArrayList<>();
     while (i < tokenString.length()) {
       if (tokenString.startsWith("<0x", i) && i + 5 < tokenString.length() &&
-          tokenString.charAt(i + 5) == '>') {
+        tokenString.charAt(i + 5) == '>') {
         try {
           int b = Integer.parseInt(tokenString.substring(i + 3, i + 5), 16);
           bytes.add((byte) b);
@@ -1008,7 +1034,7 @@ public final class Tokenizer {
                                   final boolean addGenerationPrompt,
                                   final boolean enableThinking) {
     if (this.gemmaChat ||
-        (this.chatTemplate != null && this.chatTemplate.contains("start_of_turn"))) {
+      (this.chatTemplate != null && this.chatTemplate.contains("start_of_turn"))) {
       return this.applyGemmaChat(messages, addGenerationPrompt);
     }
     if (this.usesChatMl()) {
@@ -1029,7 +1055,7 @@ public final class Tokenizer {
     StringBuilder sb = new StringBuilder();
     for (Map<String, String> msg : messages) {
       sb.append(msg.getOrDefault("role", "user")).append(": ")
-          .append(msg.getOrDefault("content", "")).append('\n');
+        .append(msg.getOrDefault("content", "")).append('\n');
     }
     if (addGenerationPrompt) {
       sb.append("assistant: ");
@@ -1152,11 +1178,17 @@ public final class Tokenizer {
     return ids;
   }
 
-  /** Encode/decode algorithm selected at load from HF JSON or GGUF heuristics. */
+  /**
+   * Encode/decode algorithm selected at load from HF JSON or GGUF heuristics.
+   */
   private enum Style {
-    /** GPT-2 byte-level BPE (Qwen / ChatML family). */
+    /**
+     * GPT-2 byte-level BPE (Qwen / ChatML family).
+     */
     GPT2_BYTE_BPE,
-    /** SentencePiece-style BPE with {@code ▁} word boundaries (Gemma / many SPM exports). */
+    /**
+     * SentencePiece-style BPE with {@code ▁} word boundaries (Gemma / many SPM exports).
+     */
     METASPACE_BPE,
     /**
      * BERT WordPiece / greedy longest-match (GGUF {@code tokenizer.ggml.model=bert}).

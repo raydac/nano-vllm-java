@@ -131,7 +131,9 @@ public class Linear {
     }
   }
 
-  /** Packed Q/K/V projection; {@code weight} shape {@code [(nH+2nKV)*d, hidden]}. */
+  /**
+   * Packed Q/K/V projection; {@code weight} shape {@code [(nH+2nKV)*d, hidden]}.
+   */
   public static final class Qkv extends Column {
     public Qkv(final Tensor weight, final Tensor bias) {
       super(weight, bias);

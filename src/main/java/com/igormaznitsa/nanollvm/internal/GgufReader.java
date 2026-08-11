@@ -72,6 +72,35 @@ public final class GgufReader implements AutoCloseable, GgufTokenizerSource {
     return new GgufReader(path);
   }
 
+  private static int[] toJavaShape(final List<Long> ggmlDims) {
+    if (ggmlDims.isEmpty()) {
+      return new int[] {1};
+    }
+    if (ggmlDims.size() == 1) {
+      return new int[] {toIntDim(ggmlDims.getFirst())};
+    }
+    if (ggmlDims.size() == 2) {
+      return new int[] {toIntDim(ggmlDims.get(1)), toIntDim(ggmlDims.get(0))};
+    }
+    int[] shape = new int[ggmlDims.size()];
+    for (int i = 0; i < ggmlDims.size(); i++) {
+      shape[i] = toIntDim(ggmlDims.get(ggmlDims.size() - 1 - i));
+    }
+    return shape;
+  }
+
+  private static int toIntDim(final long dim) {
+    if (dim <= 0 || dim > Integer.MAX_VALUE) {
+      throw new IllegalArgumentException("invalid tensor dim " + dim);
+    }
+    return (int) dim;
+  }
+
+  private static long align(final long offset, final int alignment) {
+    long rem = offset % alignment;
+    return rem == 0 ? offset : offset + (alignment - rem);
+  }
+
   private long parseContainer(final ByteBuffer map, final long size) throws IOException {
     int magic = map.getInt(0);
     if (magic != GGUF_MAGIC) {
@@ -127,35 +156,6 @@ public final class GgufReader implements AutoCloseable, GgufTokenizerSource {
     }
 
     return align(cursor.position, alignment);
-  }
-
-  private static int[] toJavaShape(final List<Long> ggmlDims) {
-    if (ggmlDims.isEmpty()) {
-      return new int[] {1};
-    }
-    if (ggmlDims.size() == 1) {
-      return new int[] {toIntDim(ggmlDims.getFirst())};
-    }
-    if (ggmlDims.size() == 2) {
-      return new int[] {toIntDim(ggmlDims.get(1)), toIntDim(ggmlDims.get(0))};
-    }
-    int[] shape = new int[ggmlDims.size()];
-    for (int i = 0; i < ggmlDims.size(); i++) {
-      shape[i] = toIntDim(ggmlDims.get(ggmlDims.size() - 1 - i));
-    }
-    return shape;
-  }
-
-  private static int toIntDim(final long dim) {
-    if (dim <= 0 || dim > Integer.MAX_VALUE) {
-      throw new IllegalArgumentException("invalid tensor dim " + dim);
-    }
-    return (int) dim;
-  }
-
-  private static long align(final long offset, final int alignment) {
-    long rem = offset % alignment;
-    return rem == 0 ? offset : offset + (alignment - rem);
   }
 
   public Path path() {

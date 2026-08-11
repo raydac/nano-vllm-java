@@ -40,7 +40,7 @@ public final class BundledRag {
 
   public static Path require() {
     return find().orElseThrow(() -> new IllegalStateException(
-        "RAG corpus not found at " + ragRoot()
-            + " (create that folder or set -D" + PROP_RAG_DIR + "=… / " + ENV_RAG_DIR + ")"));
+      "RAG corpus not found at " + ragRoot()
+        + " (create that folder or set -D" + PROP_RAG_DIR + "=… / " + ENV_RAG_DIR + ")"));
   }
 }

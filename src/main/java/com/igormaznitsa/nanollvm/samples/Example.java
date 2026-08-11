@@ -6,6 +6,7 @@ import static com.igormaznitsa.nanollvm.models.internal.WeightNames.ARCH_QWEN3;
 import static com.igormaznitsa.nanollvm.utils.NanoLlvmProps.ENV_MODEL;
 import static com.igormaznitsa.nanollvm.utils.NanoLlvmProps.PROP_COLOR;
 import static com.igormaznitsa.nanollvm.utils.NanoLlvmProps.PROP_MODEL;
+import static java.util.Objects.requireNonNull;
 
 import com.igormaznitsa.nanollvm.chat.ChatReply;
 import com.igormaznitsa.nanollvm.chat.ChatSession;
@@ -176,7 +177,13 @@ public final class Example {
 
     RagSetup ragSetup = ragMode == RagMode.NONE
       ? new RagSetup(null, null)
-      : prepareRagSetup(ragRoot.get(), ragMode, gtePath, gemmaPath, status, console);
+      : prepareRagSetup(
+      ragRoot.get(),
+      ragMode,
+      gtePath.orElse(null),
+      gemmaPath,
+      status,
+      console);
     if (ragSetup == null) {
       console.printlnInfo("RAG: no documents in " + ragRoot.get() + " — plain chat.");
       ragSetup = new RagSetup(null, null);
@@ -387,7 +394,7 @@ public final class Example {
   private static RagSetup prepareRagSetup(
     final Path ragRoot,
     final RagMode ragMode,
-    final Optional<Path> gtePath,
+    final Path gtePath,
     final boolean gemmaPath,
     final LlmListener status,
     final OrderedConsole console
@@ -409,7 +416,7 @@ public final class Example {
         yield new RagSetup(lexical, null);
       }
       case DENSE -> {
-        Path gte = gtePath.orElseThrow();
+        Path gte = requireNonNull(gtePath, "gte-small GGUF path");
         console.printlnInfo("Loading RAG embedding model from " + gte);
         LlmModel embed = LlmModelFactory.make(gte, status);
         try {
@@ -424,7 +431,7 @@ public final class Example {
         }
       }
       case HYBRID -> {
-        Path gte = gtePath.orElseThrow();
+        Path gte = requireNonNull(gtePath, "gte-small GGUF path");
         console.printlnInfo("Loading RAG embedding model from " + gte);
         LlmModel embed = LlmModelFactory.make(gte, status);
         try {
@@ -439,16 +446,6 @@ public final class Example {
         }
       }
     };
-  }
-
-  private enum RagMode {
-    NONE,
-    BM25,
-    DENSE,
-    HYBRID
-  }
-
-  private record RagSetup(RagIndex index, LlmModel embeddingModel) {
   }
 
   private static double l2Norm(final float[] vector) {
@@ -544,5 +541,15 @@ public final class Example {
         default -> console.println("Enter 1, 2, 3, 4, or 5.");
       }
     }
+  }
+
+  private enum RagMode {
+    NONE,
+    BM25,
+    DENSE,
+    HYBRID
+  }
+
+  private record RagSetup(RagIndex index, LlmModel embeddingModel) {
   }
 }

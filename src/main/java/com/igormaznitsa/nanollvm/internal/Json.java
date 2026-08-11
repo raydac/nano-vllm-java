@@ -131,9 +131,18 @@ public final class Json {
         case '{' -> this.parseObject(depth);
         case '[' -> this.parseArray(depth);
         case '"' -> this.parseString();
-        case 't' -> this.parseTrue();
-        case 'f' -> this.parseFalse();
-        case 'n' -> this.parseNull();
+        case 't' -> {
+          this.expectWord("true");
+          yield Boolean.TRUE;
+        }
+        case 'f' -> {
+          this.expectWord("false");
+          yield Boolean.FALSE;
+        }
+        case 'n' -> {
+          this.expectWord("null");
+          yield null;
+        }
         default -> {
           if (ch == '-' || this.isDigit(ch)) {
             yield this.parseNumber();
@@ -296,21 +305,6 @@ public final class Json {
       while (!this.atEnd() && this.isDigit(this.current())) {
         this.pos++;
       }
-    }
-
-    private Boolean parseTrue() {
-      this.expectWord("true");
-      return Boolean.TRUE;
-    }
-
-    private Boolean parseFalse() {
-      this.expectWord("false");
-      return Boolean.FALSE;
-    }
-
-    private Object parseNull() {
-      this.expectWord("null");
-      return null;
     }
 
     private void expectWord(final String word) {

@@ -68,7 +68,7 @@ public final class Config {
         this.hfConfig = HfConfig.load(this.model.resolve(CONFIG_JSON));
       } catch (IOException e) {
         throw new IllegalArgumentException("failed to load " + CONFIG_JSON + " from " + this.model,
-            e);
+          e);
       }
     }
     this.maxModelLen = Math.min(b.maxModelLen, this.hfConfig.maxPositionEmbeddings());
@@ -259,29 +259,29 @@ public final class Config {
   }
 
   public record HfConfig(
-      int vocabSize,
-      int hiddenSize,
-      int intermediateSize,
-      int numHiddenLayers,
-      int numAttentionHeads,
-      int numKeyValueHeads,
-      int headDim,
-      int maxPositionEmbeddings,
-      float rmsNormEps,
-      String hiddenAct,
-      boolean tieWordEmbeddings,
-      boolean attentionBias,
-      float ropeTheta,
-      Map<String, Object> ropeScaling,
-      String torchDtype,
-      String modelType,
-      List<String> architectures,
-      String hiddenActivation,
-      int slidingWindow,
-      List<String> layerTypes,
-      float ropeLocalBaseFreq,
-      float queryPreAttnScalar,
-      int convLCache
+    int vocabSize,
+    int hiddenSize,
+    int intermediateSize,
+    int numHiddenLayers,
+    int numAttentionHeads,
+    int numKeyValueHeads,
+    int headDim,
+    int maxPositionEmbeddings,
+    float rmsNormEps,
+    String hiddenAct,
+    boolean tieWordEmbeddings,
+    boolean attentionBias,
+    float ropeTheta,
+    Map<String, Object> ropeScaling,
+    String torchDtype,
+    String modelType,
+    List<String> architectures,
+    String hiddenActivation,
+    int slidingWindow,
+    List<String> layerTypes,
+    float ropeLocalBaseFreq,
+    float queryPreAttnScalar,
+    int convLCache
   ) {
     public HfConfig {
       ropeScaling = freezeStringKeyedMap(ropeScaling);
@@ -326,8 +326,8 @@ public final class Config {
         numAttentionHeads = Json.asInt(m.get("num_heads"), 0);
       }
       int headDim = m.containsKey("head_dim")
-          ? Json.asInt(m.get("head_dim"), 0)
-          : (numAttentionHeads == 0 ? 0 : hiddenSize / numAttentionHeads);
+        ? Json.asInt(m.get("head_dim"), 0)
+        : (numAttentionHeads == 0 ? 0 : hiddenSize / numAttentionHeads);
       String hiddenAct = Json.asString(m.getOrDefault("hidden_act", "silu"));
       String hiddenActivation = Json.asString(m.get("hidden_activation"));
       List<String> architectures = null;
@@ -341,8 +341,8 @@ public final class Config {
         layerTypes = layerArr.stream().map(Json::asString).toList();
       }
       float queryPre = m.containsKey("query_pre_attn_scalar")
-          ? Json.asFloat(m.get("query_pre_attn_scalar"), headDim)
-          : 0f;
+        ? Json.asFloat(m.get("query_pre_attn_scalar"), headDim)
+        : 0f;
       String modelType = Json.asString(m.get("model_type"));
       float rmsEps = m.containsKey("rms_norm_eps")
         ? Json.asFloat(m.get("rms_norm_eps"), 1e-6f)
@@ -354,28 +354,28 @@ public final class Config {
         ropeTheta = Json.asFloat(ropeParams.get("rope_theta"), ropeTheta);
       }
       return new HfConfig(
-          Json.asInt(m.get("vocab_size"), 0),
-          hiddenSize,
-          Json.asInt(m.get("intermediate_size"), 0),
-          Json.asInt(m.get("num_hidden_layers"), 0),
-          numAttentionHeads,
-          Json.asInt(m.get("num_key_value_heads"), numAttentionHeads),
-          headDim,
-          Json.asInt(m.get("max_position_embeddings"), 32768),
+        Json.asInt(m.get("vocab_size"), 0),
+        hiddenSize,
+        Json.asInt(m.get("intermediate_size"), 0),
+        Json.asInt(m.get("num_hidden_layers"), 0),
+        numAttentionHeads,
+        Json.asInt(m.get("num_key_value_heads"), numAttentionHeads),
+        headDim,
+        Json.asInt(m.get("max_position_embeddings"), 32768),
         rmsEps,
-          hiddenAct,
+        hiddenAct,
         Json.asBoolean(m.get("tie_word_embeddings"),
           modelType != null && modelType.toLowerCase(Locale.ROOT).contains("gemma")),
-          Json.asBoolean(m.get("attention_bias"), false),
+        Json.asBoolean(m.get("attention_bias"), false),
         ropeTheta,
         ropeScaling,
-          Json.asString(m.getOrDefault("torch_dtype", "float16")),
-          modelType,
-          architectures,
-          hiddenActivation,
-          Json.asInt(m.get("sliding_window"), 0),
-          layerTypes,
-          Json.asFloat(m.get("rope_local_base_freq"), 10_000f),
+        Json.asString(m.getOrDefault("torch_dtype", "float16")),
+        modelType,
+        architectures,
+        hiddenActivation,
+        Json.asInt(m.get("sliding_window"), 0),
+        layerTypes,
+        Json.asFloat(m.get("rope_local_base_freq"), 10_000f),
         queryPre,
         Json.asInt(m.get("conv_L_cache"), 0)
       );

@@ -251,10 +251,10 @@ public final class ChatSession {
    *
    * @param userText non-blank user turn
    * @return parsed thinking / answer for this turn
-   * @throws IllegalArgumentException if {@code userText} is blank after strip
-   * @throws NullPointerException     if {@code userText} is {@code null}
+   * @throws IllegalArgumentException                                          if {@code userText} is blank after strip
+   * @throws NullPointerException                                              if {@code userText} is {@code null}
    * @throws com.igormaznitsa.nanollvm.exceptions.GenerationCancelledException if {@link LLM#cancel()} fires
-   * @throws com.igormaznitsa.nanollvm.exceptions.GenerationTimeoutException if the session timeout elapses
+   * @throws com.igormaznitsa.nanollvm.exceptions.GenerationTimeoutException   if the session timeout elapses
    */
   public ChatReply send(final String userText) {
     requireNonNull(userText, "userText");
@@ -268,9 +268,9 @@ public final class ChatSession {
    * @param historyUserText text recorded in {@link #history()}
    * @param modelUserText   text used in the chat template for this generate
    * @return parsed thinking / answer for this turn
-   * @throws IllegalArgumentException if either text is blank after strip
+   * @throws IllegalArgumentException                                          if either text is blank after strip
    * @throws com.igormaznitsa.nanollvm.exceptions.GenerationCancelledException if {@link LLM#cancel()} fires
-   * @throws com.igormaznitsa.nanollvm.exceptions.GenerationTimeoutException if the session timeout elapses
+   * @throws com.igormaznitsa.nanollvm.exceptions.GenerationTimeoutException   if the session timeout elapses
    */
   public ChatReply sendPrepared(final String historyUserText, final String modelUserText) {
     return this.sendPrepared(historyUserText, modelUserText, false);
@@ -285,9 +285,9 @@ public final class ChatSession {
    *                          the prepared user turn — prior assistant answers stay in history for
    *                          the app but are not fed into this generate (avoids tiny-model latch)
    * @return parsed thinking / answer for this turn
-   * @throws IllegalArgumentException if either text is blank after strip
+   * @throws IllegalArgumentException                                          if either text is blank after strip
    * @throws com.igormaznitsa.nanollvm.exceptions.GenerationCancelledException if {@link LLM#cancel()} fires
-   * @throws com.igormaznitsa.nanollvm.exceptions.GenerationTimeoutException if the session timeout elapses
+   * @throws com.igormaznitsa.nanollvm.exceptions.GenerationTimeoutException   if the session timeout elapses
    */
   public ChatReply sendPrepared(
     final String historyUserText,
@@ -429,7 +429,7 @@ public final class ChatSession {
       tokenId -> {
         streamedIds.add(tokenId);
         turn.push(this.llm, this.listener,
-            ChatReply.parse(tokenizer.decode(streamedIds, gemmaChat)));
+          ChatReply.parse(tokenizer.decode(streamedIds, gemmaChat)));
       }
     );
 
