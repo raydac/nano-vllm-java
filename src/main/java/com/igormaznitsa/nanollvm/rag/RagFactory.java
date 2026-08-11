@@ -5,6 +5,7 @@ import static java.util.Objects.requireNonNull;
 import com.igormaznitsa.nanollvm.chat.LlmListener;
 import com.igormaznitsa.nanollvm.chat.LlmListeners;
 import com.igormaznitsa.nanollvm.exceptions.ModelLoadException;
+import com.igormaznitsa.nanollvm.models.LlmModel;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
@@ -18,9 +19,11 @@ import java.util.Set;
  * <p>Preprocessing is document-side only: section titles, sentence passages, load-time
  * preparsing (model vs search text, term frequencies), inverted BM25 — not user-reply rules.
  * Pass {@link LlmListeners#toSystem()} to print per-file extraction stats while loading.
+ * Optional embedding models produce a {@link HybridRagIndex} via {@link #withEmbeddings}.
+ * Classpath documents use {@link Builder#addResource(String)} / {@link #makeResource(String)}.
  *
- * <p>Empty corpora throw {@link ModelLoadException}. The returned index is immutable and safe to
- * share across threads.
+ * <p>Empty corpora throw {@link ModelLoadException}. Lexical indexes are immutable and safe to
+ * share across threads; hybrid indexes additionally need a live embedding {@link LlmModel}.
  */
 public final class RagFactory {
 
@@ -110,6 +113,94 @@ public final class RagFactory {
     return new Builder();
   }
 
+  /**
+   * Loads one absolute classpath resource into a BM25 index.
+   *
+   * @since 1.1.0
+   */
+  public static PreparedRag makeResource(final String resourcePath) {
+    return builder().addResource(resourcePath).build();
+  }
+
+  /**
+   * @since 1.1.0
+   */
+  public static PreparedRag makeResource(final ClassLoader loader, final String resourcePath) {
+    return builder().addResource(loader, resourcePath).build();
+  }
+
+  /**
+   * Loads a resource via {@link Class#getResourceAsStream(String)} (leading {@code /} = absolute).
+   *
+   * @since 1.1.0
+   */
+  public static PreparedRag makeResource(final Class<?> anchor, final String resourcePath) {
+    return builder().addResource(anchor, resourcePath).build();
+  }
+
+  /**
+   * Hybrid BM25 + dense retrieval over an existing lexical index.
+   *
+   * @since 1.1.0
+   */
+  public static HybridRagIndex withEmbeddings(
+    final PreparedRag lexical,
+    final LlmModel embeddingModel
+  ) {
+    requireNonNull(lexical, "lexical");
+    requireNonNull(embeddingModel, "embeddingModel");
+    return HybridRagIndex.of(lexical, embeddingModel);
+  }
+
+  /**
+   * Lexical BM25 corpus plus dense embeddings from {@code embeddingModel}.
+   *
+   * @since 1.1.0
+   */
+  public static HybridRagIndex make(final Path folderOrFile, final LlmModel embeddingModel) {
+    return withEmbeddings(make(folderOrFile), embeddingModel);
+  }
+
+  /**
+   * @since 1.1.0
+   */
+  public static HybridRagIndex make(
+    final Path folderOrFile,
+    final RagLoadOptions options,
+    final LlmModel embeddingModel
+  ) {
+    return withEmbeddings(make(folderOrFile, options), embeddingModel);
+  }
+
+  /**
+   * @since 1.1.0
+   */
+  public static HybridRagIndex make(
+    final Path folderOrFile,
+    final RagLoadOptions options,
+    final LlmListener io,
+    final LlmModel embeddingModel
+  ) {
+    return withEmbeddings(make(folderOrFile, options, io), embeddingModel);
+  }
+
+  /**
+   * Like {@link #tryMake(Path, RagLoadOptions, LlmListener)} then {@link #withEmbeddings} when
+   * the corpus is non-empty.
+   *
+   * @since 1.1.0
+   */
+  public static Optional<HybridRagIndex> tryMake(
+    final Path folderOrFile,
+    final RagLoadOptions options,
+    final LlmListener io,
+    final LlmModel embeddingModel
+  ) {
+    requireNonNull(embeddingModel, "embeddingModel");
+    return tryMake(folderOrFile, options, io)
+      .map(lexical -> withEmbeddings(lexical, embeddingModel));
+  }
+
   private static PreparedRag seal(
     final List<TextChunk> chunks,
     final Path sourceRoot,
@@ -183,6 +274,57 @@ public final class RagFactory {
       return this;
     }
 
+    /**
+     * Absolute classpath resource (no leading {@code /}), e.g. {@code rag/facts.md}.
+     *
+     * @since 1.1.0
+     */
+    public Builder addResource(final String resourcePath) {
+      this.hasContent = true;
+      this.corpus.addResource(resourcePath);
+      return this;
+    }
+
+    /**
+     * Absolute classpath resource resolved with {@code loader}.
+     *
+     * @since 1.1.0
+     */
+    public Builder addResource(final ClassLoader loader, final String resourcePath) {
+      this.hasContent = true;
+      this.corpus.addResource(loader, resourcePath);
+      return this;
+    }
+
+    /**
+     * Classpath resource via {@link Class#getResourceAsStream(String)}.
+     *
+     * @since 1.1.0
+     */
+    public Builder addResource(final Class<?> anchor, final String resourcePath) {
+      this.hasContent = true;
+      this.corpus.addResource(anchor, resourcePath);
+      return this;
+    }
+
+    /**
+     * @since 1.1.0
+     */
+    public Builder addResources(final String... resourcePaths) {
+      this.hasContent = true;
+      this.corpus.addResources(resourcePaths);
+      return this;
+    }
+
+    /**
+     * @since 1.1.0
+     */
+    public Builder addResources(final ClassLoader loader, final String... resourcePaths) {
+      this.hasContent = true;
+      this.corpus.addResources(loader, resourcePaths);
+      return this;
+    }
+
     public Builder addFolder(final Path folder) {
       this.hasContent = true;
       this.corpus.addFolder(folder);
@@ -200,6 +342,15 @@ public final class RagFactory {
 
     public PreparedRag build() {
       return seal(this.corpus.build(), this.sourceRoot, this.options, this.io);
+    }
+
+    /**
+     * Lexical index plus dense embeddings.
+     *
+     * @since 1.1.0
+     */
+    public HybridRagIndex build(final LlmModel embeddingModel) {
+      return withEmbeddings(this.build(), embeddingModel);
     }
 
     @Override

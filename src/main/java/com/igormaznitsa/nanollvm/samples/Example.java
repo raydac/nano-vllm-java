@@ -17,9 +17,11 @@ import com.igormaznitsa.nanollvm.llm.SamplingParams;
 import com.igormaznitsa.nanollvm.models.LlmModel;
 import com.igormaznitsa.nanollvm.models.LlmModelFactory;
 import com.igormaznitsa.nanollvm.prompts.AdvisorPrompts;
+import com.igormaznitsa.nanollvm.rag.DenseRagIndex;
 import com.igormaznitsa.nanollvm.rag.PreparedRag;
 import com.igormaznitsa.nanollvm.rag.RagFactory;
 import com.igormaznitsa.nanollvm.rag.RagHit;
+import com.igormaznitsa.nanollvm.rag.RagIndex;
 import com.igormaznitsa.nanollvm.rag.RagLoadOptions;
 import com.igormaznitsa.nanollvm.rag.RagSession;
 import com.igormaznitsa.nanollvm.samples.utils.BundledModels;
@@ -38,6 +40,7 @@ import java.util.stream.Collectors;
 
 /**
  * Interactive sample: causal chat/{@link RagSession} for LMs, or an embedding REPL for BERT GGUF.
+ * After choosing a chat model, a second menu selects RAG mode (none / BM25 / dense / hybrid).
  */
 public final class Example {
 
@@ -157,164 +160,295 @@ public final class Example {
     final BufferedReader in,
     final OrderedConsole console
   ) throws Exception {
-    PreparedRag preparedRag = null;
     Optional<Path> ragRoot = BundledRag.find();
-    if (ragRoot.isPresent()) {
-      console.printlnInfo("Preparing RAG corpus from " + ragRoot.get());
-      RagLoadOptions options =
-        gemmaPath ? RagLoadOptions.forTinyModels() : RagLoadOptions.defaults();
-      preparedRag = RagFactory.tryMake(ragRoot.get(), options, status).orElse(null);
-      if (preparedRag == null) {
-        console.printlnInfo("RAG: no documents in " + ragRoot.get() + " — plain chat.");
-      }
-    }
+    Optional<Path> gtePath = BundledModels.find(BundledModels.GTE_SMALL_GGUF);
 
-    if (preparedRag != null) {
-      console.printlnInfo(
-        "RAG: prepared BM25 over " + BundledRag.ragRoot()
-          + " (" + preparedRag.size() + " chunks, shared index)");
-      console.printlnInfo("Ask about the docs in rag/ (engine, models, Nile, capitals, …).");
-    } else {
+    RagMode ragMode;
+    if (ragRoot.isEmpty()) {
       console.printlnInfo("RAG: no usable corpus at " + BundledRag.ragRoot() + " — plain chat.");
-    }
-    console.println("Type a message and press Enter. Commands: /exit  /quit  /clear");
-    console.println(
-      "Answer/prompts on stdout; thinking, debug, and load/status on stderr (red in many IDEs).");
-    console.println(
-      "After each turn: engine tok/s from GenerationStats (main generate; excludes advisors / RAG prep).");
-    console.println();
-
-    boolean color = System.getenv("NO_COLOR") == null
-      && !"false".equalsIgnoreCase(NanoLlvmProps.systemProperty(PROP_COLOR));
-    PrintStream answerOut = console.stream();
-    PrintStream thinkOut = console.infoStream();
-
-    LLM.Builder builder = LLM.builder(model)
-      .maxNumSeqs(4)
-      .maxModelLen(2048)
-      .listen(status);
-
-    String arch = model.architectureName();
-    switch (arch) {
-      case ARCH_GEMMA3 -> {
-        builder.advisors(
-          LlmAdvisorMixer.defaults(),
-          LlmAdvisor.builder().name("Practical").prompt(AdvisorPrompts.ROLE_PRACTICAL).build(),
-          LlmAdvisor.builder().name("Abstract").prompt(AdvisorPrompts.ROLE_ABSTRACT).build(),
-          LlmAdvisor.builder().name("Consequence").prompt(AdvisorPrompts.ROLE_CONSEQUENCE)
-            .build());
-        console.printlnInfo("Advisors: Practical, Abstract, Consequence for Gemma.");
+      ragMode = RagMode.NONE;
+    } else {
+      ragMode = chooseRagMode(in, console, gtePath.isPresent());
+      if (ragMode == null) {
+        return;
       }
-      case ARCH_QWEN3 -> {
-        builder.advisors(
-          LlmAdvisorMixer.defaults(),
-          LlmAdvisor.builder().name("Practical").prompt(AdvisorPrompts.ROLE_PRACTICAL).build(),
-          LlmAdvisor.builder().name("Abstract").prompt(AdvisorPrompts.ROLE_ABSTRACT).build());
-        console.printlnInfo("Advisors: Practical, Abstract for Qwen.");
-      }
-      case ARCH_LFM2 -> console.printlnInfo("Advisors: off for LFM.");
-      case null, default -> console.printlnInfo("Advisors: off (architecture " + arch + ").");
     }
 
-    try (LLM llm = builder.build()) {
-      boolean gemma = llm.tokenizer().isGemmaChat();
-      RagSession rag = null;
-      ChatSession chat = null;
-      String promptLabel;
+    RagSetup ragSetup = ragMode == RagMode.NONE
+      ? new RagSetup(null, null)
+      : prepareRagSetup(ragRoot.get(), ragMode, gtePath, gemmaPath, status, console);
+    if (ragSetup == null) {
+      console.printlnInfo("RAG: no documents in " + ragRoot.get() + " — plain chat.");
+      ragSetup = new RagSetup(null, null);
+    }
 
-      if (preparedRag != null) {
-        int maxTokens = gemma ? RAG_MAX_TOKENS_GEMMA : RAG_MAX_TOKENS_DEFAULT;
-        rag = llm.rag(preparedRag, maxTokens)
-          .maxTokensWhenNoHits(gemma ? MAX_NEW_TOKENS : RAG_MAX_TOKENS_DEFAULT)
-          .topK(gemma ? RAG_TOP_K_GEMMA : RAG_TOP_K_DEFAULT)
-          .maxContextChars(gemma ? RAG_CONTEXT_CHARS_GEMMA : RAG_CONTEXT_CHARS_DEFAULT)
-          .enableThinking(llm.tokenizer().invitesThinking())
-          .sampling(new SamplingParams(
-            gemma ? 0.1f : 0.4f,
-            maxTokens,
-            false,
-            gemma ? 30 : 0,
-            gemma ? 0.8f : 0.85f))
-          .streamTo(thinkOut, answerOut, color);
-        promptLabel = "rag?> ";
-      } else {
-        chat = llm.chat(MAX_NEW_TOKENS).streamTo(thinkOut, answerOut, color);
-        promptLabel = "?> ";
+    try {
+      if (ragSetup.index() != null) {
+        console.printlnInfo("Ask about the docs in rag/ (engine, models, Nile, capitals, …).");
       }
 
-      long totalTokens = 0;
-      long totalNanos = 0;
-      int turns = 0;
+      console.println("Type a message and press Enter. Commands: /exit  /quit  /clear");
+      console.println(
+        "Answer/prompts on stdout; thinking, debug, and load/status on stderr (red in many IDEs).");
+      console.println(
+        "After each turn: engine tok/s from GenerationStats (main generate; excludes advisors / RAG prep).");
+      console.println();
 
-      while (true) {
-        console.print(promptLabel);
-        String line = in.readLine();
-        if (line == null) {
-          console.println();
-          break;
+      boolean color = System.getenv("NO_COLOR") == null
+        && !"false".equalsIgnoreCase(NanoLlvmProps.systemProperty(PROP_COLOR));
+      PrintStream answerOut = console.stream();
+      PrintStream thinkOut = console.infoStream();
+
+      LLM.Builder builder = LLM.builder(model)
+        .maxNumSeqs(4)
+        .maxModelLen(2048)
+        .listen(status);
+
+      String arch = model.architectureName();
+      switch (arch) {
+        case ARCH_GEMMA3 -> {
+          builder.advisors(
+            LlmAdvisorMixer.defaults(),
+            LlmAdvisor.builder().name("Practical").prompt(AdvisorPrompts.ROLE_PRACTICAL).build(),
+            LlmAdvisor.builder().name("Abstract").prompt(AdvisorPrompts.ROLE_ABSTRACT).build(),
+            LlmAdvisor.builder().name("Consequence").prompt(AdvisorPrompts.ROLE_CONSEQUENCE)
+              .build());
+          console.printlnInfo("Advisors: Practical, Abstract, Consequence for Gemma.");
+        }
+        case ARCH_QWEN3 -> {
+          builder.advisors(
+            LlmAdvisorMixer.defaults(),
+            LlmAdvisor.builder().name("Practical").prompt(AdvisorPrompts.ROLE_PRACTICAL).build(),
+            LlmAdvisor.builder().name("Abstract").prompt(AdvisorPrompts.ROLE_ABSTRACT).build());
+          console.printlnInfo("Advisors: Practical, Abstract for Qwen.");
+        }
+        case ARCH_LFM2 -> console.printlnInfo("Advisors: off for LFM.");
+        case null, default -> console.printlnInfo("Advisors: off (architecture " + arch + ").");
+      }
+
+      try (LLM llm = builder.build()) {
+        boolean gemma = llm.tokenizer().isGemmaChat();
+        RagSession rag = null;
+        ChatSession chat = null;
+        String promptLabel;
+        RagIndex ragIndex = ragSetup.index();
+
+        if (ragIndex != null) {
+          int maxTokens = gemma ? RAG_MAX_TOKENS_GEMMA : RAG_MAX_TOKENS_DEFAULT;
+          rag = llm.rag(ragIndex, maxTokens)
+            .maxTokensWhenNoHits(gemma ? MAX_NEW_TOKENS : RAG_MAX_TOKENS_DEFAULT)
+            .topK(gemma ? RAG_TOP_K_GEMMA : RAG_TOP_K_DEFAULT)
+            .maxContextChars(gemma ? RAG_CONTEXT_CHARS_GEMMA : RAG_CONTEXT_CHARS_DEFAULT)
+            .enableThinking(llm.tokenizer().invitesThinking())
+            .sampling(new SamplingParams(
+              gemma ? 0.1f : 0.4f,
+              maxTokens,
+              false,
+              gemma ? 30 : 0,
+              gemma ? 0.8f : 0.85f))
+            .streamTo(thinkOut, answerOut, color);
+          promptLabel = "rag?> ";
+        } else {
+          chat = llm.chat(MAX_NEW_TOKENS).streamTo(thinkOut, answerOut, color);
+          promptLabel = "?> ";
         }
 
-        String user = line.strip();
-        if (user.isEmpty()) {
-          continue;
-        }
+        long totalTokens = 0;
+        long totalNanos = 0;
+        int turns = 0;
 
-        String command = user.toLowerCase(Locale.ROOT);
-        if (command.equals("/exit") || command.equals("/quit")
-          || command.equals("exit") || command.equals("quit")) {
-          break;
-        }
-        if ("/clear".equalsIgnoreCase(user)) {
+        while (true) {
+          console.print(promptLabel);
+          String line = in.readLine();
+          if (line == null) {
+            console.println();
+            break;
+          }
+
+          String user = line.strip();
+          if (user.isEmpty()) {
+            continue;
+          }
+
+          String command = user.toLowerCase(Locale.ROOT);
+          if (command.equals("/exit") || command.equals("/quit")
+            || command.equals("exit") || command.equals("quit")) {
+            break;
+          }
+          if ("/clear".equalsIgnoreCase(user)) {
+            if (rag != null) {
+              rag.clear();
+              console.println("(conversation cleared; RAG index kept)");
+            } else {
+              chat.clear();
+              console.println("(conversation cleared)");
+            }
+            continue;
+          }
+
+          ChatReply reply = rag != null ? rag.send(user) : chat.send(user);
+          int tokens = reply.stats().completionTokens();
+          long nanos = Math.max(1L, reply.stats().elapsedNanos());
+          totalTokens += tokens;
+          totalNanos += nanos;
+          turns++;
+          console.printf(
+            Locale.ROOT,
+            "(turn %d: %d tok in %.2fs → %.1f tok/s; session avg %.1f tok/s)%n",
+            turns,
+            tokens,
+            nanos / 1e9,
+            reply.stats().completionTokensPerSecond(),
+            totalTokens / (totalNanos / 1e9));
+
           if (rag != null) {
-            rag.clear();
-            console.println("(conversation cleared; RAG index kept)");
-          } else {
-            chat.clear();
-            console.println("(conversation cleared)");
+            List<RagHit> hits = rag.lastHits();
+            if (hits.isEmpty()) {
+              console.println("(no RAG hits)");
+            } else {
+              String sources = hits.stream()
+                .map(hit -> Path.of(hit.chunk().source()).getFileName().toString())
+                .distinct()
+                .collect(Collectors.joining(", "));
+              console.println("(retrieved " + hits.size() + " chunk(s): " + sources + ")");
+            }
           }
-          continue;
+          console.println();
         }
 
-        ChatReply reply = rag != null ? rag.send(user) : chat.send(user);
-        int tokens = reply.stats().completionTokens();
-        long nanos = Math.max(1L, reply.stats().elapsedNanos());
-        totalTokens += tokens;
-        totalNanos += nanos;
-        turns++;
-        console.printf(
-          Locale.ROOT,
-          "(turn %d: %d tok in %.2fs → %.1f tok/s; session avg %.1f tok/s)%n",
-          turns,
-          tokens,
-          nanos / 1e9,
-          reply.stats().completionTokensPerSecond(),
-          totalTokens / (totalNanos / 1e9));
-
-        if (rag != null) {
-          List<RagHit> hits = rag.lastHits();
-          if (hits.isEmpty()) {
-            console.println("(no RAG hits)");
-          } else {
-            String sources = hits.stream()
-              .map(hit -> Path.of(hit.chunk().source()).getFileName().toString())
-              .distinct()
-              .collect(Collectors.joining(", "));
-            console.println("(retrieved " + hits.size() + " chunk(s): " + sources + ")");
-          }
+        if (turns > 0) {
+          console.printf(
+            Locale.ROOT,
+            "(session: %d turn(s), %d tok, %.2fs → avg %.1f tok/s)%n",
+            turns,
+            totalTokens,
+            totalNanos / 1e9,
+            totalTokens / (totalNanos / 1e9));
         }
-        console.println();
       }
-
-      if (turns > 0) {
-        console.printf(
-          Locale.ROOT,
-          "(session: %d turn(s), %d tok, %.2fs → avg %.1f tok/s)%n",
-          turns,
-          totalTokens,
-          totalNanos / 1e9,
-          totalTokens / (totalNanos / 1e9));
+    } finally {
+      if (ragSetup.embeddingModel() != null) {
+        ragSetup.embeddingModel().close();
       }
     }
+  }
+
+  private static RagMode chooseRagMode(
+    final BufferedReader in,
+    final OrderedConsole console,
+    final boolean gtePresent
+  ) throws Exception {
+    String denseMark = gtePresent ? "" : "  [not downloaded]";
+    while (true) {
+      console.println("Select RAG mode:");
+      console.println("  1) None (plain chat)");
+      console.println("  2) BM25 lexical");
+      console.println("  3) Dense embeddings (gte-small)" + denseMark);
+      console.println("  4) Hybrid BM25 + dense" + denseMark);
+      console.println("  5) Back / exit");
+      console.print("Choice [1-5]: ");
+      String line = in.readLine();
+      if (line == null) {
+        return null;
+      }
+      switch (line.strip()) {
+        case "1" -> {
+          console.printlnInfo("RAG: off — plain chat.");
+          return RagMode.NONE;
+        }
+        case "2" -> {
+          return RagMode.BM25;
+        }
+        case "3" -> {
+          if (!gtePresent) {
+            console.println(
+              "gte-small GGUF not found. Run models/download-gte-small-gguf.sh");
+            continue;
+          }
+          return RagMode.DENSE;
+        }
+        case "4" -> {
+          if (!gtePresent) {
+            console.println(
+              "gte-small GGUF not found. Run models/download-gte-small-gguf.sh");
+            continue;
+          }
+          return RagMode.HYBRID;
+        }
+        case "5", "q", "quit", "exit" -> {
+          console.println("Bye.");
+          return null;
+        }
+        default -> console.println("Enter 1, 2, 3, 4, or 5.");
+      }
+    }
+  }
+
+  private static RagSetup prepareRagSetup(
+    final Path ragRoot,
+    final RagMode ragMode,
+    final Optional<Path> gtePath,
+    final boolean gemmaPath,
+    final LlmListener status,
+    final OrderedConsole console
+  ) {
+    console.printlnInfo("Preparing RAG corpus from " + ragRoot);
+    RagLoadOptions options =
+      gemmaPath ? RagLoadOptions.forTinyModels() : RagLoadOptions.defaults();
+    PreparedRag lexical = RagFactory.tryMake(ragRoot, options, status).orElse(null);
+    if (lexical == null) {
+      return null;
+    }
+
+    return switch (ragMode) {
+      case NONE -> new RagSetup(null, null);
+      case BM25 -> {
+        console.printlnInfo(
+          "RAG: BM25 over " + BundledRag.ragRoot()
+            + " (" + lexical.size() + " chunks)");
+        yield new RagSetup(lexical, null);
+      }
+      case DENSE -> {
+        Path gte = gtePath.orElseThrow();
+        console.printlnInfo("Loading RAG embedding model from " + gte);
+        LlmModel embed = LlmModelFactory.make(gte, status);
+        try {
+          DenseRagIndex dense = DenseRagIndex.of(lexical, embed);
+          console.printlnInfo(
+            "RAG: dense embeddings over " + BundledRag.ragRoot()
+              + " (" + dense.size() + " chunks; encoder " + embed.architectureName() + ")");
+          yield new RagSetup(dense, embed);
+        } catch (RuntimeException | Error failed) {
+          embed.close();
+          throw failed;
+        }
+      }
+      case HYBRID -> {
+        Path gte = gtePath.orElseThrow();
+        console.printlnInfo("Loading RAG embedding model from " + gte);
+        LlmModel embed = LlmModelFactory.make(gte, status);
+        try {
+          RagIndex hybrid = RagFactory.withEmbeddings(lexical, embed);
+          console.printlnInfo(
+            "RAG: hybrid BM25+dense over " + BundledRag.ragRoot()
+              + " (" + hybrid.size() + " chunks; encoder " + embed.architectureName() + ")");
+          yield new RagSetup(hybrid, embed);
+        } catch (RuntimeException | Error failed) {
+          embed.close();
+          throw failed;
+        }
+      }
+    };
+  }
+
+  private enum RagMode {
+    NONE,
+    BM25,
+    DENSE,
+    HYBRID
+  }
+
+  private record RagSetup(RagIndex index, LlmModel embeddingModel) {
   }
 
   private static double l2Norm(final float[] vector) {

@@ -7,6 +7,7 @@ import com.igormaznitsa.nanollvm.chat.LlmListener;
 import com.igormaznitsa.nanollvm.chat.LlmListeners;
 import com.igormaznitsa.nanollvm.utils.ResourceLimits;
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.UncheckedIOException;
 import java.nio.file.FileVisitResult;
 import java.nio.file.Files;
@@ -24,8 +25,8 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * Loads strings, files, and folder trees into {@link TextChunk}s (preprocess + chunk). Used only
- * from {@link RagFactory}.
+ * Loads strings, files, classpath resources, and folder trees into {@link TextChunk}s
+ * (preprocess + chunk). Used only from {@link RagFactory}.
  */
 final class CorpusLoader {
 
@@ -39,6 +40,41 @@ final class CorpusLoader {
 
   static Builder builder() {
     return new Builder();
+  }
+
+  private static ClassLoader defaultClassLoader() {
+    ClassLoader loader = CorpusLoader.class.getClassLoader();
+    return loader == null ? ClassLoader.getSystemClassLoader() : loader;
+  }
+
+  private static String normalizeClasspathPath(final String resourcePath, final String paramName) {
+    requireNonNull(resourcePath, paramName);
+    String trimmed = resourcePath.strip();
+    if (trimmed.isEmpty()) {
+      throw new IllegalArgumentException(paramName + " must not be blank");
+    }
+    while (trimmed.startsWith("/")) {
+      trimmed = trimmed.substring(1);
+    }
+    while (trimmed.endsWith("/")) {
+      trimmed = trimmed.substring(0, trimmed.length() - 1);
+    }
+    if (trimmed.isEmpty()) {
+      throw new IllegalArgumentException(paramName + " must not be blank");
+    }
+    return trimmed;
+  }
+
+  private static String packageRelativeClasspath(final Class<?> anchor, final String relative) {
+    String pkg = anchor.getPackageName();
+    if (pkg == null || pkg.isBlank()) {
+      return relative;
+    }
+    return pkg.replace('.', '/') + "/" + relative;
+  }
+
+  private static boolean isPdfName(final String path) {
+    return path.toLowerCase(Locale.ROOT).endsWith(".pdf");
   }
 
   static final class Builder {
@@ -162,7 +198,7 @@ final class CorpusLoader {
       }
       try {
         long size = Files.size(path);
-        this.requireFileBudget(path, size);
+        this.requireBudget(path.toString(), size);
         String body = this.readFileText(path);
         this.accountRead(size);
         String source = path.toString();
@@ -175,17 +211,105 @@ final class CorpusLoader {
             this.preprocess,
           this.atomicSentences);
         this.pending.addAll(chunks);
-        this.reportFileProcessed(path, body, chunks.size());
+        this.reportLoaded(this.displayPath(path), body, chunks.size());
       } catch (IOException e) {
         throw new UncheckedIOException("failed to read " + path, e);
       }
       return this;
     }
 
-    private void requireFileBudget(final Path path, final long size) {
+    /**
+     * Classpath resource via this module's class loader (absolute path, no leading {@code /}).
+     */
+    public Builder addResource(final String resourcePath) {
+      return this.addResource(CorpusLoader.defaultClassLoader(), resourcePath);
+    }
+
+    /**
+     * Absolute classpath resource (no leading {@code /}), e.g. {@code rag/facts.md}.
+     */
+    public Builder addResource(final ClassLoader loader, final String resourcePath) {
+      requireNonNull(loader, "loader");
+      String path = normalizeClasspathPath(resourcePath, "resourcePath");
+      try (InputStream in = loader.getResourceAsStream(path)) {
+        if (in == null) {
+          throw new IllegalArgumentException("classpath resource not found: " + path);
+        }
+        return this.addResourceBytes(path, in.readAllBytes());
+      } catch (IOException e) {
+        throw new UncheckedIOException("failed to read classpath:" + path, e);
+      }
+    }
+
+    /**
+     * Classpath resource resolved like {@link Class#getResourceAsStream(String)}:
+     * leading {@code /} = absolute from classpath root; otherwise package-relative to
+     * {@code anchor}.
+     */
+    public Builder addResource(final Class<?> anchor, final String resourcePath) {
+      requireNonNull(anchor, "anchor");
+      requireNonNull(resourcePath, "resourcePath");
+      String raw = resourcePath.strip();
+      if (raw.isEmpty()) {
+        throw new IllegalArgumentException("resourcePath must not be blank");
+      }
+      try (InputStream in = anchor.getResourceAsStream(raw)) {
+        if (in == null) {
+          throw new IllegalArgumentException(
+              "classpath resource not found for " + anchor.getName() + ": " + raw);
+        }
+        String label = raw.startsWith("/")
+            ? normalizeClasspathPath(raw, "resourcePath")
+            : packageRelativeClasspath(anchor, raw);
+        return this.addResourceBytes(label, in.readAllBytes());
+      } catch (IOException e) {
+        throw new UncheckedIOException("failed to read classpath resource: " + raw, e);
+      }
+    }
+
+    public Builder addResources(final String... resourcePaths) {
+      requireNonNull(resourcePaths, "resourcePaths");
+      for (String resourcePath : resourcePaths) {
+        this.addResource(resourcePath);
+      }
+      return this;
+    }
+
+    public Builder addResources(final ClassLoader loader, final String... resourcePaths) {
+      requireNonNull(loader, "loader");
+      requireNonNull(resourcePaths, "resourcePaths");
+      for (String resourcePath : resourcePaths) {
+        this.addResource(loader, resourcePath);
+      }
+      return this;
+    }
+
+    private Builder addResourceBytes(final String classpathPath, final byte[] bytes) {
+      requireNonNull(classpathPath, "classpathPath");
+      requireNonNull(bytes, "bytes");
+      String source = "classpath:" + classpathPath;
+      this.requireBudget(source, bytes.length);
+      String body = isPdfName(classpathPath)
+          ? PdfTextExtractor.extract(bytes, this.resourceLimits)
+          : new String(bytes, UTF_8);
+      this.accountRead(bytes.length);
+      List<TextChunk> chunks = Chunking.split(
+          source,
+          source,
+          body,
+          this.maxChunkChars,
+          this.chunkOverlap,
+          this.preprocess,
+          this.atomicSentences);
+      this.pending.addAll(chunks);
+      this.reportLoaded(source, body, chunks.size());
+      return this;
+    }
+
+    private void requireBudget(final String label, final long size) {
       if (size > this.resourceLimits.maxFileBytes()) {
         throw new IllegalArgumentException(
-          "file exceeds maxFileBytes (" + this.resourceLimits.maxFileBytes() + "): " + path);
+            "file exceeds maxFileBytes (" + this.resourceLimits.maxFileBytes() + "): " + label);
       }
       if (this.filesRead >= this.resourceLimits.maxCorpusFiles()) {
         throw new IllegalStateException(
@@ -251,16 +375,15 @@ final class CorpusLoader {
       return List.copyOf(prepared);
     }
 
-    private void reportFileProcessed(final Path path, final String body, final int chunkCount) {
+    private void reportLoaded(final String display, final String body, final int chunkCount) {
       if (LlmListeners.isSilent(io)) {
         return;
       }
       int chars = body == null ? 0 : body.length();
       LlmListeners.infof(io, null, "RAG %s: %d char(s) → %d chunk(s)%n",
-        this.displayPath(path), chars, chunkCount);
+          display, chars, chunkCount);
       if (chars == 0) {
-        LlmListeners.info(io, null,
-          "RAG warning: no text extracted from " + this.displayPath(path));
+        LlmListeners.info(io, null, "RAG warning: no text extracted from " + display);
       }
     }
 

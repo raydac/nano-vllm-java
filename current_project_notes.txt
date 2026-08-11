@@ -13,9 +13,9 @@
 - `LLM.generate` / `close` use `ReentrantLock`; `assertNotClosed` on infrequent entry points; props = **`nanollvm.*` / `NANOLLVM_*` only**
 - JPMS: exports models/llm/chat/rag/exceptions/tokenizer/utils; non-exported `models.internal` (`LlmModelAccess`), prompts, samples, engine/layers/tensor/internal
 
-- **Samples:** linear `main` flows (`HelloWorld`, `EmbedHelloWorld`, `LogTriageHelloWorld`, `Bench`, `Example`); `Example` menu includes gte-small embeddings REPL; `BundledModels` / `BundledRag` / `OrderedConsole` in `samples.utils`
-- **RAG:** `RagFactory` → `PreparedRag`; package-private `CorpusLoader`; public API ~10 types (+ `PdfTextExtractor`)
+- **RAG:** `RagFactory` → `PreparedRag` (BM25); `addResource` / `makeResource` for classpath docs; optional `withEmbeddings` → `HybridRagIndex` (`DenseRagIndex` + RRF); package-private `CorpusLoader`; public API ~12 types (+ `PdfTextExtractor`)
 - Optional download scripts: Qwen3 / Gemma3 / LFM2 GGUF / **gte-small Q2_K** embedding GGUF (`models/download-*.sh`)
+- **Samples:** linear `main` flows (`HelloWorld`, `EmbedHelloWorld`, `LogTriageHelloWorld`, `Bench`, `Example`); `Example` menu: model then RAG mode (none / BM25 / dense / hybrid); gte-small embeddings REPL; `BundledModels` / `BundledRag` / `OrderedConsole` in `samples.utils`
 
 
 ## 2. Architecture & Technical Discoveries
@@ -26,6 +26,7 @@
 - BERT GGUF: token+pos+type emb → LayerNorm → post-LN blocks (bidirectional attn + GELU FFN) → mean pool → L2; tokenizer WordPiece with ▁ metaspace pieces
 - GGUF packed by default; late unpack does not release bytes still bound by other engines
 - `TEXT_DEBUG`: optional via `emitDebugPrompts`; RAG corpus/advisor notes are trusted prompt input by design
+- Dense RAG: index-time `LlmModel.embed` of all chunks; query cosine (dot); hybrid = BM25 + dense RRF; off-topic = both indexes agree
 
 
 ## 3. Technical Debt & Refactoring
@@ -33,7 +34,7 @@
 - Optional GGUF perf: mmap weights; FP16 / smaller default KV; fused packed GEMM
 - LFM2 GGUF tokenizer heuristics may need per-export tuning
 - Dense weight `float[]` still GC-only after model close (no eager zeroing of Tensor buffers)
-- Dense RAG over `LlmModel.embed` not wired yet
+- Dense RAG query embeds synchronize per `DenseRagIndex`; no ANN / vector DB yet
 
 
 ## 4. Current Work In Progress
@@ -64,6 +65,8 @@
 - Build: `mvn22 -q test` / `MAVEN_OPTS="-Xmx8g" mvn22 -q exec:java`
 - Library: `try (LlmModel m = LlmModelFactory.make(path); LLM llm = LLM.builder(m)…)` — engines close before model
 - Embeddings: `LlmModelFactory.make(gteGguf); model.embed(text)` — sample `EmbedHelloWorld`
+- Dense RAG: `RagFactory.withEmbeddings(preparedRag, embedModel)` → `HybridRagIndex`; keep BM25 via `PreparedRag` alone
+- Classpath RAG: `RagFactory.makeResource("docs/a.md")` / `.addResource(loader, path)` / `.addResource(Class, "/abs.md")`
 - Props: `nanollvm.*` / `NANOLLVM_*` only (`NanoLlvmProps`)
 - Heap/vector: `.mvn/jvm.config`; surefire uses `jvm.module.args`
 
@@ -73,6 +76,7 @@
 - Prefer `ChatSession` for dialog; raw `generate` for completions
 - Prefer `LlmModelFactory.make` → `LLM.builder(LlmModel)`; close LLM then model
 - Embedding GGUFs use the same factory; call `embed`, not `LLM.builder`
+- Dense RAG: prefer `RagFactory.withEmbeddings` / `HybridRagIndex`; keep chat `LLM` and embedding `LlmModel` separate; close embed after the index is unused
 - Do **not** update root `README.md` for SNAPSHOT/unreleased work — it documents the last published release; use `CHANGELOG.md` / `models/README.md` / samples until release
 - Optional `.matmulExecutor(ExecutorService)`; never shut down by `LLM.close()`
 - Optional: use Optional as return only (never method params)
