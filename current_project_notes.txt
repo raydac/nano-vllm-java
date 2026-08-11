@@ -80,7 +80,7 @@
 - Do **not** update root `README.md` for SNAPSHOT/unreleased work — it documents the last published release; use `CHANGELOG.md` / `models/README.md` / samples until release
 - Optional `.matmulExecutor(ExecutorService)`; never shut down by `LLM.close()`
 - Optional: use Optional as return only (never method params)
-- English `description.md` only
+- English `description.md` only (ch. 7b BERT embeddings, ch. 17 dense/hybrid + classpath RAG — **since 1.1.0**)
 - Unreassigned method/ctor params must be `final`
 - Do not add temporary large PDFs under `rag/` into the repo
 - New public types/methods after a release must carry `@since X.Y.Z` matching the upcoming version (e.g. `@since 1.1.0` on the 1.1.0 line)

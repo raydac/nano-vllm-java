@@ -8,8 +8,9 @@ willingness to learn technical vocabulary — but **without** assuming prior mac
 You do not need fluency in Java. Linear algebra appears where it clarifies structure (vectors, matrices, shapes); each
 term is defined on first use. Occasional metaphors remain only as scaffolding, never as substitutes for the concepts.
 
-The subject is a small program that **loads a pretrained causal language model** and runs **inference**: continuing text
-or conducting a short chat on an ordinary CPU, without CUDA or other native backends. Java package / JPMS module:
+The subject is a small program that **loads a pretrained model** and runs **inference** on an ordinary CPU, without
+CUDA or other native backends: continuing text or short chat with a **causal** language model, and (**since 1.1.0**)
+encoding sentences to vectors with a **BERT-family embedding** GGUF. Java package / JPMS module:
 `com.igormaznitsa.nanollvm`.
 
 Where a topic has a standard paper or format specification, a short **Further reading** note lists links. Those are
@@ -31,6 +32,7 @@ file paths.
 6. [`tokenizer.json` — the dictionary file field by field](#6-tokenizerjson--the-dictionary-file-field-by-field)
 7. [Tensors and `*.safetensors` — parameters on disk](#7-tensors-and-safetensors--parameters-on-disk)
 7a. [GGUF and LFM2 — format, dequant, hybrid chat](#7a-gguf-and-lfm2--quantized-single-file-models)
+7b. [BERT embedding GGUFs — sentence vectors (**since 1.1.0**)](#7b-bert-embedding-ggufs--sentence-vectors-since-110)
 8. [Attention: kinds of looking-back, and how they work](#8-attention-kinds-of-looking-back-and-how-they-work)
 9. [The thinking process: how it is organized and how it works with the model](#9-the-thinking-process-how-it-is-organized-and-how-it-works-with-the-model)
 10. [Tensors, embeddings, and the arithmetic of inference](#10-tensors-embeddings-and-the-arithmetic-of-inference) —
@@ -1151,6 +1153,104 @@ example weights [LFM2.5-2.6B-GGUF](https://huggingface.co/LiquidAI/LFM2.5-2.6B-G
 
 ---
 
+## 7b. BERT embedding GGUFs — sentence vectors (**since 1.1.0**)
+
+Chapter 7a showed how **causal** chat models can live in a `.gguf` file. **Since 1.1.0**, the same GGUF loader also
+accepts a different kind of network: a **BERT-family encoder** whose job is not to write the next token, but to turn a
+finished sentence into one **dense vector** (an embedding) you can compare with other sentences.
+
+The demo weight people usually try is **gte-small** (`models/gte-small.Q2_K.gguf`, via `models/download-gte-small-gguf.sh`).
+
+### What “BERT” means here (without the training lore)
+
+**BERT** (Bidirectional Encoder Representations from Transformers) is an architecture for **reading** text, not
+**continuing** it.
+
+| | Causal chat LM (Qwen / Gemma / LFM2) | BERT-style embedding encoder |
+|---|---|---|
+| Question it answers | “What token comes **next**?” | “What is a good **vector summary** of this whole input?” |
+| Attention | **Causal** — no peeking at future positions | **Bidirectional** — each token may look left **and** right |
+| Typical API here | `LLM.builder(model)` → `chat` / `generate` | `LlmModel.embed(text)` → `float[]` |
+| Output | Token ids / text | One L2-normalized vector of length `hidden_size` |
+
+People also say “BERT” for many descendants that keep that encoder shape (including small **sentence embedding** models
+such as GTE). In this port, GGUF metadata that looks like BERT loads as architecture `bert` and builds
+`BertForEmbedding`.
+
+**Humanities picture:** a causal LM is a writer who may only see the draft so far. A BERT encoder is a reader who may
+reread the whole finished card before writing a single summary number-line for the card box (chapter 17 dense RAG).
+
+### How this project loads and runs it
+
+1. **Same factory as chat models:** `LlmModelFactory.make(pathToGguf)`.
+2. **Detect:** `model.isEmbeddingModel()` is true; `architectureName()` is typically `bert`.
+3. **Do not** call `LLM.builder(model)` — the builder **rejects** embedding-only graphs. Chat needs a causal `CausalLM`;
+   embeddings use an internal `EmbeddingEncoder`.
+4. **Encode:** `float[] v = model.embed("hello world");` (or `embed(List)` / already-tokenized ids).
+5. **Compare:** vectors are **L2-normalized**, so cosine similarity is just the **dot product**.
+
+```java
+try (LlmModel model = LlmModelFactory.make(Path.of("models/gte-small.Q2_K.gguf"))) {
+  float[] a = model.embed("Paris is the capital of France.");
+  float[] b = model.embed("What city is France's capital?");
+  // cosine ≈ sum_i a[i]*b[i]
+}
+```
+
+**In the code:** `LlmModelFactory` → `EmbeddingEncoderFactory` → `BertForEmbedding`; public surface `LlmModel.embed`;
+samples `EmbedHelloWorld`, `Example` menu item “gte-small (embeddings)”.
+
+### Inside one `embed` call (pipeline)
+
+```text
+text
+  → WordPiece tokenize (+ [CLS] / [SEP] when present in the vocab)
+  → token + position + token-type embeddings
+  → LayerNorm
+  → N × bidirectional transformer block
+        (self-attention over the full sequence + GELU FFN; post-LN style)
+  → mean pool over sequence length  →  one vector of size hidden_size
+  → L2 normalize
+  → float[]
+```
+
+Weights may stay **GGUF-packed** and dequantize on use, like other GGUF graphs (chapter 7a). Supported quants for
+common small embedding files include paths that needed **Q3_K** / **IQ4_NL** dequant (**since 1.1.0**).
+
+**Tokenizer:** GGUF `tokenizer.ggml.model=bert` → WordPiece / greedy longest-match (`Tokenizer.Style.WORDPIECE`), often
+with lowercase and metaspace-style pieces.
+
+**In the code (graph):** `models.internal.BertForEmbedding`; blocks use `layers.BidirectionalAttention` (not the causal
+`Attention` used for chat); norms via `Norms.LayerNorm`; pooling and L2 live at the end of `encode`.
+
+### What you use the vectors for
+
+- **Semantic similarity** between two strings (REPL in `Example` / `EmbedHelloWorld`).
+- **Dense RAG** (**since 1.1.0**, chapter 17): embed every corpus chunk once, embed the question, rank by cosine —
+  `DenseRagIndex` or hybrid BM25+dense via `RagFactory.withEmbeddings`.
+
+There is **no** chat template, KV cache, or next-token sampler on this path. Lifecycle is still
+`LlmModel` as `AutoCloseable`: close when finished; for hybrid RAG, keep the encoder open while the index is in use.
+
+### Limits (honest)
+
+- **GGUF BERT embeddings only** in this line — not a full Hugging Face safetensors BERT directory load yet.
+- Dense retrieval is an **in-process linear scan**, not an ANN index.
+- Embedding quality depends on the checkpoint (gte-small is small and English-oriented).
+
+### Summary
+
+> **Since 1.1.0, load a BERT-family embedding GGUF with `LlmModelFactory.make`, call `LlmModel.embed` for an
+> L2-normalized sentence vector (bidirectional encoder + mean pool), and optionally plug that encoder into dense or
+> hybrid RAG. Never attach an embedding model to `LLM.builder`.**
+
+**Further reading:** original BERT — [Devlin et al. (arXiv)](https://arxiv.org/abs/1810.04805); sentence embeddings /
+GTE family on Hugging Face (search “thenlper/gte-small”); this guide **chapter 8** (bidirectional vs causal attention),
+**chapter 17** (dense / hybrid RAG).
+
+
+---
+
 ## 8. Attention: kinds of looking-back, and how they work
 
 Attention is the part people mean when they say the model “pays attention” to something you wrote earlier. It is not a
@@ -1217,9 +1317,10 @@ That restriction is **causal** (or *causal masked*) attention.
                          not at words that do not exist yet
 ```
 
-Without this mask, the model could “cheat” by reading the answer it has not written. Bidirectional models (like the old
-BERT-style readers) allow looking left *and* right because their job was understanding a finished sentence, not
-continuing it. **Language models that generate text use causal self-attention.** This project does too.
+Without this mask, the model could “cheat” by reading the answer it has not written. Bidirectional models (like the
+BERT-style readers in **chapter 7b**, **since 1.1.0**) allow looking left *and* right because their job was understanding
+a finished sentence, not continuing it. **Language models that generate text use causal self-attention.** Chat and
+completion in this project do too; embedding GGUFs use bidirectional attention instead.
 
 ---
 
@@ -1373,14 +1474,15 @@ embedding**: also chapter 10.
 | Sliding-window / local layers             | Yes, for Gemma layers marked as such              |
 | Global layers                             | Yes (Qwen; some Gemma layers)                     |
 | Cross-attention to a second text          | No                                                |
-| Bidirectional BERT-style                  | No                                                |
+| Bidirectional BERT-style                  | Yes, for embedding GGUFs only (**since 1.1.0**; ch. 7b) |
 | Fancy GPU kernels (flash-attention, etc.) | No — plain educational CPU math                   |
 
 ---
 
-**In the code (kinds this port runs):** causal self-attention + GQA/MQA geometry in `layers.Attention`; Gemma sliding
-window / global via model config in `Gemma3ForCausalLM`; RoPE in `Norms.RotaryEmbedding`; prefill vs decode branches
-inside `Attention.forward` (chapter 16).
+**In the code (kinds this port runs):** causal self-attention + GQA/MQA geometry in `layers.Attention` for chat LMs;
+bidirectional self-attention in `layers.BidirectionalAttention` for BERT embedding GGUFs (**since 1.1.0**, chapter 7b);
+Gemma sliding window / global via model config in `Gemma3ForCausalLM`; RoPE in `Norms.RotaryEmbedding` (causal path);
+prefill vs decode branches inside `Attention.forward` (chapter 16).
 
 ---
 
@@ -2598,7 +2700,8 @@ You do not need to read every file. Use the tables to jump, then skim the named 
 | Folder / type                                                                          | Role in the story                                    |
 |----------------------------------------------------------------------------------------|------------------------------------------------------|
 | `llm/` — `LLM`, `LLM.Builder`, `Config`, `SamplingParams`, `GenerationStats`, `LlmAdvisor`, `LlmAdvisorMixer`, `AdvisorResponse` | Front door; named advisors + mixer; stats |
-| `models/LlmModel`, `LlmModelFactory`, `WeightBag`                                          | Shared immutable loaded model + weight bag       |
+| `models/LlmModel`, `LlmModelFactory`, `WeightBag`                                          | Shared immutable loaded model + weight bag (causal **or** embedding **since 1.1.0**) |
+| `models/internal/BertForEmbedding`, `EmbeddingEncoder` (not exported)                    | BERT GGUF encode path (**since 1.1.0**) — use `LlmModel.embed`                      |
 | `chat/` — `ChatSession`, `ChatHistory`, `LlmListener`, `LlmTextKind`, `ChatReply`, `StreamPrinter` | Dialog + unified text/status events          |
 | `tokenizer/Tokenizer`                                                                  | `tokenizer.json` / GGUF vocab → encode / decode / chat template   |
 | `Config.HfConfig` (in `llm/Config`)                                                    | `config.json` blueprint + per-LLM engine knobs       |
@@ -2611,14 +2714,15 @@ You do not need to read every file. Use the tables to jump, then skim the named 
 | `tensor/Tensor`, `Ops`, `VectorMath`, `MatmulRuntime`, `FloatKernels`                  | Arrays, float ops, parallel GEMM                     |
 | `tensor/LinearKernel`, `EmbeddingKernel` (+ `tensor/kernels/*`)                        | Dense / packed weight backends bound at layer build  |
 | `prompts/ChatPrompts`, `RagPrompts`, `AdvisorPrompts`                                 | Default system / RAG / advisor wording               |
-| `rag/` — `RagFactory`, `PreparedRag`, `RagSession`, …                                  | Text RAG: prepare docs once, retrieve, chat          |
-| `samples/Example`, `samples/Bench`, `samples/LogTriageHelloWorld` (not exported)       | Runnable demos                                       |
+| `rag/` — `RagFactory`, `PreparedRag`, `DenseRagIndex`, `HybridRagIndex`, `RagSession`, … | Text RAG: BM25 and (since **1.1.0**) dense/hybrid + classpath docs |
+| `samples/Example`, `samples/Bench`, `samples/LogTriageHelloWorld`, `samples/EmbedHelloWorld` (not exported) | Runnable demos |
 
 ### Concept → class → methods
 
 | Story idea                       | Primary type                                                         | Methods / entry points to open                                                                                |
 |----------------------------------|----------------------------------------------------------------------|---------------------------------------------------------------------------------------------------------------|
-| Open a model                     | `LlmModelFactory`, `LlmModel`, `LLM.Builder`                               | `LlmModelFactory.make(path)`; `LLM.builder(model)`; `.systemPrompt(…)`, `.build()`        |
+| Open a model                     | `LlmModelFactory`, `LlmModel`, `LLM.Builder`                               | `LlmModelFactory.make(path)`; `LLM.builder(model)` for causal; `model.embed(…)` for BERT GGUF (**since 1.1.0**) |
+| Sentence embedding (BERT GGUF)   | `LlmModel`, `BertForEmbedding`                                             | `make(gteGguf)` → `isEmbeddingModel()` → `embed(text)` (chapter **7b**, **since 1.1.0**)                        |
 | Named advisors                   | `LlmAdvisor`, `LlmAdvisorMixer`, `AdvisorResponse`, `ChatHistory`          | `LLM.Builder.advisors(mixer, advisors…)`; `LLM#runAdvisors`; `ChatSession` emits `[Name]` notes                  |
 | Chat turn                        | `ChatSession`                                                        | `llm.chat(maxTokens)`, `.listen(…)`, `.streamTo(…)`, `.send(user)`, `.clear()`                              |
 | One-shot / raw text              | `LLM`                                                                | `chatOnce(…)`, `complete(…)`, `generate(…)` → `GenerationOutput.stats()`                                      |
@@ -2633,7 +2737,7 @@ You do not need to read every file. Use the tables to jump, then skim the named 
 | Attention + KV write             | `Attention`, `KvCacheArena`, `internal.Context`                      | `Context.bindKvCache`; `Attention.forward` by `layerIndex`; prefill/decode helpers                            |
 | Pages / prefix reuse             | `BlockManager`                                                       | `canAllocate`, `allocate`, `hashBlocks`, `mayAppend`                                                          |
 | Split thinking UI                | `AssistantParts`, `ChatReply`                                        | `AssistantParts.parse`, `salvageFromThinking`                                                                 |
-| Text RAG (prepare + retrieve)    | `RagFactory`, `PreparedRag`, `RagSession`                               | `RagFactory.make` → `llm.rag(prepared).send(…)` (chapter 17)                                                  |
+| Text RAG (prepare + retrieve)    | `RagFactory`, `PreparedRag`, `DenseRagIndex`, `HybridRagIndex`, `RagSession` | `RagFactory.make` / `withEmbeddings` → `llm.rag(index).send(…)` (chapter 17; dense/hybrid **since 1.1.0**) |
 | Math bricks                      | `Ops`, `LinearKernel`, `EmbeddingKernel`, `MatmulRuntime`            | norms / MLP gates / softmax; linear & embed via kernels                                                       |
 
 ### Sample A — library use (what most apps call)
@@ -2664,13 +2768,16 @@ String raw = llm.complete("The capital of France is");
 
 // Text RAG — prepare documents once (like LlmModel), share freely
 var rag = com.igormaznitsa.nanollvm.rag.RagFactory.make(Path.of("docs"));
-String grounded = llm.rag(rag).topK(2).ask("What is the capital of France?");
+// since 1.1.0: classpath docs — RagFactory.makeResource("docs/a.md")
+//             or .builder().addResource(…); hybrid — withEmbeddings(rag, embedModel)
+String grounded = llm.rag(rag).topK(2).send("What is the capital of France?").answer();
 }
 ```
 
 Interactive CLI wiring lives in `samples.Example.main`: load status and chat share
-`samples.utils.OrderedConsole` (millis-stamped queue → one stdout), then either
-`llm.chat(…).streamTo(…)` or, when `./rag` exists, `llm.rag(prepared).streamTo(…)` (chapter 17).
+`samples.utils.OrderedConsole` (millis-stamped queue → one stdout), then model menu, optional
+RAG-mode menu (none / BM25 / dense / hybrid — dense needs gte-small; **since 1.1.0**), then
+`llm.chat(…).streamTo(…)` or `llm.rag(index).streamTo(…)` (chapter 17).
 
 ### Sample B — one generate tick (Sense A loop)
 
@@ -2761,16 +2868,39 @@ hidden → qkvProj → split Q,K,V → optional qNorm/kNorm
 
 MLP: `gateUpProj` → `Ops.siluAndMul` → `downProj` (Gemma uses `geluPytorchTanhAndMul`).
 
+### Sample G0 — BERT embedding GGUF (**since 1.1.0**)
+
+```text
+LlmModelFactory.make(gte-small.Q2_K.gguf)
+    → GgufModelLoader (arch bert) → BertForEmbedding
+    → LlmModel (isEmbeddingModel == true)
+
+model.embed(text)
+    → WordPiece + [CLS]/[SEP]
+    → token+pos+type emb → LayerNorm → bidirectional blocks
+    → mean pool → L2 normalize → float[]
+
+// LLM.builder(model) throws — use embed, not chat
+// Dense RAG: DenseRagIndex.of(prepared, model) / RagFactory.withEmbeddings (ch. 17)
+```
+
+Narrative: **chapter 7b**. Demo: `samples.EmbedHelloWorld`, `Example` menu option 4.
+
 ### Sample G — text RAG (prepare once, ask many times)
 
 ```text
-RagFactory.make(docs) / .of(…) / .builder()…
-    → CorpusLoader (chunk + Markdown cleanup)
+RagFactory.make(docs|file) / .of(…) / .builder()… / makeResource(…)   // classpath since 1.1.0
+    → CorpusLoader (chunk + Markdown cleanup; Path, text, or classpath)
     → PreparedRag.fromChunks          // passage prep + inverted BM25 + IDF
     → PreparedRag                     // shareable like LlmModel
 
-llm.rag(prepared).topK(k).send(user)
-    → PreparedRag.retrieve            // BM25 + coverage/length re-rank
+optional since 1.1.0:
+  LlmModel embed = LlmModelFactory.make(gteGguf)   // embedding encoder, not LLM.builder
+  DenseRagIndex.of(prepared, embed)                // cosine over L2 vectors
+  HybridRagIndex / RagFactory.withEmbeddings(…)    // BM25 + dense RRF
+
+llm.rag(index).topK(k).send(user)   // any RagIndex: BM25, dense, or hybrid
+    → RagIndex.retrieve
     → RagSession.formatUserMessage(…) / UserMessage.format
     → ChatSession.sendPrepared(historyUser, modelUser)
 ```
@@ -2789,8 +2919,10 @@ src/main/java/com/igormaznitsa/nanollvm/
   llm/AdvisorRunner.java / AdvisorPrompt.java
   llm/LlmAdvisor.java / LlmAdvisorMixer.java / AdvisorResponse.java / AdvisorEnrichment.java
   chat/ChatSession.java / ChatHistory.java   ← dialog + thinking split; mixer history snapshot
-  rag/RagFactory.java          ← prepare documents once
+  rag/RagFactory.java          ← prepare documents once (Path, text, classpath)
   rag/PreparedRag.java         ← shareable corpus + BM25 index (+ Passage record)
+  rag/DenseRagIndex.java       ← since 1.1.0: embedding cosine index
+  rag/HybridRagIndex.java      ← since 1.1.0: BM25 + dense RRF
   rag/RagSession.java          ← retrieve → prompt → chat (UserMessage, QueryRewrite)
   rag/CorpusLoader.java        ← package-private load/chunk pipeline
   rag/PdfTextExtractor.java
@@ -2798,8 +2930,11 @@ src/main/java/com/igormaznitsa/nanollvm/
   engine/Scheduler.java        ← prefill/decode batches
   layers/Attention.java        ← QKV cache + attendRange
   models/LlmModel.java / LlmModelFactory.java / CausalLMFactory.java
+  models/internal/BertForEmbedding.java / EmbeddingEncoder.java   ← since 1.1.0
   models/Qwen3ForCausalLM.java / Gemma3ForCausalLM.java / Lfm2ForCausalLM.java
-  tokenizer/Tokenizer.java
+  layers/BidirectionalAttention.java   ← BERT embed path (since 1.1.0)
+  tokenizer/Tokenizer.java             ← includes WordPiece for BERT GGUF
+  samples/EmbedHelloWorld.java         ← since 1.1.0
   prompts/ChatPrompts.java / RagPrompts.java / AdvisorPrompts.java
   internal/ModelLoader.java / SafetensorsReader.java
   internal/GgufModelLoader.java / GgufReader.java / GgufDequant.java
@@ -2814,7 +2949,8 @@ src/main/java/com/igormaznitsa/nanollvm/
 ### Threading reminder (API contract)
 
 One `LLM` must not run concurrent `generate` / chat calls. `LLM.cancel()` is safe from another thread and clears
-in-flight work via the scheduler. One `PreparedRag` may be shared across many `LLM`s (chapter 17).
+in-flight work via the scheduler. One `PreparedRag` may be shared across many `LLM`s (chapter 17). Dense / hybrid
+indexes (**since 1.1.0**) additionally need a live embedding `LlmModel` for query-time `embed`.
 
 ---
 
@@ -2828,9 +2964,12 @@ token, the program **looks up relevant passages** from a document collection you
 into the user turn** the chat template will see. The model still only does next-token prediction. The new work is
 **which words appear in the prompt**.
 
-This project’s RAG is **text-only** and **CPU-local**: no separate embedding neural net, no vector database. Lookup uses
-**BM25** (classic lexical ranking) over passages that were **preparsed once** at load time — the same spirit as loading
-a shared immutable `LlmModel` once and attaching many `LLM` engines to it.
+This project’s RAG is **CPU-local** and works over **text passages** you load once. The default index is **BM25**
+(classic lexical ranking) — the same spirit as loading a shared immutable `LlmModel` once and attaching many `LLM`
+engines to it. **Since 1.1.0**, you may also rank by **dense embeddings** from a separate BERT-family GGUF (e.g.
+gte-small) via `LlmModel.embed` — see **chapter 7b** for what BERT is and how encoding works — alone or **hybrid** with
+BM25 (reciprocal rank fusion). There is still **no ANN vector database**: dense search is a linear scan over
+precomputed passage vectors in process memory.
 
 ### Why bother (the humanities picture)
 
@@ -2849,18 +2988,22 @@ is short, the same model has a much better chance of quoting or paraphrasing the
 | When                      | What happens                                                                  | Analogy                           |
 |---------------------------|-------------------------------------------------------------------------------|-----------------------------------|
 | **Load time** (once)      | Read files → clean → chunk → preparsing → inverted BM25 index → `PreparedRag` | Binding the card box              |
-| **Query time** (each ask) | Tokenize question → score candidate cards → format prompt → chat generate     | Pulling a few cards, then writing |
+| **Optional (1.1.0)**      | Embed each passage with an embedding `LlmModel` → `DenseRagIndex` / hybrid    | Photographing each card once      |
+| **Query time** (each ask) | Score candidate cards (BM25 and/or cosine) → format prompt → chat generate    | Pulling a few cards, then writing |
 
 `PreparedRag` is **immutable and shareable**. Many `LLM` instances (Qwen, Gemma, several chats) may point at the
-**same** prepared index without rebuilding it — parallel to sharing one `LlmModel` across engines.
+**same** prepared index without rebuilding it — parallel to sharing one `LlmModel` across engines. A dense or hybrid
+index keeps a reference to the embedding model for query-time `embed`; close that encoder only after the index is
+unused.
 
-**In the code (organization):** package `com.igormaznitsa.nanollvm.rag`; entry `RagFactory` → `PreparedRag`; session
-`LLM.rag(index)` → `RagSession`; demo corpus folder `rag/` via `samples.utils.BundledRag` in `samples.Example`.
+**In the code (organization):** package `com.igormaznitsa.nanollvm.rag`; entry `RagFactory` → `PreparedRag` (and
+optionally `withEmbeddings`); session `LLM.rag(index)` → `RagSession`; demo corpus folder `rag/` via
+`samples.utils.BundledRag` in `samples.Example` (RAG-mode menu **since 1.1.0**).
 
 ### Load path — preparing documents
 
 ```text
-files / strings / folder
+files / strings / folder / classpath resource   (classpath since 1.1.0)
         │
         ▼
   CorpusLoader (package-private)
@@ -2871,7 +3014,11 @@ files / strings / folder
         │  NFC normalize; model vs search text; source-stem tokens on searchText
         │  termFreqs per passage; inverted postings + IDF (inside PreparedRag)
         ▼
-  PreparedRag   (passages + index + options; share freely)
+  PreparedRag   (passages + BM25 index + options; share freely)
+        │
+        │  optional since 1.1.0
+        ▼
+  DenseRagIndex / HybridRagIndex   (embed passages; keep encoder open for queries)
 ```
 
 #### Chunking and cleanup
@@ -2894,7 +3041,29 @@ At load, each passage gets:
 - **Inverted BM25:** posting lists per term; queries score only candidate docs (Okapi BM25; weak hits dropped).
 
 **In the code (load):** `RagFactory.make` / `of` / `builder` → `CorpusLoader` (UTF-8 text/markup;
-`.pdf` via `PdfTextExtractor`) → `PreparedRag.fromChunks`. Options live in `RagLoadOptions`.
+`.pdf` via `PdfTextExtractor`; **since 1.1.0** also `makeResource` / `Builder.addResource` for classpath paths,
+source label `classpath:…`) → `PreparedRag.fromChunks`. Options live in `RagLoadOptions`.
+
+#### Dense and hybrid indexes (**since 1.1.0**)
+
+Load an embedding GGUF with the same factory as chat models, then call `embed` — never `LLM.builder` on an encoder:
+
+```java
+PreparedRag lexical = RagFactory.make(Path.of("docs"));
+try (LlmModel embed = LlmModelFactory.make(Path.of("models/gte-small.Q2_K.gguf"));
+     LLM llm = LLM.builder(chatModel).build()) {
+  RagIndex index = RagFactory.withEmbeddings(lexical, embed); // HybridRagIndex
+  // or: DenseRagIndex.of(lexical, embed);
+  llm.rag(index).topK(3).send("What city is France's capital?");
+}
+```
+
+- **`DenseRagIndex`:** at build time embeds every chunk; at query time embeds the question and ranks by cosine (dot
+  product on L2-normalized vectors). Linear scan — fine for small corpora.
+- **`HybridRagIndex` / `RagFactory.withEmbeddings`:** runs BM25 and dense, fuses ranks with **RRF**. Off-topic gating
+  requires **both** indexes to agree (`isOutsideCorpus`), so paraphrases can still retrieve when lexical overlap is
+  weak.
+- Chat generation stays on the causal `LLM`; the embedding model is only for retrieval.
 
 ### Query path — one RAG turn
 
@@ -2905,8 +3074,10 @@ user text
    │             retrieval query = prior turn + current   // structural only
    │
    ▼
-PreparedRag.retrieve(query, topK)  →  List<RagHit>
-   │
+RagIndex.retrieve(query, topK)  →  List<RagHit>
+   │  PreparedRag: BM25 + coverage/length re-rank
+   │  DenseRagIndex: cosine over passage vectors          (since 1.1.0)
+   │  HybridRagIndex: BM25 + dense fused by RRF           (since 1.1.0)
    ▼
 RagSession.formatUserMessage(hits, user text, maxContextChars, compact?)
    │  (internal: UserMessage.format; wording in prompts.RagPrompts)
@@ -2926,9 +3097,8 @@ ChatSession.sendPrepared(historyUser = original text,
 History keeps what the **human typed**. The **model** sees the retrieved passages on that turn. That split matters:
 the conversation log stays readable; the generator gets the cards.
 
-When several passages match, `PreparedRag.retrieve` re-ranks by query term coverage and passage length — dense
-grounding without corpus-specific filename rules. Grounded turns also clamp sampling
-temperature.
+When several BM25 passages match, `PreparedRag.retrieve` re-ranks by query term coverage and passage length — compact
+grounding without corpus-specific filename rules. Grounded turns also clamp sampling temperature.
 
 Very short follow-ups (token **count**, not a word list) expand the **retrieval** string with the previous longer user
 turn so a one-word reply does not become a random lexical hunt through the corpus. The model still receives the current
@@ -2936,41 +3106,45 @@ user text in history; chat context does the conversational work.
 
 **In the code (query):** `RagSession.send` → `RagIndex.retrieve` → `RagSession.formatUserMessage` (or
 `UserMessage.format`) → `ChatSession.sendPrepared`. Short follow-ups may use nested `QueryRewrite` (isolated LLM
-keywords). `LLM.rag(PreparedRag)` / `rag(index, maxTokens)` open the session.
+keywords). `LLM.rag(RagIndex)` / `rag(index, maxTokens)` open the session.
 
 ### How this works *with* the model
 
 RAG does not change attention math, the KV cache, or sampling math itself. It only changes the **token ids of the last
 user message** (and thus the prefill), plus a temperature clamp on grounded turns. Everything in chapters 8–12 still
 applies: longer RAG context means a heavier prefill; tiny models can still ignore instructions, so the stack prefers
-short dense passages, compact “answer from Context” wording (no leading “say you do not know” priming),
+short passages, compact “answer from Context” wording (no leading “say you do not know” priming),
 no-hit refusal, isolation, and low temperature
 (`RagLoadOptions.forTinyModels()`, small `topK`, compact formatting in `samples.Example`).
 
-Think of three layers again:
+Think of the layers again:
 
-| Layer                 | Role                                    |
-|-----------------------|-----------------------------------------|
-| `PreparedRag`         | Your documents, already cut and indexed |
-| `RagSession`          | Retrieve + format for this turn         |
-| `LLM` / `ChatSession` | Same inference engine as plain chat     |
+| Layer                         | Role                                              |
+|-------------------------------|---------------------------------------------------|
+| `PreparedRag`                 | Your documents, cut and BM25-indexed              |
+| `DenseRagIndex` / hybrid      | Optional embedding rank (**since 1.1.0**)         |
+| `RagSession`                  | Retrieve + format for this turn                   |
+| `LLM` / `ChatSession`         | Same inference engine as plain chat               |
 
 ### Project demo corpus
 
-The repository folder `rag/` holds sample Markdown (engine notes, geography facts). `samples.Example` loads it through
-`samples.utils.BundledRag` when present (`-Dnanollvm.rag.dir` / `NANOLLVM_RAG_DIR` override the path), builds one `PreparedRag`, and
-runs `rag?>` instead of plain `?>`.
+The repository folder `rag/` holds sample Markdown (fairy-tale / Grimm demos). `samples.Example` loads it through
+`samples.utils.BundledRag` when present (`-Dnanollvm.rag.dir` / `NANOLLVM_RAG_DIR` override the path). **Since 1.1.0**
+the sample asks for a **RAG mode** after you pick a chat model: none (plain chat), BM25, dense, or hybrid (dense and
+hybrid need `models/gte-small.Q2_K.gguf`). Choosing gte-small alone still opens the embedding REPL
+(`samples.EmbedHelloWorld` is the minimal embed demo).
 
 ### What this RAG is *not*
 
-- Not an embedding model or ANN vector store.
+- Not an ANN / external vector database (dense search is in-process, linear).
 - Not a guarantee of factual truth — only a way to **offer** text; the generator may still mis-copy it.
 - Not a classifier of user intents or languages: preparation is about **documents**, not about scripting replies.
+- Dense retrieval is **not** available on `LLM.Builder` — keep the chat model and the embedding `LlmModel` separate.
 
 ### A fair one-sentence summary
 
-> **Prepare documents once into a shareable BM25 index; each question pulls a few passages into the chat prompt; the
-> model then continues as usual.**
+> **Prepare documents once into a shareable BM25 index (and optionally, since 1.1.0, dense or hybrid embeddings); each
+> question pulls a few passages into the chat prompt; the model then continues as usual.**
 
 **In the code (full map):** chapter 16 Sample G; types under `rag/`.
 
@@ -3002,6 +3176,8 @@ Short glossary. For the Java home of each idea, prefer the **In the code** notes
 | Inference             | Running the pretrained model to produce text (not training)                                      |
 | Token                 | A vocabulary unit with an integer id                                                             |
 | Embedding (token)     | Matrix $E \in \mathbb{R}^{V \times H}$; row lookup starts the forward pass                       |
+| BERT / embedding GGUF | Bidirectional encoder → mean-pool → L2 vector via `LlmModel.embed` (**since 1.1.0**; ch. 7b)     |
+| Sentence embedding    | One fixed-length vector summarizing a string (cosine ≈ dot product after L2)                    |
 | RoPE                  | Rotary Position Embedding: rotate pairs inside Q/K by angle(position); encodes relative distance |
 | Tied embeddings       | Same matrix for input lookup and LM-head scoring (`tie_word_embeddings`)                         |
 | Vocabulary            | Set of token ids the model may emit ($V =$ `vocab_size`)                                         |
@@ -3033,7 +3209,9 @@ Short glossary. For the Java home of each idea, prefer the **In the code** notes
 | RAG                   | Retrieval-augmented generation: look up documents, put them in the prompt, then generate         |
 | `PreparedRag`         | Immutable shareable corpus + BM25 index (`Passage` record; load once, like `LlmModel`)                |
 | `PreparedRag.Passage` | Load-time model text, search text, and term frequencies for one chunk                               |
-| BM25                  | Lexical ranking over passages (this project: inverted index, no embedding model)                 |
+| BM25                  | Lexical ranking over passages (inverted index; default RAG path)                                     |
+| `DenseRagIndex`       | Embedding cosine index over chunks (**since 1.1.0**; needs embedding `LlmModel`)                     |
+| `HybridRagIndex`      | BM25 + dense fused by RRF (**since 1.1.0**; `RagFactory.withEmbeddings`)                             |
 | `RagSession`          | Retrieve → format prompt → `ChatSession.sendPrepared`                                            |
 
 ---
@@ -3045,7 +3223,7 @@ This project is a **teaching instrument**, not a production cloud service.
 - It runs on the ordinary processor and keeps numbers in a simple, memory-hungry form.
 - It is slower than GPU systems you meet in products.
 - Small models hallucinate, waffle, and latch onto polite filler — especially if prompts are vague. RAG can offer the
-  right passage and the generator may still garble it.
+  right passage (BM25 and, since **1.1.0**, dense/hybrid embeddings) and the generator may still garble it.
 - “Understanding,” “knowing,” “thinking,” and “meaning” here are **metaphors** for statistical continuation and inner
   arithmetic. A humanities reader is right to keep that distinction sharp.
 
@@ -3070,8 +3248,8 @@ learned retriever (chapter 17).
 A single list of the links woven into earlier chapters. Prefer the in-chapter notes for context; use this as a bookmark
 page.
 
-Implementation homes stay in the **In the code** notes, **chapter 16**, and **chapter 17** (RAG); this index is papers
-and format docs only.
+Implementation homes stay in the **In the code** notes, **chapter 16**, **chapter 7b** (BERT embeddings **since
+1.1.0**), and **chapter 17** (RAG); this index is papers and format docs only.
 
 | Topic                      | Link                                                                                                                               |
 |----------------------------|------------------------------------------------------------------------------------------------------------------------------------|
@@ -3084,6 +3262,7 @@ and format docs only.
 | Model `config` class          | [PretrainedConfig](https://huggingface.co/docs/transformers/main/en/main_classes/configuration)                                    |
 | Safetensors                | [HF docs](https://huggingface.co/docs/safetensors) · [GitHub format notes](https://github.com/huggingface/safetensors)             |
 | GGUF                       | [ggml GGUF docs](https://github.com/ggml-org/ggml/blob/master/docs/gguf.md) · (this guide §7a — layout, dtypes, LFM2)              |
+| BERT (original paper)      | [Devlin et al. (arXiv)](https://arxiv.org/abs/1810.04805) · (this guide §7b — embedding GGUFs **since 1.1.0**)                    |
 | LFM2                       | [Liquid LFM2 blog](https://www.liquid.ai/blog/liquid-foundation-models-v2-our-second-series-of-generative-ai-models) · [LFM2.5-2.6B-GGUF](https://huggingface.co/LiquidAI/LFM2.5-2.6B-GGUF) |
 | RoPE                       | [Su et al. / RoFormer (arXiv)](https://arxiv.org/abs/2104.09864)                                                                   |
 | Token / positional embeds  | (this guide ch. 10; RoPE paper above)                                                                                              |
@@ -3099,6 +3278,7 @@ and format docs only.
 | Nucleus (top-p) sampling   | [Holtzman et al. (arXiv)](https://arxiv.org/abs/1904.09751)                                                                        |
 | Softmax                    | [Wikipedia](https://en.wikipedia.org/wiki/Softmax_function)                                                                        |
 | BM25 / Okapi ranking       | [Robertson & Zaragoza survey (PDF)](https://www.staff.city.ac.uk/~sbrp622/papers/foundations_bm25_review.pdf)                      |
-| Text RAG in this project   | (this guide ch. 17 — `RagFactory`, `PreparedRag`, `CorpusLoader`, `RagSession`)                     |
+| Text RAG in this project   | (this guide ch. 17 — BM25; dense/hybrid + classpath **since 1.1.0**)                                                               |
+| BERT embed + dense RAG     | (this guide §7b + ch. 17 — `LlmModel.embed`, `DenseRagIndex`, `withEmbeddings`)                                                    |
 
 ---
