@@ -5,9 +5,10 @@
  * {@code exceptions}, {@code tokenizer}, {@code utils}.
  *
  * <p><b>Not exported:</b> {@code prompts} (engine wording), {@code models.internal} (CausalLM graph /
- * weights; in-module {@code LlmModelAccess} bridge), {@code samples}, {@code engine}, {@code layers},
- * {@code tensor}, {@code internal} (safetensors / GGUF / JSON helpers). Application code should use
- * {@code LlmModelFactory} / {@code LLM} / {@code RagFactory}.
+ * weights; in-module {@code LlmModelAccess} bridge), {@code engine}, {@code layers}, {@code tensor},
+ * {@code internal} (safetensors / GGUF / JSON helpers). Application code should use
+ * {@code LlmModelFactory} / {@code LLM} / {@code RagFactory}. Runnable demos live in the separate
+ * {@code nano-vllm-java-samples} Maven module.
  *
  * <p>GGUF tokenizer build uses exported
  * {@link com.igormaznitsa.nanollvm.tokenizer.GgufTokenizerSource}.

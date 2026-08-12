@@ -14,7 +14,7 @@ import java.util.Locale;
  *
  * <p>Args: optional model directory (default {@code models/Gemma3-270M} via
  * {@link BundledModels}). Example:
- * {@code mvn -q exec:java -Dexec.mainClass=com.igormaznitsa.nanollvm.samples.LogTriageHelloWorld
+ * {@code mvn -pl nano-vllm-java-samples -q exec:java -Dexec.mainClass=com.igormaznitsa.nanollvm.samples.LogTriageHelloWorld
  * -Dexec.args=/opt/models/Gemma3-270M}
  */
 public final class LogTriageHelloWorld {

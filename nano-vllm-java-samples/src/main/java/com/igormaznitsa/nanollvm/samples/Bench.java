@@ -20,7 +20,7 @@ import java.util.stream.IntStream;
  * irrelevant; the goal is wall-clock tok/s).
  *
  * <p>Args: optional model path/name; optional sequence count (default {@code 8}).
- * Typical: {@code MAVEN_OPTS="-Xmx8g" mvn -q exec:java
+ * Typical: {@code MAVEN_OPTS="-Xmx8g" mvn -pl nano-vllm-java-samples -q exec:java
  * -Dexec.mainClass=com.igormaznitsa.nanollvm.samples.Bench
  * -Dexec.args="models/Qwen3-0.6B 8"}
  */

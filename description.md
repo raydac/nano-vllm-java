@@ -3114,6 +3114,7 @@ src/main/java/com/igormaznitsa/nanollvm/
   internal/Context.java        ← per-step KV / conv slot maps
   utils/NanoLlvmProps.java / ResourceLimits.java   ← ResourceLimits since 1.1.0
   samples/utils/BundledModels.java / BundledRag.java / OrderedConsole.java
+  (in Maven module nano-vllm-java-samples)
   tensor/LinearKernel.java / EmbeddingKernel.java / MatmulRuntime.java
   tensor/kernels/DenseF32LinearKernel.java / PackedLinearKernel.java / …
   exceptions/…

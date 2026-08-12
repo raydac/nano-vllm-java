@@ -98,7 +98,7 @@ try (LlmModel model = LlmModelFactory.make(Path.of("models/gte-small.Q2_K.gguf")
 }
 ```
 
-Sample: `com.igormaznitsa.nanollvm.samples.EmbedHelloWorld`. Do not use with `LLM.builder` / chat.
+Sample: `nano-vllm-java-samples` → `com.igormaznitsa.nanollvm.samples.EmbedHelloWorld`. Do not use with `LLM.builder` / chat.
 
 ## Selecting a model
 

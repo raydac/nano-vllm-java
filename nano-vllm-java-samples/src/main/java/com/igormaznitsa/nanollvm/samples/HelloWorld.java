@@ -12,7 +12,7 @@ import java.nio.file.Path;
  *
  * <p>Args: optional model directory (default {@code models/Gemma3-270M} via
  * {@link BundledModels}). Example:
- * {@code mvn -q exec:java -Dexec.mainClass=com.igormaznitsa.nanollvm.samples.HelloWorld}
+ * {@code mvn -pl nano-vllm-java-samples -q exec:java -Dexec.mainClass=com.igormaznitsa.nanollvm.samples.HelloWorld}
  */
 public final class HelloWorld {
 

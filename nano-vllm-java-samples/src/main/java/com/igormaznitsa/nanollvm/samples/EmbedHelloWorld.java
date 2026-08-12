@@ -10,7 +10,7 @@ import java.nio.file.Path;
  * Minimal BERT embedding demo (GTE-small GGUF).
  *
  * <p>Args: optional {@code .gguf} path (default {@code models/gte-small.Q2_K.gguf}).
- * Example: {@code mvn -q exec:java -Dexec.mainClass=com.igormaznitsa.nanollvm.samples.EmbedHelloWorld}
+ * Example: {@code mvn -pl nano-vllm-java-samples -q exec:java -Dexec.mainClass=com.igormaznitsa.nanollvm.samples.EmbedHelloWorld}
  *
  * @since 1.1.0
  */

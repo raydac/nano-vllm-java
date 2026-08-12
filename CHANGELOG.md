@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased] — 1.1.0-SNAPSHOT
 
+### Changed
+- Maven layout is now multi-module: parent `nano-vllm-java-pom`, library `nano-vllm-java`, demos
+  `nano-vllm-java-samples`. Sample mains are no longer packaged in the library JAR; run demos with
+  `mvn -pl nano-vllm-java-samples exec:java` from the repository root.
+
 ### Added
 - **ONNX folder weight import** (Tier A): `LlmModelFactory.make(folder)` loads `config.json` + tokenizer + `.onnx` (root or `onnx/`) like safetensors — Qwen3 / Gemma3 / Llama chat and BERT embeddings; no ONNX Runtime.
 - **Llama** causal architecture (`LlamaForCausalLM`) for HF safetensors and ONNX (Tiny-LLM-ONNX base demo;

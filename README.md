@@ -132,20 +132,22 @@ What this shows: **pure Java** in / out, **your** model directory, one `LlmModel
 `chat(…).send(…).answer()` — no Python sidecar. Swap the path for another Gemma3 layout or use Qwen3 the same way
 (with `.systemPrompt(…)` if you want a fixed role).
 
-In this repository the same program lives as non-exported
+In this repository the same program lives in the `nano-vllm-java-samples` module as
 `com.igormaznitsa.nanollvm.samples.LogTriageHelloWorld` (defaults to `models/Gemma3-270M` via
 `samples.utils.BundledModels`; optional first arg overrides the path). The sample also prints
 `[timing]` lines for model load, engine build, chat turn, and total wall time:
 
 ```bash
-mvn -q exec:java -Dexec.mainClass=com.igormaznitsa.nanollvm.samples.LogTriageHelloWorld
+mvn -pl nano-vllm-java-samples -q exec:java \
+  -Dexec.mainClass=com.igormaznitsa.nanollvm.samples.LogTriageHelloWorld
 # or: … -Dexec.args=/opt/models/Gemma3-270M
 ```
 
 For the smallest in-repo smoke test (say hello, print the reply):
 
 ```bash
-mvn -q exec:java -Dexec.mainClass=com.igormaznitsa.nanollvm.samples.HelloWorld
+mvn -pl nano-vllm-java-samples -q exec:java \
+  -Dexec.mainClass=com.igormaznitsa.nanollvm.samples.HelloWorld
 ```
 
 More API samples (streaming, RAG, GGUF, advisors) are in [Library quick start](#library-quick-start).
@@ -182,10 +184,13 @@ mvn test
 mvn package
 ```
 
+This is a multi-module reactor: parent `nano-vllm-java-pom`, library `nano-vllm-java`, demos
+`nano-vllm-java-samples`. Run Maven from the **repository root**.
+
 Artifacts:
 
-- `target/nano-vllm-java-1.0.0.jar` — library JAR (JPMS module `com.igormaznitsa.nanollvm`; no `Main-Class`)
-- `target/classes/` — compiled module for development runs
+- `nano-vllm-java/target/nano-vllm-java-1.1.0-SNAPSHOT.jar` — library JAR (JPMS module `com.igormaznitsa.nanollvm`; no `Main-Class`)
+- `nano-vllm-java-samples/target/…` — demo classes (not published to Maven Central)
 
 Tests use the Vector incubator module (`jvm.module.args` in the POM). Production runs should use the same flags
 (see [Run from the CLI](#run-from-the-cli)).
@@ -211,15 +216,14 @@ requires com.igormaznitsa.nanollvm;
 
 Public API packages: `models`, `llm`, `chat`, `rag`, `tokenizer`, `utils`, `exceptions`.
 (`prompts` and `models.internal` are module-private.)
-`samples` (`HelloWorld`, `LogTriageHelloWorld`, `Example`, `Bench`, `samples.utils`), `engine`, `layers`, `tensor`, and
-`internal` are **not** exported — use `LlmModelFactory` / `LLM` / `RagFactory` from application code.
+`engine`, `layers`, `tensor`, and `internal` are **not** exported — use `LlmModelFactory` / `LLM` /
+`RagFactory` from application code. Runnable demos (`HelloWorld`, `LogTriageHelloWorld`, `Example`,
+`Bench`, `samples.utils`) live in the separate `nano-vllm-java-samples` module.
 
-The packaged JAR is a **library** (no `Main-Class` manifest entry). In-repo demos stay runnable via Maven or the
-module path:
+The packaged library JAR has no `Main-Class`. In-repo demos:
 
 ```bash
-mvn -q exec:java
-# or: java … -m com.igormaznitsa.nanollvm/com.igormaznitsa.nanollvm.samples.Example
+mvn -pl nano-vllm-java-samples -q exec:java
 ```
 
 ## Download and load models
@@ -264,7 +268,7 @@ base/completion toy (~10M), not chat-tuned; useful to smoke-test ONNX load, not 
 .\models\download-tiny-llm-onnx.ps1
 # or: models\download-tiny-llm-onnx.cmd
 
-mvn -q exec:java \
+mvn -pl nano-vllm-java-samples -q exec:java \
   -Dexec.mainClass=com.igormaznitsa.nanollvm.samples.Example \
   -Dexec.args=models/Tiny-LLM-ONNX
 ```
@@ -276,7 +280,7 @@ Llama + ChatML (~135M). Prefer this over the base
 ```bash
 ./models/download-smollm2-135m-instruct-onnx.sh
 
-mvn -q exec:java \
+mvn -pl nano-vllm-java-samples -q exec:java \
   -Dexec.mainClass=com.igormaznitsa.nanollvm.samples.Example \
   -Dexec.args=models/SmolLM2-135M-Instruct-ONNX
 ```
@@ -294,7 +298,7 @@ Activations and KV remain float32 either way. Engine warmup is **off** by defaul
 
 ```bash
 ./models/download-lfm2.5-2.6b-gguf.sh
-mvn -q exec:java \
+mvn -pl nano-vllm-java-samples -q exec:java \
   -Dexec.mainClass=com.igormaznitsa.nanollvm.samples.Example \
   -Dexec.args=models/LFM2.5-2.6B-Q4_K_M.gguf
 ```
@@ -365,17 +369,17 @@ enabled); the reply goes to **stdout**.
 
 ```bash
 # After downloading a model — heap defaults to -Xmx16g via .mvn/jvm.config
-mvn -q exec:java
+mvn -pl nano-vllm-java-samples -q exec:java
 ```
 
 Pick a model interactively, or pass it explicitly:
 
 ```bash
-mvn -q exec:java -Dexec.args="models/Gemma3-270M"
+mvn -pl nano-vllm-java-samples -q exec:java -Dexec.args="models/Gemma3-270M"
 ```
 
 ```bash
-NANOLLVM_MODEL=models/Qwen3-0.6B mvn -q exec:java
+NANOLLVM_MODEL=models/Qwen3-0.6B mvn -pl nano-vllm-java-samples -q exec:java
 ```
 
 **RAG mode:** if the directory `rag/` exists (the repo ships Grimm / Little Red Riding Hood `.txt` and fact cards),
@@ -422,15 +426,15 @@ Maven note: `exec:java` runs in the **same JVM as Maven**. Vector API flags and 
 `.mvn/jvm.config`](.mvn/jvm.config) (`--add-modules=jdk.incubator.vector`, `-Xmx16g`). The exec plugin does not fork, so
 `<jvmArgs>` in the POM are not applied — override with `MAVEN_OPTS` when needed.
 
-### Run the packaged JAR (module path)
+### Run packaged JARs (classpath)
 
-After `mvn package`:
+After `mvn package` (prefer `mvn -pl nano-vllm-java-samples exec:java` when possible):
 
 ```bash
 java --add-modules jdk.incubator.vector \
   -Xmx16g \
-  -p target/nano-vllm-java-1.0.0.jar \
-  -m com.igormaznitsa.nanollvm/com.igormaznitsa.nanollvm.samples.Example \
+  -cp nano-vllm-java/target/nano-vllm-java-1.1.0-SNAPSHOT.jar:nano-vllm-java-samples/target/nano-vllm-java-samples-1.1.0-SNAPSHOT.jar \
+  com.igormaznitsa.nanollvm.samples.Example \
   models/Qwen3-0.6B
 ```
 
@@ -441,7 +445,7 @@ Replace the main class with `com.igormaznitsa.nanollvm.samples.Bench` for throug
 Loads the same default model and runs random token-id batches (scheduler / KV stress):
 
 ```bash
-mvn -q exec:java \
+mvn -pl nano-vllm-java-samples -q exec:java \
   -Dexec.mainClass=com.igormaznitsa.nanollvm.samples.Bench \
   -Dexec.args="models/Qwen3-0.6B 8"
 ```
