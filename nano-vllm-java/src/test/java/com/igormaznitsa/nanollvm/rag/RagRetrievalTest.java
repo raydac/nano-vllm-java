@@ -75,6 +75,16 @@ class RagRetrievalTest {
   }
 
   @Test
+  void conversationalGlueDoesNotKeepOffTopicBmwInsideCorpus() {
+    PreparedRag index = RagFactory.of(
+      "Little Red Riding Hood met a wolf. She thought about the path. "
+        + "What do you think the grandmother will say? I think about flowers.");
+    assertTrue(index.isOutsideCorpus("what do you think about BMW?"));
+    assertTrue(index.retrieve("what do you think about BMW?", 3).isEmpty());
+    assertFalse(index.isOutsideCorpus("Little Red Riding Hood wolf grandmother"));
+  }
+
+  @Test
   void offTopicCodingRequestDoesNotRetrieveOnWeakCorpusOverlap() {
     PreparedRag index = RagFactory.of(
         "In 1829 the position should have been awarded by Jacob Grimm, "

@@ -4,14 +4,13 @@
 
 $ErrorActionPreference = 'Stop'
 
-$ModelsRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
+$ModelsRoot = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
 $Dest = Join-Path $ModelsRoot 'Tiny-LLM-ONNX'
 $OnnxDir = Join-Path $Dest 'onnx'
 $OnnxBase = 'https://huggingface.co/onnx-community/Tiny-LLM-ONNX/resolve/main'
 $TokBase = 'https://huggingface.co/arnir0/Tiny-LLM/resolve/main'
 
 New-Item -ItemType Directory -Force -Path $OnnxDir | Out-Null
-Set-Location $Dest
 
 function Get-Curl {
     $cmd = Get-Command curl.exe -ErrorAction SilentlyContinue
@@ -24,10 +23,14 @@ function Get-Curl {
 $Curl = Get-Curl
 
 Write-Host 'Downloading config / generation_config ...'
-& $Curl -L --fail --retry 3 -C - -o 'config.json' "$OnnxBase/config.json"
-if ($LASTEXITCODE -ne 0) { throw "Download failed for config.json (exit $LASTEXITCODE)" }
-& $Curl -L --fail --retry 3 -C - -o 'generation_config.json' "$OnnxBase/generation_config.json"
-if ($LASTEXITCODE -ne 0) { throw "Download failed for generation_config.json (exit $LASTEXITCODE)" }
+foreach ($pair in @(
+    @{ Name = 'config.json'; Url = "$OnnxBase/config.json" },
+    @{ Name = 'generation_config.json'; Url = "$OnnxBase/generation_config.json" }
+)) {
+    $out = Join-Path $Dest $pair.Name
+    & $Curl -L --fail --retry 3 -C - -o $out $pair.Url
+    if ($LASTEXITCODE -ne 0) { throw "Download failed for $($pair.Name) (exit $LASTEXITCODE)" }
+}
 
 Write-Host 'Downloading tokenizer from arnir0/Tiny-LLM ...'
 foreach ($f in @(
@@ -36,9 +39,13 @@ foreach ($f in @(
     'special_tokens_map.json',
     'tokenizer.model'
 )) {
-    & $Curl -L --fail --retry 3 -C - -o $f "$TokBase/$f"
+    $out = Join-Path $Dest $f
+    & $Curl -L --fail --retry 3 -C - -o $out "$TokBase/$f"
     if ($LASTEXITCODE -ne 0) {
         Write-Host "Optional tokenizer file skipped: $f"
+        if (Test-Path -LiteralPath $out) {
+            Remove-Item -LiteralPath $out -Force -ErrorAction SilentlyContinue
+        }
     }
 }
 

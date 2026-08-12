@@ -402,13 +402,7 @@ public final class PreparedRag implements RagIndex {
       if (source == null || source.isBlank()) {
         return List.of();
       }
-      String name;
-      try {
-        Path fileName = Path.of(source).getFileName();
-        name = fileName == null ? source : fileName.toString();
-      } catch (RuntimeException e) {
-        name = source;
-      }
+      String name = Lexicon.fileNameOnly(source);
       int dot = name.lastIndexOf('.');
       if (dot > 0) {
         name = name.substring(0, dot);
@@ -424,6 +418,13 @@ public final class PreparedRag implements RagIndex {
         tokens.add(name);
       }
       return List.copyOf(tokens);
+    }
+
+    static String fileNameOnly(final String source) {
+      String path =
+        source.startsWith("classpath:") ? source.substring("classpath:".length()) : source;
+      int slash = Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'));
+      return slash >= 0 ? path.substring(slash + 1) : path;
     }
   }
 
@@ -462,6 +463,18 @@ public final class PreparedRag implements RagIndex {
 
     private static final int MAX_SELECTED_TERMS = 5;
     private static final int CONTENTFUL_MIN_LEN = 3;
+
+    private static final Set<String> QUERY_GLUE = Set.of(
+      "a", "an", "the", "and", "or", "but", "if", "then", "than", "so", "as", "at", "by", "for",
+      "from", "in", "into", "of", "on", "to", "with", "without", "about", "over", "under", "up",
+      "down", "out", "off", "not", "no", "yes", "do", "does", "did", "doing", "done", "be", "am",
+      "is", "are", "was", "were", "been", "being", "have", "has", "had", "having", "can", "could",
+      "may", "might", "must", "shall", "should", "will", "would", "i", "me", "my", "we", "our",
+      "you", "your", "he", "she", "it", "they", "them", "their", "this", "that", "these", "those",
+      "what", "which", "who", "whom", "whose", "where", "when", "why", "how", "please", "tell",
+      "say", "said", "ask", "think", "know", "like", "want", "need", "get", "got", "just", "also",
+      "only", "very", "too", "more", "most", "some", "any", "all", "own", "same", "other", "such"
+    );
 
     private QueryTerms() {
     }
@@ -512,7 +525,7 @@ public final class PreparedRag implements RagIndex {
         return false;
       }
       List<String> contentful = surfaceTerms.stream()
-        .filter(QueryTerms::isContentful)
+        .filter(QueryTerms::isSalientContentful)
         .toList();
       if (contentful.isEmpty()) {
         return false;
@@ -560,6 +573,10 @@ public final class PreparedRag implements RagIndex {
 
     private static boolean isContentful(final String term) {
       return term != null && term.length() >= CONTENTFUL_MIN_LEN;
+    }
+
+    private static boolean isSalientContentful(final String term) {
+      return isContentful(term) && !QUERY_GLUE.contains(term);
     }
 
     private static List<String> distinctiveKnown(final List<String> known) {

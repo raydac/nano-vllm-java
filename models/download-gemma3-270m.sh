@@ -12,6 +12,8 @@ BASE="https://huggingface.co/google/gemma-3-270m-it/resolve/main"
 AUTH=()
 if [[ -n "${HF_TOKEN:-}" ]]; then
   AUTH=(-H "Authorization: Bearer ${HF_TOKEN}")
+elif [[ -n "${HF_HOME:-}" && -f "${HF_HOME}/token" ]]; then
+  AUTH=(-H "Authorization: Bearer $(cat "${HF_HOME}/token")")
 elif [[ -f "${HOME}/.cache/huggingface/token" ]]; then
   AUTH=(-H "Authorization: Bearer $(cat "${HOME}/.cache/huggingface/token")")
 fi

@@ -45,6 +45,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Stream / classpath model load: `ModelFileId` + `ModelFileSource`, `LlmModelFactory.make(source)`, and `fromClasspath` / `fromClasspathGguf` helpers (bytes stay in heap; no disk cache). Filesystem `make(Path)` unchanged.
 
 ### Fixed
+- Windows model download scripts (`.ps1` / `.cmd`) resolve their install dir via `$PSScriptRoot`,
+  write with absolute paths (no longer change the caller’s working directory), prefer `curl.exe`,
+  and the Gemma script also honors `HF_HOME\token`.
+- Lexical RAG off-topic detection no longer treats conversational fillers (`what` / `think` /
+  `about` / …) as topic evidence, so queries like “what do you think about BMW?” stay outside
+  fairy-tale corpora even when those glue words appear in the documents.
 - ChatML models without `<think>` vocab tokens no longer set `Tokenizer.invitesThinking()`; think
   invitation is vocab-gated for HF and GGUF loads alike. Library system prompts stay empty
   regardless (demo policies live in samples).

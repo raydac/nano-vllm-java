@@ -4,13 +4,12 @@
 
 $ErrorActionPreference = 'Stop'
 
-$ModelsRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
+$ModelsRoot = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
 $Dest = Join-Path $ModelsRoot 'SmolLM2-135M-Instruct-ONNX'
 $OnnxDir = Join-Path $Dest 'onnx'
 $Base = 'https://huggingface.co/onnx-community/SmolLM2-135M-Instruct-ONNX/resolve/main'
 
 New-Item -ItemType Directory -Force -Path $OnnxDir | Out-Null
-Set-Location $Dest
 
 function Get-Curl {
     $cmd = Get-Command curl.exe -ErrorAction SilentlyContinue
@@ -23,10 +22,11 @@ function Get-Curl {
 $Curl = Get-Curl
 
 Write-Host 'Downloading config / generation_config ...'
-& $Curl -L --fail --retry 3 -C - -o 'config.json' "$Base/config.json"
-if ($LASTEXITCODE -ne 0) { throw "Download failed for config.json (exit $LASTEXITCODE)" }
-& $Curl -L --fail --retry 3 -C - -o 'generation_config.json' "$Base/generation_config.json"
-if ($LASTEXITCODE -ne 0) { throw "Download failed for generation_config.json (exit $LASTEXITCODE)" }
+foreach ($f in @('config.json', 'generation_config.json')) {
+    $out = Join-Path $Dest $f
+    & $Curl -L --fail --retry 3 -C - -o $out "$Base/$f"
+    if ($LASTEXITCODE -ne 0) { throw "Download failed for $f (exit $LASTEXITCODE)" }
+}
 
 Write-Host 'Downloading tokenizer sidecars ...'
 foreach ($f in @(
@@ -36,7 +36,8 @@ foreach ($f in @(
     'vocab.json',
     'merges.txt'
 )) {
-    & $Curl -L --fail --retry 3 -C - -o $f "$Base/$f"
+    $out = Join-Path $Dest $f
+    & $Curl -L --fail --retry 3 -C - -o $out "$Base/$f"
     if ($LASTEXITCODE -ne 0) { throw "Download failed for $f (exit $LASTEXITCODE)" }
 }
 

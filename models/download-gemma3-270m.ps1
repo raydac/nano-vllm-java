@@ -4,12 +4,11 @@
 
 $ErrorActionPreference = 'Stop'
 
-$ModelsRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
+$ModelsRoot = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
 $Dest = Join-Path $ModelsRoot 'Gemma3-270M'
 $Base = 'https://huggingface.co/google/gemma-3-270m-it/resolve/main'
 
 New-Item -ItemType Directory -Force -Path $Dest | Out-Null
-Set-Location $Dest
 
 function Get-Curl {
     $cmd = Get-Command curl.exe -ErrorAction SilentlyContinue
@@ -23,9 +22,18 @@ function Get-HfAuthHeaders {
     if ($env:HF_TOKEN) {
         return @('-H', "Authorization: Bearer $($env:HF_TOKEN)")
     }
+    if ($env:HF_HOME) {
+        $tokenFile = Join-Path $env:HF_HOME 'token'
+        if (Test-Path -LiteralPath $tokenFile) {
+            $tok = (Get-Content -LiteralPath $tokenFile -Raw).Trim()
+            if ($tok) {
+                return @('-H', "Authorization: Bearer $tok")
+            }
+        }
+    }
     $tokenFile = Join-Path $env:USERPROFILE '.cache\huggingface\token'
-    if (Test-Path $tokenFile) {
-        $tok = (Get-Content -Raw $tokenFile).Trim()
+    if (Test-Path -LiteralPath $tokenFile) {
+        $tok = (Get-Content -LiteralPath $tokenFile -Raw).Trim()
         if ($tok) {
             return @('-H', "Authorization: Bearer $tok")
         }
@@ -38,7 +46,8 @@ $Auth = Get-HfAuthHeaders
 
 function Download-File([string]$Name) {
     Write-Host "Downloading $Name ..."
-    & $Curl -L --fail --retry 3 -C - @Auth -o $Name "$Base/$Name"
+    $out = Join-Path $Dest $Name
+    & $Curl -L --fail --retry 3 -C - @Auth -o $out "$Base/$Name"
     if ($LASTEXITCODE -ne 0) {
         Write-Host 'Download failed. Gemma is gated: accept the license at' -ForegroundColor Red
         Write-Host 'https://huggingface.co/google/gemma-3-270m-it' -ForegroundColor Red
@@ -65,6 +74,6 @@ Write-Host 'Downloading model.safetensors (~0.5GB) ...'
 Download-File 'model.safetensors'
 
 Write-Host "Installed to $Dest"
-Get-ChildItem | Format-Table Name, Length, LastWriteTime
-$size = (Get-ChildItem -Recurse -File | Measure-Object -Property Length -Sum).Sum
+Get-ChildItem $Dest | Format-Table Name, Length, LastWriteTime
+$size = (Get-ChildItem -LiteralPath $Dest -Recurse -File | Measure-Object -Property Length -Sum).Sum
 Write-Host ("Total: {0:N1} MB" -f ($size / 1MB))

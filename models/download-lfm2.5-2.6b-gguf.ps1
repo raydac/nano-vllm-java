@@ -4,7 +4,7 @@
 
 $ErrorActionPreference = 'Stop'
 
-$ModelsRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
+$ModelsRoot = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
 $File = 'LFM2.5-2.6B-Q4_K_M.gguf'
 $Dest = Join-Path $ModelsRoot $File
 $Base = 'https://huggingface.co/LiquidAI/LFM2.5-2.6B-GGUF/resolve/main'
@@ -26,5 +26,5 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 Write-Host "Installed to $Dest"
-Get-Item $Dest | Format-Table Name, Length, LastWriteTime
-Write-Host "Hint: mvn -pl nano-vllm-java-samples -q exec:java -Dexec.mainClass=com.igormaznitsa.nanollvm.samples.Example -Dexec.args=$Dest"
+Get-Item -LiteralPath $Dest | Format-Table Name, Length, LastWriteTime
+Write-Host "Hint: mvn -pl nano-vllm-java-samples -q exec:java -Dexec.mainClass=com.igormaznitsa.nanollvm.samples.Example `"-Dexec.args=$Dest`""

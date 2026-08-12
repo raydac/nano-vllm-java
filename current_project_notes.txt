@@ -10,7 +10,7 @@
 - **`description.md`:** audited for 1.1.0 — ONNX Tier A (**§7c**), Llama, SmolLM2/Tiny demos; ChatFormat /
   vocab-gated think / neutral `SamplingDefaults` / fail-unknown-arch; educational Qwen/Gemma tables kept as examples;
   **format restriction** tables in ch. 7 / 7a / 7c
-- Optional download scripts: Qwen3 / Gemma3 / LFM2 GGUF / gte-small / **Tiny-LLM-ONNX** / **SmolLM2-135M-Instruct-ONNX**
+- Optional download scripts: Qwen3 / Gemma3 / LFM2 GGUF / gte-small / **Tiny-LLM-ONNX** / **SmolLM2-135M-Instruct-ONNX** (`.sh` + Windows `.ps1`/`.cmd`; PS1 uses `$PSScriptRoot` + absolute outs)
 - ONNX JavaDoc: Tier A contracts + {@code @since 1.1.0} on public Onnx* APIs / ModelFileId ONNX roles / LlmModelFactory note
 
 - Advisors: `advisors(LlmAdvisorMixer, LlmAdvisor…)`; unique non-blank names; one batched `generate`; library ships no default advisor names/prompts (samples own `SampleAdvisorPrompts`); optional `advisorNoteFilter`
@@ -24,6 +24,7 @@
 - JPMS: exports models/llm/chat/rag/exceptions/tokenizer/utils; non-exported `models.internal` (`LlmModelAccess`), prompts, engine/layers/tensor/internal
 
 - **RAG:** `RagFactory` → `PreparedRag` (BM25); `addResource` / `makeResource` for classpath docs; optional `withEmbeddings` → `HybridRagIndex` (`DenseRagIndex` + RRF); package-private `CorpusLoader`; public API ~12 types (+ `PdfTextExtractor`)
+- **RAG off-topic:** `isOutsideCorpus` ignores conversational glue (`what`/`think`/`about`/…); source stems use `/`+`\` basename (Windows-safe)
 - **Samples** (`nano-vllm-java-samples`): linear `main` flows (`HelloWorld`, `EmbedHelloWorld`, `LogTriageHelloWorld`, `Bench`, `Example`); `Example` defaults to **Lanterna TUI** (`ExampleTui`; `--cli` → `ExampleCli`); shared wiring in `ExampleSessionSupport`; SmolLM2 Instruct ONNX (chat) + Tiny-LLM (base); gte-small embeddings; `BundledModels` / `BundledRag` / `OrderedConsole` in `samples.utils`
 
 
@@ -41,6 +42,7 @@
 - GGUF packed by default; late unpack does not release bytes still bound by other engines
 - `TEXT_DEBUG`: optional via `emitDebugPrompts`; RAG corpus/advisor notes are trusted prompt input by design
 - Dense RAG: index-time `LlmModel.embed` of all chunks; query cosine (dot); hybrid = BM25 + dense RRF; off-topic = both indexes agree
+- Lexical off-topic uses salient query terms only (skips conversational glue); file-name stems split on `/` and `\`
 
 
 ## 3. Technical Debt & Refactoring
@@ -57,6 +59,7 @@
 - Library de-productized (chat format markers / sample-owned demo policy); ONNX Tier A + Llama + SmolLM2 Instruct demo
 - `Example` Lanterna TUI: classic palette, bordered buttons, mouse via xterm 1000+**1006 SGR** (Lanterna stock X10-only clicks fail on modern terminals)
 - Optional GGUF perf backlog remains
+- Windows download scripts audited/hardened (parity with `.sh` URLs/files OK)
 
 
 ## 5. Known Issues & Limitations
@@ -70,6 +73,7 @@
   samples `SampleModelAssumptions` (stderr WARNING + JUnit abort) when local weights or `./rag`
   are absent — not shipped with the library JAR
 - Tiny-LLM-ONNX (~10M) is a toy checkpoint — expect incoherent text; context is only 1024 tokens
+- Lexical `isOutsideCorpus` ignores conversational glue words; still BM25/heuristic (no LLM judge)
 
 
 ## 6. Open Questions & Pending Decisions

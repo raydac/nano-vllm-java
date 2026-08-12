@@ -5,7 +5,7 @@
 
 $ErrorActionPreference = 'Stop'
 
-$ModelsRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
+$ModelsRoot = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
 $File = 'gte-small.Q2_K.gguf'
 $Dest = Join-Path $ModelsRoot $File
 $Base = 'https://huggingface.co/ChristianAzinn/gte-small-gguf/resolve/main'
@@ -27,5 +27,5 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 Write-Host "Installed to $Dest"
-Get-Item $Dest | Format-Table Name, Length, LastWriteTime
+Get-Item -LiteralPath $Dest | Format-Table Name, Length, LastWriteTime
 Write-Host "Note: embedding model (BERT), context up to 512 tokens — not for LLM chat samples."
