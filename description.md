@@ -264,6 +264,13 @@ worksheets change while answering. Close order: close each **`LLM` first**, then
 Causal graphs use internal `CausalLMFactory` + weight loaders; embedding GGUFs use `EmbeddingEncoderFactory`. Each
 `LLM.builder(model).build()` allocates its own KV arena via `Transformer` (chapter 16).
 
+```java
+try (LlmModel model = LlmModelFactory.make(Path.of("models/Qwen3-0.6B"));
+     LLM llm = LLM.builder(model).maxModelLen(2048).build()) {
+  String answer = llm.chat(256).send("What is 2+2?").answer();
+} // close LLM first, then LlmModel (try-with-resources reverse order)
+```
+
 **Further reading:** Hub layout and `from_pretrained`-style folders are covered in Hugging Face
 [Transformers docs](https://huggingface.co/docs/transformers); this Java port is inspired
 by [nano-vllm](https://github.com/GeeeekExplorer/nano-vllm) and the serving ideas in
@@ -1085,6 +1092,21 @@ only when a range starts mid-block).
 | **Unpack at load** | `make(path, io, true)` | mmap → float32 while loading; **no** packed heap copy of those tensors |
 | **Late unpack** | `LLM.Builder.allowUnpackParameters()` on a packed model | Materializes float32 via `WeightBag.asDense()`; **packed payloads may remain** until no other engine still needs them (peak RAM can hold both) |
 
+```java
+Path gguf = Path.of("models/LFM2.5-2.6B-Q4_K_M.gguf");
+
+// Packed default (smallest weight RAM; dequant on matmul)
+try (LlmModel model = LlmModelFactory.make(gguf);
+     LLM llm = LLM.builder(model)
+         // optional: .allowUnpackParameters()  // late float32 for this engine
+         .build()) {
+  String answer = llm.chat(256).send("Hello").answer();
+}
+
+// Unpack at load instead (no packed heap copy of those tensors):
+// LlmModelFactory.make(gguf, LlmListeners.silent(), true);
+```
+
 Activations and the KV cache remain float32 either way. A ~1.7 GB Q4_K_M 2.6B file stays near that size for packed
 weights; default `-Xmx16g` in `.mvn/jvm.config` is still useful headroom for KV / scratch.
 
@@ -1397,6 +1419,20 @@ live in protobuf field **9** (legacy) or **13**.
 
 - Chat ONNX demo: `models/download-smollm2-135m-instruct-onnx.sh` → `models/SmolLM2-135M-Instruct-ONNX/`
 - Base ONNX smoke test: `models/download-tiny-llm-onnx.sh` → `models/Tiny-LLM-ONNX/`
+
+```java
+// Instruct / ChatML folder (same factory as safetensors)
+try (LlmModel model = LlmModelFactory.make(Path.of("models/SmolLM2-135M-Instruct-ONNX"));
+     LLM llm = LLM.builder(model).maxModelLen(2048).build()) {
+  String answer = llm.chat(256).send("What is 2+2?").answer();
+}
+
+// Tiny-LLM-ONNX is a base / completion toy — use complete, not chat templates:
+// try (LlmModel toy = LlmModelFactory.make(Path.of("models/Tiny-LLM-ONNX"));
+//      LLM llm = LLM.builder(toy).build()) {
+//   String cont = llm.complete("Once upon a time");
+// }
+```
 
 ### Summary
 
@@ -2496,6 +2532,18 @@ Sense C from the thinking chapter: marked scratchpad versus fair copy.
 `LLM.complete` / raw `generate`; templates via `Tokenizer.applyChatTemplate`; defaults in `ChatPrompts.systemFor`
 (chapter 16).
 
+```java
+try (LlmModel model = LlmModelFactory.make(modelDir);
+     LLM llm = LLM.builder(model).build()) {
+  // Chat: history + chat template + optional <think> parse
+  String chat = llm.chat(256).send("What is 2+2?").answer();
+  String once = llm.chatOnce("What is 2+2?");           // one turn, no kept session
+
+  // Completion: raw continuation (no chat template)
+  String raw = llm.complete("The capital of France is");
+}
+```
+
 ---
 
 ## 15. A full walk-through: “What is 2+2?”
@@ -2856,7 +2904,7 @@ text. The *impression* of understanding is an effect of that chain, shaped by tr
 
 The earlier chapters tell the story. This one is the **map to the source**: which Java types and methods implement each
 idea, plus short samples you can recognize in the tree under
-`src/main/java/com/igormaznitsa/nanollvm/`.
+`nano-vllm-java/src/main/java/com/igormaznitsa/nanollvm/` (demos live in `nano-vllm-java-samples`).
 
 Every earlier chapter’s **In the code** note points here. Use this chapter when you want methods, samples, and paths in
 one place.
@@ -2885,7 +2933,7 @@ packages.
 | `layers/` — `Attention`, `BidirectionalAttention`, `Sampler`, `Linear`, `Norms`, …     | Attention, sampling, projections, norms/RoPE         | **no** |
 | `tensor/` — `Tensor`, `Ops`, `MatmulRuntime`, `LinearKernel`, `EmbeddingKernel`, …     | Arrays, float ops, parallel GEMM                     | **no** |
 | `prompts/` — `ChatPrompts`, `RagPrompts`, `AdvisorPrompts`                             | Default system / RAG / advisor wording               | **no** |
-| `samples/` — `Example`, `HelloWorld`, `Bench`, `EmbedHelloWorld`, `LogTriageHelloWorld`, `utils/Bundled*` | Runnable demos | **no** |
+| *(Maven module `nano-vllm-java-samples`)* `Example`, `HelloWorld`, `Bench`, `EmbedHelloWorld`, `LogTriageHelloWorld`, `utils/Bundled*` | Runnable demos (not in the library JAR) | n/a |
 
 `Config.HfConfig` (in `llm/Config`) holds the blueprint plus per-LLM engine knobs (`maxModelLen`, `kvHeapFraction`, …).
 
@@ -2916,9 +2964,12 @@ packages.
 ### Sample A — library use (what most apps call)
 
 ```java
+import com.igormaznitsa.nanollvm.llm.LLM;
+import com.igormaznitsa.nanollvm.llm.LlmAdvisor;
+import com.igormaznitsa.nanollvm.llm.LlmAdvisorMixer;
 import com.igormaznitsa.nanollvm.models.LlmModel;
 import com.igormaznitsa.nanollvm.models.LlmModelFactory;
-import com.igormaznitsa.nanollvm.llm.LLM;
+import com.igormaznitsa.nanollvm.rag.RagFactory;
 
 import java.nio.file.Path;
 
@@ -2926,37 +2977,113 @@ try (LlmModel model = LlmModelFactory.make(Path.of("models/Qwen3-0.6B"));
      LLM llm = LLM.builder(model)
          .maxModelLen(2048)
          .kvHeapFraction(0.25f)                 // default; sizes KV arena vs heap
-         .systemPrompt("Answer briefly and factually.")  // Qwen-style; Gemma often empty
-         // optional: .advisors(LlmAdvisorMixer.defaults(),
-         //     LlmAdvisor.builder().name("Facts").prompt("…").build(), …)
-         // optional: .warmup()  // off by default
+         .systemPrompt("Answer briefly and factually.")  // optional; demos often set policy themselves
+         .advisors(LlmAdvisorMixer.defaults(),
+             LlmAdvisor.builder().name("Facts").prompt("List only hard facts useful for the user.").build())
+         // optional: .advisorNoteFilter(note -> !note.contains("setup boilerplate"))
+         // optional: .warmup()                 // off by default
          // optional: .allowUnpackParameters()  // late float32 for packed GGUF
          .build()) {
 
-  // Multi-turn (history + template + optional <think> parse)
-  String reply = llm.chat(256).send("What is 2+2?").answer();
+  // Multi-turn with streaming (history + template + optional <think> parse)
+  var session = llm.chat(256).streamTo(System.err, System.out, false);
+  String reply = session.send("What is 2+2?").answer();
 
-  // One-shot chat
+  // One-shot chat (no kept session)
   String once = llm.chatOnce("What is 2+2?");
 
   // Raw continuation (no chat template)
   String raw = llm.complete("The capital of France is");
 
   // Text RAG — prepare documents once (like LlmModel), share freely
-  var rag = com.igormaznitsa.nanollvm.rag.RagFactory.make(Path.of("docs"));
-  // since 1.1.0: classpath docs — RagFactory.makeResource("docs/a.md")
-  //             or .builder().addResource(…); hybrid — withEmbeddings(rag, embedModel)
+  var rag = RagFactory.make(Path.of("docs"));
+  // since 1.1.0: classpath — RagFactory.makeResource("docs/a.md") / .builder().addResource(…)
+  //             hybrid — RagFactory.withEmbeddings(rag, embedModel)  (chapter 17)
   String grounded = llm.rag(rag).topK(2).send("What is the capital of France?").answer();
 } // close LLM before LlmModel (try-with-resources closes in reverse declaration order)
 
 // Embedding GGUF (since 1.1.0): never LLM.builder — call model.embed (chapter 7b)
-// Classpath / streams: LlmModelFactory.make(ModelFileSources.classpath(…)) or fromClasspath*
+// Classpath / streams: see Sample A1 below
 ```
 
-Interactive CLI wiring lives in `samples.Example.main`: load status and chat share
+Interactive CLI wiring lives in `nano-vllm-java-samples` → `samples.Example.main`: load status and chat share
 `samples.utils.OrderedConsole` (millis-stamped queue → one stdout), then model menu, optional
 RAG-mode menu (none / BM25 / dense / hybrid — dense needs gte-small; **since 1.1.0**), then
 `llm.chat(…).streamTo(…)` or `llm.rag(index).streamTo(…)` (chapter 17).
+
+### Sample A1 — classpath / stream sources (**since 1.1.0**)
+
+```java
+import com.igormaznitsa.nanollvm.llm.LLM;
+import com.igormaznitsa.nanollvm.models.LlmModelFactory;
+import com.igormaznitsa.nanollvm.models.ModelFileSources;
+
+// HF folder on the classpath (config + tokenizer + safetensors or ONNX)
+try (var model = LlmModelFactory.fromClasspath(MyApp.class.getClassLoader(), "models/Qwen3-0.6B");
+     var llm = LLM.builder(model).build()) {
+  llm.chatOnce("Hello");
+}
+
+// Same idea via ModelFileSource (custom streams also implement ModelFileSource)
+var source = ModelFileSources.classpath(MyApp.class.getClassLoader(), "models/Qwen3-0.6B");
+try (var model = LlmModelFactory.make(source)) { /* … */ }
+
+// GGUF resource: LlmModelFactory.fromClasspathGguf(loader, "models/gte-small.Q2_K.gguf");
+// Note: ONNX external_data sidecars need make(Path), not classpath streams.
+```
+
+### Sample A2 — cancel and timeout
+
+```java
+import com.igormaznitsa.nanollvm.llm.LLM;
+import com.igormaznitsa.nanollvm.models.LlmModel;
+import com.igormaznitsa.nanollvm.models.LlmModelFactory;
+
+import java.nio.file.Path;
+import java.time.Duration;
+import java.util.List;
+
+try (LlmModel model = LlmModelFactory.make(Path.of("models/Qwen3-0.6B"));
+     LLM llm = LLM.builder(model).build()) {
+
+  // Wall-clock limit on a raw generate batch (null / ZERO = unbounded)
+  llm.generate(
+      List.of("Write a short poem about rivers."),
+      llm.defaultSampling(128),
+      false,
+      Duration.ofSeconds(30),
+      tokenId -> { /* optional stream; must not re-enter generate */ });
+
+  // Abort an in-flight generate from another thread
+  Thread.ofVirtual().start(llm::cancel);
+}
+```
+
+### Sample A3 — CPU threads and ResourceLimits
+
+```java
+import com.igormaznitsa.nanollvm.llm.LLM;
+import com.igormaznitsa.nanollvm.models.LlmModel;
+import com.igormaznitsa.nanollvm.models.LlmModelFactory;
+import com.igormaznitsa.nanollvm.utils.ResourceLimits;
+
+import java.nio.file.Path;
+
+// Process-wide parser / corpus / history caps (optional; defaults are already set)
+ResourceLimits.setCurrent(
+    ResourceLimits.builder()
+        .maxCorpusFiles(2_000)
+        .maxHistoryMessages(100)
+        .build());
+
+try (LlmModel model = LlmModelFactory.make(Path.of("models/Qwen3-0.6B"));
+     LLM llm = LLM.builder(model)
+         .cpuThreads(4)          // or .allCpuThreads() / .disableMultiCpu()
+         .build()) {
+  llm.chatOnce("Hello");
+}
+// Builder cpuThreads wins over -Dnanollvm.cpu.threads
+```
 
 ### Sample B — one generate tick (Sense A loop)
 
@@ -3002,10 +3129,11 @@ That is the code behind “write notebooks at prefill; reread them at decode.”
 
 ```text
 LlmModelFactory.make(dir|gguf|ModelFileSource):
-  HF: Config loads HfConfig from config.json
-      internal.ModelLoader.loadWeights → WeightBag → CausalLMFactory.create (Qwen/Gemma)
-      Tokenizer.fromPretrained
+  HF safetensors: HfConfig + ModelLoader → WeightBag → CausalLMFactory
+                  (Qwen3 / Gemma3 / Llama)
+  HF ONNX (1.1.0): OnnxModelLoader → same causal / BERT graphs
   GGUF: GgufModelLoader → Lfm2ForCausalLM or BertForEmbedding; Tokenizer.fromGguf
+  Classpath / streams (1.1.0): ModelFileSources → heap bytes (no disk cache)
 LLM.builder(causalModel).build():   // rejected for embedding models
   Transformer allocates KvCacheArena (per LLM); optional warmup / allowUnpackParameters
 ```
@@ -3086,8 +3214,7 @@ Narrative and design notes: **chapter 17**.
 ### How to read the tree on disk
 
 ```text
-src/main/java/com/igormaznitsa/nanollvm/
-  samples/Example.java / HelloWorld.java / Bench.java / EmbedHelloWorld.java / LogTriageHelloWorld.java
+nano-vllm-java/src/main/java/com/igormaznitsa/nanollvm/
   llm/LLM.java                 ← start here for API
   llm/Config.java / SamplingParams.java
   chat/LlmListener.java / LlmListeners.java / LlmTextKind.java
@@ -3108,7 +3235,7 @@ src/main/java/com/igormaznitsa/nanollvm/
   models/ModelFileId.java / ModelFileSource.java / ModelFileSources.java   ← since 1.1.0
   models/internal/CausalLMFactory.java / WeightBag.java
   models/internal/BertForEmbedding.java / EmbeddingEncoder.java   ← since 1.1.0
-  models/internal/Qwen3ForCausalLM.java / Gemma3ForCausalLM.java / Lfm2ForCausalLM.java
+  models/internal/Qwen3ForCausalLM.java / Gemma3ForCausalLM.java / LlamaForCausalLM.java / Lfm2ForCausalLM.java
   layers/BidirectionalAttention.java   ← BERT embed path (since 1.1.0)
   tokenizer/Tokenizer.java / GgufTokenizerSource.java
   prompts/ChatPrompts.java / RagPrompts.java / AdvisorPrompts.java
@@ -3116,11 +3243,13 @@ src/main/java/com/igormaznitsa/nanollvm/
   internal/GgufModelLoader.java / GgufReader.java / GgufDequant.java
   internal/Context.java        ← per-step KV / conv slot maps
   utils/NanoLlvmProps.java / ResourceLimits.java   ← ResourceLimits since 1.1.0
-  samples/utils/BundledModels.java / BundledRag.java / OrderedConsole.java
-  (in Maven module nano-vllm-java-samples)
   tensor/LinearKernel.java / EmbeddingKernel.java / MatmulRuntime.java
   tensor/kernels/DenseF32LinearKernel.java / PackedLinearKernel.java / …
   exceptions/…
+
+nano-vllm-java-samples/src/main/java/com/igormaznitsa/nanollvm/samples/
+  Example.java / HelloWorld.java / Bench.java / EmbedHelloWorld.java / LogTriageHelloWorld.java
+  utils/BundledModels.java / BundledRag.java / OrderedConsole.java
 ```
 
 ### Threading reminder (API contract)
@@ -3222,6 +3351,25 @@ At load, each passage gets:
 `.pdf` via `PdfTextExtractor`; **since 1.1.0** also `makeResource` / `Builder.addResource` for classpath paths,
 source label `classpath:…`) → `PreparedRag.fromChunks`. Options live in `RagLoadOptions`.
 
+```java
+// BM25 only — prepare once, share across many LLM engines
+PreparedRag prepared = RagFactory.make(Path.of("rag"), RagLoadOptions.forTinyModels());
+// or classpath (since 1.1.0):
+// PreparedRag prepared = RagFactory.makeResource("docs/facts.md");
+// PreparedRag prepared = RagFactory.builder()
+//     .addResource(MyApp.class, "/docs/a.md")
+//     .add("inline.txt", "Paris is the capital of France.")
+//     .build();
+
+assert prepared.isOutsideCorpus("what do you think about BMW?");
+assert prepared.retrieve("what do you think about BMW?", 3).isEmpty();
+
+try (LLM llm = LLM.builder(chatModel).build()) {
+  String grounded = llm.rag(prepared).topK(2)
+      .send("Who are the Brothers Grimm?").answer();
+}
+```
+
 #### Dense and hybrid indexes (**since 1.1.0**)
 
 Load an embedding GGUF with the same factory as chat models, then call `embed` — never `LLM.builder` on an encoder:
@@ -3269,7 +3417,7 @@ RagSession.formatUserMessage(hits, user text, maxContextChars, compact?)
 ChatSession.sendPrepared(historyUser = original text,
                          modelUser   = RAG prompt,
                          isolateGeneration?)
-   │  isolate (default on Gemma): template = system seed + this turn only
+   │  isolateGeneration default false; when true, template = system seed + this turn only
    │  so prior wrong answers cannot latch the next generate
    ▼
  ordinary chat generate (chapters 14–15)
@@ -3296,7 +3444,7 @@ RAG does not change attention math, the KV cache, or sampling math itself. It on
 user message** (and thus the prefill), plus a temperature clamp on grounded turns. Everything in chapters 8–12 still
 applies: longer RAG context means a heavier prefill; tiny models can still ignore instructions, so the stack prefers
 short passages, compact “answer from Context” wording (no leading “say you do not know” priming),
-no-hit refusal, isolation, and low temperature
+no-hit refusal, optional `isolateGeneration` (library default **false**; demos may enable it), and low temperature
 (`RagLoadOptions.forTinyModels()`, small `topK`, compact formatting in `samples.Example`).
 
 Think of the layers again:

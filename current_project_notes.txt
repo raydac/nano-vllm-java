@@ -9,7 +9,8 @@
 - Library: `LlmModelFactory.make` → shared `LlmModel` (`AutoCloseable`); also `make(ModelFileSource)` / `fromClasspath*` (stream → heap; no disk cache); `LLM.Builder` (warmup **off** by default); close **LLM first**, then **model**
 - **`description.md`:** audited for 1.1.0 — ONNX Tier A (**§7c**), Llama, SmolLM2/Tiny demos; ChatFormat /
   vocab-gated think / neutral `SamplingDefaults` / fail-unknown-arch; educational Qwen/Gemma tables kept as examples;
-  **format restriction** tables in ch. 7 / 7a / 7c
+  **format restriction** tables in ch. 7 / 7a / 7c; **usage Java snippets** in ch. 4 / 7a / 7c / 14 / 16 / 17
+  (load+chat, GGUF/ONNX, stream/cancel, classpath, advisors, BM25+classpath RAG)
 - Optional download scripts: Qwen3 / Gemma3 / LFM2 GGUF / gte-small / **Tiny-LLM-ONNX** / **SmolLM2-135M-Instruct-ONNX** (`.sh` + Windows `.ps1`/`.cmd`; PS1 ASCII-only + `$PSScriptRoot` + absolute outs)
 - ONNX JavaDoc: Tier A contracts + {@code @since 1.1.0} on public Onnx* APIs / ModelFileId ONNX roles / LlmModelFactory note
 
@@ -60,6 +61,7 @@
 - `Example` Lanterna TUI: classic palette, bordered buttons, mouse via xterm 1000+**1006 SGR** (Lanterna stock X10-only clicks fail on modern terminals)
 - Optional GGUF perf backlog remains
 - Windows download scripts audited/hardened (parity with `.sh` URLs/files OK)
+- `description.md` usage snippets added (API-facing chapters)
 
 
 ## 5. Known Issues & Limitations
