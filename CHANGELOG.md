@@ -8,11 +8,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased] — 1.1.0-SNAPSHOT
 
 ### Changed
+- Interactive `Example` demo defaults to a **Lanterna** terminal UI (model/RAG radios, classic
+  console palette, bordered Send/Clear/Quit buttons, chat panes, mouse-friendly controls); use
+  `--cli` for the classic line-oriented console. Shared session wiring lives in
+  `ExampleSessionSupport` / `ExampleTui` / `ExampleCli` under `nano-vllm-java-samples`.
+- Library chat/sampling/RAG defaults are architecture-marker driven, not product-tuned: `Tokenizer.ChatFormat`
+  (ChatML / turn-based / plain), neutral `SamplingDefaults`, no Qwen EOS id fallback, no default
+  unknown-arch→Qwen3, no Gemma-only session retry or RAG isolate. Demo policies (system prompts,
+  turn-based top-k, unusable-answer recovery, advisor setup-boilerplate filter) live in
+  `nano-vllm-java-samples` (`SampleChatPrompts`, `Example`, `HelloWorld`).
+- Advisor demo role text, shared advisor instructions, Greek name catalog, and advisor-aware
+  system add-on are samples-only (`SampleAdvisorPrompts`). The library uses caller-supplied
+  `LlmAdvisor` name/prompt only, plus structural note-mixing helpers.
+- Demo advisor role strings and advisor-aware system add-on moved to samples
+  (`SampleAdvisorPrompts`); library no longer appends advisor prose to system prompts.
+- Library chat defaults no longer inject model-family system prose (Qwen `<think>` rules, plain
+  assistant text). `ChatPrompts.systemFor` is always empty; demos set policy via
+  `SampleChatPrompts` in `nano-vllm-java-samples`.
 - Maven layout is now multi-module: parent `nano-vllm-java-pom`, library `nano-vllm-java`, demos
   `nano-vllm-java-samples`. Sample mains are no longer packaged in the library JAR; run demos with
   `mvn -pl nano-vllm-java-samples exec:java` from the repository root.
 
 ### Added
+- `Tokenizer.ChatFormat` / `isTurnBasedChat()` / `skipSpecialTokensOnChatDecode()` (product-named
+  chat helpers such as {@code isGemmaChat} removed; use format/architecture APIs).
+- RMSNorm offset scale flag renamed to {@code onePlusWeight} (math convention, not a product name).
+- `ChatSession.recoverUnusableAnswers` / `unusableAnswer` / `unusableAnswerFallback` (opt-in).
+- `LLM.Builder.advisorNoteFilter` so apps can drop demo setup fillers before advisor mix.
 - **ONNX folder weight import** (Tier A): `LlmModelFactory.make(folder)` loads `config.json` + tokenizer + `.onnx` (root or `onnx/`) like safetensors — Qwen3 / Gemma3 / Llama chat and BERT embeddings; no ONNX Runtime.
 - **Llama** causal architecture (`LlamaForCausalLM`) for HF safetensors and ONNX (Tiny-LLM-ONNX base demo;
   SmolLM2-135M-Instruct-ONNX chat demo via `models/download-smollm2-135m-instruct-onnx.sh`).
@@ -23,6 +45,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Stream / classpath model load: `ModelFileId` + `ModelFileSource`, `LlmModelFactory.make(source)`, and `fromClasspath` / `fromClasspathGguf` helpers (bytes stay in heap; no disk cache). Filesystem `make(Path)` unchanged.
 
 ### Fixed
+- ChatML models without `<think>` vocab tokens no longer set `Tokenizer.invitesThinking()`; think
+  invitation is vocab-gated for HF and GGUF loads alike. Library system prompts stay empty
+  regardless (demo policies live in samples).
 - Generation stops at `maxModelLen` (and clamps `maxTokens` to remaining context) so short-context models such as Tiny-LLM-ONNX no longer crash RoPE past `max_position_embeddings`.
 - ONNX load skips non-float graph constants (e.g. INT64) and scalar initializers so transformers.js exports like SmolLM2 Instruct load cleanly; unknown / float8 / nibble weight types fail with an explicit error instead of silent ignore.
 - Decode stops early on degenerate token loops (exact repeated blocks, long same-token streaks, or overused n-grams) so tiny models cannot fill the whole `maxTokens` budget with the same paragraph; Example caps compact ONNX demos (SmolLM2 / Tiny) to 256 new tokens in chat and RAG.

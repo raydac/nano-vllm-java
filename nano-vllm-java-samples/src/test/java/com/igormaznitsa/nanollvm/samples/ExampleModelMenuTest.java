@@ -3,6 +3,7 @@ package com.igormaznitsa.nanollvm.samples;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.igormaznitsa.nanollvm.samples.utils.SampleModelAssumptions;
 import java.io.BufferedReader;
 import java.io.StringReader;
 import java.nio.file.Path;

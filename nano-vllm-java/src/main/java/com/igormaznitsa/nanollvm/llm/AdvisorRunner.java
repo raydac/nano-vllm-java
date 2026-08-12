@@ -52,7 +52,7 @@ final class AdvisorRunner {
     List<AdvisorResponse> responses = IntStream.range(0, advisors.size())
       .mapToObj(i -> new AdvisorResponse(
         advisors.get(i).name(),
-        parseAnswer(llm.tokenizer(), outputs.get(i))))
+        parseAnswer(llm, outputs.get(i))))
       .toList();
 
     List<String> noteTexts = responses.stream()
@@ -79,13 +79,14 @@ final class AdvisorRunner {
     return llm.tokenizer().applyChatTemplate(ChatMessages.toTemplateMaps(turn), true, false);
   }
 
-  private static String parseAnswer(final Tokenizer tokenizer, final LLM.GenerationOutput output) {
+  private static String parseAnswer(final LLM llm, final LLM.GenerationOutput output) {
+    Tokenizer tokenizer = llm.tokenizer();
     String raw = output.text();
     if (raw == null || raw.isBlank()) {
-      raw = tokenizer.decode(output.tokenIds(), tokenizer.isGemmaChat());
+      raw = tokenizer.decode(output.tokenIds(), tokenizer.skipSpecialTokensOnChatDecode());
     }
     String answer = ChatReply.parse(raw).answer().strip();
-    return AdvisorPrompt.noteOrFallback(answer);
+    return AdvisorPrompt.usableNote(answer, llm.advisorNoteFilter());
   }
 
   private static SamplingParams advisorSampling(final SamplingParams main) {

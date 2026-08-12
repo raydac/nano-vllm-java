@@ -23,7 +23,7 @@ import java.util.List;
 import java.util.stream.IntStream;
 
 /**
- * Immutable LFM2 hybrid causal LM (short-conv + GQA) loaded from GGUF weight names.
+ * Causal LM for the {@code lfm2} architecture family (short-conv + GQA) from GGUF weight names.
  *
  * <p>Weights may stay packed (default) or be dense float32 after {@link WeightBag#asDense()}.
  */
@@ -200,7 +200,8 @@ public record Lfm2ForCausalLM(Lfm2Model model, ParallelLMHead lmHead) implements
       final int layerIndex
     ) {
       if (!"silu".equals(config.effectiveActivation()) && !"silu".equals(config.hiddenAct())) {
-        throw new IllegalArgumentException("only silu supported for LFM2");
+        throw new IllegalArgumentException(
+          "lfm2 architecture expects silu, got " + config.effectiveActivation());
       }
       String blk = ggufBlk(layerIndex);
       return new Lfm2MLP(

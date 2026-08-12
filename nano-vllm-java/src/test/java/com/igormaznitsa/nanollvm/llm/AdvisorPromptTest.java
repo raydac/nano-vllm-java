@@ -29,11 +29,10 @@ class AdvisorPromptTest {
   @Test
   void mixSkipsEmptyAndDedupesIdenticalNotes() {
     String mixed = AdvisorPrompt.mix(
-        "Question?",
+      "Question?",
       List.of("Practical note.", "", "Practical note.", "Future note."));
     assertTrue(mixed.contains(AdvisorPrompts.mixNoteLine("Practical note.")));
     assertTrue(mixed.contains(AdvisorPrompts.mixNoteLine("Future note.")));
-    assertFalse(mixed.contains(AdvisorPrompts.EMPTY_NOTE_FALLBACK));
     assertTrue(mixed.endsWith("Question?"), mixed);
     assertEquals(1,
       mixed.split(Pattern.quote(AdvisorPrompts.mixNoteLine("Practical note.")), -1).length - 1);
@@ -46,13 +45,11 @@ class AdvisorPromptTest {
         "- The Brothers Grimm were Jacob Grimm and Wilhelm Grimm.\n"
           + "- The Brothers Grimm were born in Hanau, Germany."),
       List.of(
-        AdvisorPrompts.EMPTY_NOTE_FALLBACK,
-        AdvisorPrompts.EMPTY_NOTE_FALLBACK,
+        "",
         "The Brothers Grimm were born in Hanau, Germany."));
     assertTrue(mixed.endsWith("who are the grimm brothers?"), mixed);
     assertTrue(mixed.contains(AdvisorPrompts.mixNoteLine(
       "The Brothers Grimm were born in Hanau, Germany.")), mixed);
-    assertFalse(mixed.contains(AdvisorPrompts.EMPTY_NOTE_FALLBACK), mixed);
     assertFalse(mixed.contains("Context:"), mixed);
   }
 
@@ -61,10 +58,7 @@ class AdvisorPromptTest {
     String base = RagPrompts.withContext(
       "who are the grimm brothers?",
       "- The Brothers Grimm were Jacob Grimm and Wilhelm Grimm.");
-    String mixed = AdvisorPrompt.mix(base, List.of(
-      AdvisorPrompts.EMPTY_NOTE_FALLBACK,
-      "",
-      "Okay, I understand."));
+    String mixed = AdvisorPrompt.mix(base, List.of("", "  "));
     assertEquals(base.strip(), mixed);
   }
 
@@ -82,25 +76,13 @@ class AdvisorPromptTest {
   }
 
   @Test
-  void forAdvisorAppendsSharedInstructions() {
-    String role = AdvisorPrompt.groundedRole("Practical viewpoint.");
-    assertTrue(role.startsWith("Practical viewpoint."));
-    assertTrue(role.contains(AdvisorPrompts.FOR_ADVISOR));
-  }
-
-  @Test
-  void claimLabelUsesGreekNamesThenAdvisorN() {
-    assertEquals("Alpha", AdvisorPrompt.claimLabel(0));
-    assertEquals("Gamma", AdvisorPrompt.claimLabel(2));
-    assertEquals("Advisor25", AdvisorPrompt.claimLabel(24));
-    assertEquals("Advisor27", AdvisorPrompt.claimLabel(26));
-  }
-
-  @Test
-  void counselorNameOnlyDetectsLabels() {
-    assertTrue(AdvisorPrompts.isCounselorNameOnly("Gamma"));
-    assertTrue(AdvisorPrompts.isCounselorNameOnly(" alpha "));
-    assertFalse(AdvisorPrompts.isCounselorNameOnly("The Brothers Grimm were Jacob Grimm."));
+  void dialogTurnUsesCallerRolePromptAsSystem() {
+    List<ChatMessage> turn = AdvisorPrompt.dialogTurn(
+      "Practical viewpoint.",
+      List.of(),
+      "hello");
+    assertEquals(ChatRole.SYSTEM, turn.getFirst().role());
+    assertEquals("Practical viewpoint.", turn.getFirst().content());
   }
 
   @Test
@@ -118,23 +100,23 @@ class AdvisorPromptTest {
   }
 
   @Test
-  void noteOrFallbackUsesDefaultWhenBlankOrBoilerplate() {
-    assertEquals(AdvisorPrompts.EMPTY_NOTE_FALLBACK, AdvisorPrompt.noteOrFallback(""));
-    assertEquals(AdvisorPrompts.EMPTY_NOTE_FALLBACK, AdvisorPrompt.noteOrFallback("  "));
-    assertEquals(AdvisorPrompts.EMPTY_NOTE_FALLBACK, AdvisorPrompt.noteOrFallback(null));
-    assertEquals(AdvisorPrompts.EMPTY_NOTE_FALLBACK,
-      AdvisorPrompt.noteOrFallback("Okay, I understand."));
-    assertEquals("Useful hint.", AdvisorPrompt.noteOrFallback(" Useful hint. "));
+  void usableNoteDropsBlank() {
+    assertEquals("", AdvisorPrompt.usableNote(""));
+    assertEquals("", AdvisorPrompt.usableNote("  "));
+    assertEquals("", AdvisorPrompt.usableNote(null));
+    assertEquals("Useful hint.", AdvisorPrompt.usableNote(" Useful hint. "));
+    assertEquals("", AdvisorPrompt.usableNote(
+      "Okay, I understand.",
+      note -> !note.toLowerCase(java.util.Locale.ROOT).contains("understand")));
   }
 
   @Test
-  void mixKeepsRealNoteAndSkipsEmptyFallback() {
+  void mixKeepsRealNotes() {
     String mixed = AdvisorPrompt.mix(
       "who was their father?",
-      List.of("Okay, I understand.", "Philipp Wilhelm Grimm was their father."));
+      List.of("Philipp Wilhelm Grimm was their father."));
     assertTrue(mixed.contains("Philipp Wilhelm Grimm was their father."), mixed);
     assertTrue(mixed.endsWith("who was their father?"), mixed);
-    assertFalse(mixed.contains(AdvisorPrompts.EMPTY_NOTE_FALLBACK), mixed);
   }
 
   @Test
@@ -160,7 +142,7 @@ class AdvisorPromptTest {
     List<ChatMessage> turn = AdvisorPrompt.dialogTurn("Practical viewpoint.", prior, prepared);
 
     assertEquals(ChatRole.SYSTEM, turn.getFirst().role());
-    assertTrue(turn.getFirst().content().contains(AdvisorPrompts.FOR_ADVISOR));
+    assertEquals("Practical viewpoint.", turn.getFirst().content());
     assertEquals(ChatRole.USER, turn.get(1).role());
     assertEquals("what do you think about the grimm brothers?", turn.get(1).content());
     assertEquals(ChatRole.USER, turn.get(2).role());

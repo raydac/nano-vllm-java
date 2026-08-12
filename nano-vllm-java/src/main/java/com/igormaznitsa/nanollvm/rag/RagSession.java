@@ -27,12 +27,11 @@ import java.util.function.Consumer;
  * retrieval falls back to concatenating the previous longer user turn. {@link PreparedRag}
  * re-ranks hits by term coverage and passage length at retrieve time.
  * {@link #isolateGeneration(boolean)} omits prior assistant answers from grounded (hit) generates
- * when on (default for Gemma). No-hit turns always isolate so prior corpus answers cannot latch.
+ * when on (default {@code false}; demos may enable for small turn-based models). No-hit turns always isolate so prior corpus answers cannot latch.
  * Thinking is off by default so small max-token budgets are not spent on {@code <think>} blocks.
  * Grounded turns also clamp sampling temperature. Not thread-safe.
  *
- * <p>{@link #open(ChatSession, RagIndex)} reuses that session's {@link LLM} (rewrite and Gemma
- * policy stay enabled).
+ * <p>{@link #open(ChatSession, RagIndex)} reuses that session's {@link LLM} (rewrite stays enabled).
  *
  * <pre>{@code
  * PreparedRag rag = RagFactory.make(Path.of("docs"));
@@ -60,7 +59,7 @@ public final class RagSession {
     this.llm = requireNonNull(llm, "llm");
     this.chat = requireNonNull(chat, "chat");
     this.index = requireNonNull(index, "index");
-    this.isolateGeneration = this.llm.tokenizer().isGemmaChat();
+    this.isolateGeneration = false;
     this.chat.enableThinking(false);
   }
 
@@ -109,7 +108,8 @@ public final class RagSession {
 
   /**
    * RAG defaults to thinking off so the token budget goes to the grounded answer.
-   * Re-enable for plain Qwen-style chain-of-thought if desired.
+   * Re-enable when the tokenizer {@link com.igormaznitsa.nanollvm.tokenizer.Tokenizer#invitesThinking()}
+   * and the budget allows.
    */
   public RagSession enableThinking(final boolean enableThinking) {
     this.chat.enableThinking(enableThinking);
@@ -125,7 +125,7 @@ public final class RagSession {
   /**
    * When retrieval returns no passages, use at least this many new tokens (capped by
    * {@link SamplingParams#maxTokens()} from {@link #sampling} when lower). Default {@code 384}.
-   * Grounded turns still use the {@link #sampling} budget (e.g. short answers on Gemma).
+   * Grounded turns still use the {@link #sampling} budget.
    */
   public RagSession maxTokensWhenNoHits(final int maxTokens) {
     if (maxTokens < 1) {
@@ -214,7 +214,7 @@ public final class RagSession {
 
   /**
    * When {@code true}, grounded turns (retrieval hits) see only the RAG-augmented user message,
-   * not earlier assistant replies — avoids tiny-model latch on prior answers. Defaults on for Gemma.
+   * not earlier assistant replies — avoids tiny-model latch on prior answers. Default {@code false}.
    * No-hit turns always isolate regardless of this flag.
    */
   public RagSession isolateGeneration(final boolean isolateGeneration) {

@@ -8,7 +8,7 @@ import java.util.Comparator;
 import java.util.List;
 
 /**
- * Dense passage index: chunk vectors from an embedding {@link LlmModel} (e.g. BERT / GTE GGUF),
+ * Dense passage index: chunk vectors from an embedding {@link LlmModel} (e.g. BERT-family GGUF),
  * query-time cosine (dot product on L2-normalized vectors).
  *
  * <p>Does not own {@code encoder} — close the model after this index is unused. Index-time vectors

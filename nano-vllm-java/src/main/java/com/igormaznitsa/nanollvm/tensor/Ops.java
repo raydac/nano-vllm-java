@@ -29,8 +29,8 @@ import java.util.Arrays;
  *   <li><strong>Embedding weights:</strong> shape {@code [vocab, dim]} — row {@code id} is the
  *       vector for token {@code id} (gather, not a matmul).</li>
  *   <li><strong>Gated MLP:</strong> last dim is {@code 2 * half}; first half = gate, second = up.</li>
- *   <li><strong>Gemma RMSNorm:</strong> when {@code gemmaStyle}, stored weight {@code w} is applied
- *       as {@code (1 + w)} (HF Gemma convention).</li>
+ *   <li><strong>Offset RMSNorm:</strong> when {@code onePlusWeight}, stored weight {@code w} is applied
+ *       as {@code (1 + w)} (some HF checkpoints store a delta from 1).</li>
  * </ul>
  *
  * @see Tensor
@@ -227,7 +227,7 @@ public final class Ops {
   }
 
   /**
-   * SwiGLU with separate gate and up tensors: {@code silu(gate) * up} (LFM2-style unfused MLP).
+   * SwiGLU with separate gate and up tensors: {@code silu(gate) * up} (unfused MLP).
    */
   public static Tensor siluAndMul(final Tensor gate, final Tensor up) {
     requireSameShape(gate, up, "gate", "up");
@@ -264,7 +264,7 @@ public final class Ops {
   }
 
   /**
-   * PyTorch-style GELU approximate with tanh (used by BERT / Gemma gates).
+   * PyTorch-style GELU approximate with tanh (used by BERT / some causal MLP gates).
    */
   public static Tensor gelu(final Tensor x) {
     Tensor out = Tensor.zeros(x.shape());
@@ -335,9 +335,9 @@ public final class Ops {
   }
 
   /**
-   * Gemma MLP gate: {@code gelu_pytorch_tanh(gate) * up} with gate/up packed in the last dimension.
+   * MLP gate: {@code gelu_pytorch_tanh(gate) * up} with gate/up packed in the last dimension.
    *
-   * <p>Uses the tanh approximation of GELU common in PyTorch/HF Gemma, not {@code erf}.
+   * <p>Uses the tanh approximation of GELU ({@code gelu_pytorch_tanh}), not {@code erf}.
    * See {@link #gatedActAndMul(Tensor, boolean)} and {@link #geluPytorchTanh(float)}.
    *
    * @param x last dim even; layout {@code […, gate | up]}
@@ -357,7 +357,7 @@ public final class Ops {
    * {@code half}, leading axes preserved.
    *
    * @param x        activations with even last dimension
-   * @param geluTanh {@code true} → Gemma GELU-tanh; {@code false} → SiLU
+   * @param geluTanh {@code true} → GELU-tanh; {@code false} → SiLU
    * @return activated-and-multiplied tensor
    * @throws IllegalArgumentException if last dim is odd
    */
@@ -392,7 +392,7 @@ public final class Ops {
   }
 
   /**
-   * PyTorch {@code gelu} approximate with tanh (Gemma):
+   * PyTorch {@code gelu} approximate with tanh:
    * {@code 0.5 * x * (1 + tanh(√(2/π) * (x + 0.044715 * x³)))}.
    *
    * <p>Constant {@code 0.7978845608028654} is {@code √(2/π)}.
@@ -440,7 +440,7 @@ public final class Ops {
   }
 
   /**
-   * RMSNorm with {@code gemmaStyle == false} (weight applied as stored).
+   * RMSNorm with {@code onePlusWeight == false} (weight applied as stored).
    *
    * @see #rmsNorm(Tensor, Tensor, float, boolean)
    */
@@ -454,17 +454,17 @@ public final class Ops {
    * <p>For each row of length {@code H}: {@code inv = 1 / sqrt(mean(x²) + eps)}, then
    * {@code out = x * inv * w'}. Uses {@link VectorMath#sumSquares} for the energy.
    *
-   * <p><strong>Hard part — Gemma:</strong> if {@code gemmaStyle}, {@code w' = 1 + weight[i]}
-   * (HF stores a delta from 1). Otherwise {@code w' = weight[i]}.
+   * <p>If {@code onePlusWeight}, {@code w' = 1 + weight[i]} (checkpoint stores a delta from 1).
+   * Otherwise {@code w' = weight[i]}.
    *
    * @param x          input; last dim = feature width
    * @param weight     length-{@code H} scale vector
    * @param eps        added under the square root for stability
-   * @param gemmaStyle whether to use {@code (1 + w)} scales
+   * @param onePlusWeight whether to use {@code (1 + w)} scales
    * @return same shape as {@code x}
    */
   public static Tensor rmsNorm(final Tensor x, final Tensor weight, final float eps,
-                               final boolean gemmaStyle) {
+                               final boolean onePlusWeight) {
     int[] shape = x.rawShape();
     int last = shape[shape.length - 1];
     int rows = x.numel() / last;
@@ -481,7 +481,7 @@ public final class Ops {
       float inv = (float) (1.0 / Math.sqrt(var + eps));
       for (int i = 0; i < last; i++) {
         float w = wd[wOff + i];
-        if (gemmaStyle) {
+        if (onePlusWeight) {
           w = 1.0f + w;
         }
         od[oBase + i] = xd[xBase + i] * inv * w;
@@ -491,7 +491,7 @@ public final class Ops {
   }
 
   /**
-   * Residual add + RMSNorm ({@code gemmaStyle == false}).
+   * Residual add + RMSNorm ({@code onePlusWeight == false}).
    *
    * @see #addRmsNorm(Tensor, Tensor, Tensor, float, boolean)
    */
@@ -506,19 +506,19 @@ public final class Ops {
    * <p><strong>Hard part — return contract:</strong> returns {@code {normed, residualSum}} where
    * index {@code 0} is the normalized tensor (fed to the next sublayer) and index {@code 1} is the
    * post-add residual stream to carry forward. Callers must keep both; dropping {@code summed}
-   * breaks the residual highway. Same {@code gemmaStyle} weight rule as {@link #rmsNorm}.
+   * breaks the residual highway. Same {@code onePlusWeight} weight rule as {@link #rmsNorm}.
    *
    * @param x          branch output to add
    * @param residual   incoming residual stream (same {@link Tensor#numel()} as {@code x})
    * @param weight     RMSNorm scale
    * @param eps        stability epsilon
-   * @param gemmaStyle {@code (1 + w)} if true
+   * @param onePlusWeight {@code (1 + w)} if true
    * @return {@code new Tensor[] { normed, xPlusResidual }}
    * @throws IllegalArgumentException if {@code x} and {@code residual} sizes differ
    */
   public static Tensor[] addRmsNorm(final Tensor x, final Tensor residual, final Tensor weight,
                                     final float eps,
-                                    final boolean gemmaStyle) {
+                                    final boolean onePlusWeight) {
     requireSameSize(x, residual);
     int[] shape = x.rawShape();
     int last = shape[shape.length - 1];
@@ -546,7 +546,7 @@ public final class Ops {
       float inv = (float) (1.0 / Math.sqrt(sumSq / last + eps));
       for (int i = 0; i < last; i++) {
         float w = wd[wOff + i];
-        if (gemmaStyle) {
+        if (onePlusWeight) {
           w = 1.0f + w;
         }
         od[sBase + i] = sd[sBase + i] * inv * w;

@@ -68,7 +68,7 @@ public final class WeightSchema {
   }
 
   /**
-   * Llama-style schema (RMSNorm, RoPE, GQA, SiLU MLP; no Q/K head norms).
+   * {@code llama} architecture schema (RMSNorm, RoPE, GQA, SiLU MLP; no Q/K head norms).
    *
    * @since 1.1.0
    */

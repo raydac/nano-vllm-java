@@ -14,6 +14,7 @@ import com.igormaznitsa.nanollvm.rag.RagHit;
 import com.igormaznitsa.nanollvm.rag.RagLoadOptions;
 import com.igormaznitsa.nanollvm.rag.RagSession;
 import com.igormaznitsa.nanollvm.rag.TextChunk;
+import com.igormaznitsa.nanollvm.testsupport.OptionalModelAssumptions;
 import java.nio.file.Path;
 import java.util.List;
 import org.junit.jupiter.api.Test;
@@ -202,7 +203,7 @@ class RagUnitTest {
 
   @Test
   void bundledFairyTaleCorpusRejectsUnrelatedCapitalsQuery() {
-    Path root = BundledModelAssumptions.requireBundledRag();
+    Path root = OptionalModelAssumptions.requireLocalRag();
     PreparedRag prepared = RagFactory.make(root, RagLoadOptions.forTinyModels());
     assertTrue(prepared.size() > 0);
     assertTrue(prepared.isOutsideCorpus("capital of France Paris"));

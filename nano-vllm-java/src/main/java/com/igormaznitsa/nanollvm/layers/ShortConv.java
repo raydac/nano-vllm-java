@@ -8,7 +8,7 @@ import com.igormaznitsa.nanollvm.models.internal.PackedWeight;
 import com.igormaznitsa.nanollvm.tensor.Tensor;
 
 /**
- * LFM2 gated short convolution: {@code in_proj → B,C,x → conv1d(B*x) → C*y → out_proj}.
+ * Gated short convolution: {@code in_proj → B,C,x → conv1d(B*x) → C*y → out_proj}.
  */
 public final class ShortConv {
 

@@ -19,7 +19,7 @@ import java.util.stream.IntStream;
 import java.util.stream.Stream;
 
 /**
- * Loads GGUF checkpoints (LFM2 causal, BERT embedding) into {@link Config.HfConfig} +
+ * Loads GGUF checkpoints ({@code lfm2} causal, {@code bert} embedding) into {@link Config.HfConfig} +
  * {@link WeightBag}. Default keeps large matrices GGML-packed; {@code allowUnpackParameters}
  * dequantizes each tensor to float32 from the mmap during load (no packed heap copy).
  */
@@ -196,7 +196,7 @@ public final class GgufModelLoader {
     }
     if (hidden <= 0 || layers <= 0 || heads <= 0 || intermediate <= 0 || vocab <= 0) {
       throw new IllegalStateException(
-        "incomplete LFM2 GGUF metadata (hidden/layers/heads/ff/vocab)");
+        "incomplete lfm2 GGUF metadata (hidden/layers/heads/ff/vocab)");
     }
     int headDim = hidden / heads;
     List<String> layerTypes = resolveLayerTypes(reader, prefix, layers, kvHeads);

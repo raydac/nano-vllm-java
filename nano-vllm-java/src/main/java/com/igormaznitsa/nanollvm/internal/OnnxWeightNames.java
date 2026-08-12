@@ -26,7 +26,7 @@ public final class OnnxWeightNames {
   }
 
   /**
-   * Chat / Llama-style path cleanup (strip leading noise, collapse {@code model.model.} →
+   * Causal decoder HF path cleanup (strip leading noise, collapse {@code model.model.} →
    * {@code model.}).
    *
    * @since 1.1.0

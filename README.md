@@ -358,38 +358,44 @@ The models root itself defaults to `./models`, overridable with `-Dnanollvm.mode
 | RAG corpus dir     | `-Dnanollvm.rag.dir=./docs` or `NANOLLVM_RAG_DIR` (default `./rag`) |
 | CPU matmul threads | `.cpuThreads(N)` / `.allCpuThreads()` / `.disableMultiCpu()` (builder wins); else `-Dnanollvm.cpu.threads=N`; else all processors. `.disableMultiCpu()` = calling thread only, no executor. Optional `.matmulExecutor(…)` only when workers &gt; 1 |
 
-If you start **without** any of (1)–(3), the Example CLI shows an interactive menu (**Qwen3 / Gemma3 / LFM2 / Exit**).
+If you start **without** any of (1)–(3), the Example TUI (or `--cli` menu) lists bundled models
+(**Qwen3 / Gemma3 / LFM2 / SmolLM2 / Tiny / gte-small / Exit**).
 
 ## Run from the CLI
 
 ### Interactive chat (`Example`)
 
-Recommended entry point: multi-turn chat with streaming output. Thinking tokens go to **stderr** (dim cyan when color is
-enabled); the reply goes to **stdout**.
+Recommended entry point: **Lanterna TUI** (keyboard + mouse) with model/RAG setup and streaming chat panes.
+Pass `--cli` for the classic stdout/stderr line console (thinking → stderr, answer → stdout).
 
 ```bash
 # After downloading a model — heap defaults to -Xmx16g via .mvn/jvm.config
-mvn -pl nano-vllm-java-samples -q exec:java
+mvn22 -pl nano-vllm-java-samples -q exec:java
+
+# Classic console menus / streaming
+mvn22 -pl nano-vllm-java-samples -q exec:java -Dexec.args="--cli"
 ```
 
-Pick a model interactively, or pass it explicitly:
+Pick a model in the TUI (or CLI menu), or pass it explicitly:
 
 ```bash
-mvn -pl nano-vllm-java-samples -q exec:java -Dexec.args="models/Gemma3-270M"
+mvn22 -pl nano-vllm-java-samples -q exec:java -Dexec.args="models/Gemma3-270M"
 ```
 
 ```bash
-NANOLLVM_MODEL=models/Qwen3-0.6B mvn -pl nano-vllm-java-samples -q exec:java
+NANOLLVM_MODEL=models/Qwen3-0.6B mvn22 -pl nano-vllm-java-samples -q exec:java
 ```
+
+**TUI keys:** Ctrl+Enter send · Esc quit · F5 clear · Tab to bordered Send/Clear/Quit · mouse click when supported.
 
 **RAG mode:** if the directory `rag/` exists (the repo ships Grimm / Little Red Riding Hood `.txt` and fact cards),
-Example builds a shared BM25 index and uses the `rag?>` prompt. Otherwise it uses plain chat (`?>`).
+choose None / BM25 / dense / hybrid in the setup window (CLI: same menu after model pick).
 
 **Advisors (Example only):** at build time, named advisors are wired by architecture — **Gemma**
-Practical/Abstract/Consequence, **Qwen** Practical/Abstract, **LFM** none. Notes appear on the thinking
-stream as `[Name] …`; the default mixer folds useful notes into the main prompt.
+Practical/Abstract/Consequence, **Qwen** Practical/Abstract, **LFM** none. Notes appear in the thinking
+pane (TUI) or on the thinking stream as `[Name] …` (`--cli`); the default mixer folds useful notes into the main prompt.
 
-Example session (ask about the demo corpus):
+Example session (ask about the demo corpus; `--cli` prompts shown):
 
 ```text
 Loading model from …/models/Qwen3-0.6B

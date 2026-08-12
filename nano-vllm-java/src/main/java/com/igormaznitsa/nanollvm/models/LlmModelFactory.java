@@ -209,7 +209,7 @@ public final class LlmModelFactory {
    * Loads an HF-style model <em>folder</em> from the classpath (silent).
    *
    * <p>Resolves {@link ModelFileId} names and weight shards under {@code resourceFolder}
-   * (e.g. {@code models/Qwen3-0.6B} → {@code models/Qwen3-0.6B/config.json}).
+   * (e.g. {@code models/MyChatModel} → {@code models/MyChatModel/config.json}).
    *
    * @param loader         class loader that can see the resources (often the application module
    *                       loader); non-{@code null}

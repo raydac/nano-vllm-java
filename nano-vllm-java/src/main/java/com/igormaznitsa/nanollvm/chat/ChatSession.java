@@ -8,8 +8,6 @@ import com.igormaznitsa.nanollvm.llm.GenerationStats;
 import com.igormaznitsa.nanollvm.llm.LLM;
 import com.igormaznitsa.nanollvm.llm.SamplingDefaults;
 import com.igormaznitsa.nanollvm.llm.SamplingParams;
-import com.igormaznitsa.nanollvm.prompts.AdvisorPrompts;
-import com.igormaznitsa.nanollvm.prompts.ChatPrompts;
 import com.igormaznitsa.nanollvm.tokenizer.Tokenizer;
 import com.igormaznitsa.nanollvm.utils.ResourceLimits;
 import java.io.PrintStream;
@@ -17,6 +15,7 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Consumer;
+import java.util.function.Predicate;
 
 /**
  * Multi-turn chat over an {@link LLM}: history, chat template, truncation, reply parsing, and
@@ -39,6 +38,9 @@ public final class ChatSession {
   private GenerationStats lastGenerateStats = GenerationStats.NONE;
   private int maxHistoryMessages = ResourceLimits.current().maxHistoryMessages();
   private boolean emitDebugPrompts = true;
+  private boolean recoverUnusableAnswers;
+  private Predicate<String> unusableAnswer = body -> body == null || body.isBlank();
+  private String unusableAnswerFallback = "Sorry — I couldn't form a reply. Please try again.";
 
   /**
    * Opens a session with {@link LLM#defaultSampling()} and a fresh conversation seeded from the
@@ -68,7 +70,7 @@ public final class ChatSession {
    * Factory that pins a max new-token budget via {@link SamplingDefaults#forTokenizer}.
    *
    * @param llm       engine that owns generation
-   * @param maxTokens upper bound on new tokens per turn (architecture-aware defaults for the rest)
+   * @param maxTokens upper bound on new tokens per turn (neutral defaults for the rest)
    * @return a new session
    */
   public static ChatSession open(final LLM llm, final int maxTokens) {
@@ -112,7 +114,7 @@ public final class ChatSession {
 
   /**
    * Engine stats for the main assistant generate(s) on the last {@link #send} /
-   * {@link #sendPrepared} (includes Gemma boilerplate retries' elapsed time; excludes advisors).
+   * {@link #sendPrepared} (includes optional unusable-answer retries' elapsed time; excludes advisors).
    */
   public GenerationStats lastGenerateStats() {
     return this.lastGenerateStats;
@@ -168,15 +170,51 @@ public final class ChatSession {
   /**
    * Enables or disables thinking-scratchpad invitation for this session.
    *
-   * <p>When {@code false}, the chat template seeds an empty {@code <think></think>} so Qwen-style
-   * models skip long chain-of-thought (important for RAG token budgets). When never called, the
-   * default from {@link Tokenizer#invitesThinking()} applies.
+   * <p>When {@code false}, ChatML templates that {@link Tokenizer#invitesThinking()} may seed an
+   * empty {@code <think></think>} so the model skips long chain-of-thought (important for RAG token
+   * budgets). When never called, the default from {@link Tokenizer#invitesThinking()} applies.
    *
    * @param enableThinking {@code true} to invite chain-of-thought, {@code false} to suppress it
    * @return {@code this} for fluent configuration
    */
   public ChatSession enableThinking(final boolean enableThinking) {
     this.enableThinking = enableThinking;
+    return this;
+  }
+
+  /**
+   * When {@code true}, retries once (scrubbing matching assistant turns) and may salvage from
+   * advisor notes if the main answer matches {@link #unusableAnswer(Predicate)}. Off by default —
+   * enable from demos/apps that need it for small turn-based models.
+   *
+   * @since 1.1.0
+   */
+  public ChatSession recoverUnusableAnswers(final boolean enable) {
+    this.recoverUnusableAnswers = enable;
+    return this;
+  }
+
+  /**
+   * Predicate for answers treated as unusable when {@link #recoverUnusableAnswers(boolean)} is on.
+   * Default: blank only.
+   *
+   * @since 1.1.0
+   */
+  public ChatSession unusableAnswer(final Predicate<String> predicate) {
+    this.unusableAnswer = requireNonNull(predicate, "predicate");
+    return this;
+  }
+
+  /**
+   * Fallback visible reply when recovery still yields nothing usable.
+   *
+   * @since 1.1.0
+   */
+  public ChatSession unusableAnswerFallback(final String fallback) {
+    this.unusableAnswerFallback = requireNonNull(fallback, "fallback").strip();
+    if (this.unusableAnswerFallback.isEmpty()) {
+      throw new IllegalArgumentException("fallback must not be blank");
+    }
     return this;
   }
 
@@ -311,7 +349,6 @@ public final class ChatSession {
     ChatMessages.truncateHistory(
       this.history, tokenizer, this.llm.config().maxModelLen(), this.samplingParams.maxTokens());
 
-    boolean gemmaChat = tokenizer.isGemmaChat();
     TurnStream turn = this.beginTurn();
 
     long advisorStarted = System.nanoTime();
@@ -324,8 +361,8 @@ public final class ChatSession {
     this.lastGenerateStats = GenerationStats.NONE;
     ChatReply reply = this.generateTurn(turn, enrichment.modelUserText(), isolateGeneration);
 
-    if (gemmaChat && this.isUnusableMainAnswer(reply.answer())) {
-      ChatMessages.scrubSetupBoilerplateTurns(this.history);
+    if (this.recoverUnusableAnswers && this.isUnusableMainAnswer(reply.answer())) {
+      ChatMessages.scrubMatchingAssistantTurns(this.history, this.unusableAnswer);
       this.emitDiagnostics("(unusable main answer — retrying without filler history)");
       this.discardPrintedAnswer();
       turn = this.beginTurn();
@@ -351,10 +388,7 @@ public final class ChatSession {
 
   private boolean isUnusableMainAnswer(final String answer) {
     String body = answer == null ? "" : answer.strip();
-    if (body.isEmpty() || ChatPrompts.isSetupBoilerplate(body)) {
-      return true;
-    }
-    if (AdvisorPrompts.isCounselorNameOnly(body)) {
+    if (this.unusableAnswer.test(body)) {
       return true;
     }
     return this.llm.advisors().stream()
@@ -369,7 +403,7 @@ public final class ChatSession {
       return new ChatReply("", salvage.strip(), false, this.lastGenerateStats);
     }
     this.emitDiagnostics("(unusable main answer — used plain reply fallback)");
-    return new ChatReply("", "What would you like to explore?", false, this.lastGenerateStats);
+    return new ChatReply("", this.unusableAnswerFallback, false, this.lastGenerateStats);
   }
 
   private TurnStream beginTurn() {
@@ -412,7 +446,7 @@ public final class ChatSession {
     final boolean isolateGeneration
   ) {
     Tokenizer tokenizer = this.llm.tokenizer();
-    boolean gemmaChat = tokenizer.isGemmaChat();
+    boolean skipSpecials = tokenizer.skipSpecialTokensOnChatDecode();
     boolean enableThinking = this.thinkingEnabled(tokenizer);
     List<ChatMessage> forTemplate = isolateGeneration
       ? this.isolatedTurn(lastUserOverride)
@@ -429,13 +463,13 @@ public final class ChatSession {
       tokenId -> {
         streamedIds.add(tokenId);
         turn.push(this.llm, this.listener,
-          ChatReply.parse(tokenizer.decode(streamedIds, gemmaChat)));
+          ChatReply.parse(tokenizer.decode(streamedIds, skipSpecials)));
       }
     );
 
     LLM.GenerationOutput output = outputs.getFirst();
     this.lastGenerateStats = this.mergeGenerateStats(this.lastGenerateStats, output.stats());
-    return ChatReply.parse(tokenizer.decode(output.tokenIds(), gemmaChat))
+    return ChatReply.parse(tokenizer.decode(output.tokenIds(), skipSpecials))
       .withStats(this.lastGenerateStats);
   }
 
@@ -487,7 +521,7 @@ public final class ChatSession {
         : "(reply recovered from thinking; model omitted or truncated visible answer)");
     }
     if (answer.isBlank()) {
-      answer = "Sorry — I couldn't form a reply. Please try again.";
+      answer = this.unusableAnswerFallback;
       this.emitDiagnostics("(empty reply — used fallback)");
     }
 

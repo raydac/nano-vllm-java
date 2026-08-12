@@ -16,7 +16,6 @@ import com.igormaznitsa.nanollvm.exceptions.GenerationTimeoutException;
 import com.igormaznitsa.nanollvm.exceptions.ModelLoadException;
 import com.igormaznitsa.nanollvm.models.LlmModel;
 import com.igormaznitsa.nanollvm.models.LlmModelFactory;
-import com.igormaznitsa.nanollvm.prompts.ChatPrompts;
 import com.igormaznitsa.nanollvm.rag.PreparedRag;
 import com.igormaznitsa.nanollvm.rag.RagFactory;
 import com.igormaznitsa.nanollvm.rag.RagIndex;
@@ -38,6 +37,7 @@ import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.locks.ReentrantLock;
+import java.util.function.Predicate;
 import java.util.stream.IntStream;
 
 /**
@@ -74,7 +74,7 @@ import java.util.stream.IntStream;
  * Construction is <em>library-quiet</em> ({@link LlmListeners#silent()}). CLI tools should pass
  * {@link LlmListeners#toSystem()} via {@link Builder#listen(LlmListener)}. Architecture is auto-detected from
  * {@code config.json}
- * (override with {@code -Dnanollvm.arch=qwen3|gemma3}).
+ * (override with {@code -Dnanollvm.arch=qwen3|gemma3|llama|lfm2}).
  *
  * <h2>Thread safety</h2>
  * <ul>
@@ -130,6 +130,7 @@ public final class LLM implements AutoCloseable {
   private final AtomicBoolean closed = new AtomicBoolean();
   private final List<LlmAdvisor> advisors;
   private final LlmAdvisorMixer advisorMixer;
+  private final Predicate<String> advisorNoteFilter;
 
   /**
    * Binds a shared immutable {@link LlmModel} with default builder settings
@@ -162,6 +163,7 @@ public final class LLM implements AutoCloseable {
       this.systemPromptOverride = builder.systemPromptOverride;
       this.advisors = builder.advisors;
       this.advisorMixer = builder.advisorMixer;
+      this.advisorNoteFilter = builder.advisorNoteFilter;
       this.transformer = new Transformer(
         this.model, this.config, this.matmul, this.listener, builder.allowUnpackParameters);
       this.scheduler = new Scheduler(this.config, this.transformer::clearConvState);
@@ -738,7 +740,7 @@ public final class LLM implements AutoCloseable {
   }
 
   /**
-   * Model-aware defaults (e.g. Gemma {@code top_k=64}) with {@link SamplingDefaults#DEFAULT_MAX_TOKENS}.
+   * Neutral sampling defaults with {@link SamplingDefaults#DEFAULT_MAX_TOKENS}.
    *
    * @return a new immutable {@link SamplingParams}; never {@code null}
    */
@@ -748,7 +750,7 @@ public final class LLM implements AutoCloseable {
   }
 
   /**
-   * Model-aware defaults with a custom max new-token budget.
+   * Neutral sampling defaults with a custom max new-token budget.
    *
    * @param maxTokens maximum newly generated tokens per sequence; must be {@code >= 1}
    * @return a new immutable {@link SamplingParams}
@@ -783,7 +785,7 @@ public final class LLM implements AutoCloseable {
   }
 
   /**
-   * Opens a multi-turn session with model-aware sampling limited to {@code maxTokens}.
+   * Opens a multi-turn session with neutral sampling limited to {@code maxTokens}.
    *
    * @param maxTokens max new tokens per turn; must be {@code >= 1}
    * @return a new session
@@ -908,18 +910,16 @@ public final class LLM implements AutoCloseable {
 
   /**
    * System text used by {@link #newConversation()} and {@link #chat()}.
-   * Builder override wins; otherwise {@link ChatPrompts#systemFor(Tokenizer, boolean)}
-   * (empty for Gemma; short plain text when thinking is not invited; Qwen-style otherwise;
-   * advisor-aware add-on when advisors are configured and the base system is non-blank).
+   * Builder override wins; otherwise the library default is empty (no system turn).
+   * Set {@link Builder#systemPrompt(String)} for application policy.
    *
    * @return system prompt string; never {@code null} (may be blank = no system turn)
    */
   public String systemPrompt() {
     if (this.systemPromptOverride != null) {
-      return ChatPrompts.withAdvisorGuidance(
-        this.systemPromptOverride, !this.advisors.isEmpty());
+      return this.systemPromptOverride;
     }
-    return ChatPrompts.systemFor(this.tokenizer, !this.advisors.isEmpty());
+    return "";
   }
 
   /**
@@ -938,6 +938,16 @@ public final class LLM implements AutoCloseable {
    */
   public LlmAdvisorMixer advisorMixer() {
     return this.advisorMixer;
+  }
+
+  /**
+   * Keeps advisor notes that pass this predicate (default: non-blank). Demo policies may reject
+   * short setup acknowledgments.
+   *
+   * @since 1.1.0
+   */
+  public Predicate<String> advisorNoteFilter() {
+    return this.advisorNoteFilter;
   }
 
   /**
@@ -1022,8 +1032,8 @@ public final class LLM implements AutoCloseable {
    * Fluent configurator for {@link LLM}.
    *
    * <p>Defaults: {@link LlmListeners#silent()}, eager execution, warmup off, GGUF parameters
-   * packed (use {@link #allowUnpackParameters()} for float32 speed), no system-prompt
-   * override (model default via {@link ChatPrompts}), no advisors.
+   * packed (use {@link #allowUnpackParameters()} for float32 speed), empty system prompt
+   * (set {@link #systemPrompt(String)} for application policy), no advisors.
    *
    * <p>Provide a shared {@link LlmModel} via {@link LLM#builder(LlmModel)}. Call {@link #build()} last.
    *
@@ -1047,11 +1057,12 @@ public final class LLM implements AutoCloseable {
     private boolean warmup = false;
     private boolean allowUnpackParameters = false;
     /**
-     * {@code null} = model default from {@link ChatPrompts}; blank = no system turn.
+     * {@code null} = empty library default; blank = no system turn; non-blank = caller policy.
      */
     private String systemPromptOverride = null;
     private List<LlmAdvisor> advisors = List.of();
     private LlmAdvisorMixer advisorMixer = LlmAdvisorMixer.defaults();
+    private Predicate<String> advisorNoteFilter = note -> note != null && !note.isBlank();
 
     private Builder(final LlmModel model) {
       this.sharedModel = requireNonNull(model, "model");
@@ -1090,7 +1101,7 @@ public final class LLM implements AutoCloseable {
 
     /**
      * Sets the chat system prompt. {@code null} becomes blank (no system turn).
-     * Omit this method entirely to keep the model default from {@link ChatPrompts}.
+     * Omit this method entirely to keep the empty library default.
      *
      * @param prompt system text, {@code null}/{@code ""} for no system turn, or non-blank text
      * @return {@code this}
@@ -1110,7 +1121,7 @@ public final class LLM implements AutoCloseable {
     }
 
     /**
-     * Clears an override so {@link ChatPrompts#systemFor(Tokenizer)} applies again.
+     * Clears an override so the library empty default applies again.
      *
      * @return {@code this}
      */
@@ -1168,6 +1179,17 @@ public final class LLM implements AutoCloseable {
     public Builder noAdvisors() {
       this.advisors = List.of();
       this.advisorMixer = LlmAdvisorMixer.defaults();
+      return this;
+    }
+
+    /**
+     * Predicate for keeping advisor note text after decode (default: non-blank).
+     * Applications may reject demo setup fillers before mix / salvage.
+     *
+     * @since 1.1.0
+     */
+    public Builder advisorNoteFilter(final Predicate<String> filter) {
+      this.advisorNoteFilter = requireNonNull(filter, "filter");
       return this;
     }
 

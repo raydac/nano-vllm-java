@@ -5,9 +5,9 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import com.igormaznitsa.nanollvm.BundledModelAssumptions;
 import com.igormaznitsa.nanollvm.chat.LlmListener;
 import com.igormaznitsa.nanollvm.chat.LlmListeners;
+import com.igormaznitsa.nanollvm.testsupport.OptionalModelAssumptions;
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
 import java.nio.file.Files;
@@ -133,7 +133,7 @@ class RagRetrievalTest {
 
   @Test
   void longNaturalGrimmQuestionHitsTinyModelCorpus() {
-    Path ragDir = BundledModelAssumptions.requireBundledRag();
+    Path ragDir = OptionalModelAssumptions.requireLocalRag();
     PreparedRag rag = RagFactory.builder()
       .options(RagLoadOptions.forTinyModels())
       .addFolder(ragDir)
@@ -150,7 +150,7 @@ class RagRetrievalTest {
 
   @Test
   void fatherQueriesHitBundledCorpusWithoutRewrite() {
-    PreparedRag rag = RagFactory.make(BundledModelAssumptions.requireBundledRag());
+    PreparedRag rag = RagFactory.make(OptionalModelAssumptions.requireLocalRag());
 
     assertTrue(RagSession.Retrieval.shortFollowUp("who was their father?"));
     assertTrue(RagSession.Retrieval.shortFollowUp("father of grimm brothers"));
@@ -166,7 +166,7 @@ class RagRetrievalTest {
 
   @Test
   void rewriteNoneFallsBackToAnchorExpansion() {
-    PreparedRag rag = RagFactory.make(BundledModelAssumptions.requireBundledRag());
+    PreparedRag rag = RagFactory.make(OptionalModelAssumptions.requireLocalRag());
     Optional<String> chosen = RagSession.Retrieval.queryAfterRewrite(
       "who was their father?",
       "who are the grimm brothers?",
@@ -180,7 +180,7 @@ class RagRetrievalTest {
 
   @Test
   void rewriteOutsideCorpusFallsBackToAnchorExpansion() {
-    PreparedRag rag = RagFactory.make(BundledModelAssumptions.requireBundledRag());
+    PreparedRag rag = RagFactory.make(OptionalModelAssumptions.requireLocalRag());
     Optional<String> chosen = RagSession.Retrieval.queryAfterRewrite(
       "who was their father?",
       "who are the grimm brothers?",

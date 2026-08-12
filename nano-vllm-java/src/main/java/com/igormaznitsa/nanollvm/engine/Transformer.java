@@ -130,7 +130,7 @@ public final class Transformer implements AutoCloseable {
       this.config.numKvcacheBlocks(),
       (System.nanoTime() - tKv) / 1e9);
 
-    // Short-conv models (e.g. LFM2) need a parallel per-layer conv state arena
+    // Short-conv hybrid models need a parallel per-layer conv state arena
     Config.HfConfig hf = this.config.hfConfig();
     if (hf.convLCache() > 0) {
       this.convCache = new ConvStateArena(hf.numHiddenLayers(), hf.hiddenSize(), hf.convLCache());

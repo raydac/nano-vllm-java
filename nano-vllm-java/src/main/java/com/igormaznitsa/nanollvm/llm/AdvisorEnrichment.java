@@ -2,8 +2,6 @@ package com.igormaznitsa.nanollvm.llm;
 
 import static java.util.Objects.requireNonNull;
 
-import com.igormaznitsa.nanollvm.prompts.AdvisorPrompts;
-import com.igormaznitsa.nanollvm.prompts.ChatPrompts;
 import java.util.List;
 
 /**
@@ -33,8 +31,8 @@ public record AdvisorEnrichment(
   }
 
   /**
-   * Notes usable when the main answer collapses to setup boilerplate: prefer grounded salvage
-   * notes, else raw advisor replies.
+   * Notes usable when the main answer is unusable: prefer grounded salvage notes, else raw
+   * advisor replies (blank entries dropped).
    */
   public List<String> answerSalvageNotes() {
     List<String> source = this.salvageNotes.isEmpty()
@@ -43,8 +41,6 @@ public record AdvisorEnrichment(
     return source.stream()
       .map(note -> note == null ? "" : note.strip())
       .filter(note -> !note.isEmpty())
-      .filter(note -> !note.equals(AdvisorPrompts.EMPTY_NOTE_FALLBACK))
-      .filter(note -> !ChatPrompts.isSetupBoilerplate(note))
       .distinct()
       .toList();
   }

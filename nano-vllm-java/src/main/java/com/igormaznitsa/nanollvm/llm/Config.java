@@ -364,8 +364,7 @@ public final class Config {
         Json.asInt(m.get("max_position_embeddings"), 32768),
         rmsEps,
         hiddenAct,
-        Json.asBoolean(m.get("tie_word_embeddings"),
-          modelType != null && modelType.toLowerCase(Locale.ROOT).contains("gemma")),
+        Json.asBoolean(m.get("tie_word_embeddings"), false),
         Json.asBoolean(m.get("attention_bias"), false),
         ropeTheta,
         ropeScaling,
@@ -411,7 +410,7 @@ public final class Config {
         String type = this.layerTypes.get(layerIndex);
         return type != null && type.toLowerCase(Locale.ROOT).contains("sliding");
       }
-      // Gemma 3 default when layer_types absent: full attention every 6th layer (1-indexed).
+      // Compat when sliding_window is set but layer_types is absent: full attention every 6th layer.
       if (this.slidingWindow > 0) {
         return (layerIndex + 1) % 6 != 0;
       }

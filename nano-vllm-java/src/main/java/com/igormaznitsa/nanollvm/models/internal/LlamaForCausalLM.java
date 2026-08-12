@@ -30,7 +30,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Immutable Llama-style causal LM (RMSNorm, RoPE, GQA, SiLU MLP; no Q/K head norms).
+ * Causal LM for the {@code llama} architecture family (RMSNorm, RoPE, GQA, SiLU MLP; no Q/K head norms).
  *
  * @since 1.1.0
  */
@@ -164,7 +164,8 @@ public record LlamaForCausalLM(LlamaModel model, ParallelLMHead lmHead) implemen
       final int layerIndex
     ) {
       if (!"silu".equals(config.effectiveActivation()) && !"silu".equals(config.hiddenAct())) {
-        throw new IllegalArgumentException("only silu supported for Llama");
+        throw new IllegalArgumentException(
+          "llama architecture expects silu, got " + config.effectiveActivation());
       }
       String p = mlp(layerIndex);
       return new LlamaMLP(

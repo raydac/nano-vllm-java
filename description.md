@@ -357,7 +357,7 @@ A Gemma file adds things like `layer_types`, `sliding_window`, `hidden_activatio
 
 | Field           | Means                                                                                 | Used for                                              | If missing                                         |
 |-----------------|---------------------------------------------------------------------------------------|-------------------------------------------------------|----------------------------------------------------|
-| `model_type`    | Short family name (`qwen3`, `gemma3_text`, `llama`, …)                                 | Auto-detect causal graph (`CausalLMFactory`: Qwen3 / Gemma3 / **Llama**; GGUF also `lfm2`) | Fall through to `architectures`, else assume Qwen3 |
+| `model_type`    | Short family name (`qwen3`, `gemma3_text`, `llama`, …)                                 | Auto-detect causal graph (`CausalLMFactory`: Qwen3 / Gemma3 / **Llama**; GGUF also `lfm2`) | Fall through to `architectures`, else **fail** (set `-Dnanollvm.arch=…`) |
 | `architectures` | List of class-style names from Hugging Face (`Qwen3ForCausalLM`, `LlamaForCausalLM`, …) | Same detection if `model_type` is unclear             | Optional                                           |
 
 You can override causal detection with `-Dnanollvm.arch=qwen3`, `gemma3`, `llama`, or `lfm2` without editing the file.
@@ -518,10 +518,10 @@ GELU-like curve in the MLP gate).
 
 | Field                 | Means                                                           | Used for                                                     | If missing                                                    |
 |-----------------------|-----------------------------------------------------------------|--------------------------------------------------------------|---------------------------------------------------------------|
-| `tie_word_embeddings` | If true, embedding table and LM head **share** the same numbers | Saves a huge matrix; load path may skip a separate `lm_head` | For Gemma `model_type`, default **true**; otherwise **false** |
+| `tie_word_embeddings` | If true, embedding table and LM head **share** the same numbers | Saves a huge matrix; load path may skip a separate `lm_head` | Default **false** when the field is absent |
 
-**Real values:** Qwen3-0.6B sets `true`. Gemma often omits a separate LM-head tensor on disk; the loader’s Gemma default
-matches that habit.
+**Real values:** Qwen3-0.6B sets `true`. Gemma3-270M often omits the field and omits a separate `lm_head` tensor; the
+`gemma3` graph still reuses embeddings when `lm_head` is missing on disk.
 
 ---
 
@@ -585,7 +585,7 @@ null in both samples.
 | Field            | Means                                                            | Used for                                             | If missing                                                                                                       |
 |------------------|------------------------------------------------------------------|------------------------------------------------------|------------------------------------------------------------------------------------------------------------------|
 | `sliding_window` | How many recent tokens a local layer may look back               | Window width for sliding attention                   | `0` or null → no windowing unless layer types say otherwise                                                      |
-| `layer_types`    | Per-layer list: e.g. `"sliding_attention"` vs `"full_attention"` | `isSlidingLayer(i)` decides window + which RoPE base | If absent but `sliding_window` > 0: Gemma-style default — full attention every 6th layer (1-based), else sliding |
+| `layer_types`    | Per-layer list: e.g. `"sliding_attention"` vs `"full_attention"` | `isSlidingLayer(i)` decides window + which RoPE base | If absent but `sliding_window` > 0: compat fallback — full attention every 6th layer (1-based), else sliding |
 
 **Real Gemma3-270M:** `sliding_window` 512; `layer_types` alternates five sliding layers then one full, repeating across
 18 layers.
@@ -872,8 +872,9 @@ It is only the **bridge language ↔ numbers**.
 > **`tokenizer.json` stores the vocabulary, the merge recipe, and the text-cleanup pipeline so strings become the
 > integer ids the embedding table understands — and back again.**
 
-**In the code:** `Tokenizer.fromPretrained` reads `tokenizer.json` (+ `tokenizer_config.json` chat template and stop
-ids); encode/decode and `applyChatTemplate` live on `Tokenizer` (chapter 16).
+**In the code:** `Tokenizer.fromPretrained` / `fromGguf` read vocab + optional chat template / stop ids;
+`ChatFormat` (ChatML / turn-based / plain) and `invitesThinking()` follow markers in template/vocab (not product
+names); encode/decode and `applyChatTemplate` live on `Tokenizer` (chapter 16).
 
 **Further reading:** the JSON pipeline (normalizer → pre-tokenizer → model → decoder) is the
 [Hugging Face Tokenizers](https://huggingface.co/docs/tokenizers/index) design; API overview of the `Tokenizer` class is
@@ -1174,16 +1175,16 @@ the graph must know which layers are `conv` vs `full_attention`.
 
 ### Chat packaging (easy to get wrong)
 
-Many LFM2 GGUF exports omit an embedded `chat_template` string even though the vocab still contains ChatML markers
+Many `lfm2` GGUF exports omit an embedded `chat_template` string even though the vocab still contains ChatML markers
 (`<|im_start|>`, `<|im_end|>`). This port therefore:
 
-- Uses **ChatML** turn wrapping when those markers exist in the vocab (not the plain `user: / assistant:` fallback).
-- Sets `Tokenizer.invitesThinking()` to **false** for GGUF LFM2 and uses a short `PLAIN_CHAT_SYSTEM` — Qwen-style
-  “open with `<think>…`” system rules make LFM2 **narrate the format** instead of answering.
-- Does **not** pre-insert an empty `<think></think>` block on the assistant prompt (that trick is Qwen-only).
+- Detects **`Tokenizer.ChatFormat`** from template/vocab markers (**ChatML** / turn-based / plain) — not from product names.
+- Sets `Tokenizer.invitesThinking()` from vocab (`<think>` + `</think>` present), for HF and GGUF loads alike.
+- Keeps library system text empty (`ChatPrompts.systemFor`); demos set policy via samples `SampleChatPrompts`.
+- When thinking is disabled and the vocab invites it, ChatML may pre-insert an empty `<think></think>` so the model
+  skips a long scratchpad (token-budget control — not a second brain).
 
-The UI can still split `<think>` / answer if the model emits those tags; LFM2 chat simply does not invite them by
-default. (Sense C details: chapter 9.)
+The UI can still split `<think>` / answer if the model emits those tags. (Sense C details: chapter 9.)
 
 Example ChatML prompt fragment this tokenizer builds:
 
@@ -1217,7 +1218,8 @@ weight RAM stays near packed size (KV / activations are still float32).
 tokenizer via the sealed `LlmModel`. **Internal map:** `internal.GgufReader` / `GgufDequant` / `GgufModelLoader`;
 `models.internal.PackedWeight` / `Lfm2ForCausalLM`; `tensor.LinearKernel` / `EmbeddingKernel`; short-conv state in
 `engine.ConvStateArena` via `Transformer` / `internal.Context`; chat defaults via `ChatPrompts.systemFor(Tokenizer)`
-and `Tokenizer.invitesThinking()`; matmul via `MatmulRuntime` (per `LLM`).
+(always empty — demos use `SampleChatPrompts`) and vocab-gated `Tokenizer.invitesThinking()`; matmul via
+`MatmulRuntime` (per `LLM`).
 
 **Further reading:** [GGUF format notes](https://github.com/ggml-org/ggml/blob/master/docs/gguf.md); Liquid
 [LFM2 blog](https://www.liquid.ai/blog/liquid-foundation-models-v2-our-second-series-of-generative-ai-models);
@@ -1860,16 +1862,17 @@ Plan: answer with 4.
 4
 ```
 
-**LFM2 GGUF** does **not** use that invitation. Turns are wrapped as **ChatML** (`<|im_start|>role` …
-`<|im_end|>`); the system text is short (`PLAIN_CHAT_SYSTEM`) with no `<think>` rules. See §7a.
+**Other ChatML checkpoints** (e.g. many `lfm2` GGUFs) wrap turns as **ChatML** (`<|im_start|>role` …
+`<|im_end|>`). Library default system text is empty; demos may set a short
+`SampleChatPrompts.PLAIN_ASSISTANT_SYSTEM` without `<think>` rules. Think invitation follows vocab markers. See §7a.
 
 #### How the program organizes Sense C around the model
 
 ```text
   1. Build chat history + system directions
   2. Apply chat template → one big prompt string
-       (Gemma / LFM2 GGUF: thinking tags not invited)
-       (Qwen-style: enableThinking=true + system text invite <think>…)
+       (turn-based ChatFormat: no ChatML think invitation)
+       (ChatML + think vocab: enableThinking / invitesThinking gate empty `<think>` seed + sample system text)
   3. Prefill + decode (pure Sense A) until the turn ends
   4. Decode tokens → raw assistant text
   5. AssistantParts.parse splits raw text into:
@@ -1885,16 +1888,16 @@ Plan: answer with 4.
 Important: **the model does not call a `Think()` function.** It emits the characters `<`, `t`, `h`, … as ordinary tokens
 if sampling chose them. Parsing happens **after** generation (and incrementally while streaming).
 
-#### Qwen vs Gemma vs LFM2 (GGUF) organization in this project
+#### ChatFormat vs architecture (organization in this project)
 
-|                                         | Qwen-style chat | Gemma chat here | LFM2 GGUF |
-|-----------------------------------------|-----------------|-----------------|-----------|
-| System directions about `<think>`       | Yes (`CHAT_SYSTEM`) | No (empty system) | No (`PLAIN_CHAT_SYSTEM` — think-format rules cause meta-narration) |
-| `invitesThinking` / default enable      | **true** — do not pre-insert empty `<think></think>`; model may open its own | **false** (Gemma turn template) | **false**; ChatML via `<\|im_start\|>` vocab even if GGUF omits `chat_template` |
-| Reliable tagged scratchpad              | Encouraged by system text | Not relied on | Not invited (UI still splits tags if emitted) |
-| Sense A (layers)                        | Same kind of engine | Same kind of engine | Hybrid: short-conv + GQA |
+|                                         | ChatML + think vocab | Turn-based (`<start_of_turn>`) | ChatML without think tags / hybrid GGUF |
+|-----------------------------------------|----------------------|--------------------------------|-----------------------------------------|
+| System directions about `<think>`       | App/sample owned (library default empty) | App/sample owned (usually empty) | App/sample owned (demos may use plain cue) |
+| `invitesThinking` / default enable      | **true** when both `<think>` and `</think>` exist in vocab | **false** (no ChatML think seed) | Vocab-gated; ChatML via `<\|im_start\|>` even if GGUF omits `chat_template` |
+| Reliable tagged scratchpad              | Encouraged by **sample** system text when used | Not relied on | Only if tags appear in vocab / output |
+| Sense A (layers)                        | Architecture backend (`qwen3`, `llama`, …) | Architecture backend (`gemma3`, …) | e.g. `lfm2` hybrid short-conv + GQA |
 
-So “thinking UI” is a **chat convention** on top of the same model machinery — strongest on Qwen-style templates here.
+So “thinking UI” is a **chat convention** (`ChatFormat` + vocab markers) on top of architecture backends.
 `enableThinking` / `invitesThinking` are not a second brain switch; they only change how the **prompt string** is wrapped
 before Sense A runs.
 
@@ -2337,8 +2340,8 @@ Then one slip is drawn. This project’s sampler uses a **Gumbel-max–style** d
 naive left-to-right walk of a cumulative table). Pure greedy decoding (temperature ≈ 0) is **rejected** by
 `SamplingParams` — use a small positive temperature instead.
 
-Default helpers (`SamplingDefaults`) use temperature `0.6` and top-p `0.95`; for Gemma chat they also set **top-k =
-64**, which matches common Gemma sampling advice.
+Default helpers (`SamplingDefaults`) use temperature `0.6`, top-p `0.95`, and **top-k off** (`0`) for every
+tokenizer. Product/family knobs (e.g. turn-based top-k 64) belong in the app or samples (`SampleChatPrompts`).
 
 So the model is not forced to say the single most likely word every time. Controlled chance is why two answers to the
 same question can differ — and why “creativity” settings exist in chat products.
@@ -2620,7 +2623,7 @@ Those ids are just a line of dictionary numbers. No attention has run yet.
 |------------------|-------------------------------------------------------------------------|--------------------------------------------------|
 | Record user      | `ChatSession#send` → `ChatMessage#user`                                 | Append to history                                |
 | Fit desk         | `ChatMessages#truncateHistory`                                          | Drop old turns if context is tight               |
-| Stage directions | `Tokenizer#applyChatTemplate(…, enableThinking)`                        | Role markers; thinking invitation when not Gemma |
+| Stage directions | `Tokenizer#applyChatTemplate(…, enableThinking)`                        | Role markers via `ChatFormat`; think seed when ChatML + `invitesThinking` |
 | To ids           | inside `LLM#generate` → encode → `Scheduler#add` (new `Sequence`) | Prompt string → token ids → `Sequence`           |
 
 `ChatSession#generateTurn` is the private brick that calls `applyChatTemplate` then `LLM#generate`.
@@ -2764,9 +2767,9 @@ Example timeline (one possible Qwen-style path — not guaranteed wording):
   decode → end-of-turn
 ```
 
-If there is **no** scratchpad (typical Gemma path here), Sense A still runs the same way; you only see the final answer
-tokens. There is no missing “thinker” — only missing **visible** Sense B/C text. Gemma disables the thinking invitation
-in `ChatSession#generateTurn` (`enableThinking = !tokenizer.isGemmaChat()`).
+If there is **no** scratchpad (turn-based `ChatFormat`, or ChatML without think tags), Sense A still runs the same way;
+you only see the final answer tokens. There is no missing “thinker” — only missing **visible** Sense B/C text.
+`ChatSession` defaults thinking from `Tokenizer#invitesThinking()` unless the caller sets `enableThinking(…)`.
 
 **How written thinking helps attention (and how it can fail)**
 
@@ -3023,9 +3026,9 @@ ChatSession.send(user)
 ```
 
 Key types: `ChatSession.send` / `generateTurn` / `finishTurn`, `LlmAdvisor` / `LlmAdvisorMixer` /
-`AdvisorEnrichment` / `AdvisorResponse` / `ChatHistory`, `AssistantParts.parse`, `ChatPrompts.systemFor`,
-`SamplingDefaults.forTokenizer` (Gemma top-k 64). Advisors need **unique non-blank names**; they share one batched
-`generate` and must not interleave with another `generate` on the same `LLM`.
+`AdvisorEnrichment` / `AdvisorResponse` / `ChatHistory`, `AssistantParts.parse`, `ChatPrompts.systemFor` (always empty),
+`SamplingDefaults.forTokenizer` (neutral), optional `LLM.Builder#advisorNoteFilter`. Advisors need **unique non-blank
+names**; they share one batched `generate` and must not interleave with another `generate` on the same `LLM`.
 
 ### Sample F — where “2+2” meets attention in the model graph
 

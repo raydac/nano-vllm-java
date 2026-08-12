@@ -8,6 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import com.igormaznitsa.nanollvm.llm.LLM;
 import com.igormaznitsa.nanollvm.models.LlmModel;
 import com.igormaznitsa.nanollvm.models.LlmModelFactory;
+import com.igormaznitsa.nanollvm.testsupport.OptionalModelAssumptions;
 import java.nio.file.Path;
 import org.junit.jupiter.api.Test;
 
@@ -31,7 +32,7 @@ final class BertEmbeddingTest {
 
   @Test
   void gteSmallEmbedsAndRejectsLlmBuilder() {
-    Path path = BundledModelAssumptions.requireGteSmallGguf();
+    Path path = OptionalModelAssumptions.requireGteSmallGguf();
 
     try (LlmModel model = LlmModelFactory.make(path)) {
       assertTrue(model.isEmbeddingModel());

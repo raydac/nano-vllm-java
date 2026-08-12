@@ -1,4 +1,4 @@
-package com.igormaznitsa.nanollvm;
+package com.igormaznitsa.nanollvm.testsupport;
 
 import static com.igormaznitsa.nanollvm.utils.NanoLlvmProps.CONFIG_JSON;
 import static com.igormaznitsa.nanollvm.utils.NanoLlvmProps.ENV_MODELS_DIR;
@@ -15,10 +15,10 @@ import java.util.Optional;
 import java.util.stream.Stream;
 
 /**
- * Skips resource-dependent tests when weights or corpus are absent, printing a visible warning
- * to stderr.
+ * Test-only helper: skip resource-dependent tests when optional local weights or corpus are absent.
+ * Not part of the published library — models are never shipped with the JAR.
  */
-public final class BundledModelAssumptions {
+public final class OptionalModelAssumptions {
 
   private static final String MODELS_DIR = "models";
   private static final String RAG_DIR = "rag";
@@ -27,7 +27,7 @@ public final class BundledModelAssumptions {
   private static final String LFM2_5_2_6B_GGUF = "LFM2.5-2.6B-Q4_K_M.gguf";
   private static final String GTE_SMALL_GGUF = "gte-small.Q2_K.gguf";
 
-  private BundledModelAssumptions() {
+  private OptionalModelAssumptions() {
   }
 
   public static Path requireQwen3() {
@@ -58,10 +58,10 @@ public final class BundledModelAssumptions {
       "models/download-gte-small-gguf.sh");
   }
 
-  public static Path requireBundledRag() {
+  public static Path requireLocalRag() {
     return require(
       findRag(),
-      "bundled RAG corpus at " + ragRoot(),
+      "local RAG corpus at " + ragRoot(),
       "create ./rag with corpus files or set -Dnanollvm.rag.dir=…");
   }
 
@@ -81,7 +81,8 @@ public final class BundledModelAssumptions {
 
   private static Optional<Path> findModel(final String bareName) {
     Path candidate = modelsRoot().resolve(bareName);
-    return isModel(candidate) ? Optional.of(candidate.toAbsolutePath().normalize()) : Optional.empty();
+    return isModel(candidate) ? Optional.of(candidate.toAbsolutePath().normalize()) :
+      Optional.empty();
   }
 
   private static Optional<Path> findRag() {
@@ -133,7 +134,7 @@ public final class BundledModelAssumptions {
       return false;
     }
     try (Stream<Path> stream = Files.list(dir)) {
-      return stream.anyMatch(BundledModelAssumptions::isGgufFile);
+      return stream.anyMatch(OptionalModelAssumptions::isGgufFile);
     } catch (Exception e) {
       return false;
     }

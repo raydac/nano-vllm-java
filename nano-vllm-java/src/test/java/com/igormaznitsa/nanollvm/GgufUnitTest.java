@@ -16,6 +16,7 @@ import com.igormaznitsa.nanollvm.tensor.EmbeddingKernel;
 import com.igormaznitsa.nanollvm.tensor.LinearKernel;
 import com.igormaznitsa.nanollvm.tensor.MatmulRuntime;
 import com.igormaznitsa.nanollvm.tensor.Tensor;
+import com.igormaznitsa.nanollvm.testsupport.OptionalModelAssumptions;
 import com.igormaznitsa.nanollvm.tokenizer.Tokenizer;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
@@ -395,25 +396,28 @@ final class GgufUnitTest {
   }
 
   @Test
-  void lfm2GgufTokenizerUsesChatMlWithoutThinkInvite() throws Exception {
-    Path path = BundledModelAssumptions.requireLfm2Gguf();
+  void lfm2GgufTokenizerUsesChatMlFormat() throws Exception {
+    Path path = OptionalModelAssumptions.requireLfm2Gguf();
 
     try (GgufReader reader = GgufReader.open(path)) {
       Tokenizer tok = Tokenizer.fromGguf(reader);
-      assertFalse(tok.isGemmaChat());
-      assertFalse(tok.invitesThinking());
-      assertEquals(ChatPrompts.PLAIN_CHAT_SYSTEM, ChatPrompts.systemFor(tok));
+      assertFalse(tok.isTurnBasedChat());
+      assertEquals(Tokenizer.ChatFormat.CHATML, tok.chatFormat());
+      assertEquals("", ChatPrompts.systemFor(tok));
 
+      boolean enableThinking = tok.invitesThinking();
       String chat = tok.applyChatTemplate(
         List.of(
           Map.of("role", "system", "content", "be brief"),
           Map.of("role", "user", "content", "hello")),
         true,
-        false);
+        enableThinking);
       assertTrue(chat.contains("<|im_start|>user"));
       assertTrue(chat.contains("<|im_start|>assistant"));
-      assertFalse(chat.contains("<think>"), chat);
       assertFalse(chat.startsWith("user:"), chat);
+      if (!enableThinking) {
+        assertFalse(chat.contains("<think>"), chat);
+      }
     }
   }
 }

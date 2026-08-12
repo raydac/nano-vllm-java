@@ -38,12 +38,13 @@ import com.igormaznitsa.nanollvm.tensor.FloatKernelsFactory;
 import com.igormaznitsa.nanollvm.tensor.MatmulRuntime;
 import com.igormaznitsa.nanollvm.tensor.Ops;
 import com.igormaznitsa.nanollvm.tensor.Tensor;
+import com.igormaznitsa.nanollvm.testsupport.OptionalModelAssumptions;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.file.Path;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 import java.util.stream.IntStream;
 import org.junit.jupiter.api.Test;
 
@@ -66,7 +67,7 @@ class CoreUnitTest {
 
   @Test
   void llmBuilderIsFluentAndDefaultsQuiet() {
-    Path path = BundledModelAssumptions.requireQwen3();
+    Path path = OptionalModelAssumptions.requireQwen3();
 
     LlmModel model = LlmModelFactory.make(path);
     try (model) {
@@ -93,7 +94,7 @@ class CoreUnitTest {
 
   @Test
   void sharedModelIsReusedAcrossLlmsWhenWeightsPresent() {
-    Path path = BundledModelAssumptions.requireQwen3();
+    Path path = OptionalModelAssumptions.requireQwen3();
 
     LlmModel model = LlmModelFactory.make(path);
     try (model;
@@ -109,7 +110,7 @@ class CoreUnitTest {
 
   @Test
   void closedLlmAndModelRejectFurtherUseWhenWeightsPresent() {
-    Path path = BundledModelAssumptions.requireQwen3();
+    Path path = OptionalModelAssumptions.requireQwen3();
 
     LlmModel model = LlmModelFactory.make(path);
     LLM llm = LLM.builder(model).maxModelLen(256).numKvcacheBlocks(32).build();
@@ -128,7 +129,7 @@ class CoreUnitTest {
 
   @Test
   void advisorsConfiguredOnBuilderWhenWeightsPresent() {
-    Path path = BundledModelAssumptions.requireQwen3();
+    Path path = OptionalModelAssumptions.requireQwen3();
 
     LlmModel model = LlmModelFactory.make(path);
     LlmAdvisor facts = LlmAdvisor.builder().name("Facts").prompt("Fact check").build();
@@ -298,7 +299,7 @@ class CoreUnitTest {
 
   @Test
   void bundledQwenModelIsPresent() {
-    Path path = BundledModelAssumptions.requireQwen3();
+    Path path = OptionalModelAssumptions.requireQwen3();
     assertTrue(isRegularFile(path.resolve("config.json")));
     assertTrue(isRegularFile(path.resolve("model.safetensors")));
   }
@@ -391,7 +392,7 @@ class CoreUnitTest {
 
   @Test
   void disableMultiCpuWinsOverCpuThreadsSystemPropertyWhenWeightsPresent() {
-    Path path = BundledModelAssumptions.requireQwen3();
+    Path path = OptionalModelAssumptions.requireQwen3();
 
     String previous = System.getProperty("nanollvm.cpu.threads");
     System.setProperty("nanollvm.cpu.threads", "8");
@@ -470,7 +471,7 @@ class CoreUnitTest {
     assertEquals("ащ", com.igormaznitsa.nanollvm.tokenizer.Tokenizer.decodeUtf8Complete(
       "ащ".getBytes(java.nio.charset.StandardCharsets.UTF_8)));
 
-    Path path = BundledModelAssumptions.requireQwen3();
+    Path path = OptionalModelAssumptions.requireQwen3();
     var tok = com.igormaznitsa.nanollvm.tokenizer.Tokenizer.fromPretrained(path);
     List<Integer> ids = tok.encode("обычное средство щелочное");
     for (int n = 1; n <= ids.size(); n++) {
@@ -482,7 +483,7 @@ class CoreUnitTest {
 
   @Test
   void tokenizerEncodesSpecialTokensAtomically() {
-    Path path = BundledModelAssumptions.requireQwen3();
+    Path path = OptionalModelAssumptions.requireQwen3();
     var tok = com.igormaznitsa.nanollvm.tokenizer.Tokenizer.fromPretrained(path);
     List<Integer> ids = tok.encode(
         "<|im_start|>user\nhello<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n");
@@ -569,38 +570,19 @@ class CoreUnitTest {
   }
 
   @Test
-  void chatSystemPromptUsesDialogHistory() {
-    assertTrue(ChatPrompts.CHAT_SYSTEM.contains("You are the Assistant"));
-    assertTrue(ChatPrompts.CHAT_SYSTEM.contains("User"));
-    assertTrue(ChatPrompts.CHAT_SYSTEM.toLowerCase(Locale.ROOT).contains("conversation"));
-    assertTrue(ChatPrompts.CHAT_SYSTEM.toLowerCase(Locale.ROOT).contains("do not repeat")
-      || ChatPrompts.CHAT_SYSTEM.toLowerCase(Locale.ROOT).contains("do not greet"));
-    assertTrue(ChatPrompts.CHAT_SYSTEM.contains("<think>"));
-    assertFalse(ChatPrompts.CHAT_SYSTEM.toLowerCase(Locale.ROOT).contains("knowledge base"));
-    assertEquals(ChatPrompts.CHAT_SYSTEM, ChatPrompts.systemFor(false));
-    assertEquals(ChatPrompts.GEMMA_CHAT_SYSTEM, ChatPrompts.systemFor(true));
-    assertFalse(ChatPrompts.PLAIN_CHAT_SYSTEM.contains("<think>"));
-    assertTrue(ChatPrompts.CHAT_SYSTEM.contains("<think>"));
-    assertTrue(ChatPrompts.GEMMA_CHAT_SYSTEM.isBlank());
-    assertTrue(ChatPrompts.gemmaUserContent("SYS", "hi", true).startsWith("SYS"));
-    assertEquals("hi", ChatPrompts.gemmaUserContent("SYS", "hi", false));
-    assertEquals("hi", ChatPrompts.gemmaUserContent(null, "hi", true));
-    assertEquals("hi", ChatPrompts.gemmaUserContent("", "hi", true));
-    assertTrue(ChatPrompts.isSetupBoilerplate("Okay, I'm ready."));
-    assertTrue(ChatPrompts.isSetupBoilerplate("Okay, I understand. Let's begin."));
-    assertTrue(ChatPrompts.isSetupBoilerplate(
-      "Okay, I understand. I will respond with a short viewpoint, not the user-facing assistant."));
-    assertFalse(ChatPrompts.isSetupBoilerplate("Hello! How can I help you today?"));
-    assertFalse(ChatPrompts.isSetupBoilerplate("The president of Estonia is Alar Karis."));
-    assertFalse(ChatPrompts.isSetupBoilerplate(
-      "The universe is the totality of space, time, matter, and energy."));
-    assertTrue(ChatPrompts.withAdvisorGuidance(ChatPrompts.CHAT_SYSTEM, true)
-      .contains(ChatPrompts.ADVISOR_AWARE_ADDON));
-    assertEquals("", ChatPrompts.withAdvisorGuidance(ChatPrompts.GEMMA_CHAT_SYSTEM, true));
-    assertEquals(ChatPrompts.CHAT_SYSTEM,
-      ChatPrompts.withAdvisorGuidance(ChatPrompts.CHAT_SYSTEM, false));
+  void chatPromptsStayModelAgnostic() {
+    assertEquals("", ChatPrompts.systemFor(false));
+    assertEquals("", ChatPrompts.systemFor(true));
+    assertEquals("", ChatPrompts.systemFor((com.igormaznitsa.nanollvm.tokenizer.Tokenizer) null));
+    assertTrue(ChatPrompts.foldSystemIntoFirstUser("SYS", "hi", true).startsWith("SYS"));
+    assertEquals("hi", ChatPrompts.foldSystemIntoFirstUser("SYS", "hi", false));
+    assertEquals("hi", ChatPrompts.foldSystemIntoFirstUser(null, "hi", true));
+    assertEquals("hi", ChatPrompts.foldSystemIntoFirstUser("", "hi", true));
+    assertEquals("Be brief.", ChatPrompts.withAdvisorGuidance("Be brief.", true));
+    assertEquals("", ChatPrompts.withAdvisorGuidance("", true));
+    assertEquals("Be brief.", ChatPrompts.withAdvisorGuidance("Be brief.", false));
     assertTrue(ChatMessages.newConversation(true).isEmpty());
-    assertFalse(ChatMessages.newConversation(false).isEmpty());
+    assertTrue(ChatMessages.newConversation(false).isEmpty());
     assertEquals(1, ChatMessages.newConversation("Be brief.").size());
     assertTrue(ChatMessages.newConversation("").isEmpty());
     assertTrue(ChatMessages.newConversation(null).isEmpty());
@@ -611,7 +593,7 @@ class CoreUnitTest {
   }
 
   @Test
-  void samplingDefaultsPreferGemmaTopKWhenFlagged() {
+  void samplingDefaultsAreNeutral() {
     SamplingParams plain = SamplingDefaults.forTokenizer(null, 100);
     assertEquals(0, plain.topK());
     assertEquals(100, plain.maxTokens());
@@ -672,15 +654,82 @@ class CoreUnitTest {
 
   @Test
   void qwenTokenizerIsNotGemmaChat() {
-    Path path = BundledModelAssumptions.requireQwen3();
+    Path path = OptionalModelAssumptions.requireQwen3();
     var tok = com.igormaznitsa.nanollvm.tokenizer.Tokenizer.fromPretrained(path);
-    assertFalse(tok.isGemmaChat());
+    assertFalse(tok.isTurnBasedChat());
     assertTrue(tok.invitesThinking());
-    assertEquals(ChatPrompts.CHAT_SYSTEM, ChatPrompts.systemFor(tok));
+    assertEquals("", ChatPrompts.systemFor(tok));
     String chat = tok.applyChatTemplate(
         List.of(Map.of("role", "user", "content", "hi")), true, false);
     assertTrue(chat.contains("<|im_start|>"));
     assertFalse(chat.contains("<start_of_turn>"));
+  }
+
+  @Test
+  void chatMlWithoutThinkTokensHasEmptyLibrarySystem() throws Exception {
+    Path dir = createTempDirectory("chatml-plain-tok");
+    try {
+      writeString(dir.resolve("config.json"),
+        "{\"model_type\":\"llama\",\"architectures\":[\"LlamaForCausalLM\"],\"vocab_size\":8}");
+      writeString(dir.resolve("tokenizer_config.json"), """
+        {
+          "eos_token": "<|im_end|>",
+          "pad_token": "<|im_end|>",
+          "chat_template": "{% for message in messages %}{{'<|im_start|>' + message['role'] + '\\n' + message['content'] + '<|im_end|>\\n'}}{% endfor %}{% if add_generation_prompt %}{{ '<|im_start|>assistant\\n' }}{% endif %}"
+        }
+        """);
+      writeString(dir.resolve("tokenizer.json"), """
+        {
+          "model": {
+            "type": "BPE",
+            "vocab": {
+              "a": 0,
+              "<|im_start|>": 1,
+              "<|im_end|>": 2,
+              "hi": 3
+            },
+            "merges": []
+          },
+          "added_tokens": [
+            {"id": 1, "content": "<|im_start|>", "special": true},
+            {"id": 2, "content": "<|im_end|>", "special": true}
+          ]
+        }
+        """);
+      var tok = com.igormaznitsa.nanollvm.tokenizer.Tokenizer.fromPretrained(dir);
+      assertFalse(tok.isTurnBasedChat());
+      assertFalse(tok.invitesThinking());
+      assertEquals("", ChatPrompts.systemFor(tok));
+      String chat = tok.applyChatTemplate(
+        List.of(Map.of("role", "user", "content", "hi")), true, false);
+      assertTrue(chat.contains("<|im_start|>assistant"));
+      assertFalse(chat.contains("<think>"));
+    } finally {
+      try (var walk = walk(dir)) {
+        walk.sorted(java.util.Comparator.reverseOrder()).forEach(p -> {
+          try {
+            deleteIfExists(p);
+          } catch (IOException e) {
+            throw new UncheckedIOException("failed to delete temp path " + p, e);
+          }
+        });
+      }
+    }
+  }
+
+  @Test
+  void smolLm2InstructTokenizerHasEmptyLibrarySystemWhenPresent() {
+    Path modelsRoot = Path.of(System.getProperty("nanollvm.models.dir", "models"));
+    Path path = OptionalModelAssumptions.require(
+      Optional.of(modelsRoot.resolve("SmolLM2-135M-Instruct-ONNX"))
+        .filter(p -> java.nio.file.Files.isDirectory(p)
+          && java.nio.file.Files.isRegularFile(p.resolve("tokenizer.json"))),
+      "SmolLM2-135M-Instruct-ONNX",
+      "models/download-smollm2-135m-instruct-onnx.sh");
+    var tok = com.igormaznitsa.nanollvm.tokenizer.Tokenizer.fromPretrained(path);
+    assertFalse(tok.isTurnBasedChat());
+    assertFalse(tok.invitesThinking());
+    assertEquals("", ChatPrompts.systemFor(tok));
   }
 
   @Test
@@ -712,7 +761,7 @@ class CoreUnitTest {
            "pre_tokenizer":{"type":"Metaspace","replacement":"▁"}}
           """);
       var tok = com.igormaznitsa.nanollvm.tokenizer.Tokenizer.fromPretrained(dir);
-      assertTrue(tok.isGemmaChat());
+      assertTrue(tok.isTurnBasedChat());
       String chatThinkFlag = tok.applyChatTemplate(
           List.of(Map.of("role", "user", "content", "hi")), true, true);
       assertTrue(
@@ -737,9 +786,9 @@ class CoreUnitTest {
 
   @Test
   void gemmaSmokeWhenWeightsPresent() {
-    Path path = BundledModelAssumptions.requireGemma3();
+    Path path = OptionalModelAssumptions.requireGemma3();
     var tok = com.igormaznitsa.nanollvm.tokenizer.Tokenizer.fromPretrained(path);
-    assertTrue(tok.isGemmaChat());
+    assertTrue(tok.isTurnBasedChat());
     assertEquals(List.of(23391), tok.encode("hello"));
     assertEquals(List.of(23391, 1902), tok.encode("hello world"));
     String chatNoThink = tok.applyChatTemplate(
@@ -753,15 +802,13 @@ class CoreUnitTest {
     assertTrue(chatNoThink.contains("<start_of_turn>user"));
     assertTrue(chatNoThink.contains("<start_of_turn>model"));
     assertFalse(chatNoThink.contains("<think>"));
-    assertTrue(ChatPrompts.CHAT_SYSTEM.contains("<think>"));
-    assertFalse(ChatPrompts.GEMMA_CHAT_SYSTEM.contains("<think>"));
+    assertEquals("", ChatPrompts.systemFor(tok));
     Config.HfConfig hf = null;
     try {
       hf = Config.HfConfig.load(path.resolve("config.json"));
     } catch (Exception e) {
       throw new AssertionError(e);
     }
-    assertTrue(hf.tieWordEmbeddings());
     assertEquals("gemma3", com.igormaznitsa.nanollvm.models.internal.CausalLMFactory.detect(hf));
     assertTrue(com.igormaznitsa.nanollvm.models.internal.WeightSchema.gemma3(hf)
         .expects("model.layers.0.pre_feedforward_layernorm.weight"));

@@ -23,7 +23,7 @@ import java.util.List;
 import java.util.stream.IntStream;
 
 /**
- * BERT encoder for GGUF embedding models (e.g. GTE-small): token+position+type embeddings,
+ * BERT-family encoder for GGUF embedding checkpoints: token+position+type embeddings,
  * post-LN transformer blocks, mean pooling, L2 normalize.
  *
  * @since 1.1.0

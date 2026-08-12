@@ -32,7 +32,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Immutable Qwen3 causal LM. All weights are taken from {@link WeightBag} at construction.
+ * Causal LM for the {@code qwen3} architecture family. Weights from {@link WeightBag} at construction.
  */
 public record Qwen3ForCausalLM(Qwen3Model model, ParallelLMHead lmHead) implements CausalLM {
 
@@ -178,7 +178,8 @@ public record Qwen3ForCausalLM(Qwen3Model model, ParallelLMHead lmHead) implemen
     private static Qwen3MLP assemble(final Config.HfConfig config, final WeightBag weights,
                                      final int layerIndex) {
       if (!"silu".equals(config.effectiveActivation()) && !"silu".equals(config.hiddenAct())) {
-        throw new IllegalArgumentException("only silu supported for Qwen3");
+        throw new IllegalArgumentException(
+          "qwen3 architecture expects silu, got " + config.effectiveActivation());
       }
       String p = mlp(layerIndex);
       return new Qwen3MLP(

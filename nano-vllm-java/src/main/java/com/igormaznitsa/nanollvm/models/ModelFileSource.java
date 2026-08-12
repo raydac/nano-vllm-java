@@ -33,7 +33,7 @@ public interface ModelFileSource {
   }
 
   /**
-   * Label for logs (e.g. {@code classpath:models/Qwen}).
+   * Label for logs (e.g. {@code classpath:models/MyChatModel}).
    *
    * @since 1.1.0
    */

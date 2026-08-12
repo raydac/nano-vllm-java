@@ -42,7 +42,7 @@ public final class ModelFileSources {
 
   /**
    * Maps {@link ModelFileId#fileName()} and weight shard names under a classpath <em>folder</em>
-   * (no leading slash; e.g. {@code models/Qwen3-0.6B}).
+   * (no leading slash; e.g. {@code models/MyChatModel}).
    *
    * @param loader         class loader that owns the resources
    * @param resourceFolder classpath folder prefix (not a file path)

@@ -1,9 +1,9 @@
 package com.igormaznitsa.nanollvm.chat;
 
-import com.igormaznitsa.nanollvm.prompts.ChatPrompts;
 import com.igormaznitsa.nanollvm.tokenizer.Tokenizer;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Predicate;
 import java.util.stream.IntStream;
 
 /**
@@ -19,8 +19,12 @@ public final class ChatMessages {
   private ChatMessages() {
   }
 
-  public static List<ChatMessage> newConversation(final boolean gemmaChat) {
-    return newConversation(ChatPrompts.systemFor(gemmaChat));
+  /**
+   * @deprecated Prefer {@link #newConversation(String)}; the boolean is ignored.
+   */
+  @Deprecated
+  public static List<ChatMessage> newConversation(final boolean ignoredTurnBasedChat) {
+    return newConversation("");
   }
 
   /**
@@ -69,13 +73,28 @@ public final class ChatMessages {
   }
 
   /**
-   * Replaces setup-boilerplate assistant turns with a short greeting. Mutates {@code history}
+   * Replaces assistant turns matching {@code match} with a short greeting. Mutates {@code history}
    * in place.
+   *
+   * @since 1.1.0
    */
-  public static void scrubSetupBoilerplateTurns(final List<ChatMessage> history) {
+  public static void scrubMatchingAssistantTurns(
+    final List<ChatMessage> history,
+    final Predicate<String> match
+  ) {
     IntStream.range(0, history.size())
       .filter(i -> history.get(i).role() == ChatRole.ASSISTANT
-        && ChatPrompts.isSetupBoilerplate(history.get(i).content()))
+        && match.test(history.get(i).content()))
       .forEach(i -> history.set(i, ChatMessage.assistant("Hello!")));
+  }
+
+  /**
+   * @deprecated Prefer {@link #scrubMatchingAssistantTurns(List, Predicate)} with an app-owned
+   * predicate. This no-op kept for binary compatibility with 1.0 callers that scrubbed via the
+   * old library boilerplate list.
+   */
+  @Deprecated
+  public static void scrubSetupBoilerplateTurns(final List<ChatMessage> history) {
+    // Library no longer owns demo boilerplate phrases; callers should pass their own predicate.
   }
 }

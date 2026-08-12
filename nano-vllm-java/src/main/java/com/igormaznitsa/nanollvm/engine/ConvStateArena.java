@@ -4,7 +4,7 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * Per-LLM rolling short-convolution state for hybrid models (LFM2), keyed by sequence id.
+ * Per-LLM rolling short-convolution state for hybrid short-conv models, keyed by sequence id.
  */
 public final class ConvStateArena {
 

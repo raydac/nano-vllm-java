@@ -86,7 +86,10 @@ public final class CausalLMFactory {
         }
       }
     }
-    return ARCH_QWEN3;
+    throw new IllegalArgumentException(
+      "cannot detect architecture from config (model_type/architectures); set -D"
+        + PROP_ARCH + "=qwen3|gemma3|llama|lfm2"
+    );
   }
 
   private static String normalize(final String arch) {

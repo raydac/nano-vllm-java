@@ -4,9 +4,9 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import com.igormaznitsa.nanollvm.BundledModelAssumptions;
 import com.igormaznitsa.nanollvm.models.LlmModel;
 import com.igormaznitsa.nanollvm.models.LlmModelFactory;
+import com.igormaznitsa.nanollvm.testsupport.OptionalModelAssumptions;
 import java.nio.file.Path;
 import java.util.List;
 import org.junit.jupiter.api.Test;
@@ -33,7 +33,7 @@ class DenseRagIndexTest {
 
   @Test
   void withEmbeddingsRejectsCausalModel() {
-    Path qwen = BundledModelAssumptions.requireQwen3();
+    Path qwen = OptionalModelAssumptions.requireQwen3();
     PreparedRag lexical = RagFactory.of("Paris is the capital of France.");
     try (LlmModel causal = LlmModelFactory.make(qwen)) {
       IllegalArgumentException ex = assertThrows(
@@ -45,7 +45,7 @@ class DenseRagIndexTest {
 
   @Test
   void hybridDenseRetrievesParaphraseWhenGtePresent() {
-    Path gte = BundledModelAssumptions.requireGteSmallGguf();
+    Path gte = OptionalModelAssumptions.requireGteSmallGguf();
     PreparedRag lexical = RagFactory.builder()
       .options(RagLoadOptions.forTinyModels())
       .add("capital.txt", "Paris is the capital of France.")

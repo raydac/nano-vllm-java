@@ -6,7 +6,6 @@ import com.igormaznitsa.nanollvm.chat.ChatMessage;
 import com.igormaznitsa.nanollvm.chat.ChatMessages;
 import com.igormaznitsa.nanollvm.chat.ChatRole;
 import com.igormaznitsa.nanollvm.prompts.AdvisorPrompts;
-import com.igormaznitsa.nanollvm.prompts.ChatPrompts;
 import com.igormaznitsa.nanollvm.prompts.RagPrompts;
 import com.igormaznitsa.nanollvm.tokenizer.Tokenizer;
 import java.util.ArrayList;
@@ -15,11 +14,12 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
+import java.util.function.Predicate;
 import java.util.regex.Pattern;
 
 /**
  * Builds isolated advisor chat prompts and mixes advisor answers into the main user text.
- * Wording lives in {@link AdvisorPrompts} / {@link RagPrompts}.
+ * Role wording is entirely caller-supplied ({@link LlmAdvisor#prompt()}).
  */
 final class AdvisorPrompt {
 
@@ -31,14 +31,7 @@ final class AdvisorPrompt {
   }
 
   /**
-   * Role prompt plus shared advisor instructions.
-   */
-  public static String groundedRole(final String rolePrompt) {
-    return AdvisorPrompts.forAdvisor(rolePrompt);
-  }
-
-  /**
-   * Advisor turn: role+instructions as system (Gemma folds into first user), prior user turns,
+   * Advisor turn: caller role prompt as system (turn-based templates fold into first user), prior user turns,
    * then advisor user payload (question + Context when RAG hit).
    */
   public static String withDialog(
@@ -60,13 +53,16 @@ final class AdvisorPrompt {
   ) {
     requireNonNull(priorDialog, "priorDialog");
     requireNonNull(modelUserText, "modelUserText");
+    String system = requireNonNull(rolePrompt, "rolePrompt").strip();
+    if (system.isEmpty()) {
+      throw new IllegalArgumentException("rolePrompt must not be blank");
+    }
     String user = advisorFacingUserText(modelUserText);
     if (user.isEmpty()) {
       throw new IllegalArgumentException("modelUserText must not be blank");
     }
 
-    List<ChatMessage> turn = new ArrayList<>(ChatMessages.newConversation(
-      AdvisorPrompts.forAdvisor(rolePrompt)));
+    List<ChatMessage> turn = new ArrayList<>(ChatMessages.newConversation(system));
     priorDialog.stream()
       .filter(message -> message.role() == ChatRole.USER)
       .forEach(turn::add);
@@ -101,7 +97,7 @@ final class AdvisorPrompt {
   }
 
   /**
-   * Notes usable for salvage / diagnostics: drop empty fallbacks; when facts are present require
+   * Notes usable for salvage / diagnostics: drop empty/boilerplate; when facts are present require
    * lexical grounding; dedupe identical notes (first advisor slot wins).
    */
   public static List<String> selectNotesForMix(
@@ -128,8 +124,8 @@ final class AdvisorPrompt {
     LinkedHashSet<String> seen = new LinkedHashSet<>();
     List<IndexedNote> selected = new ArrayList<>();
     for (int i = 0; i < notes.size(); i++) {
-      String note = noteOrFallback(notes.get(i));
-      if (note.equals(AdvisorPrompts.EMPTY_NOTE_FALLBACK)) {
+      String note = usableNote(notes.get(i));
+      if (note.isEmpty()) {
         continue;
       }
       if (withContext && !isGroundedInContext(note, contextTerms)) {
@@ -143,17 +139,29 @@ final class AdvisorPrompt {
     return selected;
   }
 
-  static String noteOrFallback(final String note) {
+  /**
+   * @return stripped note, or empty when blank
+   */
+  static String usableNote(final String note) {
+    return usableNote(note, body -> body != null && !body.isBlank());
+  }
+
+  /**
+   * @return stripped note when {@code keep} accepts it; otherwise empty
+   * @since 1.1.0
+   */
+  static String usableNote(final String note, final Predicate<String> keep) {
+    requireNonNull(keep, "keep");
     String body = note == null ? "" : note.strip();
-    if (body.isEmpty() || ChatPrompts.isSetupBoilerplate(body)) {
-      return AdvisorPrompts.EMPTY_NOTE_FALLBACK;
+    if (body.isEmpty() || !keep.test(body)) {
+      return "";
     }
     return body;
   }
 
   /**
    * Mixes useful advisor notes into the main user text via {@link AdvisorPrompts#withGeneratedNotes}.
-   * Empty/fallback-only lists leave {@code modelUserText} unchanged.
+   * Empty-only lists leave {@code modelUserText} unchanged.
    */
   public static String mix(final String modelUserText, final List<String> answers) {
     requireNonNull(modelUserText, "modelUserText");
@@ -167,8 +175,8 @@ final class AdvisorPrompt {
     }
 
     List<String> notes = answers.stream()
-      .map(AdvisorPrompt::noteOrFallback)
-      .filter(note -> !note.equals(AdvisorPrompts.EMPTY_NOTE_FALLBACK))
+      .map(AdvisorPrompt::usableNote)
+      .filter(note -> !note.isEmpty())
       .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new))
       .stream()
       .toList();
@@ -176,10 +184,6 @@ final class AdvisorPrompt {
       return base;
     }
     return AdvisorPrompts.withGeneratedNotes(base, notes);
-  }
-
-  static String claimLabel(final int index) {
-    return AdvisorPrompts.advisorName(index);
   }
 
   static boolean ragTurnWithoutHits(final String modelUserText) {

@@ -33,7 +33,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Immutable text-only Gemma 3 causal LM. All weights are taken from {@link WeightBag} at
+ * Causal LM for the {@code gemma3} / {@code gemma3_text} architecture family. Weights from {@link WeightBag} at
  * construction.
  */
 public record Gemma3ForCausalLM(Gemma3Model model, ParallelLMHead lmHead) implements CausalLM {
@@ -48,7 +48,7 @@ public record Gemma3ForCausalLM(Gemma3Model model, ParallelLMHead lmHead) implem
 
   private static Gemma3ForCausalLM assemble(final Config.HfConfig config, final WeightBag weights) {
     Gemma3Model model = new Gemma3Model(config, weights);
-    // Gemma3-270M has no lm_head in the checkpoint; HF ties embeddings.
+    // When lm_head is absent in the checkpoint, reuse tied embeddings.
     Tensor lmWeight = weights.find(LM_HEAD)
       .orElseGet(() -> model.embedTokens().weight());
     return new Gemma3ForCausalLM(model, new ParallelLMHead(lmWeight));
@@ -169,7 +169,8 @@ public record Gemma3ForCausalLM(Gemma3Model model, ParallelLMHead lmHead) implem
                                       final int layerIndex) {
       String act = config.effectiveActivation().toLowerCase();
       if (!act.contains("gelu")) {
-        throw new IllegalArgumentException("Gemma3 expects gelu_pytorch_tanh, got " + act);
+        throw new IllegalArgumentException(
+          "gemma3 architecture expects gelu_pytorch_tanh, got " + act);
       }
       String p = mlp(layerIndex);
       return new Gemma3MLP(

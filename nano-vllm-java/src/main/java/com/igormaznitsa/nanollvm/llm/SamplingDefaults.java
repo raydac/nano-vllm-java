@@ -3,7 +3,8 @@ package com.igormaznitsa.nanollvm.llm;
 import com.igormaznitsa.nanollvm.tokenizer.Tokenizer;
 
 /**
- * Model-aware default {@link SamplingParams} for chat / completion helpers.
+ * Neutral default {@link SamplingParams} for chat / completion helpers.
+ * Model-family knobs (e.g. turn-based top-k) belong in the application or samples.
  */
 public final class SamplingDefaults {
 
@@ -17,9 +18,6 @@ public final class SamplingDefaults {
   }
 
   public static SamplingParams forTokenizer(final Tokenizer tokenizer, final int maxTokens) {
-    if (tokenizer != null && tokenizer.isGemmaChat()) {
-      return new SamplingParams(0.6f, maxTokens, false, 64, 0.95f);
-    }
     return new SamplingParams(0.6f, maxTokens, false, 0, 0.95f);
   }
 }

@@ -18,17 +18,17 @@ public final class Norms {
    */
   public static final class RMSNorm {
     private final float eps;
-    private final boolean gemmaStyle;
+    private final boolean onePlusWeight;
     private final Tensor weight;
 
     public RMSNorm(final Tensor weight, final float eps) {
       this(weight, eps, false);
     }
 
-    public RMSNorm(final Tensor weight, final float eps, final boolean gemmaStyle) {
+    public RMSNorm(final Tensor weight, final float eps, final boolean onePlusWeight) {
       this.weight = requireNonNull(weight, "weight");
       this.eps = eps;
-      this.gemmaStyle = gemmaStyle;
+      this.onePlusWeight = onePlusWeight;
     }
 
     public Tensor weight() {
@@ -36,11 +36,11 @@ public final class Norms {
     }
 
     public Tensor forward(final Tensor x) {
-      return Ops.rmsNorm(x, this.weight, this.eps, this.gemmaStyle);
+      return Ops.rmsNorm(x, this.weight, this.eps, this.onePlusWeight);
     }
 
     public Tensor[] forward(final Tensor x, final Tensor residual) {
-      return Ops.addRmsNorm(x, residual, this.weight, this.eps, this.gemmaStyle);
+      return Ops.addRmsNorm(x, residual, this.weight, this.eps, this.onePlusWeight);
     }
   }
 
