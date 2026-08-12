@@ -20,7 +20,7 @@ import java.util.stream.IntStream;
  * <ul>
  *   <li>two queues — {@code waiting} (new / preempted prompts) and {@code running} (decoding)</li>
  *   <li>a {@link BlockManager} that pages KV slots into the per-LLM {@link KvCacheArena}</li>
- *   <li>stop / max-token finish rules copied from {@link Config}</li>
+ *   <li>stop / max-token / max-model-len / degenerate-loop finish rules from {@link Config}</li>
  * </ul>
  * Prefill is preferred over decode: as long as waiting sequences can be admitted, {@link #schedule()}
  * returns a prefill batch. Only when waiting cannot proceed does it schedule one decode token per
@@ -61,6 +61,7 @@ public final class Scheduler {
 
   private final int maxNumSeqs;
   private final int maxNumBatchedTokens;
+  private final int maxModelLen;
   private final List<Integer> stopTokenIds;
   private final int blockSize;
   private final BlockManager blockManager;
@@ -85,6 +86,7 @@ public final class Scheduler {
     requireNonNull(config, "config");
     this.maxNumSeqs = config.maxNumSeqs();
     this.maxNumBatchedTokens = config.maxNumBatchedTokens();
+    this.maxModelLen = config.maxModelLen();
     this.stopTokenIds = config.stopTokenIds().isEmpty()
       ? List.of(config.eos())
       : List.copyOf(config.stopTokenIds());
@@ -286,7 +288,8 @@ public final class Scheduler {
    * <p>Always hashes / accounts scheduled KV tokens via {@link BlockManager#hashBlocks}. Mid-prefill
    * chunks that have not yet covered the full prompt return early (no completion token appended).
    * Otherwise appends {@code tokenIds.get(i)}, optionally records {@code [seqId, tokenId]} into
-   * {@code appendedOut}, and finishes the sequence on stop-id or {@code maxTokens}.
+   * {@code appendedOut}, and finishes the sequence on stop-id, {@code maxTokens},
+   * {@code maxModelLen}, or a detected degenerate token-loop.
    *
    * @param seqs        same order as the batch returned by {@link #schedule()}
    * @param tokenIds    one sampled id per sequence
@@ -329,7 +332,9 @@ public final class Scheduler {
 
   private boolean shouldFinish(final Sequence seq, final int tokenId) {
     return (!seq.ignoreEos() && this.stopTokenIds.contains(tokenId))
-      || seq.numCompletionTokens() == seq.maxTokens();
+      || seq.numCompletionTokens() == seq.maxTokens()
+      || seq.length() >= this.maxModelLen
+      || seq.hasDegenerateRepetition();
   }
 
   private void finishSequence(final Sequence seq) {

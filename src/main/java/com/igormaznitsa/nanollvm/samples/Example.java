@@ -46,6 +46,7 @@ import java.util.stream.Collectors;
 public final class Example {
 
   private static final int MAX_NEW_TOKENS = 768;
+  private static final int COMPACT_DEMO_MAX_NEW_TOKENS = 256;
   private static final int RAG_MAX_TOKENS_DEFAULT = 768;
   private static final int RAG_MAX_TOKENS_GEMMA = 128;
   private static final int RAG_TOP_K_DEFAULT = 4;
@@ -83,10 +84,15 @@ public final class Example {
       console.printlnInfo("Loading model from " + path);
       console.printlnInfo(
         "Architecture auto-detects from config.json / GGUF metadata "
-          + "(override: -Dnanollvm.arch=qwen3|gemma3|lfm2|bert).");
+          + "(override: -Dnanollvm.arch=qwen3|gemma3|llama|lfm2|bert).");
       console.printlnInfo(
         "CPU matmul: " + Runtime.getRuntime().availableProcessors()
           + " threads from Runtime (override: -Dnanollvm.cpu.threads=N).");
+      if (pathLower.contains("tiny-llm")) {
+        console.printlnInfo(
+          "This checkpoint is a base/completion toy model (~10M), not chat-tuned — "
+            + "expect odd replies under the chat/RAG UI.");
+      }
       if (ggufPath) {
         console.printlnInfo(
           "GGUF: weights stay packed (dequant on matmul). For float32 at load: "
@@ -235,17 +241,33 @@ public final class Example {
 
       try (LLM llm = builder.build()) {
         boolean gemma = llm.tokenizer().isGemmaChat();
+        int modelLen = llm.config().maxModelLen();
+        int maxNew = Math.clamp(modelLen / 2, 32, MAX_NEW_TOKENS);
+        if (isCompactDemoModel(llm)) {
+          maxNew = Math.min(maxNew, COMPACT_DEMO_MAX_NEW_TOKENS);
+        }
         RagSession rag = null;
         ChatSession chat = null;
         String promptLabel;
         RagIndex ragIndex = ragSetup.index();
 
         if (ragIndex != null) {
-          int maxTokens = gemma ? RAG_MAX_TOKENS_GEMMA : RAG_MAX_TOKENS_DEFAULT;
+          int maxTokens = Math.clamp(modelLen / 4, 32,
+            gemma ? RAG_MAX_TOKENS_GEMMA : RAG_MAX_TOKENS_DEFAULT);
+          if (isCompactDemoModel(llm)) {
+            maxTokens = Math.min(maxTokens, COMPACT_DEMO_MAX_NEW_TOKENS);
+          }
+          int maxNoHits =
+            Math.clamp(maxTokens, isCompactDemoModel(llm) ? maxTokens : modelLen / 2, maxNew);
+          int maxContextChars = Math.clamp((modelLen - maxTokens - 64) * 3, 256,
+            gemma ? RAG_CONTEXT_CHARS_GEMMA : RAG_CONTEXT_CHARS_DEFAULT);
+          if (isCompactDemoModel(llm)) {
+            maxContextChars = Math.min(maxContextChars, 1200);
+          }
           rag = llm.rag(ragIndex, maxTokens)
-            .maxTokensWhenNoHits(gemma ? MAX_NEW_TOKENS : RAG_MAX_TOKENS_DEFAULT)
+            .maxTokensWhenNoHits(maxNoHits)
             .topK(gemma ? RAG_TOP_K_GEMMA : RAG_TOP_K_DEFAULT)
-            .maxContextChars(gemma ? RAG_CONTEXT_CHARS_GEMMA : RAG_CONTEXT_CHARS_DEFAULT)
+            .maxContextChars(maxContextChars)
             .enableThinking(llm.tokenizer().invitesThinking())
             .sampling(new SamplingParams(
               gemma ? 0.1f : 0.4f,
@@ -256,7 +278,7 @@ public final class Example {
             .streamTo(thinkOut, answerOut, color);
           promptLabel = "rag?> ";
         } else {
-          chat = llm.chat(MAX_NEW_TOKENS).streamTo(thinkOut, answerOut, color);
+          chat = llm.chat(maxNew).streamTo(thinkOut, answerOut, color);
           promptLabel = "?> ";
         }
 
@@ -479,6 +501,11 @@ public final class Example {
     return sb.append(']').toString();
   }
 
+  private static boolean isCompactDemoModel(final LLM llm) {
+    var hf = llm.config().hfConfig();
+    return hf.numHiddenLayers() <= 32 && hf.hiddenSize() <= 768;
+  }
+
   static Path resolveModel(final String[] args, final BufferedReader in) throws Exception {
     return resolveModel(args, in, new OrderedConsole(System.out, System.err));
   }
@@ -498,20 +525,36 @@ public final class Example {
     var qwen = BundledModels.find(BundledModels.QWEN3_0_6B);
     var gemma = BundledModels.find(BundledModels.GEMMA3_270M);
     var lfm2 = BundledModels.find(BundledModels.LFM2_5_2_6B_GGUF);
+    var smolOnnx = BundledModels.find(BundledModels.SMOLLM2_135M_INSTRUCT_ONNX);
+    var tinyOnnx = BundledModels.find(BundledModels.TINY_LLM_ONNX);
     var gte = BundledModels.find(BundledModels.GTE_SMALL_GGUF);
 
     while (true) {
       console.println("Select model to load:");
-      console.println("  1) Qwen3-0.6B" + (qwen.isPresent() ? "" : "  [not downloaded]"));
-      console.println("  2) Gemma3-270M" + (gemma.isPresent() ? "" : "  [not downloaded]"));
       console.println(
-        "  3) LFM2.5-2.6B GGUF Q4_K_M" + (lfm2.isPresent() ? "" : "  [not downloaded]")
+        "  Kind: chat = instruct Q&A · base = plain completion (not chat-tuned)"
+          + " · embeddings = vectors");
+      console.println(
+        "  1) Qwen3-0.6B (chat, safetensors)"
+          + (qwen.isPresent() ? "" : "  [not downloaded]"));
+      console.println(
+        "  2) Gemma3-270M (chat, safetensors)"
+          + (gemma.isPresent() ? "" : "  [not downloaded]"));
+      console.println(
+        "  3) LFM2.5-2.6B Q4_K_M (chat, gguf)"
+          + (lfm2.isPresent() ? "" : "  [not downloaded]")
           + "  (~16g heap)");
       console.println(
-        "  4) gte-small GGUF Q2_K" + (gte.isPresent() ? "" : "  [not downloaded]")
-          + "  (embeddings)");
-      console.println("  5) Exit");
-      console.print("Choice [1-5]: ");
+        "  4) SmolLM2-135M-Instruct-ONNX (chat, onnx — ChatML ~135M)"
+          + (smolOnnx.isPresent() ? "" : "  [not downloaded]"));
+      console.println(
+        "  5) Tiny-LLM-ONNX (base, onnx — toy ~10M ONNX smoke test, not for chat)"
+          + (tinyOnnx.isPresent() ? "" : "  [not downloaded]"));
+      console.println(
+        "  6) gte-small Q2_K (embeddings, gguf)"
+          + (gte.isPresent() ? "" : "  [not downloaded]"));
+      console.println("  7) Exit");
+      console.print("Choice [1-7]: ");
       String line = in.readLine();
       if (line == null) {
         return null;
@@ -531,14 +574,23 @@ public final class Example {
               + "(heap: .mvn/jvm.config -Xmx16g)"));
         }
         case "4" -> {
+          return smolOnnx.orElseThrow(() -> new IllegalStateException(
+            "SmolLM2-135M-Instruct-ONNX not found. "
+              + "Run models/download-smollm2-135m-instruct-onnx.sh"));
+        }
+        case "5" -> {
+          return tinyOnnx.orElseThrow(() -> new IllegalStateException(
+            "Tiny-LLM-ONNX not found. Run models/download-tiny-llm-onnx.sh"));
+        }
+        case "6" -> {
           return gte.orElseThrow(() -> new IllegalStateException(
             "gte-small GGUF not found. Run models/download-gte-small-gguf.sh"));
         }
-        case "5", "q", "quit", "exit" -> {
+        case "7", "q", "quit", "exit" -> {
           console.println("Bye.");
           return null;
         }
-        default -> console.println("Enter 1, 2, 3, 4, or 5.");
+        default -> console.println("Enter 1, 2, 3, 4, 5, 6, or 7.");
       }
     }
   }

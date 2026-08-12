@@ -2,7 +2,9 @@ package com.igormaznitsa.nanollvm.engine;
 
 import com.igormaznitsa.nanollvm.llm.SamplingParams;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 
 public final class Sequence {
@@ -181,6 +183,75 @@ public final class Sequence {
 
   public int length() {
     return this.numTokens;
+  }
+
+  /**
+   * Detects stuck decode loops: same-token streaks, exact repeated blocks, or an n-gram
+   * reused enough times that the model is paraphrasing the same sentence forever.
+   *
+   * @since 1.1.0
+   */
+  public boolean hasDegenerateRepetition() {
+    int completion = this.numCompletionTokens();
+    if (completion < 32) {
+      return false;
+    }
+    if (this.sameTokenStreak() >= 32) {
+      return true;
+    }
+    int maxPeriod = Math.min(64, completion / 2);
+    for (int period = 16; period <= maxPeriod; period += 8) {
+      if (this.endsWithTwoIdenticalBlocks(period)) {
+        return true;
+      }
+    }
+    return completion >= 48 && this.hasOverusedNgram();
+  }
+
+  private int sameTokenStreak() {
+    int streak = 0;
+    for (int i = this.numTokens - 1; i >= this.numPromptTokens; i--) {
+      if (this.tokenIds.get(i) != this.lastToken) {
+        break;
+      }
+      streak++;
+    }
+    return streak;
+  }
+
+  private boolean endsWithTwoIdenticalBlocks(final int period) {
+    int start = this.numTokens - 2 * period;
+    if (start < this.numPromptTokens) {
+      return false;
+    }
+    for (int i = 0; i < period; i++) {
+      if (!this.tokenIds.get(start + i).equals(this.tokenIds.get(start + period + i))) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  private boolean hasOverusedNgram() {
+    final int ngram = 12;
+    final int minHits = 3;
+    int window = Math.min(this.numCompletionTokens(), 128);
+    int from = this.numTokens - window;
+    if (window < ngram * minHits) {
+      return false;
+    }
+    Map<Long, Integer> counts = new HashMap<>();
+    for (int start = from; start <= this.numTokens - ngram; start++) {
+      long hash = 0x9E3779B97F4A7C15L;
+      for (int i = 0; i < ngram; i++) {
+        hash = 31L * hash + this.tokenIds.get(start + i);
+      }
+      int hits = counts.merge(hash, 1, Integer::sum);
+      if (hits >= minHits) {
+        return true;
+      }
+    }
+    return false;
   }
 
   public enum Status {

@@ -14,8 +14,8 @@ import java.util.Optional;
 import java.util.stream.Stream;
 
 /**
- * Resolves on-disk HuggingFace model directories or {@code .gguf} files.
- * Default root is {@code ./models} (see {@code models/download-*.sh}).
+ * Resolves on-disk HuggingFace model directories ({@code .safetensors} or {@code .onnx}) or
+ * {@code .gguf} files. Default root is {@code ./models} (see {@code models/download-*.sh}).
  */
 public final class BundledModels {
 
@@ -30,6 +30,15 @@ public final class BundledModels {
    */
   public static final String GTE_SMALL_GGUF =
     DEFAULT_MODELS_DIR + "/gte-small.Q2_K.gguf";
+  /**
+   * @since 1.1.0
+   */
+  public static final String TINY_LLM_ONNX = DEFAULT_MODELS_DIR + "/Tiny-LLM-ONNX";
+  /**
+   * @since 1.1.0
+   */
+  public static final String SMOLLM2_135M_INSTRUCT_ONNX =
+    DEFAULT_MODELS_DIR + "/SmolLM2-135M-Instruct-ONNX";
 
   private BundledModels() {
   }
@@ -73,13 +82,16 @@ public final class BundledModels {
       "model not found: " + modelPathOrName
         + " (expected under " + modelsRoot()
         + "). Run models/download-qwen3-0.6b.sh, models/download-gemma3-270m.sh, "
-        + "models/download-lfm2.5-2.6b-gguf.sh, or models/download-gte-small-gguf.sh, "
+        + "models/download-lfm2.5-2.6b-gguf.sh, models/download-gte-small-gguf.sh, "
+        + "or models/download-tiny-llm-onnx.sh, "
+        + "models/download-smollm2-135m-instruct-onnx.sh, "
         + "or pass a model path / -D" + PROP_MODEL + "=… / " + ENV_MODEL + "."
     ));
   }
 
   /**
    * @param modelPathOrName absolute/relative path, {@code Qwen3-0.6B}, {@code Gemma3-270M},
+   *                        {@code Tiny-LLM-ONNX}, {@code SmolLM2-135M-Instruct-ONNX},
    *                        {@code LFM2.5-2.6B-Q4_K_M.gguf}, or {@code models/…}
    */
   public static Optional<Path> find(final String modelPathOrName) {
@@ -132,7 +144,7 @@ public final class BundledModels {
   private static boolean isHfModelDir(final Path dir) {
     return Files.isDirectory(dir)
       && Files.isRegularFile(dir.resolve(CONFIG_JSON))
-      && hasSafetensors(dir);
+      && (hasSafetensors(dir) || hasOnnx(dir));
   }
 
   private static boolean isDirWithGguf(final Path dir) {
@@ -149,6 +161,33 @@ public final class BundledModels {
   private static boolean hasSafetensors(final Path dir) {
     try (var stream = Files.list(dir)) {
       return stream.anyMatch(p -> p.getFileName().toString().endsWith(".safetensors"));
+    } catch (Exception e) {
+      return false;
+    }
+  }
+
+  private static boolean hasOnnx(final Path dir) {
+    if (Files.isRegularFile(dir.resolve("model.onnx"))
+      || Files.isRegularFile(dir.resolve("model_fp16.onnx"))
+      || Files.isRegularFile(dir.resolve("onnx").resolve("model.onnx"))
+      || Files.isRegularFile(dir.resolve("onnx").resolve("model_fp16.onnx"))) {
+      return true;
+    }
+    try (var stream = Files.list(dir)) {
+      if (stream.anyMatch(
+        p -> p.getFileName().toString().toLowerCase(Locale.ROOT).endsWith(".onnx"))) {
+        return true;
+      }
+    } catch (Exception ignored) {
+      // fall through
+    }
+    Path onnxDir = dir.resolve("onnx");
+    if (!Files.isDirectory(onnxDir)) {
+      return false;
+    }
+    try (var stream = Files.list(onnxDir)) {
+      return stream.anyMatch(
+        p -> p.getFileName().toString().toLowerCase(Locale.ROOT).endsWith(".onnx"));
     } catch (Exception e) {
       return false;
     }

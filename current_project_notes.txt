@@ -1,13 +1,15 @@
 ## 1. Implementation Progress
 - Maven **`1.1.0-SNAPSHOT`** (released **1.0.0** 2026-08-09); enforcer Java `[21,)`, Maven `[3.9,)`; JPMS module `com.igormaznitsa.nanollvm`
 - **ResourceLimits** (exported utils): process-wide defaults + builder; RAG/PDF/JSON/GGUF/safetensors/corpus/history budgets
-- CausalLM: Qwen3 + Gemma3 + LFM2 (GGUF); tokenizers GPT-2 BPE / Metaspace / GGUF-embedded / BERT WordPiece
+- CausalLM: Qwen3 + Gemma3 + **Llama** + LFM2 (GGUF); tokenizers GPT-2 BPE / Metaspace / GGUF-embedded / BERT WordPiece
+- **ONNX Tier A:** folder load via `LlmModelFactory.make` — initializers only (no ORT); root or `onnx/`; safetensors preferred if both present; chat Qwen3/Gemma3/Llama + BERT embeddings (HF→GGUF name remap)
 - **GGUF BERT embeddings** (e.g. gte-small): same `LlmModelFactory.make` → `LlmModel.embed`; `LLM.builder` rejects embedding models; Q3_K + IQ4_NL dequant
-- **ModelFileSource**: `ModelFileId` → `InputStream` (+ weight shards); load into heap only (no disk cache); `make(Path)` stays direct disk I/O
+- **ModelFileSource**: `ModelFileId` → `InputStream` (+ weight shards); load into heap only (no disk cache); `make(Path)` stays direct disk I/O; ONNX ids `MODEL_ONNX` / `MODEL_ONNX_FP16`
 - **GGUF:** packed by default; `LlmModelFactory.make(path, io, true)` unpacks at load; `LLM.Builder.allowUnpackParameters()` late-unpacks packed models
 - Library: `LlmModelFactory.make` → shared `LlmModel` (`AutoCloseable`); also `make(ModelFileSource)` / `fromClasspath*` (stream → heap; no disk cache); `LLM.Builder` (warmup **off** by default); close **LLM first**, then **model**
-- **`description.md`:** audited vs 1.1.0 code (API errors fixed; load vs engine, packed GGUF modes, JPMS, RAG short-follow-up=6, close order clarified)
-
+- **`description.md`:** audited for 1.1.0 — ONNX Tier A (**§7c**), Llama, SmolLM2/Tiny demos, stop rules; **format restriction** tables in ch. 7 / 7a / 7c (safetensors dtypes, GGUF lfm2|bert + GGML subset, ONNX name/type/external_data limits)
+- Optional download scripts: Qwen3 / Gemma3 / LFM2 GGUF / gte-small / **Tiny-LLM-ONNX** / **SmolLM2-135M-Instruct-ONNX**
+- ONNX JavaDoc: Tier A contracts + {@code @since 1.1.0} on public Onnx* APIs / ModelFileId ONNX roles / LlmModelFactory note
 
 - **Advisors:** `advisors(LlmAdvisorMixer, LlmAdvisor…)`; unique non-blank names; one batched `generate`
 - Engine: `Transformer` owns per-LLM arenas + explicit step `Context`; `MatmulRuntime` per `LLM`; `kvHeapFraction` (default 0.25) for KV auto-size
@@ -15,8 +17,7 @@
 - JPMS: exports models/llm/chat/rag/exceptions/tokenizer/utils; non-exported `models.internal` (`LlmModelAccess`), prompts, samples, engine/layers/tensor/internal
 
 - **RAG:** `RagFactory` → `PreparedRag` (BM25); `addResource` / `makeResource` for classpath docs; optional `withEmbeddings` → `HybridRagIndex` (`DenseRagIndex` + RRF); package-private `CorpusLoader`; public API ~12 types (+ `PdfTextExtractor`)
-- Optional download scripts: Qwen3 / Gemma3 / LFM2 GGUF / **gte-small Q2_K** embedding GGUF (`models/download-*.sh`)
-- **Samples:** linear `main` flows (`HelloWorld`, `EmbedHelloWorld`, `LogTriageHelloWorld`, `Bench`, `Example`); `Example` menu: model then RAG mode (none / BM25 / dense / hybrid); gte-small embeddings REPL; `BundledModels` / `BundledRag` / `OrderedConsole` in `samples.utils`
+- **Samples:** linear `main` flows (`HelloWorld`, `EmbedHelloWorld`, `LogTriageHelloWorld`, `Bench`, `Example`); `Example` menu labels kind (`chat` / `base` / `embeddings`) + format; SmolLM2 Instruct ONNX (chat) + Tiny-LLM (base); gte-small embeddings REPL; `BundledModels` / `BundledRag` / `OrderedConsole` in `samples.utils`
 
 
 ## 2. Architecture & Technical Discoveries
@@ -25,6 +26,9 @@
 - `.disableMultiCpu()` / `cpuThreads(1)` → `MatmulRuntime.sequential()` (pool=null, calling thread only); builder thread count wins over `-Dnanollvm.cpu.threads`
 - Engine obtains `CausalLM` via `LlmModelAccess.resolveNetwork` (no public `network()`); embedding models hold `EmbeddingEncoder` instead
 - BERT GGUF: token+pos+type emb → LayerNorm → post-LN blocks (bidirectional attn + GELU FFN) → mean pool → L2; tokenizer WordPiece with ▁ metaspace pieces
+- ONNX: `OnnxProtoReader` reads initializers only; `OnnxWeightNames` maps chat HF names and BERT HF→GGUF schema keys; external_data for `make(Path)` only (not ModelFileSource yet)
+- transformers.js / onnx-community: raw payload may be protobuf field **9** (legacy) or **13**; MatMul B is `[in,out]` → transpose to Linear `[out,in]`; anonymous `onnx::MatMul_*` remapped via MatMul node path; `OnnxDataTypes` catalogs TensorProto types — load FLOAT/FP16/BF16/DOUBLE, skip int/bool/string/complex (+ scalars), fail loudly on float8/nibble/unknown
+- SmolLM2-135M-Instruct-ONNX = Llama ChatML chat demo; base SmolLM2-135M-ONNX / Tiny-LLM-ONNX = completion-only
 - GGUF packed by default; late unpack does not release bytes still bound by other engines
 - `TEXT_DEBUG`: optional via `emitDebugPrompts`; RAG corpus/advisor notes are trusted prompt input by design
 - Dense RAG: index-time `LlmModel.embed` of all chunks; query cosine (dot); hybrid = BM25 + dense RRF; off-topic = both indexes agree
@@ -36,12 +40,13 @@
 - LFM2 GGUF tokenizer heuristics may need per-export tuning
 - Dense weight `float[]` still GC-only after model close (no eager zeroing of Tensor buffers)
 - Dense RAG query embeds synchronize per `DenseRagIndex`; no ANN / vector DB yet
+- ONNX: no QDQ/int8; no LFM2-from-ONNX; ModelFileSource rejects external_data sidecars; transformers.js name drift may need more remaps
 
 
 ## 4. Current Work In Progress
 - Development line **`1.1.0-SNAPSHOT`** (post-1.0.0)
-- Optional GGUF perf backlog (mmap, FP16, smaller default KV, fused packed GEMM)
-- `description.md` audited vs code (2026-08-11): fixed factual API/docs drift + foggy load/RAG/JPMS explanations; **ch. 21** curated learning literature; all ch.20–21 URLs HTTP-verified (Gemma→`/docs`, RRF→cormack.uwaterloo.ca, safetensors GitHub org move)
+- ONNX Tier A + Llama + SmolLM2 Instruct demo; generation stops at maxModelLen / degenerate token-loops
+- Optional GGUF perf backlog remains
 
 
 ## 5. Known Issues & Limitations
@@ -50,23 +55,26 @@
 - Demo `rag/` is English Grimm/LRRH only
 - Advisors add latency (one batched generate); matmul pool is process-shared or caller-provided
 - Closing `LlmModel` while an `LLM` still holds the graph leaves dense weights reachable until that LLM closes
-- BERT embedding GGUFs only (no HF safetensors BERT directory load yet)
+- BERT embedding GGUFs and ONNX BERT folders; HF safetensors BERT directory load still limited
 - Model/RAG-dependent unit tests skip via `BundledModelAssumptions` (stderr WARNING + JUnit abort) when weights or `./rag` are absent
+- Tiny-LLM-ONNX (~10M) is a toy checkpoint — expect incoherent text; context is only 1024 tokens
 
 
 ## 6. Open Questions & Pending Decisions
 - Fold Sampler deeper into Transformer bricks?
 - BM25F field weights for multi-field docs?
 - HF safetensors LFM2 directory load beside GGUF?
+- Broader ONNX initializer name maps for exotic Optimum/transformers.js exports?
 
 
 ## 7. Useful References
 - `security_audit.txt` — 1.0.0 threat-model summary
 - `CHANGELOG.md` — 1.0.0 released; active line 1.1.0-SNAPSHOT
-- `README.md` — Hello World, CLI, library samples
+- `README.md` — Hello World, CLI, library samples; ONNX + Tiny-LLM section
 - Build: `mvn22 -q test` / `MAVEN_OPTS="-Xmx8g" mvn22 -q exec:java`
 - Library: `try (LlmModel m = LlmModelFactory.make(path); LLM llm = LLM.builder(m)…)` — engines close before model
 - Embeddings: `LlmModelFactory.make(gteGguf); model.embed(text)` — sample `EmbedHelloWorld`
+- ONNX demo: `./models/download-smollm2-135m-instruct-onnx.sh` (chat) or `./models/download-tiny-llm-onnx.sh` (base toy)
 - Dense RAG: `RagFactory.withEmbeddings(preparedRag, embedModel)` → `HybridRagIndex`; keep BM25 via `PreparedRag` alone
 - Classpath RAG: `RagFactory.makeResource("docs/a.md")` / `.addResource(loader, path)` / `.addResource(Class, "/abs.md")`
 - Props: `nanollvm.*` / `NANOLLVM_*` only (`NanoLlvmProps`)
@@ -77,12 +85,6 @@
 - Document Maven as `mvn` (portable); agent on this machine may use `mvn22`
 - Prefer `ChatSession` for dialog; raw `generate` for completions
 - Prefer `LlmModelFactory.make` → `LLM.builder(LlmModel)`; close LLM then model
-- Embedding GGUFs use the same factory; call `embed`, not `LLM.builder`
-- Dense RAG: prefer `RagFactory.withEmbeddings` / `HybridRagIndex`; keep chat `LLM` and embedding `LlmModel` separate; close embed after the index is unused
-- Do **not** update root `README.md` for SNAPSHOT/unreleased work — it documents the last published release; use `CHANGELOG.md` / `models/README.md` / samples until release
-- Optional `.matmulExecutor(ExecutorService)`; never shut down by `LLM.close()`
-- Optional: use Optional as return only (never method params)
-- English `description.md` only (ch. 7b BERT embeddings, ch. 17 dense/hybrid + classpath RAG — **since 1.1.0**; ch. 21 suggested literature)
-- Unreassigned method/ctor params must be `final`
-- Do not add temporary large PDFs under `rag/` into the repo
-- New public types/methods after a release must carry `@since X.Y.Z` matching the upcoming version (e.g. `@since 1.1.0` on the 1.1.0 line)
+- Embedding GGUFs/ONNX use the same factory; call `embed`, not `LLM.builder`
+- For Tiny-LLM-ONNX use `onnx/model.onnx` (fp32) or `model_fp16.onnx`; skip quantized community files
+- Tiny-LLM-ONNX download: `.sh` (Linux/macOS), `.ps1` / `.cmd` (Windows)

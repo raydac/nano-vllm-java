@@ -36,6 +36,9 @@ public final class ModelFileBundle {
     ModelFileId.GENERATION_CONFIG,
     ModelFileId.ADDED_TOKENS,
     ModelFileId.SPECIAL_TOKENS_MAP);
+  private static final List<ModelFileId> ONNX_IDS = List.of(
+    ModelFileId.MODEL_ONNX,
+    ModelFileId.MODEL_ONNX_FP16);
 
   private final String displayName;
   private final Path virtualPath;
@@ -43,6 +46,7 @@ public final class ModelFileBundle {
   private final String configJson;
   private final Map<String, String> textFiles;
   private final List<NamedBytes> safetensors;
+  private final List<NamedBytes> onnx;
 
   private ModelFileBundle(
     final String displayName,
@@ -50,7 +54,8 @@ public final class ModelFileBundle {
     final byte[] gguf,
     final String configJson,
     final Map<String, String> textFiles,
-    final List<NamedBytes> safetensors
+    final List<NamedBytes> safetensors,
+    final List<NamedBytes> onnx
   ) {
     this.displayName = displayName;
     this.virtualPath = virtualPath;
@@ -58,6 +63,7 @@ public final class ModelFileBundle {
     this.configJson = configJson;
     this.textFiles = textFiles;
     this.safetensors = safetensors;
+    this.onnx = onnx;
   }
 
   /**
@@ -80,6 +86,7 @@ public final class ModelFileBundle {
           bytes,
           null,
           Map.of(),
+          List.of(),
           List.of());
       }
     }
@@ -94,6 +101,38 @@ public final class ModelFileBundle {
       }
     }
 
+    List<NamedBytes> safetensors = readSafetensors(source, textFiles, limits);
+    List<NamedBytes> onnx = List.of();
+    if (safetensors.isEmpty()) {
+      onnx = readOnnx(source);
+      if (onnx.isEmpty()) {
+        throw new ModelLoadException(
+          "missing safetensors or ONNX weights from " + source.displayName());
+      }
+    }
+
+    List<NamedBytes> weightFiles = safetensors.isEmpty() ? onnx : safetensors;
+    long total = weightFiles.stream().mapToLong(w -> w.bytes().length).sum();
+    LlmListeners.infof(streams, null, "Read HF model into memory (%.2f MiB, %d weight file%s)%n",
+      total / (1024.0 * 1024.0),
+      weightFiles.size(),
+      weightFiles.size() == 1 ? "" : "s");
+
+    return new ModelFileBundle(
+      source.displayName(),
+      virtualPath(source.displayName()),
+      null,
+      configJson,
+      Map.copyOf(textFiles),
+      List.copyOf(safetensors),
+      List.copyOf(onnx));
+  }
+
+  private static List<NamedBytes> readSafetensors(
+    final ModelFileSource source,
+    final Map<String, String> textFiles,
+    final ResourceLimits limits
+  ) throws IOException {
     List<NamedBytes> weights = new ArrayList<>();
     byte[] indexBytes = readOptional(source, ModelFileId.SAFE_TENSORS_INDEX, limits);
     if (indexBytes != null) {
@@ -107,32 +146,29 @@ public final class ModelFileBundle {
           weights.add(new NamedBytes(shard, readBounded(in, MAX_WEIGHT_BYTES)));
         }
       }
-    } else {
-      try (InputStream in = source.open(ModelFileId.MODEL_SAFE_TENSORS)) {
-        if (in == null) {
-          throw new ModelLoadException(
-            "missing required model file " + ModelFileId.MODEL_SAFE_TENSORS + " from "
-              + source.displayName());
-        }
+      return weights;
+    }
+    try (InputStream in = source.open(ModelFileId.MODEL_SAFE_TENSORS)) {
+      if (in != null) {
         weights.add(new NamedBytes(
           ModelFileId.MODEL_SAFE_TENSORS.fileName(),
           readBounded(in, MAX_WEIGHT_BYTES)));
       }
     }
+    return weights;
+  }
 
-    long total = weights.stream().mapToLong(w -> w.bytes().length).sum();
-    LlmListeners.infof(streams, null, "Read HF model into memory (%.2f MiB, %d weight file%s)%n",
-      total / (1024.0 * 1024.0),
-      weights.size(),
-      weights.size() == 1 ? "" : "s");
-
-    return new ModelFileBundle(
-      source.displayName(),
-      virtualPath(source.displayName()),
-      null,
-      configJson,
-      Map.copyOf(textFiles),
-      List.copyOf(weights));
+  private static List<NamedBytes> readOnnx(final ModelFileSource source) throws IOException {
+    List<NamedBytes> weights = new ArrayList<>();
+    for (ModelFileId id : ONNX_IDS) {
+      try (InputStream in = source.open(id)) {
+        if (in != null) {
+          weights.add(new NamedBytes(id.fileName(), readBounded(in, MAX_WEIGHT_BYTES)));
+          return weights;
+        }
+      }
+    }
+    return weights;
   }
 
   private static Path virtualPath(final String displayName) {
@@ -239,6 +275,13 @@ public final class ModelFileBundle {
 
   public List<NamedBytes> safetensors() {
     return this.safetensors;
+  }
+
+  /**
+   * @since 1.1.0
+   */
+  public List<NamedBytes> onnx() {
+    return this.onnx;
   }
 
   /**

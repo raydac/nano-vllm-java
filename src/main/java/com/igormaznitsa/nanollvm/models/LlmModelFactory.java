@@ -11,6 +11,8 @@ import com.igormaznitsa.nanollvm.internal.GgufModelLoader.LoadedGguf;
 import com.igormaznitsa.nanollvm.internal.GgufReader;
 import com.igormaznitsa.nanollvm.internal.ModelFileBundle;
 import com.igormaznitsa.nanollvm.internal.ModelLoader;
+import com.igormaznitsa.nanollvm.internal.OnnxModelLoader;
+import com.igormaznitsa.nanollvm.internal.SafetensorsReader;
 import com.igormaznitsa.nanollvm.llm.Config;
 import com.igormaznitsa.nanollvm.llm.LLM;
 import com.igormaznitsa.nanollvm.models.internal.CausalLM;
@@ -27,8 +29,9 @@ import java.nio.file.Path;
 import java.util.Locale;
 
 /**
- * Loads a {@link LlmModel} from a HuggingFace model directory, a {@code .gguf} file, or a
- * {@link ModelFileSource} (classpath / custom streams read into heap; no filesystem cache).
+ * Loads a {@link LlmModel} from a HuggingFace model directory (safetensors or ONNX weights), a
+ * {@code .gguf} file, or a {@link ModelFileSource} (classpath / custom streams read into heap; no
+ * filesystem cache).
  *
  * <p>One {@link LlmModel} may be reused by any number of {@link LLM} instances until
  * {@link LlmModel#close()}. Load is blocking I/O on the calling thread; the returned model is safe
@@ -37,6 +40,10 @@ import java.util.Locale;
  *
  * <p>GGUF stays packed by default. Pass {@code allowUnpackParameters=true} to dequantize to float32
  * during load (mmap or in-memory buffer → float tensors; no packed heap residency).
+ *
+ * <p>ONNX folders (<strong>since 1.1.0</strong>) use Tier A initializer import only (no ORT). When
+ * both {@code *.safetensors} and {@code *.onnx} are present, safetensors wins. Stream loads reject
+ * ONNX {@code external_data} sidecars — use {@link #make(Path)} for those exports.
  *
  * <p>Filesystem {@link #make(Path)} overloads load directly from disk and do not route through
  * {@link ModelFileSource}.
@@ -50,8 +57,8 @@ public final class LlmModelFactory {
    * Loads a model from disk with silent progress output and packed GGUF weights (when applicable).
    *
    * @param modelPath filesystem path to either an HF model <em>folder</em>
-   *                  ({@code config.json} + {@code *.safetensors}) or a single {@code .gguf}
-   *                  <em>file</em>; must exist
+   *                  ({@code config.json} + {@code *.safetensors} or supported {@code *.onnx}) or a
+   *                  single {@code .gguf} <em>file</em>; must exist
    * @return loaded model; caller must {@link LlmModel#close()} after all bound {@link LLM} engines
    * @throws NullPointerException if {@code modelPath} is {@code null}
    * @throws ModelLoadException   if the path is missing, unsupported, or load fails
@@ -121,7 +128,7 @@ public final class LlmModelFactory {
       }
       if (!Files.isDirectory(path)) {
         throw new ModelLoadException(
-          "model path is not an HF model folder or .gguf file: " + path);
+          "model path is not an HF model folder (safetensors/ONNX) or .gguf file: " + path);
       }
       return loadHfFolder(path, streams);
     } catch (ModelLoadException e) {
@@ -288,19 +295,41 @@ public final class LlmModelFactory {
     LlmListeners.info(io, null, "CPU backend: " + MatmulRuntime.sequential().backendInfo());
 
     Config.HfConfig hfConfig = Config.HfConfig.load(modelFolder.resolve(CONFIG_JSON));
-    String arch = CausalLMFactory.detect(hfConfig);
-    WeightSchema schema = CausalLMFactory.schema(hfConfig);
+    boolean embedding = EmbeddingEncoderFactory.isEmbeddingArchitecture(hfConfig);
+    WeightSchema schema = embedding
+      ? EmbeddingEncoderFactory.schema(hfConfig)
+      : CausalLMFactory.schema(hfConfig);
+    String arch = embedding
+      ? EmbeddingEncoderFactory.detect(hfConfig)
+      : CausalLMFactory.detect(hfConfig);
 
     LlmListeners.info(io, null, "Loading " + arch + " weights…");
-    WeightBag weights = ModelLoader.loadWeights(modelFolder, hfConfig, schema, io);
+    WeightBag weights;
+    if (!SafetensorsReader.listSafetensors(modelFolder).isEmpty()) {
+      weights = ModelLoader.loadWeights(modelFolder, hfConfig, schema, io);
+    } else if (OnnxModelLoader.hasOnnxWeights(modelFolder)) {
+      weights = OnnxModelLoader.loadWeights(modelFolder, hfConfig, schema, io);
+    } else {
+      throw new ModelLoadException(
+        "model folder has no *.safetensors or supported *.onnx weights: " + modelFolder);
+    }
+
+    Tokenizer tokenizer = Tokenizer.fromPretrained(modelFolder);
+    if (embedding) {
+      LlmListeners.info(io, null, "Building " + arch + " embedding graph…");
+      long tGraph = System.nanoTime();
+      EmbeddingEncoder encoder = EmbeddingEncoderFactory.create(hfConfig, weights);
+      LlmListeners.infof(io, null, "Embedding graph ready (%s) in %.1fs%n",
+        encoder.architectureName(), (System.nanoTime() - tGraph) / 1e9);
+      LlmListeners.infof(io, null, "Model loaded in %.1fs%n", (System.nanoTime() - t0) / 1e9);
+      return new LlmModel(modelFolder, hfConfig, weights, encoder, tokenizer);
+    }
 
     LlmListeners.info(io, null, "Building " + arch + " model graph…");
     long tGraph = System.nanoTime();
     CausalLM network = CausalLMFactory.create(hfConfig, weights);
     LlmListeners.infof(io, null, "Model graph ready (%s) in %.1fs%n",
       network.architectureName(), (System.nanoTime() - tGraph) / 1e9);
-
-    Tokenizer tokenizer = Tokenizer.fromPretrained(modelFolder);
     LlmListeners.infof(io, null, "Model loaded in %.1fs%n", (System.nanoTime() - t0) / 1e9);
     return new LlmModel(modelFolder, hfConfig, weights, network, tokenizer);
   }
@@ -311,26 +340,59 @@ public final class LlmModelFactory {
     LlmListeners.info(io, null, "CPU backend: " + MatmulRuntime.sequential().backendInfo());
 
     Config.HfConfig hfConfig = Config.HfConfig.parse(bundle.configJson());
-    String arch = CausalLMFactory.detect(hfConfig);
-    WeightSchema schema = CausalLMFactory.schema(hfConfig);
+    boolean embedding = EmbeddingEncoderFactory.isEmbeddingArchitecture(hfConfig);
+    WeightSchema schema = embedding
+      ? EmbeddingEncoderFactory.schema(hfConfig)
+      : CausalLMFactory.schema(hfConfig);
+    String arch = embedding
+      ? EmbeddingEncoderFactory.detect(hfConfig)
+      : CausalLMFactory.detect(hfConfig);
 
     LlmListeners.info(io, null, "Loading " + arch + " weights…");
-    WeightBag weights = ModelLoader.loadWeights(
-      bundle.safetensors(), bundle.displayName(), hfConfig, schema, io);
-
-    LlmListeners.info(io, null, "Building " + arch + " model graph…");
-    long tGraph = System.nanoTime();
-    CausalLM network = CausalLMFactory.create(hfConfig, weights);
-    LlmListeners.infof(io, null, "Model graph ready (%s) in %.1fs%n",
-      network.architectureName(), (System.nanoTime() - tGraph) / 1e9);
+    WeightBag weights;
+    if (!bundle.safetensors().isEmpty()) {
+      weights = ModelLoader.loadWeights(
+        bundle.safetensors(), bundle.displayName(), hfConfig, schema, io);
+    } else if (!bundle.onnx().isEmpty()) {
+      weights = loadOnnxFromBundle(bundle, hfConfig, schema, io);
+    } else {
+      throw new ModelLoadException(
+        "model source has no safetensors or ONNX weights: " + bundle.displayName());
+    }
 
     Tokenizer tokenizer = Tokenizer.fromJsonDocuments(
       bundle.textFile(ModelFileId.TOKENIZER).orElse(null),
       bundle.textFile(ModelFileId.TOKENIZER_CONFIG).orElse(null),
       bundle.textFile(ModelFileId.GENERATION_CONFIG).orElse(null),
       bundle.configJson());
+    if (embedding) {
+      LlmListeners.info(io, null, "Building " + arch + " embedding graph…");
+      long tGraph = System.nanoTime();
+      EmbeddingEncoder encoder = EmbeddingEncoderFactory.create(hfConfig, weights);
+      LlmListeners.infof(io, null, "Embedding graph ready (%s) in %.1fs%n",
+        encoder.architectureName(), (System.nanoTime() - tGraph) / 1e9);
+      LlmListeners.infof(io, null, "Model loaded in %.1fs%n", (System.nanoTime() - t0) / 1e9);
+      return new LlmModel(bundle.virtualPath(), hfConfig, weights, encoder, tokenizer);
+    }
+
+    LlmListeners.info(io, null, "Building " + arch + " model graph…");
+    long tGraph = System.nanoTime();
+    CausalLM network = CausalLMFactory.create(hfConfig, weights);
+    LlmListeners.infof(io, null, "Model graph ready (%s) in %.1fs%n",
+      network.architectureName(), (System.nanoTime() - tGraph) / 1e9);
     LlmListeners.infof(io, null, "Model loaded in %.1fs%n", (System.nanoTime() - t0) / 1e9);
     return new LlmModel(bundle.virtualPath(), hfConfig, weights, network, tokenizer);
+  }
+
+  private static WeightBag loadOnnxFromBundle(
+    final ModelFileBundle bundle,
+    final Config.HfConfig hfConfig,
+    final WeightSchema schema,
+    final LlmListener io
+  ) throws IOException {
+    ModelFileBundle.NamedBytes primary = bundle.onnx().getFirst();
+    return OnnxModelLoader.loadWeightsFromBytes(
+      primary.bytes(), primary.name(), hfConfig, schema, io);
   }
 
   private static LlmModel loadGgufFile(

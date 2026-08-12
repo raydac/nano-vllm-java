@@ -3,6 +3,7 @@ package com.igormaznitsa.nanollvm.models.internal;
 import static com.igormaznitsa.nanollvm.models.internal.WeightNames.ARCH_BERT;
 import static com.igormaznitsa.nanollvm.models.internal.WeightNames.ARCH_GEMMA3;
 import static com.igormaznitsa.nanollvm.models.internal.WeightNames.ARCH_LFM2;
+import static com.igormaznitsa.nanollvm.models.internal.WeightNames.ARCH_LLAMA;
 import static com.igormaznitsa.nanollvm.models.internal.WeightNames.ARCH_QWEN3;
 import static com.igormaznitsa.nanollvm.models.internal.WeightNames.DOWN_PROJ_WEIGHT;
 import static com.igormaznitsa.nanollvm.models.internal.WeightNames.EMBED_TOKENS;
@@ -59,10 +60,40 @@ public final class WeightSchema {
     return switch (arch) {
       case ARCH_GEMMA3 -> gemma3(config);
       case ARCH_QWEN3 -> qwen3(config);
+      case ARCH_LLAMA -> llama(config);
       case ARCH_LFM2 -> lfm2(config);
       case ARCH_BERT -> bert(config);
       default -> throw new IllegalArgumentException("unsupported architecture '" + arch + "'");
     };
+  }
+
+  /**
+   * Llama-style schema (RMSNorm, RoPE, GQA, SiLU MLP; no Q/K head norms).
+   *
+   * @since 1.1.0
+   */
+  public static WeightSchema llama(final Config.HfConfig config) {
+    Set<String> expected = new LinkedHashSet<>();
+    Set<String> optional = new LinkedHashSet<>();
+    expected.add(EMBED_TOKENS);
+    for (int i = 0; i < config.numHiddenLayers(); i++) {
+      String p = layer(i);
+      String attn = selfAttn(i);
+      String mlpPrefix = mlp(i);
+      expected.add(p + INPUT_LAYERNORM);
+      expected.add(p + POST_ATTENTION_LAYERNORM);
+      expected.add(attn + QKV_PROJ_WEIGHT);
+      expected.add(attn + O_PROJ_WEIGHT);
+      expected.add(mlpPrefix + GATE_UP_PROJ_WEIGHT);
+      expected.add(mlpPrefix + DOWN_PROJ_WEIGHT);
+    }
+    expected.add(MODEL_NORM);
+    if (config.tieWordEmbeddings()) {
+      optional.add(LM_HEAD);
+    } else {
+      expected.add(LM_HEAD);
+    }
+    return new WeightSchema(PACKED_MODULES_MAPPING, expected, optional);
   }
 
   public static WeightSchema qwen3(final Config.HfConfig config) {

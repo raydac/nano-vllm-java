@@ -547,16 +547,38 @@ public final class LLM implements AutoCloseable {
   private void enqueuePromptUnlocked(final Object prompt, final SamplingParams samplingParams) {
     // Internal: accept either raw text (tokenize) or pre-tokenized ids
     if (prompt instanceof String text) {
-      this.scheduler.add(
-        new Sequence(this.tokenizer.encode(text), samplingParams, this.config.kvcacheBlockSize()));
+      this.enqueueTokenIdsUnlocked(this.tokenizer.encode(text), samplingParams);
       return;
     }
     if (prompt instanceof List<?> ids) {
-      this.scheduler.add(
-        new Sequence(this.toTokenIdList(ids), samplingParams, this.config.kvcacheBlockSize()));
+      this.enqueueTokenIdsUnlocked(this.toTokenIdList(ids), samplingParams);
       return;
     }
     throw new IllegalArgumentException("prompt must be String or List<Integer>");
+  }
+
+  private void enqueueTokenIdsUnlocked(
+    final List<Integer> tokenIds,
+    final SamplingParams samplingParams
+  ) {
+    this.scheduler.add(new Sequence(
+      tokenIds,
+      this.fitSamplingToContext(tokenIds.size(), samplingParams),
+      this.config.kvcacheBlockSize()));
+  }
+
+  private SamplingParams fitSamplingToContext(final int promptLen, final SamplingParams params) {
+    int maxLen = this.config.maxModelLen();
+    if (promptLen >= maxLen) {
+      throw new IllegalArgumentException(
+        "prompt length %d exceeds maxModelLen %d (no room for generation)"
+          .formatted(promptLen, maxLen));
+    }
+    int room = maxLen - promptLen;
+    return params.maxTokens() <= room
+      ? params
+      : new SamplingParams(
+      params.temperature(), room, params.ignoreEos(), params.topK(), params.topP());
   }
 
   private List<Integer> toTokenIdList(final List<?> ids) {

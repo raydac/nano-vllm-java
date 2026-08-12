@@ -107,8 +107,13 @@ public final class Norms {
       Tensor qOut = Tensor.zeros(query.shape());
       Tensor kOut = Tensor.zeros(key.shape());
       int half = this.headSize / 2;
+      int maxPos = this.cosSinCache.size(0);
       for (int t = 0; t < tokens; t++) {
         int pos = Math.round(positions.get(t));
+        if (pos < 0 || pos >= maxPos) {
+          throw new IllegalArgumentException(
+            "RoPE position %d out of range [0, %d)".formatted(pos, maxPos));
+        }
         int cBase = this.cosSinCache.offset() + pos * this.headSize;
         this.apply(query, qOut, t, headsQ, half, cBase);
         this.apply(key, kOut, t, headsK, half, cBase);

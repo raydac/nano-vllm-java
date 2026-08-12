@@ -44,6 +44,7 @@ import java.nio.file.Path;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.stream.IntStream;
 import org.junit.jupiter.api.Test;
 
 class CoreUnitTest {
@@ -256,6 +257,35 @@ class CoreUnitTest {
     Sequence b = new Sequence(List.of(1, 2, 3, 4, 5, 6, 7, 8, 10), new SamplingParams(0.6f, 8), 4);
     int cachedB = bm.canAllocate(b);
     assertEquals(2, cachedB); // first two full blocks shared
+  }
+
+  @Test
+  void detectsDegenerateTokenRepetition() {
+    Sequence streak = new Sequence(List.of(1, 2, 3), new SamplingParams(0.6f, 128), 4);
+    for (int i = 0; i < 40; i++) {
+      streak.appendToken(9);
+    }
+    assertTrue(streak.hasDegenerateRepetition());
+
+    Sequence cycle = new Sequence(List.of(1), new SamplingParams(0.6f, 128), 4);
+    List<Integer> block = IntStream.rangeClosed(10, 25).boxed().toList();
+    for (int copy = 0; copy < 2; copy++) {
+      block.forEach(cycle::appendToken);
+    }
+    assertTrue(cycle.hasDegenerateRepetition());
+
+    Sequence shortOk = new Sequence(List.of(1, 2, 3), new SamplingParams(0.6f, 64), 4);
+    shortOk.appendToken(4);
+    shortOk.appendToken(5);
+    assertFalse(shortOk.hasDegenerateRepetition());
+
+    Sequence softLoop = new Sequence(List.of(1), new SamplingParams(0.6f, 256), 4);
+    List<Integer> line = IntStream.rangeClosed(100, 120).boxed().toList();
+    for (int copy = 0; copy < 4; copy++) {
+      line.forEach(softLoop::appendToken);
+      softLoop.appendToken(200 + copy);
+    }
+    assertTrue(softLoop.hasDegenerateRepetition());
   }
 
   @Test

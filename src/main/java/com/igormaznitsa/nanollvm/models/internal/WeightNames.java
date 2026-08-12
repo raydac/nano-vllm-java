@@ -13,6 +13,10 @@ public final class WeightNames {
   /**
    * @since 1.1.0
    */
+  public static final String ARCH_LLAMA = "llama";
+  /**
+   * @since 1.1.0
+   */
   public static final String ARCH_BERT = "bert";
 
   public static final String EMBED_TOKENS = "model.embed_tokens.weight";

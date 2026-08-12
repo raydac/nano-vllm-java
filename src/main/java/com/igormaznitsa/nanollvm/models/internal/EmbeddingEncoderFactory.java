@@ -29,22 +29,23 @@ public final class EmbeddingEncoderFactory {
   }
 
   public static boolean isEmbeddingArchitecture(final Config.HfConfig config) {
-    return ARCH_BERT.equals(detect(config));
-  }
-
-  public static String detect(final Config.HfConfig config) {
-    if (config.modelType() != null) {
-      String mt = config.modelType().toLowerCase(ROOT);
-      if (mt.contains("bert")) {
-        return ARCH_BERT;
-      }
+    if (config.modelType() != null
+      && config.modelType().toLowerCase(ROOT).contains("bert")) {
+      return true;
     }
     if (config.architectures() != null) {
       for (String a : config.architectures()) {
         if (a != null && a.toLowerCase(ROOT).contains("bert")) {
-          return ARCH_BERT;
+          return true;
         }
       }
+    }
+    return false;
+  }
+
+  public static String detect(final Config.HfConfig config) {
+    if (isEmbeddingArchitecture(config)) {
+      return ARCH_BERT;
     }
     throw new IllegalArgumentException("not an embedding architecture: " + config.modelType());
   }

@@ -2,6 +2,7 @@ package com.igormaznitsa.nanollvm.internal;
 
 import static com.igormaznitsa.nanollvm.models.internal.WeightNames.GATE_UP_PROJ;
 import static com.igormaznitsa.nanollvm.models.internal.WeightNames.QKV_PROJ;
+import static java.util.Objects.requireNonNull;
 
 import com.igormaznitsa.nanollvm.chat.LlmListener;
 import com.igormaznitsa.nanollvm.chat.LlmListeners;
@@ -142,6 +143,47 @@ public final class ModelLoader {
       }
     }
 
+    WeightBag bag = assembler.build();
+    for (String required : schema.expectedParameters()) {
+      if (!bag.has(required)) {
+        throw new IllegalStateException("missing required weight after load: " + required);
+      }
+    }
+    return bag;
+  }
+
+  /**
+   * Assembles a {@link WeightBag} from already-decoded float tensors (ONNX / other formats).
+   *
+   * @since 1.1.0
+   */
+  public static WeightBag assembleFromNamedTensors(
+    final Map<String, Tensor> namedTensors,
+    final String label,
+    final Config.HfConfig hfConfig,
+    final WeightSchema schema,
+    final LlmListener io
+  ) {
+    requireNonNull(namedTensors, "namedTensors");
+    LlmListener streams = io == null ? LlmListeners.silent() : io;
+    if (namedTensors.isEmpty()) {
+      throw new IllegalArgumentException("no weight tensors for " + label);
+    }
+    Map<String, Object[]> packed = schema.packedModulesMapping();
+    WeightAssembler assembler = new WeightAssembler(hfConfig);
+    int matched = 0;
+    for (var e : namedTensors.entrySet()) {
+      ResolvedParam resolved = resolveParam(e.getKey(), schema, packed);
+      if (resolved == null) {
+        continue;
+      }
+      assembler.accept(resolved.paramName(), resolved.shardId(), e.getValue());
+      matched++;
+    }
+    if (matched == 0) {
+      throw new IllegalStateException("no matching weight tensors found in " + label);
+    }
+    LlmListeners.infof(streams, null, "Assembled %d weight tensors from %s%n", matched, label);
     WeightBag bag = assembler.build();
     for (String required : schema.expectedParameters()) {
       if (!bag.has(required)) {

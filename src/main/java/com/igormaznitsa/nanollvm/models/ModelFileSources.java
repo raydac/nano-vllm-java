@@ -95,7 +95,16 @@ public final class ModelFileSources {
     @Override
     public InputStream open(final ModelFileId id) throws IOException {
       Path file = this.folder.resolve(id.fileName());
-      return Files.isRegularFile(file) ? Files.newInputStream(file) : null;
+      if (Files.isRegularFile(file)) {
+        return Files.newInputStream(file);
+      }
+      if (id == ModelFileId.MODEL_ONNX || id == ModelFileId.MODEL_ONNX_FP16) {
+        Path nested = this.folder.resolve("onnx").resolve(id.fileName());
+        if (Files.isRegularFile(nested)) {
+          return Files.newInputStream(nested);
+        }
+      }
+      return null;
     }
 
     @Override
@@ -131,7 +140,15 @@ public final class ModelFileSources {
 
     @Override
     public InputStream open(final ModelFileId id) {
-      return this.loader.getResourceAsStream(this.resourceFolder + "/" + id.fileName());
+      InputStream in = this.loader.getResourceAsStream(this.resourceFolder + "/" + id.fileName());
+      if (in != null) {
+        return in;
+      }
+      if (id == ModelFileId.MODEL_ONNX || id == ModelFileId.MODEL_ONNX_FP16) {
+        return this.loader.getResourceAsStream(
+          this.resourceFolder + "/onnx/" + id.fileName());
+      }
+      return null;
     }
 
     @Override

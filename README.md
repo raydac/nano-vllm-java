@@ -17,6 +17,41 @@ engine.
 
 For a guided tour of the design (scheduler, attention, tensors, RAG), see [`description.md`](description.md).
 
+## Supported formats and variants
+
+One entry point: `LlmModelFactory.make(…)` (folder, `.gguf` file, or `ModelFileSource` / classpath). What you may load
+depends on the **container** and the **architecture** — this is a curated subset, not every hub file.
+
+### Weight containers
+
+| Format | Since | What you point at | Role |
+|--------|-------|-------------------|------|
+| **Safetensors** | **1.0.0** | HF folder: `config.json` + tokenizer + `*.safetensors` | Dense float weights (`F32` / `F16` / `BF16` / `F64` → float32). If both safetensors and ONNX are present, **safetensors wins**. |
+| **GGUF** | **1.0.0** | Single `.gguf` file | Packed GGML blocks; dequant on matmul / embed. Mmap ≤ ~2 GiB. Architectures: **`lfm2`** (chat) and **`bert`** (embeddings **since 1.1.0**). |
+| **ONNX** (Tier A) | **1.1.0** | HF folder: same sidecars + `model.onnx` / `model_fp16.onnx` (root or `onnx/`) | **Initializers only** — no ONNX Runtime, no graph execution. Preferred float exports; community `*_q4*` / `*_int8*` / `*_quantized*` / `with_past` names are skipped. |
+
+Stream / classpath loads (`ModelFileSource`, `fromClasspath*`) are **since 1.1.0** (bytes → heap, no disk cache). ONNX
+`external_data` sidecars need `make(Path)`; stream loads reject them.
+
+### Architectures and APIs
+
+| Kind | Since | Typical crate | Public use |
+|------|-------|---------------|------------|
+| **Qwen3** / **Gemma3** causal chat | **1.0.0** | HF safetensors (also ONNX **1.1.0**) | `LLM.builder(model)` → chat / generate |
+| **LFM2** hybrid causal chat | **1.0.0** | GGUF only (`lfm2`) | Same `LLM` path; not from HF safetensors / ONNX |
+| **Llama** causal (incl. Tiny-LLM / SmolLM2 Instruct demos) | **1.1.0** | HF safetensors or ONNX | Same `LLM` path |
+| **BERT** sentence embeddings | **1.1.0** | GGUF `bert` (e.g. gte-small); ONNX BERT when names map | `LlmModel.embed(…)` — **not** `LLM.builder` |
+
+### GGUF / ONNX dtype notes
+
+| Path | Supported | Explicitly out |
+|------|-----------|----------------|
+| GGUF GGML | `F32`, `F16`, `BF16`, `Q4_0`, `Q8_0`, `Q4_K`, `Q6_K`; **`Q3_K` / `IQ4_NL` since 1.1.0** | Other GGML types; Qwen/Gemma/Llama GGUF exports |
+| ONNX TensorProto | FLOAT / FLOAT16 / BFLOAT16 / DOUBLE → float32 | Float8 / nibble / unknown weight types (fail loud); int/bool/string/complex initializers skipped as graph constants |
+
+Details and honest limits: [`description.md`](description.md) chapters **7** / **7a** / **7b** / **7c**. Download scripts and
+folder layout: [Download and load models](#download-and-load-models).
+
 ## Hello World — Gemma3 log triage in your app
 
 This is the usual path for library users: declare the dependency, point at a **local Gemma3** folder (any path you
@@ -118,11 +153,11 @@ More API samples (streaming, RAG, GGUF, advisors) are in [Library quick start](#
 ## Key features
 
 - Continuous batching scheduler with paged KV cache and prefix caching
-- **Qwen3** (default), **Gemma3**, and **LFM2** (hybrid short-conv + GQA) causal LMs
-- Loads HF `config.json` + `.safetensors`, or a single **`.gguf`** file (weights stay packed; in-place block dequant on matmul / embedding via `LinearKernel` / `EmbeddingKernel`)
+- **Qwen3** (default), **Gemma3**, **Llama** (**since 1.1.0**), and **LFM2** (hybrid short-conv + GQA) causal LMs
+- Weight crates: HF **safetensors**, **GGUF**, and (**since 1.1.0**) ONNX Tier A — see [Supported formats and variants](#supported-formats-and-variants)
 - Optional multi-thread CPU matmul (`cpuThreads` / `matmulExecutor` / `disableMultiCpu`); default = all processors on a lazily shared pool
-- GPT-2 byte BPE, Gemma Metaspace BPE, and GGUF-embedded tokenizers
-- Optional **BM25 text RAG** over a local `rag/` corpus (used automatically by the Example CLI)
+- GPT-2 byte BPE, Gemma Metaspace BPE, GGUF-embedded, and BERT WordPiece tokenizers
+- Optional **BM25 text RAG** over a local `rag/` corpus (used automatically by the Example CLI); dense / hybrid embeddings **since 1.1.0**
 - **ResourceLimits** — default caps for corpus/PDF/JSON/GGUF/safetensors (overridable)
 - Optional **advisors** before each chat/RAG turn: `LLM.Builder.advisors(LlmAdvisorMixer, LlmAdvisor…)`
 - Warmup **off** by default (`LLM.Builder.warmup()` to enable)
@@ -205,11 +240,48 @@ models/Qwen3-0.6B/
   …                          # merges.txt / vocab.json as needed
 ```
 
-At load time, `LlmModelFactory` reads `config.json`, builds the graph (Qwen3 or Gemma3), merges packed weights from
-safetensors, and constructs the tokenizer. Architecture is inferred from `model_type` / `architectures` unless you set
-`-Dnanollvm.arch=qwen3|gemma3|lfm2`.
+At load time, `LlmModelFactory` reads `config.json`, builds the graph (Qwen3, Gemma3, or Llama), merges packed weights from
+safetensors **or** ONNX initializers, and constructs the tokenizer. Architecture is inferred from `model_type` /
+`architectures` unless you set `-Dnanollvm.arch=qwen3|gemma3|llama|lfm2`. If both `*.safetensors` and `*.onnx` are
+present, safetensors wins.
 
-### GGUF (LFM2)
+### ONNX (weight import) — since 1.1.0
+
+A folder may use ONNX weights instead of safetensors (same `config.json` + tokenizer). See
+[Supported formats and variants](#supported-formats-and-variants) for filters and TensorProto limits. Supported files
+(root or `onnx/`): `model.onnx`, `model_fp16.onnx`, Optimum decoder names; quantized community variants (`*_q4*`,
+`*_int8*`, …) are skipped. The computation graph is ignored — only initializers are loaded into the existing Java
+engine (Qwen3 / Gemma3 / Llama chat, or BERT embeddings).
+
+Tiny Llama demo ([onnx-community/Tiny-LLM-ONNX](https://huggingface.co/onnx-community/Tiny-LLM-ONNX)) —
+base/completion toy (~10M), not chat-tuned; useful to smoke-test ONNX load, not for Q&A quality:
+
+```bash
+# Linux / macOS
+./models/download-tiny-llm-onnx.sh
+
+# Windows
+.\models\download-tiny-llm-onnx.ps1
+# or: models\download-tiny-llm-onnx.cmd
+
+mvn -q exec:java \
+  -Dexec.mainClass=com.igormaznitsa.nanollvm.samples.Example \
+  -Dexec.args=models/Tiny-LLM-ONNX
+```
+
+Chat-capable ONNX demo ([onnx-community/SmolLM2-135M-Instruct-ONNX](https://huggingface.co/onnx-community/SmolLM2-135M-Instruct-ONNX)) —
+Llama + ChatML (~135M). Prefer this over the base
+[SmolLM2-135M-ONNX](https://huggingface.co/onnx-community/SmolLM2-135M-ONNX) for the Example chat UI:
+
+```bash
+./models/download-smollm2-135m-instruct-onnx.sh
+
+mvn -q exec:java \
+  -Dexec.mainClass=com.igormaznitsa.nanollvm.samples.Example \
+  -Dexec.args=models/SmolLM2-135M-Instruct-ONNX
+```
+
+### GGUF (LFM2 chat; BERT embeddings since 1.1.0)
 
 A single `.gguf` file is also valid. Example: LiquidAI [LFM2.5-2.6B-GGUF](https://huggingface.co/LiquidAI/LFM2.5-2.6B-GGUF)
 `Q4_K_M` (~1.67 GB on disk). Weights **stay packed** in RAM by default; each `Linear` / embedding binds a
@@ -227,9 +299,10 @@ mvn -q exec:java \
   -Dexec.args=models/LFM2.5-2.6B-Q4_K_M.gguf
 ```
 
-Supported GGUF dtypes for this path: `Q4_K`, `Q4_0`, `Q6_K`, `Q8_0`, `F16`, `BF16`, `F32`. Architecture must be
-`lfm2` (hybrid short-convolution + attention). Default heap in `.mvn/jvm.config` is still **16 GB** (safe headroom for
-KV / scratch); packed weights alone are closer to on-disk size.
+Supported GGUF dtypes for this path: `Q4_K`, `Q4_0`, `Q6_K`, `Q8_0`, `F16`, `BF16`, `F32` (plus `Q3_K` /
+`IQ4_NL` **since 1.1.0**, common on small embedding GGUFs). Architecture must be `lfm2` for chat (or `bert` for
+embeddings — see [Supported formats and variants](#supported-formats-and-variants)). Default heap in `.mvn/jvm.config`
+is still **16 GB** (safe headroom for KV / scratch); packed weights alone are closer to on-disk size.
 
 ### Download scripts
 
@@ -250,7 +323,12 @@ export HF_TOKEN=hf_…   # or: huggingface-cli login
 
 **LFM2.5 GGUF** — see [GGUF (LFM2)](#gguf-lfm2) above.
 
-**Windows:** `.\models\download-qwen3-0.6b.ps1` / `.cmd` and the matching Gemma / LFM scripts under `models/`.
+**Tiny-LLM-ONNX (Llama ~10M, ONNX demo)** — see [ONNX (weight import)](#onnx-weight-import) above.
+
+**SmolLM2-135M-Instruct-ONNX (Llama ChatML ~135M)** — `./models/download-smollm2-135m-instruct-onnx.sh`.
+
+**Windows:** `.\models\download-qwen3-0.6b.ps1` / `.cmd` and the matching Gemma / LFM / Tiny-LLM-ONNX /
+SmolLM2 Instruct ONNX scripts under `models/`.
 
 You can also point the engine at **any** local HF-style directory (your own path or another download).
 

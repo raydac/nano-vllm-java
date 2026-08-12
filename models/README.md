@@ -47,6 +47,35 @@ Windows: `.\models\download-lfm2.5-2.6b-gguf.ps1` or `models\download-lfm2.5-2.6
 
 Creates `models/LFM2.5-2.6B-Q4_K_M.gguf`.
 
+## Tiny-LLM-ONNX (optional, Llama ONNX demo)
+
+[onnx-community/Tiny-LLM-ONNX](https://huggingface.co/onnx-community/Tiny-LLM-ONNX) — ~10M Llama, ONNX weights under
+`onnx/`. Tokenizer files are pulled from [arnir0/Tiny-LLM](https://huggingface.co/arnir0/Tiny-LLM). Uses fp32
+`onnx/model.onnx` (quantized community files are ignored by the loader).
+
+```bash
+./models/download-tiny-llm-onnx.sh
+```
+
+Windows: `.\models\download-tiny-llm-onnx.ps1` or `models\download-tiny-llm-onnx.cmd`.
+
+Creates `models/Tiny-LLM-ONNX/`.
+
+## SmolLM2-135M-Instruct-ONNX (optional, Llama ChatML ONNX)
+
+[onnx-community/SmolLM2-135M-Instruct-ONNX](https://huggingface.co/onnx-community/SmolLM2-135M-Instruct-ONNX) —
+instruct-tuned SmolLM2 (~135M, ChatML). Downloads `onnx/model_fp16.onnx` (~270 MiB; quantized `*_q4*` /
+`*_int8*` files are ignored). For plain completion (not chat), see
+[onnx-community/SmolLM2-135M-ONNX](https://huggingface.co/onnx-community/SmolLM2-135M-ONNX) instead.
+
+```bash
+./models/download-smollm2-135m-instruct-onnx.sh
+```
+
+Windows: `.\models\download-smollm2-135m-instruct-onnx.ps1` or `models\download-smollm2-135m-instruct-onnx.cmd`.
+
+Creates `models/SmolLM2-135M-Instruct-ONNX/`.
+
 ## gte-small GGUF (optional, embeddings)
 
 [ChristianAzinn/gte-small-gguf](https://huggingface.co/ChristianAzinn/gte-small-gguf) — Alibaba GTE-small as GGUF

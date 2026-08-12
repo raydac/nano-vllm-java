@@ -2,6 +2,7 @@ package com.igormaznitsa.nanollvm.models.internal;
 
 import static com.igormaznitsa.nanollvm.models.internal.WeightNames.ARCH_GEMMA3;
 import static com.igormaznitsa.nanollvm.models.internal.WeightNames.ARCH_LFM2;
+import static com.igormaznitsa.nanollvm.models.internal.WeightNames.ARCH_LLAMA;
 import static com.igormaznitsa.nanollvm.models.internal.WeightNames.ARCH_QWEN3;
 import static com.igormaznitsa.nanollvm.utils.NanoLlvmProps.PROP_ARCH;
 import static java.util.Locale.ROOT;
@@ -14,7 +15,8 @@ import java.util.Optional;
 
 /**
  * Builds an immutable {@link CausalLM} from HF config + {@link WeightBag}
- * (optional {@code -Dnanollvm.arch=qwen3|gemma3|lfm2}).
+ * (optional {@code -Dnanollvm.arch=qwen3|gemma3|llama|lfm2}). Llama support is
+ * <strong>since 1.1.0</strong> ({@link LlamaForCausalLM}).
  */
 public final class CausalLMFactory {
 
@@ -26,9 +28,11 @@ public final class CausalLMFactory {
     return switch (arch) {
       case ARCH_GEMMA3 -> new Gemma3ForCausalLM(config, weights);
       case ARCH_QWEN3 -> new Qwen3ForCausalLM(config, weights);
+      case ARCH_LLAMA -> new LlamaForCausalLM(config, weights);
       case ARCH_LFM2 -> new Lfm2ForCausalLM(config, weights);
       default -> throw new IllegalArgumentException(
-        "unsupported architecture '" + arch + "' (use qwen3|gemma3|lfm2; set -D" + PROP_ARCH + "=…)"
+        "unsupported architecture '" + arch
+          + "' (use qwen3|gemma3|llama|lfm2; set -D" + PROP_ARCH + "=…)"
       );
     };
   }
@@ -54,6 +58,9 @@ public final class CausalLMFactory {
       if (mt.contains("lfm2")) {
         return ARCH_LFM2;
       }
+      if (mt.contains("llama")) {
+        return ARCH_LLAMA;
+      }
       if (mt.contains("qwen")) {
         return ARCH_QWEN3;
       }
@@ -71,6 +78,9 @@ public final class CausalLMFactory {
         if (lower.contains("lfm2")) {
           return ARCH_LFM2;
         }
+        if (lower.contains("llama")) {
+          return ARCH_LLAMA;
+        }
         if (lower.contains("qwen")) {
           return ARCH_QWEN3;
         }
@@ -83,6 +93,7 @@ public final class CausalLMFactory {
     return switch (arch) {
       case "gemma", ARCH_GEMMA3, "gemma3_text" -> ARCH_GEMMA3;
       case "qwen", ARCH_QWEN3 -> ARCH_QWEN3;
+      case ARCH_LLAMA, "llama2", "llama3" -> ARCH_LLAMA;
       case "lfm", ARCH_LFM2, "lfm2.5" -> ARCH_LFM2;
       default -> arch;
     };

@@ -34,6 +34,7 @@ file paths.
 7. [Tensors and `*.safetensors` — parameters on disk](#7-tensors-and-safetensors--parameters-on-disk)
 7a. [GGUF and LFM2 — quantized single-file models](#7a-gguf-and-lfm2--quantized-single-file-models)
 7b. [BERT embedding GGUFs — sentence vectors (**since 1.1.0**)](#7b-bert-embedding-ggufs--sentence-vectors-since-110)
+7c. [ONNX weight folders and Llama (**since 1.1.0**)](#7c-onnx-weight-folders-and-llama-since-110)
 8. [Attention: kinds of looking-back, and how they work](#8-attention-kinds-of-looking-back-and-how-they-work)
 9. [The thinking process: how it is organized and how it works with the model](#9-the-thinking-process-how-it-is-organized-and-how-it-works-with-the-model)
 10. [Tensors, embeddings, and the arithmetic of inference](#10-tensors-embeddings-and-the-arithmetic-of-inference) —
@@ -116,13 +117,14 @@ finished script, not writing the script.
 is [The Annotated Transformer](https://nlp.seas.harvard.edu/annotated-transformer/).
 
 Two families of Hugging Face checkpoints are supported here (different “editions” of the book, same kind of reading
-process): **Qwen3** and **Gemma3**. A third path loads **LFM2** from a **GGUF** file (hybrid short-convolution + GQA).
-You usually need not care which; the program detects which files you pointed it at.
+process): **Qwen3** and **Gemma3**. **Since 1.1.0**, **Llama**-style causal graphs are also assembled (including small
+ONNX demos). A further path loads **LFM2** from a **GGUF** file (hybrid short-convolution + GQA). You usually need not
+care which; the program detects which files you pointed it at.
 
 **In the code:** architecture pick is `CausalLMFactory.detect` / `create` → `Qwen3ForCausalLM`,
-`Gemma3ForCausalLM`, or `Lfm2ForCausalLM`; GGUF entry is `LlmModelFactory` → `internal.GgufModelLoader` /
-`GgufReader`; one next-token step is `Transformer.step` → `CausalLM.forward` / `computeLogits` →
-`Sampler.forward` (chapter 16).
+`Gemma3ForCausalLM`, `LlamaForCausalLM`, or `Lfm2ForCausalLM`; GGUF entry is `LlmModelFactory` →
+`internal.GgufModelLoader` / `GgufReader`; ONNX folders use `internal.OnnxModelLoader` (chapter **7c**); one next-token
+step is `Transformer.step` → `CausalLM.forward` / `computeLogits` → `Sampler.forward` (chapter 16).
 
 ---
 
@@ -174,9 +176,12 @@ You (or a download script in this project’s `models/` folder) fetch weights fr
 
 | Crate shape | What you point at | Typical cargo |
 |-------------|-------------------|---------------|
-| **Hugging Face folder** | A directory | `config.json` + `tokenizer.json` + `*.safetensors` (Qwen3 / Gemma3) |
-| **Single GGUF file** | One `.gguf` | Metadata + embedded tokenizer + quantized weights (LFM2 chat, or BERT embeddings **since 1.1.0**) |
+| **Hugging Face folder** | A directory | `config.json` + `tokenizer.json` + `*.safetensors` **or** supported `*.onnx` (Qwen3 / Gemma3 / **Llama**; BERT embeddings from ONNX) — **since 1.1.0** for ONNX |
+| **Single GGUF file** | One `.gguf` | Metadata + embedded tokenizer + quantized weights (**LFM2** chat, or **BERT** embeddings **since 1.1.0** — not Qwen/Gemma/Llama GGUF) |
 | **Stream / classpath** (**since 1.1.0**) | A `ModelFileSource` (or `fromClasspath*` helpers) | Same roles as above, but bytes come from streams into **heap** (no disk cache); `make(Path)` stays direct disk I/O |
+
+**Format restrictions are real:** each crate shape accepts only a **subset** of hub files (dtypes, architectures,
+file-name filters). Chapters **7** / **7a** / **7c** spell out what loads and what fails.
 
 Hugging Face folder example:
 
@@ -206,9 +211,10 @@ How human text becomes token numbers and back, plus special markers for “user�
 This is the spelling system and the stage-direction language — still not the “knowledge.” **Chapter 6** details
 `tokenizer.json` (and friends such as `tokenizer_config.json`).
 
-**3. The learned numbers (`*.safetensors`)**  
+**3. The learned numbers (`*.safetensors` or supported `*.onnx`)**  
 The big cargo. Millions or billions of numbers shaped by training. These are what make one model sound different from
-another. **Chapter 7** explains the binary layout, dtypes, and tensor names.
+another. **Chapter 7** (safetensors) and **chapter 7c** (ONNX **since 1.1.0**) explain layouts, dtypes, and what is
+*not* accepted. GGUF packs the same role into one file (**chapter 7a**).
 
 On disk they are often stored in a compact form (half-precision). This Java program **converts them into ordinary
 decimal floating numbers in RAM** so the calculations stay simple to follow. Easy to teach; hungry for memory.
@@ -351,16 +357,18 @@ A Gemma file adds things like `layer_types`, `sliding_window`, `hidden_activatio
 
 | Field           | Means                                                                                 | Used for                                              | If missing                                         |
 |-----------------|---------------------------------------------------------------------------------------|-------------------------------------------------------|----------------------------------------------------|
-| `model_type`    | Short family name (`qwen3`, `gemma3_text`, …)                                         | Auto-detect causal graph (`CausalLMFactory`: Qwen3 / Gemma3; GGUF also `lfm2`) | Fall through to `architectures`, else assume Qwen3 |
-| `architectures` | List of class-style names from Hugging Face (`Qwen3ForCausalLM`, `Gemma3ForCausalLM`) | Same detection if `model_type` is unclear             | Optional                                           |
+| `model_type`    | Short family name (`qwen3`, `gemma3_text`, `llama`, …)                                 | Auto-detect causal graph (`CausalLMFactory`: Qwen3 / Gemma3 / **Llama**; GGUF also `lfm2`) | Fall through to `architectures`, else assume Qwen3 |
+| `architectures` | List of class-style names from Hugging Face (`Qwen3ForCausalLM`, `LlamaForCausalLM`, …) | Same detection if `model_type` is unclear             | Optional                                           |
 
-You can override causal detection with `-Dnanollvm.arch=qwen3`, `gemma3`, or `lfm2` without editing the file. Embedding
-GGUFs use a separate detector (`bert`) and never go through `LLM.builder` (chapter 7b).
+You can override causal detection with `-Dnanollvm.arch=qwen3`, `gemma3`, `llama`, or `lfm2` without editing the file.
+Embedding GGUFs use a separate detector (`bert`) and never go through `LLM.builder` (chapter 7b). ONNX folders use the
+same `config.json` detection (chapter **7c**).
 
 **Examples from real folders**
 
 - Qwen3-0.6B: `"model_type": "qwen3"`, `"architectures": ["Qwen3ForCausalLM"]`
 - Gemma3-270M: `"model_type": "gemma3_text"`, `"architectures": ["Gemma3ForCausalLM"]`
+- SmolLM2 / Tiny-LLM ONNX: `"model_type": "llama"`, `"architectures": ["LlamaForCausalLM"]`
 
 ---
 
@@ -643,7 +651,7 @@ consult it.
 | Comes from `config.json` / GGUF metadata  | Comes from this program’s builder / runtime                                         |
 |-------------------------------------------|-------------------------------------------------------------------------------------|
 | Layer count, widths, heads, RoPE, windows | `maxModelLen` (capped by blueprint), KV page size, number of KV pages, batch limits |
-| Which recipe (Qwen / Gemma / LFM2 / BERT) | `-Dnanollvm.arch=…` override (causal); embedding GGUFs detected separately          |
+| Which recipe (Qwen / Gemma / Llama / LFM2 / BERT) | `-Dnanollvm.arch=…` override (causal); embedding GGUFs detected separately; ONNX folders use same HF `config.json` |
 | `torch_dtype` hint                        | Always float32 activations; GGUF weights may stay packed until unpack               |
 | (not in blueprint)                        | `kvHeapFraction` (default **0.25**) — share of heap used to size the KV arena       |
 | (not in blueprint)                        | CPU matmul threads / optional caller `ExecutorService`; warmup on/off               |
@@ -903,11 +911,21 @@ different `numel` cannot.
 **weights**. Arrays produced during a forward pass (hidden states, attention scores, logits) are **activations**. Both
 are tensors; only weights persist across requests as part of the model.
 
-**Dtype.** On disk a tensor may be stored as BF16, F16, or F32. After load, this educational CPU port widens everything
-to Java `float` (IEEE float32). Shape is unchanged; only element width grows.
+**Dtype.** On disk a tensor may be stored as BF16, F16, F32, or F64. After load, this educational CPU port widens
+everything to Java `float` (IEEE float32). Shape is unchanged; only element width grows. Other safetensors dtypes
+(int / uint / bool / …) **fail the load**.
 
 Formal detail and the Java type live in **chapter 10**. The rest of this chapter is the **on-disk container** that
 delivers named weight tensors into RAM.
+
+### Supported formats / restrictions (safetensors)
+
+| Allowed | Not in this port |
+|---------|------------------|
+| Element dtypes **`F32`**, **`F16`**, **`BF16`**, **`F64`** → float32 weights | Other catalog dtypes (ints, bool, …) |
+| HF folder causal graphs: **Qwen3**, **Gemma3**, **Llama** (when `config.json` + names match) | **LFM2** from an HF safetensors directory (use **GGUF**, ch. 7a) |
+| Same folder may also use ONNX instead (ch. **7c**); if **both** `*.safetensors` and `*.onnx` exist, **safetensors wins** | Full HF **BERT** safetensors directory load (BERT embeddings: GGUF ch. 7b, or ONNX BERT when names map) |
+| Activations / KV always float32 after load | Keeping BF16/F16 math at runtime |
 
 ### Why the safetensors format exists
 
@@ -1127,6 +1145,15 @@ Each **tensor info** records:
 A **Q4_K_M** file typically mixes **Q4_K** and **Q6_K** tensors. Weights stay packed; activations use float32 after
 per-row dequant inside the bound `LinearKernel` / `EmbeddingKernel` (via `GgufDequant.dequantizeRange`).
 
+### Supported formats / restrictions (GGUF)
+
+| Allowed | Not in this port |
+|---------|------------------|
+| GGUF **v2 / v3**; mmap payload **≤ ~2 GiB** | Larger maps / other GGUF major versions |
+| Architectures **`lfm2`** (chat) and **`bert`** (embeddings **since 1.1.0**) | **Qwen / Gemma / Llama** (or other) GGUF exports — loader expects `lfm2\|bert` |
+| GGML types in the table above (`F32`/`F16`/`BF16`, `Q4_0`, `Q8_0`, `Q3_K`, `Q4_K`, `Q6_K`, `IQ4_NL`) | Any other GGML type → `UnsupportedOperationException` (not a full llama.cpp quant catalog) |
+| Packed default; optional unpack at load / late unpack | ONNX or safetensors wrapped *inside* a `.gguf` |
+
 ### What else lives in GGUF metadata
 
 Useful keys this loader / tokenizer read (names vary slightly by export):
@@ -1212,7 +1239,7 @@ The demo weight people usually try is **gte-small** (`models/gte-small.Q2_K.gguf
 **BERT** (Bidirectional Encoder Representations from Transformers) is an architecture for **reading** text, not
 **continuing** it.
 
-| | Causal chat LM (Qwen / Gemma / LFM2) | BERT-style embedding encoder |
+| | Causal chat LM (Qwen / Gemma / Llama / LFM2) | BERT-style embedding encoder |
 |---|---|---|
 | Question it answers | “What token comes **next**?” | “What is a good **vector summary** of this whole input?” |
 | Attention | **Causal** — no peeking at future positions | **Bidirectional** — each token may look left **and** right |
@@ -1281,7 +1308,9 @@ There is **no** chat template, KV cache, or next-token sampler on this path. Lif
 
 ### Limits (honest)
 
-- **GGUF BERT embeddings only** in this line — not a full Hugging Face safetensors BERT directory load yet.
+- **BERT embeddings:** GGUF (`bert` arch) and ONNX folders when names map — **not** a full Hugging Face safetensors
+  BERT directory load yet.
+- GGUF embedding files still need a **supported** GGML dtype (ch. 7a table); exotic quants fail at load.
 - Dense retrieval is an **in-process linear scan**, not an ANN index.
 - Embedding quality depends on the checkpoint (gte-small is small and English-oriented).
 
@@ -1294,6 +1323,87 @@ There is **no** chat template, KV cache, or next-token sampler on this path. Lif
 **Further reading:** original BERT — [Devlin et al. (arXiv)](https://arxiv.org/abs/1810.04805); sentence embeddings /
 GTE family on Hugging Face (search “thenlper/gte-small”); this guide **chapter 8** (bidirectional vs causal attention),
 **chapter 17** (dense / hybrid RAG).
+
+
+---
+
+## 7c. ONNX weight folders and Llama (**since 1.1.0**)
+
+Chapter 7 described **safetensors** as the usual crate of named float tensors inside an HF folder. **Since 1.1.0**,
+the same folder shape may instead ship **ONNX** weight files (`model.onnx`, `model_fp16.onnx`, … under the folder root
+or an `onnx/` subfolder). The public API does **not** change: still `LlmModelFactory.make(folder)`.
+
+### What this engine does with ONNX (Tier A)
+
+This is **weight import**, not an ONNX Runtime session:
+
+| Does | Does not |
+|------|----------|
+| Read **graph initializers** (the learned tensors) | Execute the ONNX compute graph / operators / QDQ |
+| Map names onto the existing Java causal / BERT graphs | Depend on native ORT |
+| Prefer **safetensors** if both formats are present | Treat every community `.onnx` as loadable (see filters below) |
+
+**In the code:** `internal.OnnxProtoReader` → `OnnxWeightReader` / `OnnxDataTypes` → `OnnxModelLoader` →
+`ModelLoader.assembleFromNamedTensors` → `CausalLMFactory` / `EmbeddingEncoderFactory`.
+
+### Supported formats / restrictions (ONNX)
+
+**Where files may live:** folder root or `onnx/` subfolder.
+
+**Preferred names** (first match wins): `model.onnx`, `model_fp16.onnx`, `decoder_model_merged.onnx`,
+`decoder_model.onnx`, `encoder_model.onnx`; otherwise the first sorted allowed `*.onnx`.
+
+| Allowed | Rejected / skipped |
+|---------|-------------------|
+| Float initializers: **FLOAT**, **FLOAT16**, **BFLOAT16**, **DOUBLE** → float32 | Filename contains `_q4`, `_int8`, `_uint8`, `_bnb4`, `_quantized`, or `with_past` (community quant / KV-past exports) |
+| `make(Path)` may follow **external_data** sidecars next to the `.onnx` | **`ModelFileSource` / classpath** loads: `external_data` → `ModelLoadException` (use `make(Path)`) |
+| File size up to **8 GiB** on disk; in-memory buffer path capped at **~2 GiB** | Empty initializer list; float8 / nibble / unknown TensorProto weight types (fail loud) |
+| Architectures that map to Qwen3 / Gemma3 / **Llama** / BERT embedding schemas | **LFM2-from-ONNX**; QDQ / int8 weight graphs; running the ONNX op graph |
+
+INT/UINT/BOOL/STRING/COMPLEX initializers and float **scalars** are **skipped** as graph constants (not weight
+tensors). See the TensorProto table below.
+
+### Which architectures
+
+| Checkpoint family | Graph | Typical demo |
+|-------------------|-------|--------------|
+| Qwen3 / Gemma3 / **Llama** | Causal chat (`LLM.builder`) | [SmolLM2-135M-Instruct-ONNX](https://huggingface.co/onnx-community/SmolLM2-135M-Instruct-ONNX) (ChatML), [Tiny-LLM-ONNX](https://huggingface.co/onnx-community/Tiny-LLM-ONNX) (base / completion toy) |
+| BERT-style | Embeddings (`LlmModel.embed`) | ONNX BERT folders when named for the embedding schema |
+
+**Llama** here means the Llama-style stack assembled by `LlamaForCausalLM`: RMSNorm, RoPE, GQA, SiLU MLP, **without**
+Qwen’s extra Q/K head norms. Tiny-LLM and SmolLM2 Instruct ONNX both declare `LlamaForCausalLM` in `config.json`.
+
+**Chat vs base:** instruct checkpoints (SmolLM2 Instruct) ship a ChatML `chat_template` and belong in the Example
+**chat** menu. Base / completion toys (Tiny-LLM, base SmolLM2-135M-ONNX) only continue text; wrapping them in
+`user:` / `assistant:` chat prompts produces nonsense — the menu labels them **base**.
+
+### TensorProto types (what loads, what skips, what fails)
+
+`OnnxDataTypes` catalogs ONNX `TensorProto.DataType` codes:
+
+| Kind | Examples | Behavior |
+|------|----------|----------|
+| Loadable float | FLOAT, FLOAT16, BFLOAT16, DOUBLE | Decode to float32 weights |
+| Skip | INT/UINT*, BOOL, STRING, COMPLEX*, UNDEFINED; float **scalars** | Graph constants — ignore |
+| Fail loud | FLOAT8*, INT4/UINT4, FLOAT4, unknown codes | `ModelLoadException` (no silent drop of weights) |
+
+transformers.js / onnx-community exports often store MatMul `B` as `[in, out]` under anonymous `onnx::MatMul_*`
+names; the loader remaps via MatMul **node paths** and **transposes** to PyTorch Linear `[out, in]`. Raw payloads may
+live in protobuf field **9** (legacy) or **13**.
+
+### Download scripts
+
+- Chat ONNX demo: `models/download-smollm2-135m-instruct-onnx.sh` → `models/SmolLM2-135M-Instruct-ONNX/`
+- Base ONNX smoke test: `models/download-tiny-llm-onnx.sh` → `models/Tiny-LLM-ONNX/`
+
+### Summary
+
+> **Since 1.1.0, an HF folder may use ONNX initializers instead of safetensors. The engine extracts weights only (no
+> ORT), applies file-name and TensorProto filters, builds Qwen3 / Gemma3 / Llama / BERT graphs as usual, and rejects
+> float8/nibble weight types and unsupported community quant exports explicitly.**
+
+**Further reading:** [ONNX](https://onnx.ai/); community exports such as
+[onnx-community/SmolLM2-135M-Instruct-ONNX](https://huggingface.co/onnx-community/SmolLM2-135M-Instruct-ONNX).
 
 
 ---
@@ -2178,7 +2288,10 @@ Given logits $\boldsymbol{\ell} \in \mathbb{R}^{V}$:
 5. **Draw:** this port uses a **Gumbel-max–style** score $p_i / (-\log U_i)$ with $U_i \sim \mathrm{Uniform} (0,1)$
    and picks the argmax (equivalent in spirit to sampling from categorical $p$; see `Sampler`).
 
-Stop token ids / `maxTokens` end the sequence in the scheduler, not in the sampler.
+Stop token ids / `maxTokens` / `maxModelLen` / degenerate token-loops end the sequence in the scheduler, not in the
+sampler. **Since 1.1.0**, `Sequence.hasDegenerateRepetition` stops soft loops (same-token streaks, exact repeated
+blocks, overused n-grams) so tiny models cannot fill the whole budget with the same paragraph. Engine
+`maxModelLen` is also capped by `config.json` `max_position_embeddings` so RoPE never walks past its cache.
 
 **In the code:** `layers.Sampler`; defaults in `SamplingDefaults`. Narrative: chapter 11.
 
@@ -2238,7 +2351,7 @@ finished.”
 [Holtzman et al., *The Curious Case of Neural Text Degeneration*](https://arxiv.org/abs/1904.09751).
 
 **In the code:** `SamplingParams` / `SamplingDefaults.forTokenizer`; draw in `Sampler.forward` (Gumbel-max style); stop
-ids and `maxTokens` enforced in `Scheduler.postprocess` (chapter 16).
+ids, `maxTokens`, `maxModelLen`, and degenerate-loop checks enforced in `Scheduler.postprocess` (chapter 16).
 
 
 ---
@@ -2404,9 +2517,10 @@ then this path for the **turn**:
 ```text
 OPEN (once)
   LlmModelFactory#make(Path | ModelFileSource | fromClasspath*)
-      → (HF folder) CausalLMFactory#detect / #create
+      → (HF safetensors) CausalLMFactory#detect / #create
          + internal.ModelLoader#loadWeights (+ SafetensorsReader; merge into WeightBag)
          + Tokenizer#fromPretrained
+      → (HF ONNX, since 1.1.0) OnnxModelLoader → same CausalLM / EmbeddingEncoder graphs
       → (GGUF causal) GgufModelLoader → models.internal.Lfm2ForCausalLM + Tokenizer#fromGguf
       → (GGUF bert) EmbeddingEncoderFactory → BertForEmbedding   // embed only; no LLM.builder
   LLM#builder(LlmModel) → LLM.Builder#build → LLM.<init>         // causal models only
@@ -2431,7 +2545,7 @@ ONE TURN
                       → Scheduler#schedule          (BlockManager#allocate / #mayAppend)
                       → Transformer#step
                           → preparePrefill | prepareDecode
-                          → CausalLM#forward        (Qwen3 / Gemma3 / Lfm2)
+                          → CausalLM#forward        (Qwen3 / Gemma3 / Llama / Lfm2)
                           → CausalLM#computeLogits
                           → Sampler#forward
                       → Scheduler#postprocess       (append token / finish on stop)
@@ -2479,7 +2593,7 @@ try (LlmModel model = LlmModelFactory.make(modelDir);
 | Step            | Call                                                               | Role                                                      |
 |-----------------|--------------------------------------------------------------------|-----------------------------------------------------------|
 | Blueprint       | `Config.HfConfig#load` (via `LlmModelFactory`)                        | Read `config.json` (HF) or GGUF metadata              |
-| Empty graph     | `CausalLMFactory#detect` → `#create` / GGUF loaders                   | `Qwen3ForCausalLM`, `Gemma3ForCausalLM`, or `Lfm2ForCausalLM` (all under `models.internal`) |
+| Empty graph     | `CausalLMFactory#detect` → `#create` / GGUF / ONNX loaders            | `Qwen3ForCausalLM`, `Gemma3ForCausalLM`, `LlamaForCausalLM`, or `Lfm2ForCausalLM` (all under `models.internal`) |
 | Pour weights    | `internal.ModelLoader#loadWeights` or `GgufModelLoader` → `WeightBag` | Merge shards / dequant path; construct immutable graph |
 | Seal            | (graph is immutable at construction)                               | No post-load weight mutation                              |
 | Dictionary      | `Tokenizer#fromPretrained` or `#fromGguf`                          | HF JSON or GGUF-embedded vocab + chat template / stop ids |
@@ -2624,7 +2738,7 @@ private stepUnlocked
   │    │    └─ Attention#forward → #storeKvCache → #decode → #attendRange
   │    ├─ CausalLM#computeLogits
   │    └─ Sampler#forward
-  └─ Scheduler#postprocess           // stop if eos / stop ids / maxTokens
+  └─ Scheduler#postprocess           // stop if eos / stop ids / maxTokens / maxModelLen / degenerate loop
 ```
 
 `LLM#generate` keeps calling private `stepUnlocked` until `Scheduler#isFinished()` is true. There is **no** public
@@ -2703,7 +2817,7 @@ the finished stream for display (`thinking` vs `answer`).
   Scheduler#postprocess
            │
            ▼
-  stop ids / maxTokens                SAMPLE "4" … STOP
+  stop ids / maxTokens / maxModelLen / degenerate loop    SAMPLE "4" … STOP
            │
            ▼
   AssistantParts#parse
@@ -2776,7 +2890,7 @@ packages.
 
 | Story idea                       | Primary type                                                         | Methods / entry points to open                                                                                |
 |----------------------------------|----------------------------------------------------------------------|---------------------------------------------------------------------------------------------------------------|
-| Open a model                     | `LlmModelFactory`, `LlmModel`, `LLM.Builder`                               | `make(Path)` / `make(ModelFileSource)` / `fromClasspath*`; `LLM.builder(model)` for causal; `model.embed(…)` for BERT GGUF (**since 1.1.0**) |
+| Open a model                     | `LlmModelFactory`, `LlmModel`, `LLM.Builder`                               | `make(Path)` / `make(ModelFileSource)` / `fromClasspath*`; HF **safetensors or ONNX** (**since 1.1.0**); `LLM.builder(model)` for causal; `model.embed(…)` for BERT (**since 1.1.0**) |
 | Sentence embedding (BERT GGUF)   | `LlmModel` (internal `BertForEmbedding`)                                   | `make(gteGguf)` → `isEmbeddingModel()` → `embed(text)` (chapter **7b**, **since 1.1.0**)                        |
 | Named advisors                   | `LlmAdvisor`, `LlmAdvisorMixer`, `AdvisorEnrichment`, `ChatHistory`        | `Builder.advisors(mixer, …)` — unique non-blank names; `LLM#runAdvisors` → `AdvisorEnrichment`; one batched `generate` |
 | Chat turn                        | `ChatSession`                                                        | `llm.chat(maxTokens)`, `.listen(…)`, `.streamTo(…)`, `.send(user)`, `.clear()`                              |
@@ -3230,6 +3344,7 @@ Short glossary. For the Java home of each idea, prefer the **In the code** notes
 | Tensor                | Multidimensional numeric array with a shape; weights and activations are both tensors            |
 | Shape / `numel`       | Axis lengths of a tensor; product = number of scalar elements                                    |
 | `.safetensors`        | On-disk container: JSON catalog of named tensors + raw numeric payload                           |
+| `.onnx` / ONNX        | Optional HF-folder weights (**since 1.1.0**, ch. **7c**): initializers only → float32; no ORT   |
 | `.gguf` / GGUF        | Single-file container: binary metadata + GGML tensor table + aligned (often quantized) payload   |
 | GGML type             | On-disk element/block layout in GGUF (`F32`, `Q4_K`, …); this port dequants to float32           |
 | BPE                   | Byte-Pair Encoding: merge frequent pieces using an ordered merge list                            |
@@ -3290,6 +3405,12 @@ This project is a **teaching instrument**, not a production cloud service.
 - It is slower than GPU systems you meet in products.
 - Small models hallucinate, waffle, and latch onto polite filler — especially if prompts are vague. RAG can offer the
   right passage (BM25 and, since **1.1.0**, dense/hybrid embeddings) and the generator may still garble it.
+- **ONNX demos** (**since 1.1.0**, ch. **7c**): SmolLM2 Instruct is a tiny ChatML chat model; Tiny-LLM-ONNX is a
+  **base** completion toy — do not expect solid Q&A from either. Decode may stop early on degenerate loops or at a
+  demo `maxTokens` cap so answers can look cut off.
+- **Weight formats are curated, not universal:** safetensors float dtypes only (ch. 7); GGUF = `lfm2|bert` + listed
+  GGML quants (ch. 7a); ONNX = Tier A initializers, no ORT / no community `*_q4*`/`*_int8*`/`with_past` names, no
+  float8 weights, no LFM2-from-ONNX (ch. **7c**).
 - “Understanding,” “knowing,” “thinking,” and “meaning” here are **metaphors** for statistical continuation and inner
   arithmetic. A humanities reader is right to keep that distinction sharp.
 
@@ -3316,7 +3437,8 @@ A single list of the links woven into earlier chapters. Prefer the in-chapter no
 page.
 
 Implementation homes stay in the **In the code** notes, **chapter 16**, **chapter 7b** (BERT embeddings **since
-1.1.0**), and **chapter 17** (RAG); this index is papers and format docs only.
+1.1.0**), **chapter 7c** (ONNX / Llama **since 1.1.0**), and **chapter 17** (RAG); this index is papers and format docs
+only.
 
 | Topic                      | Link                                                                                                                               |
 |----------------------------|------------------------------------------------------------------------------------------------------------------------------------|
@@ -3328,6 +3450,7 @@ Implementation homes stay in the **In the code** notes, **chapter 16**, **chapte
 | Chat templates             | [Transformers guide](https://huggingface.co/docs/transformers/chat_templating)                                                     |
 | Model `config` class          | [PretrainedConfig](https://huggingface.co/docs/transformers/main/en/main_classes/configuration)                                    |
 | Safetensors                | [HF docs](https://huggingface.co/docs/safetensors) · [GitHub format notes](https://github.com/safetensors/safetensors)             |
+| ONNX weight folders        | [ONNX](https://onnx.ai/) · (this guide §7c — Tier A initializers, Llama, SmolLM2 / Tiny demos **since 1.1.0**)                    |
 | GGUF                       | [ggml GGUF docs](https://github.com/ggml-org/ggml/blob/master/docs/gguf.md) · (this guide §7a — layout, dtypes, LFM2)              |
 | BERT (original paper)      | [Devlin et al. (arXiv)](https://arxiv.org/abs/1810.04805) · (this guide §7b — embedding GGUFs **since 1.1.0**)                    |
 | LFM2                       | [Liquid LFM2 blog](https://www.liquid.ai/blog/liquid-foundation-models-v2-our-second-series-of-generative-ai-models) · [LFM2.5-2.6B-GGUF](https://huggingface.co/LiquidAI/LFM2.5-2.6B-GGUF) |
@@ -3358,7 +3481,7 @@ For a **curated learning order** (what to read first, and why it helps this proj
 
 Chapter 20 is a **bookmark table** of links already cited in this guide. This chapter is a **reading list**: a small set
 of papers, format docs, and tutorials ordered so a careful reader can build intuition for *this* codebase — inference,
-not training; CPU; Qwen / Gemma / LFM2 / BERT-GGUF; BM25 and dense RAG.
+not training; CPU; Qwen / Gemma / Llama / LFM2 / BERT-GGUF; ONNX weight folders (**since 1.1.0**); BM25 and dense RAG.
 
 **Provenance:** every link below names a real paper, format doc, blog, Hub page, or video that was resolved live
 (HTTP 200 / valid PDF / arXiv title match / YouTube oEmbed) on **2026-08-11**. Titles match the cited work (e.g. arXiv
@@ -3392,11 +3515,12 @@ You do not need every item. Prefer the path that matches what felt foggy while r
 | [Chat templating guide](https://huggingface.co/docs/transformers/chat_templating) | Role markers and `chat_template` — what `applyChatTemplate` implements. | ch. 3, 14, 15 |
 | [PretrainedConfig](https://huggingface.co/docs/transformers/main/en/main_classes/configuration) | Mental model for `config.json` fields this loader reads. | ch. 5 |
 
-### C. Weights on disk (safetensors & GGUF)
+### C. Weights on disk (safetensors, GGUF & ONNX)
 
 | Read | Why here | Guide |
 |------|----------|-------|
 | [Safetensors documentation](https://huggingface.co/docs/safetensors) · [format notes](https://github.com/safetensors/safetensors) | Named tensors + dtype payload without pickle — HF folder path in this port. | ch. 7 |
+| [ONNX](https://onnx.ai/) · [SmolLM2-135M-Instruct-ONNX](https://huggingface.co/onnx-community/SmolLM2-135M-Instruct-ONNX) | Tier A initializer import (no ORT) — Llama / ChatML demos **since 1.1.0**. | ch. **7c** |
 | [GGUF format notes (ggml)](https://github.com/ggml-org/ggml/blob/master/docs/gguf.md) | Single-file metadata + GGML quants — LFM2 chat and BERT embedding loads. | ch. 7a, 7b |
 | [Liquid LFM2 overview](https://www.liquid.ai/blog/liquid-foundation-models-v2-our-second-series-of-generative-ai-models) · [LFM2.5-2.6B-GGUF](https://huggingface.co/LiquidAI/LFM2.5-2.6B-GGUF) | Hybrid short-conv + GQA architecture this GGUF chat path targets. | ch. 7a |
 
