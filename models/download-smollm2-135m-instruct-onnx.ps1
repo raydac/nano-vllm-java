@@ -1,5 +1,5 @@
 # Download onnx-community SmolLM2-135M-Instruct-ONNX (Llama ChatML, ~135M).
-# Prefer fp16 ONNX (~270 MiB) — loader converts to float32.
+# Prefer fp16 ONNX (~270 MiB) - loader converts to float32.
 # Usage (PowerShell):  .\models\download-smollm2-135m-instruct-onnx.ps1
 
 $ErrorActionPreference = 'Stop'

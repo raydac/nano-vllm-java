@@ -1,5 +1,5 @@
 # Download LiquidAI LFM2.5-2.6B Q4_K_M GGUF into this models/ directory.
-# Dequantizes to ~10GB float32 — plan on -Xmx16g (default in .mvn/jvm.config).
+# Dequantizes to ~10GB float32 - plan on -Xmx16g (default in .mvn/jvm.config).
 # Usage:  .\models\download-lfm2.5-2.6b-gguf.ps1
 
 $ErrorActionPreference = 'Stop'

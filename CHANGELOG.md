@@ -47,7 +47,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - Windows model download scripts (`.ps1` / `.cmd`) resolve their install dir via `$PSScriptRoot`,
   write with absolute paths (no longer change the caller’s working directory), prefer `curl.exe`,
-  and the Gemma script also honors `HF_HOME\token`.
+  stay ASCII-only for Windows PowerShell 5.1 encoding, and the Gemma script also honors
+  `HF_HOME\token`.
 - Lexical RAG off-topic detection no longer treats conversational fillers (`what` / `think` /
   `about` / …) as topic evidence, so queries like “what do you think about BMW?” stay outside
   fairy-tale corpora even when those glue words appear in the documents.

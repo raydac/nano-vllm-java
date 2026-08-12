@@ -10,7 +10,7 @@
 - **`description.md`:** audited for 1.1.0 — ONNX Tier A (**§7c**), Llama, SmolLM2/Tiny demos; ChatFormat /
   vocab-gated think / neutral `SamplingDefaults` / fail-unknown-arch; educational Qwen/Gemma tables kept as examples;
   **format restriction** tables in ch. 7 / 7a / 7c
-- Optional download scripts: Qwen3 / Gemma3 / LFM2 GGUF / gte-small / **Tiny-LLM-ONNX** / **SmolLM2-135M-Instruct-ONNX** (`.sh` + Windows `.ps1`/`.cmd`; PS1 uses `$PSScriptRoot` + absolute outs)
+- Optional download scripts: Qwen3 / Gemma3 / LFM2 GGUF / gte-small / **Tiny-LLM-ONNX** / **SmolLM2-135M-Instruct-ONNX** (`.sh` + Windows `.ps1`/`.cmd`; PS1 ASCII-only + `$PSScriptRoot` + absolute outs)
 - ONNX JavaDoc: Tier A contracts + {@code @since 1.1.0} on public Onnx* APIs / ModelFileId ONNX roles / LlmModelFactory note
 
 - Advisors: `advisors(LlmAdvisorMixer, LlmAdvisor…)`; unique non-blank names; one batched `generate`; library ships no default advisor names/prompts (samples own `SampleAdvisorPrompts`); optional `advisorNoteFilter`

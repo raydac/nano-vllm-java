@@ -1,5 +1,5 @@
 # Download ChristianAzinn gte-small Q2_K GGUF (smallest quant, ~25MB) into this models/ directory.
-# Embedding / feature-extraction BERT GGUF — not a causal chat model for Example/HelloWorld.
+# Embedding / feature-extraction BERT GGUF - not a causal chat model for Example/HelloWorld.
 # Source: https://huggingface.co/ChristianAzinn/gte-small-gguf
 # Usage:  .\models\download-gte-small-gguf.ps1
 
@@ -28,4 +28,4 @@ if ($LASTEXITCODE -ne 0) {
 
 Write-Host "Installed to $Dest"
 Get-Item -LiteralPath $Dest | Format-Table Name, Length, LastWriteTime
-Write-Host "Note: embedding model (BERT), context up to 512 tokens — not for LLM chat samples."
+Write-Host "Note: embedding model (BERT), context up to 512 tokens - not for LLM chat samples."
