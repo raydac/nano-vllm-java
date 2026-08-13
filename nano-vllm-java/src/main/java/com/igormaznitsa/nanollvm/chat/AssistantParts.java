@@ -1,5 +1,8 @@
 package com.igormaznitsa.nanollvm.chat;
 
+import static java.util.Objects.requireNonNull;
+
+import java.util.ArrayList;
 import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -10,66 +13,81 @@ record AssistantParts(String thinking, String answer, boolean thinkOpen) {
   private static final Pattern LEADING_ASSISTANT = Pattern.compile("(?i)^\\s*assistant\\s*:?\\s*");
   private static final Pattern STATED_ANSWER = Pattern.compile(
     "(?i)(?:answer(?:\\s+should)?\\s+be|returns?|result(?:\\s+is)?)\\s*[:\"']?\\s*(.+)$");
-  private static final List<String> CHAT_MARKUP = List.of(
+  private static final List<String> BASE_CHAT_MARKUP = List.of(
     "<|im_end|>", "<|im_start|>", "<|endoftext|>",
     "<end_of_turn>", "<start_of_turn>", "<eos>", "<bos>",
-    "<think>", "</think>"
+    ThinkTags.DEFAULT.open(), ThinkTags.DEFAULT.close()
   );
 
   public static AssistantParts parse(final String raw) {
+    return parse(raw, ThinkTags.DEFAULT);
+  }
+
+  public static AssistantParts parse(final String raw, final ThinkTags tags) {
+    requireNonNull(tags, "tags");
     if (raw == null || raw.isBlank()) {
       return new AssistantParts("", "", false);
     }
 
-    String text = holdIncompleteMarkupSuffix(raw);
-    int startThink = text.indexOf("<think>");
+    List<String> markup = markupMarkers(tags);
+    String text = holdIncompleteMarkupSuffix(raw, markup);
+    String open = tags.open();
+    String close = tags.close();
+    int startThink = text.indexOf(open);
     int endThink = startThink >= 0
-      ? text.indexOf("</think>", startThink + "<think>".length())
-      : text.indexOf("</think>");
+      ? text.indexOf(close, startThink + open.length())
+      : text.indexOf(close);
 
     String thinking;
-    boolean open;
+    boolean thinkOpen;
     String after;
     if (startThink >= 0 && endThink > startThink) {
-      thinking = text.substring(startThink + "<think>".length(), endThink);
-      Remainder rest = splitRemainder(text.substring(endThink + "</think>".length()));
+      thinking = text.substring(startThink + open.length(), endThink);
+      Remainder rest = splitRemainder(text.substring(endThink + close.length()), tags, markup);
       thinking = joinThink(thinking, rest.thinking());
       after = rest.answer();
-      open = rest.open();
+      thinkOpen = rest.open();
     } else if (startThink >= 0) {
-      thinking = text.substring(startThink + "<think>".length());
+      thinking = text.substring(startThink + open.length());
       after = "";
-      open = true;
+      thinkOpen = true;
     } else if (endThink >= 0) {
-      Remainder rest = splitRemainder(text.substring(endThink + "</think>".length()));
+      Remainder rest = splitRemainder(text.substring(endThink + close.length()), tags, markup);
       thinking = rest.thinking();
       after = rest.answer();
-      open = rest.open();
+      thinkOpen = rest.open();
     } else {
       thinking = "";
       after = text;
-      open = false;
+      thinkOpen = false;
     }
 
-    return new AssistantParts(stripChatMarkup(thinking), sanitizeAnswer(after), open);
+    return new AssistantParts(stripChatMarkup(thinking, tags), sanitizeAnswer(after, markup),
+      thinkOpen);
   }
 
-  private static Remainder splitRemainder(final String after) {
-    final String text = holdIncompleteMarkupSuffix(after);
-    int start = text.indexOf("<think>");
+  private static Remainder splitRemainder(
+    final String after,
+    final ThinkTags tags,
+    final List<String> markup
+  ) {
+    final String text = holdIncompleteMarkupSuffix(after, markup);
+    String open = tags.open();
+    int start = text.indexOf(open);
     if (start < 0) {
       return new Remainder("", text, false);
     }
 
     String before = text.substring(0, start);
-    String fromThink = text.substring(start + "<think>".length());
-    int end = fromThink.indexOf("</think>");
+    String fromThink = text.substring(start + open.length());
+    String close = tags.close();
+    int end = fromThink.indexOf(close);
     if (end < 0) {
       return new Remainder(fromThink, before, true);
     }
 
     String inner = fromThink.substring(0, end);
-    Remainder nested = splitRemainder(fromThink.substring(end + "</think>".length()));
+    Remainder nested = splitRemainder(fromThink.substring(end + close.length()), tags, markup);
     return new Remainder(
       joinThink(inner, nested.thinking()),
       joinAnswer(before, nested.answer()),
@@ -100,9 +118,9 @@ record AssistantParts(String thinking, String answer, boolean thinkOpen) {
     return a.stripTrailing() + "\n" + b.stripLeading();
   }
 
-  private static String sanitizeAnswer(final String text) {
-    String cleaned = holdIncompleteMarkupSuffix(text);
-    for (String marker : CHAT_MARKUP) {
+  private static String sanitizeAnswer(final String text, final List<String> markup) {
+    String cleaned = holdIncompleteMarkupSuffix(text, markup);
+    for (String marker : markup) {
       int at = cleaned.indexOf(marker);
       if (at >= 0) {
         cleaned = cleaned.substring(0, at);
@@ -112,11 +130,17 @@ record AssistantParts(String thinking, String answer, boolean thinkOpen) {
   }
 
   public static String stripChatMarkup(final String text) {
+    return stripChatMarkup(text, ThinkTags.DEFAULT);
+  }
+
+  public static String stripChatMarkup(final String text, final ThinkTags tags) {
+    requireNonNull(tags, "tags");
     if (text == null || text.isEmpty()) {
       return "";
     }
-    String s = holdIncompleteMarkupSuffix(text);
-    for (String marker : CHAT_MARKUP) {
+    List<String> markup = markupMarkers(tags);
+    String s = holdIncompleteMarkupSuffix(text, markup);
+    for (String marker : markup) {
       s = s.replace(marker, "");
     }
     return finishSanitize(s);
@@ -128,13 +152,21 @@ record AssistantParts(String thinking, String answer, boolean thinkOpen) {
   }
 
   public static String cleanAssistantText(final String raw) {
-    AssistantParts parts = parse(raw);
+    return cleanAssistantText(raw, ThinkTags.DEFAULT);
+  }
+
+  public static String cleanAssistantText(final String raw, final ThinkTags tags) {
+    AssistantParts parts = parse(raw, tags);
     String answer = parts.answer();
     return answer.isEmpty() ? salvageFromThinking(parts.thinking()) : answer;
   }
 
   public static String streamDisplayText(final String raw) {
-    return cleanAssistantText(raw);
+    return streamDisplayText(raw, ThinkTags.DEFAULT);
+  }
+
+  public static String streamDisplayText(final String raw, final ThinkTags tags) {
+    return cleanAssistantText(raw, tags);
   }
 
   public static String salvageFromThinking(final String thinking) {
@@ -193,24 +225,41 @@ record AssistantParts(String thinking, String answer, boolean thinkOpen) {
    * fragments like {@code <think} into the answer channel.
    */
   static String holdIncompleteMarkupSuffix(final String text) {
+    return holdIncompleteMarkupSuffix(text, BASE_CHAT_MARKUP);
+  }
+
+  static String holdIncompleteMarkupSuffix(final String text, final List<String> markers) {
     if (text == null || text.isEmpty()) {
       return "";
     }
-    int at = text.lastIndexOf('<');
-    if (at < 0) {
-      return text;
-    }
-    String suffix = text.substring(at);
-    return isStrictPrefixOfMarkup(suffix) ? text.substring(0, at) : text;
-  }
-
-  private static boolean isStrictPrefixOfMarkup(final String suffix) {
-    for (String marker : CHAT_MARKUP) {
-      if (marker.startsWith(suffix) && !marker.equals(suffix)) {
-        return true;
+    int longest = markers.stream().mapToInt(String::length).max().orElse(0);
+    int minStart = Math.max(0, text.length() - longest + 1);
+    for (int i = minStart; i < text.length(); i++) {
+      String suffix = text.substring(i);
+      if (isStrictPrefixOfMarkup(suffix, markers)) {
+        return text.substring(0, i);
       }
     }
-    return false;
+    return text;
+  }
+
+  private static boolean isStrictPrefixOfMarkup(final String suffix, final List<String> markers) {
+    return markers.stream()
+      .anyMatch(marker -> marker.startsWith(suffix) && !marker.equals(suffix));
+  }
+
+  private static List<String> markupMarkers(final ThinkTags tags) {
+    if (ThinkTags.DEFAULT.equals(tags)) {
+      return BASE_CHAT_MARKUP;
+    }
+    List<String> markers = new ArrayList<>(BASE_CHAT_MARKUP);
+    if (!markers.contains(tags.open())) {
+      markers.add(tags.open());
+    }
+    if (!markers.contains(tags.close())) {
+      markers.add(tags.close());
+    }
+    return List.copyOf(markers);
   }
 
   private record Remainder(String thinking, String answer, boolean open) {

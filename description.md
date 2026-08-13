@@ -1202,9 +1202,12 @@ Many `lfm2` GGUF exports omit an embedded `chat_template` string even though the
 
 - Detects **`Tokenizer.ChatFormat`** from template/vocab markers (**ChatML** / turn-based / plain) — not from product names.
 - Sets `Tokenizer.invitesThinking()` from vocab (`<think>` + `</think>` present), for HF and GGUF loads alike.
+  Custom pairs go on `LlmModelFactory.make(path, Map.of(LlmModel.OPTION_THINK_TAGS, tags))`
+  (frozen on the model; inherited by every `LLM` sharing the checkpoint);
+  skip-seed then uses `Tokenizer.invitesThinking(open, close)`. `ChatSession.thinkTags` overrides one conversation.
 - Keeps library system text empty (`ChatPrompts.systemFor`); demos set policy via samples `SampleChatPrompts`.
-- When thinking is disabled and the vocab invites it, ChatML may pre-insert an empty `<think></think>` so the model
-  skips a long scratchpad (token-budget control — not a second brain).
+- When thinking is disabled and the vocab invites the configured tags, ChatML may pre-insert an empty open/close
+  pair so the model skips a long scratchpad (token-budget control — not a second brain).
 
 The UI can still split `<think>` / answer if the model emits those tags. (Sense C details: chapter 9.)
 
@@ -2618,7 +2621,7 @@ try (LlmModel model = LlmModelFactory.make(modelDir);
      LLM llm = LLM.builder(model).maxModelLen(2048).build()) {
   ChatReply reply = llm.chat(256).send("What is 2+2?");
   String visible = reply.answer();   // user-facing text (same as reply.text())
-  String notes   = reply.thinking(); // optional <think> scratchpad; not stored in history
+  String notes   = reply.thinking(); // optional scratchpad; not stored in history
   boolean open   = reply.thinkOpen(); // false after send; true only on streaming snapshots
   double tokPerSec = reply.stats().completionTokensPerSecond();
 } // close LLM first (try-with-resources order), then LlmModel
@@ -2820,7 +2823,7 @@ Example timeline (one possible Qwen-style path — not guaranteed wording):
 
 If there is **no** scratchpad (turn-based `ChatFormat`, or ChatML without think tags), Sense A still runs the same way;
 you only see the final answer tokens. There is no missing “thinker” — only missing **visible** Sense B/C text.
-`ChatSession` defaults thinking from `Tokenizer#invitesThinking()` unless the caller sets `enableThinking(…)`.
+`ChatSession` defaults thinking from `Tokenizer#invitesThinking(open, close)` for the session’s `ThinkTags` (default `<think>` / `</think>`) unless the caller sets `enableThinking(…)`.
 
 **How written thinking helps attention (and how it can fail)**
 
@@ -2926,7 +2929,7 @@ packages.
 | `llm/` — `LLM`, `LLM.Builder`, `Config`, `SamplingParams`, `GenerationStats`, `LlmAdvisor`, `LlmAdvisorMixer`, `AdvisorResponse`, `AdvisorEnrichment` | Front door; named advisors + mixer; stats | yes |
 | `models/` — `LlmModel`, `LlmModelFactory`, `ModelFileId`, `ModelFileSource`, `ModelFileSources` | Shared immutable loaded model + stream/classpath sources (**since 1.1.0**) | yes |
 | `models.internal/` — `WeightBag`, `CausalLM*`, `BertForEmbedding`, `EmbeddingEncoder`, … | Graphs, weight bags, BERT encode (use `LlmModel.embed`) | **no** |
-| `chat/` — `ChatSession`, `ChatHistory`, `ChatMessage`, `ChatMessages`, `LlmListener`, `LlmTextKind`, `ChatReply`, `StreamPrinter` | Dialog + unified text/status events | yes |
+| `chat/` — `ChatSession`, `ChatHistory`, `ChatMessage`, `ChatMessages`, `ThinkTags`, `LlmListener`, `LlmTextKind`, `ChatReply`, `StreamPrinter` | Dialog + unified text/status events | yes |
 | `tokenizer/Tokenizer`, `GgufTokenizerSource`                                           | HF / GGUF vocab → encode / decode / chat template   | yes |
 | `utils/NanoLlvmProps`, `ResourceLimits`                                                | Property/env knobs; process-wide parser/corpus caps (**since 1.1.0**) | yes |
 | `exceptions/`                                                                          | Typed library failures                               | yes |
@@ -3534,8 +3537,8 @@ Short glossary. For the Java home of each idea, prefer the **In the code** notes
 | Query / Key / Value   | Linear projections used by attention (search / address / content)                                |
 | Inner work (Sense A)  | Invisible stack of attention + MLP for each next token                                           |
 | Chain of thought (B)  | Reasoning written as ordinary tokens in the reply                                                |
-| Tagged scratchpad (C) | Written reasoning inside `<think>…</think>` for UI splitting                                     |
-| ChatReply             | Parsed assistant turn: `thinking` (scratchpad), `answer` / `text()` (visible), `thinkOpen` (unclosed `<think>` while streaming), `stats` (`GenerationStats`; `NONE` until generate finishes). `parse(raw)` splits decode; `ChatSession.send` salvages + attaches stats. History stores **answer only**. |
+| Tagged scratchpad (C) | Written reasoning inside open/close markers (default `<think>…</think>`; override with `ThinkTags`) |
+| ChatReply             | Parsed assistant turn: `thinking` (scratchpad), `answer` / `text()` (visible), `thinkOpen` (unclosed scratchpad while streaming), `stats` (`GenerationStats`; `NONE` until generate finishes). `parse(raw)` uses default tags; `parse(raw, ThinkTags)` / `LlmModel.OPTION_THINK_TAGS` at load / `ChatSession.thinkTags` for custom markers. `ChatSession.send` salvages + attaches stats. History stores **answer only**. |
 | KV cache              | Stored Keys and Values, reused while decoding                                                    |
 | Prefill               | First pass over the prompt that fills the KV cache                                               |
 | Decode                | Step-by-step production of later tokens                                                          |

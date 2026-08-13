@@ -4,6 +4,7 @@ import static java.util.Objects.requireNonNull;
 
 import com.igormaznitsa.nanollvm.chat.LlmListener;
 import com.igormaznitsa.nanollvm.chat.LlmListeners;
+import com.igormaznitsa.nanollvm.chat.ThinkTags;
 import com.igormaznitsa.nanollvm.llm.Config;
 import com.igormaznitsa.nanollvm.llm.LLM;
 import com.igormaznitsa.nanollvm.models.internal.CausalLM;
@@ -15,7 +16,10 @@ import com.igormaznitsa.nanollvm.tensor.MatmulRuntime;
 import com.igormaznitsa.nanollvm.tokenizer.Tokenizer;
 
 import java.nio.file.Path;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.locks.ReentrantLock;
@@ -24,8 +28,10 @@ import java.util.concurrent.locks.ReentrantLock;
  * Loaded model: architecture weights, HF/GGUF config, and tokenizer.
  *
  * <p>Safe to share across threads and across many {@link LLM} instances (causal models). Mutable
- * inference state (KV cache, scheduler, sampling) lives on each {@link LLM}, not here. Embedding
- * models expose {@link #embed(CharSequence)} instead of chat/generate.
+ * inference state (KV cache, scheduler, sampling) lives on each {@link LLM}, not here. Load-time
+ * options ({@link #options()}, including {@link #OPTION_THINK_TAGS}) are frozen at
+ * {@link LlmModelFactory#make} and never change. Embedding models expose
+ * {@link #embed(CharSequence)} instead of chat/generate.
  *
  * <p>GGUF models keep quantized weights packed by default. Prefer unpacking at load with
  * {@link LlmModelFactory#make(Path, LlmListener, boolean)} ({@code true}) so float32 is built
@@ -41,6 +47,15 @@ import java.util.concurrent.locks.ReentrantLock;
  */
 public final class LlmModel implements AutoCloseable {
 
+  /**
+   * Factory option: a {@link ThinkTags} pair for chat parse and ChatML skip-seed.
+   *
+   * @since 1.1.0
+   */
+  public static final String OPTION_THINK_TAGS = "thinkTags";
+
+  private static final Set<String> KNOWN_OPTIONS = Set.of(OPTION_THINK_TAGS);
+
   static {
     LlmModelAccess.setResolver(LlmModel::resolveNetwork);
   }
@@ -48,6 +63,7 @@ public final class LlmModel implements AutoCloseable {
   private final Path path;
   private final Config.HfConfig hfConfig;
   private final Tokenizer tokenizer;
+  private final Map<String, Object> options;
   private final AtomicReference<WeightBag> weights;
   private final AtomicReference<CausalLM> network;
   private final AtomicReference<EmbeddingEncoder> encoder;
@@ -59,9 +75,10 @@ public final class LlmModel implements AutoCloseable {
     final Config.HfConfig hfConfig,
     final WeightBag weights,
     final CausalLM network,
-    final Tokenizer tokenizer
+    final Tokenizer tokenizer,
+    final Map<String, ?> options
   ) {
-    this(path, hfConfig, weights, network, null, tokenizer);
+    this(path, hfConfig, weights, network, null, tokenizer, options);
   }
 
   LlmModel(
@@ -69,9 +86,10 @@ public final class LlmModel implements AutoCloseable {
     final Config.HfConfig hfConfig,
     final WeightBag weights,
     final EmbeddingEncoder encoder,
-    final Tokenizer tokenizer
+    final Tokenizer tokenizer,
+    final Map<String, ?> options
   ) {
-    this(path, hfConfig, weights, null, encoder, tokenizer);
+    this(path, hfConfig, weights, null, encoder, tokenizer, options);
   }
 
   private LlmModel(
@@ -80,7 +98,8 @@ public final class LlmModel implements AutoCloseable {
     final WeightBag weights,
     final CausalLM network,
     final EmbeddingEncoder encoder,
-    final Tokenizer tokenizer
+    final Tokenizer tokenizer,
+    final Map<String, ?> options
   ) {
     if ((network == null) == (encoder == null)) {
       throw new IllegalArgumentException("exactly one of network or encoder must be set");
@@ -91,6 +110,29 @@ public final class LlmModel implements AutoCloseable {
     this.network = new AtomicReference<>(network);
     this.encoder = new AtomicReference<>(encoder);
     this.tokenizer = requireNonNull(tokenizer, "tokenizer");
+    this.options = copyAndValidateOptions(options);
+  }
+
+  static Map<String, Object> copyAndValidateOptions(final Map<String, ?> options) {
+    requireNonNull(options, "options");
+    Map<String, Object> copy = new LinkedHashMap<>();
+    options.forEach((key, value) -> {
+      requireNonNull(key, "option key");
+      if (key.isBlank()) {
+        throw new IllegalArgumentException("option key must not be blank");
+      }
+      requireNonNull(value, "option value for " + key);
+      if (!KNOWN_OPTIONS.contains(key)) {
+        throw new IllegalArgumentException("unknown model option: " + key);
+      }
+      copy.put(key, value);
+    });
+    Object thinkTags = copy.get(OPTION_THINK_TAGS);
+    if (thinkTags != null && !(thinkTags instanceof ThinkTags)) {
+      throw new IllegalArgumentException(
+        OPTION_THINK_TAGS + " must be a ThinkTags, got " + thinkTags.getClass().getName());
+    }
+    return Map.copyOf(copy);
   }
 
   public Path path() {
@@ -106,6 +148,30 @@ public final class LlmModel implements AutoCloseable {
   public Tokenizer tokenizer() {
     this.assertNotClosed();
     return this.tokenizer;
+  }
+
+  /**
+   * Load-time options frozen by {@link LlmModelFactory} ({@link Map#copyOf}). Empty when the caller
+   * passed no options.
+   *
+   * @since 1.1.0
+   */
+  public Map<String, Object> options() {
+    this.assertNotClosed();
+    return this.options;
+  }
+
+  /**
+   * Scratchpad open/close markers for chat parse and ChatML skip-seed. Taken from
+   * {@link #OPTION_THINK_TAGS} when present; otherwise {@link ThinkTags#DEFAULT}
+   * ({@code <think>} / {@code </think>}).
+   *
+   * @since 1.1.0
+   */
+  public ThinkTags thinkTags() {
+    this.assertNotClosed();
+    Object value = this.options.get(OPTION_THINK_TAGS);
+    return value == null ? ThinkTags.DEFAULT : (ThinkTags) value;
   }
 
   public String architectureName() {

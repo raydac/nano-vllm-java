@@ -75,8 +75,18 @@ final class AdvisorRunner {
     List<ChatMessage> turn = new ArrayList<>(
       AdvisorPrompt.dialogTurn(advisor.prompt(), priorDialog, modelUserText));
     ChatMessages.truncateHistory(
-      turn, llm.tokenizer(), llm.config().maxModelLen(), sampling.maxTokens());
-    return llm.tokenizer().applyChatTemplate(ChatMessages.toTemplateMaps(turn), true, false);
+      turn,
+      llm.tokenizer(),
+      llm.config().maxModelLen(),
+      sampling.maxTokens(),
+      false,
+      llm.thinkTags());
+    return llm.tokenizer().applyChatTemplate(
+      ChatMessages.toTemplateMaps(turn),
+      true,
+      false,
+      llm.thinkTags().open(),
+      llm.thinkTags().close());
   }
 
   private static String parseAnswer(final LLM llm, final LLM.GenerationOutput output) {
@@ -85,7 +95,7 @@ final class AdvisorRunner {
     if (raw == null || raw.isBlank()) {
       raw = tokenizer.decode(output.tokenIds(), tokenizer.skipSpecialTokensOnChatDecode());
     }
-    String answer = ChatReply.parse(raw).answer().strip();
+    String answer = ChatReply.parse(raw, llm.thinkTags()).answer().strip();
     return AdvisorPrompt.usableNote(answer, llm.advisorNoteFilter());
   }
 

@@ -20,6 +20,7 @@ import com.igormaznitsa.nanollvm.chat.ChatRole;
 import com.igormaznitsa.nanollvm.chat.LlmListener;
 import com.igormaznitsa.nanollvm.chat.LlmListeners;
 import com.igormaznitsa.nanollvm.chat.LlmTextKind;
+import com.igormaznitsa.nanollvm.chat.ThinkTags;
 import com.igormaznitsa.nanollvm.engine.BlockManager;
 import com.igormaznitsa.nanollvm.engine.Sequence;
 import com.igormaznitsa.nanollvm.internal.Json;
@@ -105,6 +106,38 @@ class CoreUnitTest {
       assertSame(model.tokenizer(), a.tokenizer());
       assertSame(model.tokenizer(), b.tokenizer());
       assertEquals(model.architectureName(), a.model().architectureName());
+      assertTrue(model.options().isEmpty());
+      assertEquals(ThinkTags.DEFAULT, model.thinkTags());
+    }
+  }
+
+  @Test
+  void modelFactoryOptionsRejectUnknownKeysAndWrongTypes() {
+    Path path = Path.of("/nonexistent-nano-vllm-model");
+    assertThrows(NullPointerException.class,
+      () -> LlmModelFactory.make(path, (Map<String, ?>) null));
+    assertThrows(IllegalArgumentException.class,
+      () -> LlmModelFactory.make(path, Map.of("unknown", "x")));
+    assertThrows(IllegalArgumentException.class,
+      () -> LlmModelFactory.make(path, Map.of(LlmModel.OPTION_THINK_TAGS, "</think>")));
+  }
+
+  @Test
+  void modelThinkTagsComeFromFactoryOptionsAndSessionCanOverride() {
+    Path path = OptionalModelAssumptions.requireQwen3();
+    ThinkTags custom = ThinkTags.of("<reasoning>", "</reasoning>");
+    LlmModel model = LlmModelFactory.make(path, Map.of(LlmModel.OPTION_THINK_TAGS, custom));
+    try (model;
+         LLM llm = LLM.builder(model).maxModelLen(256).numKvcacheBlocks(32).build()) {
+      assertEquals(custom, model.thinkTags());
+      assertEquals(custom, model.options().get(LlmModel.OPTION_THINK_TAGS));
+      assertThrows(UnsupportedOperationException.class, () -> model.options().put("x", "y"));
+      assertEquals(custom, llm.thinkTags());
+      assertEquals(custom, llm.chat(16).thinkTags());
+
+      ThinkTags sessionTags = ThinkTags.of("[reasoning]", "[/reasoning]");
+      assertEquals(sessionTags, llm.chat(16).thinkTags(sessionTags).thinkTags());
+      assertEquals(custom, llm.thinkTags());
     }
   }
 
@@ -123,6 +156,8 @@ class CoreUnitTest {
     model.close();
     assertTrue(model.isClosed());
     assertThrows(IllegalStateException.class, model::architectureName);
+    assertThrows(IllegalStateException.class, model::thinkTags);
+    assertThrows(IllegalStateException.class, model::options);
     assertThrows(IllegalStateException.class, () -> LLM.builder(model).build());
     model.close();
   }
@@ -570,6 +605,30 @@ class CoreUnitTest {
   }
 
   @Test
+  void customThinkTagsSplitHoldAndRejectInvalid() {
+    ThinkTags tags = ThinkTags.of("[reasoning]", "[/reasoning]");
+    assertEquals(ThinkTags.DEFAULT, ThinkTags.of(" <think> ", " </think> "));
+
+    ChatReply parts = ChatReply.parse("[reasoning]\nplan\n[/reasoning]\n\nHi", tags);
+    assertEquals("plan", parts.thinking());
+    assertEquals("Hi", parts.answer());
+    assertFalse(parts.thinkOpen());
+
+    ChatReply partial = ChatReply.parse("[reason", tags);
+    assertEquals("", partial.thinking());
+    assertEquals("", partial.answer());
+    assertFalse(partial.thinkOpen());
+
+    assertEquals("visible", ChatReply.streamDisplayText(
+      "[reasoning]secret[/reasoning]visible", tags));
+
+    assertThrows(IllegalArgumentException.class, () -> ThinkTags.of("  ", "</think>"));
+    assertThrows(IllegalArgumentException.class, () -> ThinkTags.of("<x>", "<x>"));
+    assertThrows(IllegalArgumentException.class, () -> ThinkTags.of("ab", "a"));
+    assertThrows(NullPointerException.class, () -> ThinkTags.of(null, "</think>"));
+  }
+
+  @Test
   void chatPromptsStayModelAgnostic() {
     assertEquals("", ChatPrompts.systemFor((com.igormaznitsa.nanollvm.tokenizer.Tokenizer) null));
     assertTrue(ChatPrompts.foldSystemIntoFirstUser("SYS", "hi", true).startsWith("SYS"));
@@ -700,6 +759,65 @@ class CoreUnitTest {
         List.of(Map.of("role", "user", "content", "hi")), true, false);
       assertTrue(chat.contains("<|im_start|>assistant"));
       assertFalse(chat.contains("<think>"));
+    } finally {
+      try (var walk = walk(dir)) {
+        walk.sorted(java.util.Comparator.reverseOrder()).forEach(p -> {
+          try {
+            deleteIfExists(p);
+          } catch (IOException e) {
+            throw new UncheckedIOException("failed to delete temp path " + p, e);
+          }
+        });
+      }
+    }
+  }
+
+  @Test
+  void chatMlCustomThinkTagsSkipSeedWhenInVocab() throws Exception {
+    Path dir = createTempDirectory("chatml-custom-think");
+    try {
+      writeString(dir.resolve("config.json"),
+        "{\"model_type\":\"llama\",\"architectures\":[\"LlamaForCausalLM\"],\"vocab_size\":8}");
+      writeString(dir.resolve("tokenizer_config.json"), """
+        {
+          "eos_token": "<|im_end|>",
+          "pad_token": "<|im_end|>",
+          "chat_template": "{% for message in messages %}{{'<|im_start|>' + message['role'] + '\\n' + message['content'] + '<|im_end|>\\n'}}{% endfor %}{% if add_generation_prompt %}{{ '<|im_start|>assistant\\n' }}{% endif %}"
+        }
+        """);
+      writeString(dir.resolve("tokenizer.json"), """
+        {
+          "model": {
+            "type": "BPE",
+            "vocab": {
+              "a": 0,
+              "<|im_start|>": 1,
+              "<|im_end|>": 2,
+              "hi": 3,
+              "[reasoning]": 4,
+              "[/reasoning]": 5
+            },
+            "merges": []
+          },
+          "added_tokens": [
+            {"id": 1, "content": "<|im_start|>", "special": true},
+            {"id": 2, "content": "<|im_end|>", "special": true},
+            {"id": 4, "content": "[reasoning]", "special": true},
+            {"id": 5, "content": "[/reasoning]", "special": true}
+          ]
+        }
+        """);
+      var tok = com.igormaznitsa.nanollvm.tokenizer.Tokenizer.fromPretrained(dir);
+      assertFalse(tok.invitesThinking());
+      assertTrue(tok.invitesThinking("[reasoning]", "[/reasoning]"));
+      List<Map<String, String>> turn = List.of(Map.of("role", "user", "content", "hi"));
+      String defaultSeed = tok.applyChatTemplate(turn, true, false);
+      assertFalse(defaultSeed.contains("<think>"));
+      assertFalse(defaultSeed.contains("[reasoning]"));
+      String customSeed = tok.applyChatTemplate(turn, true, false, "[reasoning]", "[/reasoning]");
+      assertTrue(customSeed.contains("[reasoning]\n\n[/reasoning]\n\n"));
+      String customOn = tok.applyChatTemplate(turn, true, true, "[reasoning]", "[/reasoning]");
+      assertFalse(customOn.contains("[reasoning]"));
     } finally {
       try (var walk = walk(dir)) {
         walk.sorted(java.util.Comparator.reverseOrder()).forEach(p -> {

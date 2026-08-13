@@ -760,6 +760,23 @@ public final class Tokenizer {
   }
 
   /**
+   * Whether both scratchpad markers exist as whole vocabulary tokens (the ChatML skip-seed gate).
+   *
+   * @param thinkOpen  start marker; must not be {@code null}
+   * @param thinkClose end marker; must not be {@code null}
+   * @return {@code true} when both strings are non-empty and present in vocab
+   * @since 1.1.0
+   */
+  public boolean invitesThinking(final String thinkOpen, final String thinkClose) {
+    requireNonNull(thinkOpen, "thinkOpen");
+    requireNonNull(thinkClose, "thinkClose");
+    return !thinkOpen.isEmpty()
+      && !thinkClose.isEmpty()
+      && this.vocab.containsKey(thinkOpen)
+      && this.vocab.containsKey(thinkClose);
+  }
+
+  /**
    * Whether chat decode should omit special/control tokens (turn-based markup models).
    *
    * @since 1.1.0
@@ -1059,6 +1076,26 @@ public final class Tokenizer {
   public String applyChatTemplate(final List<Map<String, String>> messages,
                                   final boolean addGenerationPrompt,
                                   final boolean enableThinking) {
+    return this.applyChatTemplate(messages, addGenerationPrompt, enableThinking, "<think>",
+      "</think>");
+  }
+
+  /**
+   * {@link #applyChatTemplate(List, boolean, boolean)} with custom scratchpad markers for the ChatML
+   * skip-seed (emitted only when thinking is disabled and both strings are in vocab).
+   *
+   * @param thinkOpen  start marker; must not be {@code null}
+   * @param thinkClose end marker; must not be {@code null}
+   * @return prompt string ready to {@link #encode(String)}
+   * @since 1.1.0
+   */
+  public String applyChatTemplate(final List<Map<String, String>> messages,
+                                  final boolean addGenerationPrompt,
+                                  final boolean enableThinking,
+                                  final String thinkOpen,
+                                  final String thinkClose) {
+    requireNonNull(thinkOpen, "thinkOpen");
+    requireNonNull(thinkClose, "thinkClose");
     if (this.chatFormat == ChatFormat.TURN_BASED) {
       return this.applyTurnBasedChat(messages, addGenerationPrompt);
     }
@@ -1071,8 +1108,8 @@ public final class Tokenizer {
       }
       if (addGenerationPrompt) {
         sb.append("<|im_start|>assistant\n");
-        if (!enableThinking && this.inviteThinking) {
-          sb.append("<think>\n\n</think>\n\n");
+        if (!enableThinking && this.invitesThinking(thinkOpen, thinkClose)) {
+          sb.append(thinkOpen).append("\n\n").append(thinkClose).append("\n\n");
         }
       }
       return sb.toString();

@@ -34,6 +34,7 @@ public final class ChatSession {
   private LlmListener listener = LlmListeners.silent();
   private LlmListeners.PrintStreamLlmListener printSink;
   private Boolean enableThinking;
+  private ThinkTags thinkTags;
   private long lastAdvisorNanos;
   private GenerationStats lastGenerateStats = GenerationStats.NONE;
   private int maxHistoryMessages = ResourceLimits.current().maxHistoryMessages();
@@ -170,9 +171,10 @@ public final class ChatSession {
   /**
    * Enables or disables thinking-scratchpad invitation for this session.
    *
-   * <p>When {@code false}, ChatML templates that {@link Tokenizer#invitesThinking()} may seed an
-   * empty {@code <think></think>} so the model skips long chain-of-thought (important for RAG token
-   * budgets). When never called, the default from {@link Tokenizer#invitesThinking()} applies.
+   * <p>When {@code false}, ChatML templates may seed an empty open/close pair from this session's
+   * {@link #thinkTags()} when {@link Tokenizer#invitesThinking(String, String)} is true for those
+   * markers, so the model skips long chain-of-thought (important for RAG token budgets). When never
+   * called, the default from vocab membership of those tags applies.
    *
    * @param enableThinking {@code true} to invite chain-of-thought, {@code false} to suppress it
    * @return {@code this} for fluent configuration
@@ -180,6 +182,30 @@ public final class ChatSession {
   public ChatSession enableThinking(final boolean enableThinking) {
     this.enableThinking = enableThinking;
     return this;
+  }
+
+  /**
+   * Scratchpad open/close markers for parse and ChatML skip-seed. Defaults to
+   * {@link LLM#thinkTags()} from the shared {@link com.igormaznitsa.nanollvm.models.LlmModel}. Set
+   * this only to override the model pair for one conversation.
+   *
+   * @param thinkTags must not be {@code null}
+   * @return {@code this} for fluent configuration
+   * @since 1.1.0
+   */
+  public ChatSession thinkTags(final ThinkTags thinkTags) {
+    this.thinkTags = requireNonNull(thinkTags, "thinkTags");
+    return this;
+  }
+
+  /**
+   * Markers currently used by {@link #send} / streaming parse ({@link LLM#thinkTags()} unless
+   * {@link #thinkTags(ThinkTags)} was called).
+   *
+   * @since 1.1.0
+   */
+  public ThinkTags thinkTags() {
+    return this.thinkTags != null ? this.thinkTags : this.llm.thinkTags();
   }
 
   /**
@@ -350,7 +376,12 @@ public final class ChatSession {
     this.trimHistoryToCap();
     Tokenizer tokenizer = this.llm.tokenizer();
     ChatMessages.truncateHistory(
-      this.history, tokenizer, this.llm.config().maxModelLen(), this.samplingParams.maxTokens());
+      this.history,
+      tokenizer,
+      this.llm.config().maxModelLen(),
+      this.samplingParams.maxTokens(),
+      this.thinkingEnabled(tokenizer),
+      this.thinkTags());
 
     TurnStream turn = this.beginTurn();
 
@@ -451,11 +482,16 @@ public final class ChatSession {
     Tokenizer tokenizer = this.llm.tokenizer();
     boolean skipSpecials = tokenizer.skipSpecialTokensOnChatDecode();
     boolean enableThinking = this.thinkingEnabled(tokenizer);
+    ThinkTags tags = this.thinkTags();
     List<ChatMessage> forTemplate = isolateGeneration
       ? this.isolatedTurn(lastUserOverride)
       : this.historyForTemplate(lastUserOverride);
     String prompt = tokenizer.applyChatTemplate(
-      ChatMessages.toTemplateMaps(forTemplate), true, enableThinking);
+      ChatMessages.toTemplateMaps(forTemplate),
+      true,
+      enableThinking,
+      tags.open(),
+      tags.close());
 
     List<Integer> streamedIds = new ArrayList<>();
     List<LLM.GenerationOutput> outputs = this.llm.generate(
@@ -466,13 +502,13 @@ public final class ChatSession {
       tokenId -> {
         streamedIds.add(tokenId);
         turn.push(this.llm, this.listener,
-          ChatReply.parse(tokenizer.decode(streamedIds, skipSpecials)));
+          ChatReply.parse(tokenizer.decode(streamedIds, skipSpecials), tags));
       }
     );
 
     LLM.GenerationOutput output = outputs.getFirst();
     this.lastGenerateStats = this.mergeGenerateStats(this.lastGenerateStats, output.stats());
-    return ChatReply.parse(tokenizer.decode(output.tokenIds(), skipSpecials))
+    return ChatReply.parse(tokenizer.decode(output.tokenIds(), skipSpecials), tags)
       .withStats(this.lastGenerateStats);
   }
 
@@ -490,7 +526,11 @@ public final class ChatSession {
   }
 
   private boolean thinkingEnabled(final Tokenizer tokenizer) {
-    return this.enableThinking != null ? this.enableThinking : tokenizer.invitesThinking();
+    if (this.enableThinking != null) {
+      return this.enableThinking;
+    }
+    ThinkTags tags = this.thinkTags();
+    return tokenizer.invitesThinking(tags.open(), tags.close());
   }
 
   private List<ChatMessage> isolatedTurn(final String modelUserText) {

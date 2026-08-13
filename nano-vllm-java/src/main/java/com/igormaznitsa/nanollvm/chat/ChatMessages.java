@@ -1,5 +1,7 @@
 package com.igormaznitsa.nanollvm.chat;
 
+import static java.util.Objects.requireNonNull;
+
 import com.igormaznitsa.nanollvm.tokenizer.Tokenizer;
 import java.util.List;
 import java.util.Map;
@@ -45,11 +47,39 @@ public final class ChatMessages {
     final int maxModelLen,
     final int maxTokens
   ) {
+    truncateHistory(
+      history,
+      tokenizer,
+      maxModelLen,
+      maxTokens,
+      tokenizer.invitesThinking(),
+      ThinkTags.DEFAULT);
+  }
+
+  /**
+   * {@link #truncateHistory(List, Tokenizer, int, int)} using the same thinking flag and scratchpad
+   * markers as the upcoming generate, so skip-seed tokens count toward the budget.
+   *
+   * @since 1.1.0
+   */
+  public static void truncateHistory(
+    final List<ChatMessage> history,
+    final Tokenizer tokenizer,
+    final int maxModelLen,
+    final int maxTokens,
+    final boolean enableThinking,
+    final ThinkTags thinkTags
+  ) {
+    requireNonNull(thinkTags, "thinkTags");
     int budget = Math.max(64, maxModelLen - maxTokens - PROMPT_MARGIN);
-    boolean enableThinking = tokenizer.invitesThinking();
     int minKeep = !history.isEmpty() && history.getFirst().role() == ChatRole.SYSTEM ? 2 : 1;
     while (history.size() > minKeep) {
-      String prompt = tokenizer.applyChatTemplate(toTemplateMaps(history), true, enableThinking);
+      String prompt = tokenizer.applyChatTemplate(
+        toTemplateMaps(history),
+        true,
+        enableThinking,
+        thinkTags.open(),
+        thinkTags.close());
       if (tokenizer.encode(prompt).size() <= budget) {
         return;
       }

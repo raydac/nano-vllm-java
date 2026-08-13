@@ -5,6 +5,7 @@ import static java.util.Objects.requireNonNull;
 import com.igormaznitsa.nanollvm.chat.ChatReply;
 import com.igormaznitsa.nanollvm.chat.ChatSession;
 import com.igormaznitsa.nanollvm.chat.LlmListener;
+import com.igormaznitsa.nanollvm.chat.ThinkTags;
 import com.igormaznitsa.nanollvm.llm.LLM;
 import com.igormaznitsa.nanollvm.llm.SamplingParams;
 import com.igormaznitsa.nanollvm.prompts.RagPrompts;
@@ -113,6 +114,19 @@ public final class RagSession {
    */
   public RagSession enableThinking(final boolean enableThinking) {
     this.chat.enableThinking(enableThinking);
+    return this;
+  }
+
+  /**
+   * Scratchpad markers for parse and ChatML skip-seed. Delegates to the inner
+   * {@link ChatSession#thinkTags(ThinkTags)}. Prefer
+   * {@link com.igormaznitsa.nanollvm.models.LlmModel#OPTION_THINK_TAGS} at load
+   * so every session sharing the checkpoint uses the same pair.
+   *
+   * @since 1.1.0
+   */
+  public RagSession thinkTags(final ThinkTags thinkTags) {
+    this.chat.thinkTags(thinkTags);
     return this;
   }
 
@@ -384,11 +398,15 @@ public final class RagSession {
     }
 
     static Optional<String> parse(final String rawModelText) {
+      return parse(rawModelText, ThinkTags.DEFAULT);
+    }
+
+    static Optional<String> parse(final String rawModelText, final ThinkTags tags) {
+      requireNonNull(tags, "tags");
       if (rawModelText == null || rawModelText.isBlank()) {
         return Optional.empty();
       }
-      String answer = com.igormaznitsa.nanollvm.chat.ChatReply.parse(rawModelText)
-        .answer().strip();
+      String answer = ChatReply.parse(rawModelText, tags).answer().strip();
       if (answer.isEmpty()) {
         return Optional.empty();
       }
@@ -424,10 +442,15 @@ public final class RagSession {
       String user = userMessage(priorContext, followUp);
       List<com.igormaznitsa.nanollvm.chat.ChatMessage> turn =
         List.of(com.igormaznitsa.nanollvm.chat.ChatMessage.user(user));
+      ThinkTags tags = llm.thinkTags();
       String prompt = llm.tokenizer().applyChatTemplate(
-        com.igormaznitsa.nanollvm.chat.ChatMessages.toTemplateMaps(turn), true, false);
+        com.igormaznitsa.nanollvm.chat.ChatMessages.toTemplateMaps(turn),
+        true,
+        false,
+        tags.open(),
+        tags.close());
       String raw = llm.generate(List.of(prompt), REWRITE_SAMPLING).getFirst().text();
-      return parse(raw);
+      return parse(raw, tags);
     }
   }
 

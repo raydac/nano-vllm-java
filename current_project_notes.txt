@@ -13,7 +13,7 @@
   **format restriction** tables in ch. 7 / 7a / 7c; **usage Java snippets** in ch. 4 / 7a / 7c / 14 / 16 / 17
   (load+chat, GGUF/ONNX, stream/cancel, classpath, advisors, BM25+classpath RAG);
   **`ChatReply`** and other exported records: JavaDoc covers fields (`@param`) and how to
-  use helpers — `ChatReply`, `ChatMessage`, `LlmTextEvent`, `AdvisorResponse`,
+  use helpers — `ChatReply`, `ThinkTags`, `ChatMessage`, `LlmTextEvent`, `AdvisorResponse`,
   `AdvisorEnrichment`, `GenerationStats`, `LLM.GenerationOutput`, `SamplingParams`,
   `Config.HfConfig`, `RagHit`, `TextChunk`, `RagLoadOptions`, `ResourceLimits`,
   `ModelSupport.Selection`
@@ -30,6 +30,11 @@
   RMSNorm uses `onePlusWeight` (not product-named). Architecture id `gemma3` remains only as the
   HF `model_type` / backend key (`Gemma3ForCausalLM`), same as `qwen3`/`llama`/`lfm2`.
   1.0 boolean chat shims removed (not kept as `@Deprecated`).
+- **ThinkTags:** opt-in custom scratchpad markers via `LlmModelFactory.make(…, Map)` key
+  `LlmModel.OPTION_THINK_TAGS` (frozen `Map.copyOf` on the model; all `LLM`s inherit).
+  `ChatSession.thinkTags` / `RagSession.thinkTags` override one conversation. Default remains
+  `<think>`/`</think>`. Tokenizer skip-seed stays string-based (no tokenizer→chat cycle).
+  ChatML skip-seed only when both markers are whole vocab tokens.
 - Engine: `Transformer` owns per-LLM arenas + explicit step `Context`; `MatmulRuntime` per `LLM`; `kvHeapFraction` (default 0.25) for KV auto-size
 - `LLM.generate` / `close` use `ReentrantLock`; `assertNotClosed` on infrequent entry points; props = **`nanollvm.*` / `NANOLLVM_*` only**
 - JPMS: exports models/llm/chat/rag/exceptions/tokenizer/utils; non-exported `models.internal` (`LlmModelAccess`), prompts, engine/layers/tensor/internal
@@ -113,6 +118,8 @@
 ## 8. User Advice and Recommendations
 - Document Maven as `mvn` (portable); agent on this machine may use `mvn22`
 - Prefer `ChatSession` for dialog; raw `generate` for completions
+- Custom think/scratchpad markers: `LlmModelFactory.make(path, Map.of(LlmModel.OPTION_THINK_TAGS, ThinkTags.of(open, close)))`;
+  `ChatReply.parse(raw)` still defaults to `<think>`/`</think>` if you parse yourself
 - Prefer `LlmModelFactory.make` → `LLM.builder(LlmModel)`; close LLM then model
 - Embedding GGUFs/ONNX use the same factory; call `embed`, not `LLM.builder`
 - For Tiny-LLM-ONNX use `onnx/model.onnx` (fp32) or `model_fp16.onnx`; skip quantized community files

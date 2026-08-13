@@ -38,6 +38,10 @@ class RagQueryRewriteTest {
   void parseIgnoresThinkBlocks() {
     assertEquals(Optional.of("Hanau residence city"),
       RagSession.QueryRewrite.parse("<think>ponder</think>\nHanau residence city"));
+    assertEquals(Optional.of("Hanau residence city"),
+      RagSession.QueryRewrite.parse(
+        "[reasoning]ponder[/reasoning]\nHanau residence city",
+        com.igormaznitsa.nanollvm.chat.ThinkTags.of("[reasoning]", "[/reasoning]")));
   }
 
   @Test

@@ -53,6 +53,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - RAG classpath documents: `RagFactory.makeResource` / `Builder.addResource` (absolute ClassLoader path or `Class.getResourceAsStream` resolution); source labels use `classpath:…`.
 - GGML dequant for Q3_K and IQ4_NL (needed by common small embedding GGUF quants).
 - Stream / classpath model load: `ModelFileId` + `ModelFileSource`, `LlmModelFactory.make(source)`, and `fromClasspath` / `fromClasspathGguf` helpers (bytes stay in heap; no disk cache). Filesystem `make(Path)` unchanged.
+- Custom chat scratchpad markers via `ThinkTags` in `LlmModelFactory.make(…, Map)` under
+  `LlmModel.OPTION_THINK_TAGS` (default remains `<think>` / `</think>`). Options are frozen with
+  `Map.copyOf` on the model. `ChatSession.thinkTags` / `RagSession.thinkTags` override one
+  conversation. Parse, ChatML skip-seed, and history truncation use the same pair when both
+  markers are in vocab.
 
 ### Fixed
 - Windows model download scripts (`.ps1` / `.cmd`) resolve their install dir via `$PSScriptRoot`,

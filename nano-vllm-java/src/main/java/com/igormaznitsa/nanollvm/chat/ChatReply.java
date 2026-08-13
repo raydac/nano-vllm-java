@@ -5,12 +5,16 @@ import com.igormaznitsa.nanollvm.llm.GenerationStats;
 /**
  * Parsed assistant turn: optional thinking scratchpad, visible answer, and engine stats.
  *
- * <p>Some chat models emit a tagged scratchpad {@code <think>…</think>} before the user-visible
- * reply. {@link #parse(String)} splits decoded assistant text into those two channels and strips
- * chat specials ({@code <|im_end|>}, {@code <end_of_turn>}, …). {@link ChatSession#send} returns a
- * finished turn ({@link #thinkOpen()} is {@code false} and {@link #stats()} is filled). Streaming
- * listeners see partial snapshots: {@code thinkOpen} stays {@code true} until {@code </think>}
- * arrives, and {@code stats} stays {@link GenerationStats#NONE} until the generate completes.
+ * <p>Some chat models emit a tagged scratchpad (by default {@code <think>…</think>}) before the
+ * user-visible reply. {@link #parse(String)} splits decoded assistant text into those two channels
+ * and strips chat specials ({@code <|im_end|>}, {@code <end_of_turn>}, …). Override the pair with
+ * {@link ThinkTags} via {@link com.igormaznitsa.nanollvm.models.LlmModel#OPTION_THINK_TAGS} at
+ * {@link com.igormaznitsa.nanollvm.models.LlmModelFactory#make} /
+ * {@link ChatSession#thinkTags(ThinkTags)} / {@link #parse(String, ThinkTags)}
+ * when the model uses different markers. {@link ChatSession#send} returns a finished turn
+ * ({@link #thinkOpen()} is {@code false} and {@link #stats()} is filled). Streaming listeners see
+ * partial snapshots: {@code thinkOpen} stays {@code true} until the close tag arrives, and
+ * {@code stats} stays {@link GenerationStats#NONE} until the generate completes.
  *
  * <h2 id="typical-use">Typical use after {@code send}</h2>
  * <pre>{@code
@@ -24,13 +28,13 @@ import com.igormaznitsa.nanollvm.llm.GenerationStats;
  * constructor arguments become empty strings / {@link GenerationStats#NONE}. Immutable; safe to
  * share across threads after construction.
  *
- * @param thinking  text inside {@code <think>}…{@code </think>} with markup stripped; empty when
+ * @param thinking  text inside the open/close {@link ThinkTags} (markup stripped); empty when
  *                  the model wrote no scratchpad. Several think blocks are joined with newlines.
  * @param answer    visible reply after a closed think block, or the whole decode when there is no
- *                  {@code <think>} tag; chat specials stripped. Empty while thinking is still open,
+ *                  open tag; chat specials stripped. Empty while thinking is still open,
  *                  or when the model closed the tag and wrote nothing after it.
- * @param thinkOpen {@code true} while an opened {@code <think>} has no matching {@code </think>}
- *                  yet (mid-stream or truncated decode). {@code false} when the scratchpad is
+ * @param thinkOpen {@code true} while an opened think tag has no matching close tag yet
+ *                  (mid-stream or truncated decode). {@code false} when the scratchpad is
  *                  closed or absent. After {@link ChatSession#send} this is always {@code false}.
  * @param stats     token counts and wall time of the generate that produced this turn.
  *                  {@link GenerationStats#NONE} after plain {@link #parse} and on streaming
@@ -54,7 +58,7 @@ public record ChatReply(
    *
    * @param thinking  scratchpad body, or {@code null} for empty
    * @param answer    visible reply, or {@code null} for empty
-   * @param thinkOpen {@code true} if {@code </think>} has not arrived yet
+   * @param thinkOpen {@code true} if the close think tag has not arrived yet
    */
   public ChatReply(final String thinking, final String answer, final boolean thinkOpen) {
     this(thinking, answer, thinkOpen, GenerationStats.NONE);
@@ -65,7 +69,8 @@ public record ChatReply(
   }
 
   /**
-   * Splits decoded assistant text into thinking / answer / {@code thinkOpen}.
+   * Splits decoded assistant text into thinking / answer / {@code thinkOpen} using
+   * {@link ThinkTags#DEFAULT}.
    *
    * <p>Does not salvage a missing answer from the scratchpad and does not attach stats — call
    * {@link #salvageFromThinking(String)} or {@link #withStats(GenerationStats)} yourself, or use
@@ -77,7 +82,19 @@ public record ChatReply(
    * @return parsed snapshot; never {@code null}
    */
   public static ChatReply parse(final String raw) {
-    return from(AssistantParts.parse(raw));
+    return parse(raw, ThinkTags.DEFAULT);
+  }
+
+  /**
+   * Splits decoded assistant text using {@code tags} as the scratchpad pair.
+   *
+   * @param raw  decoded assistant tokens; {@code null} / blank yields empty channels
+   * @param tags open/close markers; must not be {@code null}
+   * @return parsed snapshot; never {@code null}
+   * @since 1.1.0
+   */
+  public static ChatReply parse(final String raw, final ThinkTags tags) {
+    return from(AssistantParts.parse(raw, tags));
   }
 
   /**
@@ -90,21 +107,39 @@ public record ChatReply(
    * @return stripped visible text, never {@code null}
    */
   public static String cleanAssistantText(final String raw) {
-    return AssistantParts.cleanAssistantText(raw);
+    return cleanAssistantText(raw, ThinkTags.DEFAULT);
+  }
+
+  /**
+   * {@link #cleanAssistantText(String)} with custom scratchpad markers.
+   *
+   * @since 1.1.0
+   */
+  public static String cleanAssistantText(final String raw, final ThinkTags tags) {
+    return AssistantParts.cleanAssistantText(raw, tags);
   }
 
   /**
    * Incremental display helper for a streaming decode prefix.
    *
    * <p>Same pipeline as {@link #cleanAssistantText(String)}: a closed think block hides the notes
-   * and shows the answer; a still-open {@code <think>} surfaces the scratchpad so the UI is not
+   * and shows the answer; a still-open think block surfaces the scratchpad so the UI is not
    * blank while the model is writing notes.
    *
    * @param raw partial decode so far; {@code null} / blank yields {@code ""}
    * @return stripped display text, never {@code null}
    */
   public static String streamDisplayText(final String raw) {
-    return AssistantParts.streamDisplayText(raw);
+    return streamDisplayText(raw, ThinkTags.DEFAULT);
+  }
+
+  /**
+   * {@link #streamDisplayText(String)} with custom scratchpad markers.
+   *
+   * @since 1.1.0
+   */
+  public static String streamDisplayText(final String raw, final ThinkTags tags) {
+    return AssistantParts.streamDisplayText(raw, tags);
   }
 
   /**
@@ -132,7 +167,16 @@ public record ChatReply(
    * @return {@code text} with chat / think markers and leading {@code assistant:} removed
    */
   public static String stripChatMarkup(final String text) {
-    return AssistantParts.stripChatMarkup(text);
+    return stripChatMarkup(text, ThinkTags.DEFAULT);
+  }
+
+  /**
+   * {@link #stripChatMarkup(String)} including {@code tags} as extra markers to remove.
+   *
+   * @since 1.1.0
+   */
+  public static String stripChatMarkup(final String text, final ThinkTags tags) {
+    return AssistantParts.stripChatMarkup(text, tags);
   }
 
   /**

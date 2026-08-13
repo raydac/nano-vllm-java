@@ -8,6 +8,7 @@ import com.igormaznitsa.nanollvm.chat.ChatReply;
 import com.igormaznitsa.nanollvm.chat.ChatSession;
 import com.igormaznitsa.nanollvm.chat.LlmListener;
 import com.igormaznitsa.nanollvm.chat.LlmListeners;
+import com.igormaznitsa.nanollvm.chat.ThinkTags;
 import com.igormaznitsa.nanollvm.engine.Scheduler;
 import com.igormaznitsa.nanollvm.engine.Sequence;
 import com.igormaznitsa.nanollvm.engine.Transformer;
@@ -888,6 +889,16 @@ public final class LLM implements AutoCloseable {
    */
   public Tokenizer tokenizer() {
     return this.tokenizer;
+  }
+
+  /**
+   * Scratchpad markers from {@link LlmModel#thinkTags()} — the pair belongs to the checkpoint,
+   * not this engine. Override per conversation with {@link ChatSession#thinkTags(ThinkTags)}.
+   *
+   * @since 1.1.0
+   */
+  public ThinkTags thinkTags() {
+    return this.model.thinkTags();
   }
 
   /**
