@@ -35,6 +35,7 @@
   `ChatSession.thinkTags` / `RagSession.thinkTags` override one conversation. Default remains
   `<think>`/`</think>`. Tokenizer skip-seed stays string-based (no tokenizer→chat cycle).
   ChatML skip-seed only when both markers are whole vocab tokens.
+- Weight-load status: shared in-place bar (`LoadProgress`) for safetensors, GGUF, and ONNX
 - Engine: `Transformer` owns per-LLM arenas + explicit step `Context`; `MatmulRuntime` per `LLM`; `kvHeapFraction` (default 0.25) for KV auto-size
 - `LLM.generate` / `close` use `ReentrantLock`; `assertNotClosed` on infrequent entry points; props = **`nanollvm.*` / `NANOLLVM_*` only**
 - JPMS: exports models/llm/chat/rag/exceptions/tokenizer/utils; non-exported `models.internal` (`LlmModelAccess`), prompts, engine/layers/tensor/internal

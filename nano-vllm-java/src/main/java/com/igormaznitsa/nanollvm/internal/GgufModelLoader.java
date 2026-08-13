@@ -106,7 +106,7 @@ public final class GgufModelLoader {
       config.numKeyValueHeads());
 
     Map<String, Object> weights = new LinkedHashMap<>();
-    Progress progress = new Progress("GGUF weights", reader.tensorCount(), streams);
+    LoadProgress progress = new LoadProgress("GGUF weights", reader.tensorCount(), streams);
     long accountedBytes = 0L;
     try {
       for (String name : reader.tensorNames()) {
@@ -287,29 +287,5 @@ public final class GgufModelLoader {
   }
 
   public record LoadedGguf(Config.HfConfig config, WeightBag weights, GgufReader reader) {
-  }
-
-  private static final class Progress {
-    private final String label;
-    private final int total;
-    private final LlmListener io;
-    private int done;
-
-    Progress(final String label, final int total, final LlmListener io) {
-      this.label = label;
-      this.total = Math.max(1, total);
-      this.io = io;
-    }
-
-    void step(final String detail) {
-      this.done++;
-      if (this.done == 1 || this.done == this.total || this.done % 8 == 0) {
-        LlmListeners.infof(io, null, "%s [%d/%d] %s%n", this.label, this.done, this.total, detail);
-      }
-    }
-
-    void finish(final String detail) {
-      LlmListeners.infof(io, null, "%s done: %s%n", this.label, detail);
-    }
   }
 }

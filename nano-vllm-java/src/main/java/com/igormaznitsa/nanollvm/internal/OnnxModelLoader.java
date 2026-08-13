@@ -135,13 +135,35 @@ public final class OnnxModelLoader {
     }
 
     boolean embedding = EmbeddingEncoderFactory.isEmbeddingArchitecture(hfConfig);
-    Map<String, Tensor> named = new LinkedHashMap<>();
     Path externalBase = onnxFile.getParent() == null ? modelDir : onnxFile.getParent();
-    for (OnnxTensorProto proto : graph.initializers()) {
-      putFloatingInitializer(named, graph, proto, externalBase, embedding);
-    }
+    Map<String, Tensor> named = decodeFloatingInitializers(graph, externalBase, embedding, streams);
     return ModelLoader.assembleFromNamedTensors(
       named, onnxFile.toString(), hfConfig, schema, streams);
+  }
+
+  private static Map<String, Tensor> decodeFloatingInitializers(
+    final OnnxGraphBundle graph,
+    final Path externalBase,
+    final boolean embedding,
+    final LlmListener streams
+  ) throws IOException {
+    Map<String, Tensor> named = new LinkedHashMap<>();
+    int total = (int) graph.initializers().stream()
+      .filter(OnnxDataTypes::shouldLoadAsWeight)
+      .count();
+    LoadProgress progress = new LoadProgress("ONNX weights", total, streams);
+    try {
+      for (OnnxTensorProto proto : graph.initializers()) {
+        if (putFloatingInitializer(named, graph, proto, externalBase, embedding)) {
+          progress.step(proto.name() == null ? "" : proto.name());
+        }
+      }
+      progress.finish("%d tensors".formatted(named.size()));
+    } catch (RuntimeException | IOException e) {
+      progress.finish("failed");
+      throw e;
+    }
+    return named;
   }
 
   /**
@@ -165,7 +187,7 @@ public final class OnnxModelLoader {
     return Tensor.of(dst, cols, rows);
   }
 
-  private static void putFloatingInitializer(
+  private static boolean putFloatingInitializer(
     final Map<String, Tensor> named,
     final OnnxGraphBundle graph,
     final OnnxTensorProto proto,
@@ -174,18 +196,19 @@ public final class OnnxModelLoader {
   ) throws IOException {
     if (!OnnxDataTypes.shouldLoadAsWeight(proto)) {
       OnnxDataTypes.requireHandledOrSkip(proto);
-      return;
+      return false;
     }
     Tensor tensor = OnnxWeightReader.toTensor(proto, externalBase);
     String alias = graph.matMulWeightAliases().get(proto.name());
     if (alias != null) {
       named.put(OnnxWeightNames.normalizeChatName(alias), transposeIfMatrix(tensor));
-      return;
+      return true;
     }
     String mapped = embedding
       ? OnnxWeightNames.normalizeBertName(proto.name())
       : OnnxWeightNames.normalizeChatName(proto.name());
     named.put(mapped, tensor);
+    return true;
   }
 
   /**
@@ -247,7 +270,6 @@ public final class OnnxModelLoader {
     OnnxGraphBundle graph = OnnxProtoReader.readGraph(
       ByteBuffer.wrap(onnxBytes).order(ByteOrder.LITTLE_ENDIAN), label);
     boolean embedding = EmbeddingEncoderFactory.isEmbeddingArchitecture(hfConfig);
-    Map<String, Tensor> named = new LinkedHashMap<>();
     for (OnnxTensorProto proto : graph.initializers()) {
       if (proto.hasExternalData()
         && proto.name() != null
@@ -257,8 +279,10 @@ public final class OnnxModelLoader {
           "ONNX external_data is not supported for ModelFileSource loads; use make(Path): "
             + proto.name());
       }
-      putFloatingInitializer(named, graph, proto, Path.of("/"), embedding);
     }
-    return ModelLoader.assembleFromNamedTensors(named, label, hfConfig, schema, io);
+    LlmListener streams = io == null ? LlmListeners.silent() : io;
+    Map<String, Tensor> named =
+      decodeFloatingInitializers(graph, Path.of("/"), embedding, streams);
+    return ModelLoader.assembleFromNamedTensors(named, label, hfConfig, schema, streams);
   }
 }

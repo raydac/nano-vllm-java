@@ -14,6 +14,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   with download instructions. Embedding models skip to an embed REPL. Prepared-prompt debug
   (`debug>` on stderr) is off unless you pass `--debug`. Read `samples.Example` top to bottom —
   each mode is a named method.
+- GGUF and ONNX weight loads now redraw the same in-place percent/ETA bar as Hugging Face
+  safetensors (current tensor on one line) instead of a tensor list or a late “assembled” summary.
 - Library chat/sampling/RAG defaults are architecture-marker driven, not product-tuned: `Tokenizer.ChatFormat`
   (ChatML / turn-based / plain), neutral `SamplingDefaults`, no Qwen EOS id fallback, no default
   unknown-arch→Qwen3, no Gemma-only session retry or RAG isolate. Demo policies (system prompts,
