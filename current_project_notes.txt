@@ -12,6 +12,7 @@
   vocab-gated think / neutral `SamplingDefaults` / fail-unknown-arch; educational Qwen/Gemma tables kept as examples;
   **format restriction** tables in ch. 7 / 7a / 7c; **usage Java snippets** in ch. 4 / 7a / 7c / 14 / 16 / 17
   (load+chat, GGUF/ONNX, stream/cancel, classpath, advisors, BM25+classpath RAG);
+  **ThinkTags** / `OPTION_THINK_TAGS` in ch. 4, 7a, 9, 16; shared `LoadProgress` bar in ch. 4 / 7 / 7a / 7c / 16;
   **`ChatReply`** and other exported records: JavaDoc covers fields (`@param`) and how to
   use helpers — `ChatReply`, `ThinkTags`, `ChatMessage`, `LlmTextEvent`, `AdvisorResponse`,
   `AdvisorEnrichment`, `GenerationStats`, `LLM.GenerationOutput`, `SamplingParams`,

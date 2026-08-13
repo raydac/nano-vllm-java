@@ -379,6 +379,7 @@ Line-oriented terminal demo. Three setup questions, then a chat (or embed) loop:
 3. **Advisor count** — `0`–`3` roles (Enter = none)
 
 Thinking, advisor notes, and load status go to **stderr**; answers and prompts go to **stdout**.
+Safetensors, GGUF, and ONNX loads share one in-place percent/ETA bar on that status stream.
 Prepared-prompt dumps (`debug> …`) are **off** unless you pass `--debug`.
 
 ```bash
@@ -498,7 +499,7 @@ import java.nio.file.Path;
 
 Path modelDir = Path.of("models/Qwen3-0.6B"); // your local HF (or .gguf) path
 
-try (LlmModel model = LlmModelFactory.make(modelDir);  // quiet; LlmModelFactory.make(dir, LlmListeners.toSystem()) for progress
+try (LlmModel model = LlmModelFactory.make(modelDir);  // quiet; make(dir, LlmListeners.toSystem()) for the same in-place percent/ETA bar on safetensors, GGUF, and ONNX
      LLM llm = LLM.builder(model)
     .maxModelLen(2048)
     .systemPrompt("Answer briefly and factually.") // Qwen-style; prefer .noSystemPrompt() on Gemma
@@ -540,6 +541,27 @@ try (model; LLM llm = LLM.builder(model)
   System.out.println(llm.chatOnce("Hello"));
 }
 ```
+
+### Custom scratchpad markers (**since 1.1.0**)
+
+Default parse/split still uses `<think>` / `</think>`. To freeze a different pair on the model (every `LLM` sharing
+that checkpoint inherits it):
+
+```java
+import com.igormaznitsa.nanollvm.chat.ThinkTags;
+import com.igormaznitsa.nanollvm.models.LlmModel;
+import com.igormaznitsa.nanollvm.models.LlmModelFactory;
+
+import java.nio.file.Path;
+import java.util.Map;
+
+try (LlmModel model = LlmModelFactory.make(Path.of("models/Qwen3-0.6B"), Map.of(
+        LlmModel.OPTION_THINK_TAGS, ThinkTags.of("<scratch>", "</scratch>")))) {
+  // ChatSession.thinkTags(...) can still override one conversation
+}
+```
+
+`ChatReply.parse(raw)` without tags still assumes the default pair.
 
 ### Streaming chat
 
