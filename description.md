@@ -364,10 +364,10 @@ A Gemma file adds things like `layer_types`, `sliding_window`, `hidden_activatio
 
 | Field           | Means                                                                                 | Used for                                              | If missing                                         |
 |-----------------|---------------------------------------------------------------------------------------|-------------------------------------------------------|----------------------------------------------------|
-| `model_type`    | Short family name (`qwen3`, `gemma3_text`, `llama`, …)                                 | Auto-detect causal graph (`CausalLMFactory`: Qwen3 / Gemma3 / **Llama**; GGUF also `lfm2`) | Fall through to `architectures`, else **fail** (set `-Dnanollvm.arch=…`) |
-| `architectures` | List of class-style names from Hugging Face (`Qwen3ForCausalLM`, `LlamaForCausalLM`, …) | Same detection if `model_type` is unclear             | Optional                                           |
+| `model_type`    | Short family name (`qwen3`, `gemma3_text`, `llama`, …)                                 | Exact match via `ModelSupport` (Qwen3 / Gemma3 text / Llama; GGUF `lfm2`; embeddings `bert`) | Unsupported families fail with `UnsupportedModelException` and a support catalog. Optional `-Dnanollvm.arch=…` only when it **matches** the checkpoint. |
+| `architectures` | List of class-style names from Hugging Face (`Qwen3ForCausalLM`, `LlamaForCausalLM`, …) | Same detection if `model_type` is unclear; `*ForConditionalGeneration` / vision classes are rejected | Optional                                           |
 
-You can override causal detection with `-Dnanollvm.arch=qwen3`, `gemma3`, `llama`, or `lfm2` without editing the file.
+You can override causal detection with `-Dnanollvm.arch=qwen3`, `gemma3`, `llama`, or `lfm2` **only when that id matches the checkpoint**. A forced id cannot turn Qwen2 / Qwen3.5 / vision models into a supported graph. Look-alike names are rejected (`qwen3_5` is not `qwen3`; `gemma2` is not `gemma3`; `roberta` is not `bert`). The error lists what this library actually loads (`ModelSupport.CATALOG`).
 Embedding GGUFs use a separate detector (`bert`) and never go through `LLM.builder` (chapter 7b). ONNX folders use the
 same `config.json` detection (chapter **7c**).
 

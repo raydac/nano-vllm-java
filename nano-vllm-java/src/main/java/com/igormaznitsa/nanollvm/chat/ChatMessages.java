@@ -20,14 +20,6 @@ public final class ChatMessages {
   }
 
   /**
-   * @deprecated Prefer {@link #newConversation(String)}; the boolean is ignored.
-   */
-  @Deprecated
-  public static List<ChatMessage> newConversation(final boolean ignoredTurnBasedChat) {
-    return newConversation("");
-  }
-
-  /**
    * Fresh history seeded with an optional system turn.
    *
    * @return an unmodifiable list (empty when {@code systemPrompt} is null/blank)
@@ -86,15 +78,5 @@ public final class ChatMessages {
       .filter(i -> history.get(i).role() == ChatRole.ASSISTANT
         && match.test(history.get(i).content()))
       .forEach(i -> history.set(i, ChatMessage.assistant("Hello!")));
-  }
-
-  /**
-   * @deprecated Prefer {@link #scrubMatchingAssistantTurns(List, Predicate)} with an app-owned
-   * predicate. This no-op kept for binary compatibility with 1.0 callers that scrubbed via the
-   * old library boilerplate list.
-   */
-  @Deprecated
-  public static void scrubSetupBoilerplateTurns(final List<ChatMessage> history) {
-    // Library no longer owns demo boilerplate phrases; callers should pass their own predicate.
   }
 }

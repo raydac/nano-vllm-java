@@ -281,7 +281,9 @@ public final class Config {
     List<String> layerTypes,
     float ropeLocalBaseFreq,
     float queryPreAttnScalar,
-    int convLCache
+    int convLCache,
+    boolean visionConfigPresent,
+    boolean nestedTextConfig
   ) {
     public HfConfig {
       ropeScaling = freezeStringKeyedMap(ropeScaling);
@@ -376,8 +378,18 @@ public final class Config {
         layerTypes,
         Json.asFloat(m.get("rope_local_base_freq"), 10_000f),
         queryPre,
-        Json.asInt(m.get("conv_L_cache"), 0)
+        Json.asInt(m.get("conv_L_cache"), 0),
+        m.containsKey("vision_config")
+          || m.containsKey("image_token_id")
+          || m.containsKey("video_token_id"),
+        m.get("text_config") instanceof Map<?, ?>
       );
+    }
+
+    public boolean hasLinearAttentionLayers() {
+      return this.layerTypes.stream()
+        .anyMatch(
+          type -> type != null && type.toLowerCase(Locale.ROOT).contains("linear_attention"));
     }
 
     public boolean isConvLayer(final int layerIndex) {

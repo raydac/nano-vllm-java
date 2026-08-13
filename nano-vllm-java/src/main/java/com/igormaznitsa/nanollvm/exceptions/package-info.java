@@ -5,6 +5,7 @@
  * {@link com.igormaznitsa.nanollvm.models.LlmModelFactory},
  * {@link com.igormaznitsa.nanollvm.tokenizer.Tokenizer} load paths,
  * {@link com.igormaznitsa.nanollvm.rag.RagFactory} corpus load, and related entry points.
+ * Unsupported architectures throw {@link UnsupportedModelException} (a {@link ModelLoadException}).
  * Argument validation may still throw {@link IllegalArgumentException}.
  */
 

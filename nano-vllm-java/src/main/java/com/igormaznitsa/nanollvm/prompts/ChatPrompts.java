@@ -20,21 +20,6 @@ public final class ChatPrompts {
   }
 
   /**
-   * Library default system text: always empty ({@code advisorsEnabled} is ignored).
-   */
-  public static String systemFor(final Tokenizer tokenizer, final boolean advisorsEnabled) {
-    return "";
-  }
-
-  /**
-   * @deprecated Prefer an empty default and set system text explicitly. Always returns empty.
-   */
-  @Deprecated
-  public static String systemFor(final boolean ignoredTurnBasedChat) {
-    return "";
-  }
-
-  /**
    * Pass-through for a caller-supplied system string (null → empty). The library does not append
    * advisor prose; applications that want an advisor-aware system cue include it themselves.
    */

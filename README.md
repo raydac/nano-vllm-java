@@ -245,10 +245,12 @@ models/Qwen3-0.6B/
   …                          # merges.txt / vocab.json as needed
 ```
 
-At load time, `LlmModelFactory` reads `config.json`, builds the graph (Qwen3, Gemma3, or Llama), merges packed weights from
-safetensors **or** ONNX initializers, and constructs the tokenizer. Architecture is inferred from `model_type` /
-`architectures` unless you set `-Dnanollvm.arch=qwen3|gemma3|llama|lfm2`. If both `*.safetensors` and `*.onnx` are
-present, safetensors wins.
+At load time, `LlmModelFactory` reads `config.json`, checks the architecture against `ModelSupport` (exact family
+names — `qwen3_5` is not `qwen3`), builds the graph (Qwen3, Gemma3, or Llama), merges packed weights from
+safetensors **or** ONNX initializers, and constructs the tokenizer. `-Dnanollvm.arch=qwen3|gemma3|llama|lfm2|bert`
+may only confirm a matching checkpoint, not override a different family. Unsupported models throw
+`UnsupportedModelException` with the support catalog. If both `*.safetensors` and `*.onnx` are present, safetensors
+wins (BERT folders prefer ONNX because HF BERT safetensors is not supported).
 
 <a id="onnx-weight-import"></a>
 ### ONNX (weight import) — since 1.1.0
@@ -357,7 +359,7 @@ The models root itself defaults to `./models`, overridable with `-Dnanollvm.mode
 | Property           | `-Dnanollvm.model=/data/hf/Qwen3-0.6B`                              |
 | Environment        | `NANOLLVM_MODEL=models/Gemma3-270M`                                 |
 | Models root        | `-Dnanollvm.models.dir=/opt/models`                                 |
-| Force architecture | `-Dnanollvm.arch=gemma3` (when auto-detect is wrong)                |
+| Force architecture | `-Dnanollvm.arch=gemma3` (must match the checkpoint; cannot force Qwen2 → Qwen3) |
 | RAG corpus dir     | `-Dnanollvm.rag.dir=./docs` or `NANOLLVM_RAG_DIR` (default `./rag`) |
 | CPU matmul threads | `.cpuThreads(N)` / `.allCpuThreads()` / `.disableMultiCpu()` (builder wins); else `-Dnanollvm.cpu.threads=N`; else all processors. `.disableMultiCpu()` = calling thread only, no executor. Optional `.matmulExecutor(…)` only when workers &gt; 1 |
 

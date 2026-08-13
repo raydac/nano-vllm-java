@@ -55,7 +55,7 @@ public final class Tokenizer {
     "'s|'t|'re|'ve|'m|'ll|'d| ?\\p{L}+| ?\\p{N}+| ?[^\\s\\p{L}\\p{N}]+|\\s+(?!\\S)|\\s+"
   );
   // SentencePiece / Metaspace word-boundary marker (U+2581)
-  private static final String META_SPACE = "\u2581";
+  private static final String META_SPACE = "▁";
   // GPT-2: each raw byte 0..255 → one Unicode code unit used as a BPE alphabet symbol
   private static final String[] BYTE_ENCODER = new String[256];
   // Inverse of BYTE_ENCODER for decode

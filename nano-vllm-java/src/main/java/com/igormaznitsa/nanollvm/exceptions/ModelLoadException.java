@@ -4,7 +4,7 @@ package com.igormaznitsa.nanollvm.exceptions;
  * Failure while loading a model, tokenizer, or RAG corpus (missing files, empty corpus, corrupt
  * weights, …).
  */
-public final class ModelLoadException extends NanoLlvmException {
+public class ModelLoadException extends NanoLlvmException {
 
   public ModelLoadException(final String message) {
     super(message);

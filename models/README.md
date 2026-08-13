@@ -106,8 +106,9 @@ Sample: `nano-vllm-java-samples` → `com.igormaznitsa.nanollvm.samples.EmbedHel
 |--------------------|---------------------------------------------------------------------------------------------------|
 | CLI arg            | `… Example models/Gemma3-270M` or `… Example models/LFM2.5-2.6B-Q4_K_M.gguf`                      |
 | System property    | `-Dnanollvm.model=models/Gemma3-270M`                                                             |
-| Force architecture | `-Dnanollvm.arch=gemma3` (or `qwen3` / `lfm2`)                                                    |
+| Force architecture | `-Dnanollvm.arch=gemma3` (must match the checkpoint)                                              |
 | Env                | `NANOLLVM_MODEL=models/Gemma3-270M`                                                               |
 | Models root        | `-Dnanollvm.models.dir=/other/models` or `NANOLLVM_MODELS_DIR` (default loads `<dir>/Qwen3-0.6B`) |
 
-Architecture is auto-detected from `config.json` or GGUF `general.architecture` unless `-Dnanollvm.arch` is set.
+Architecture is detected exactly from `config.json` / GGUF `general.architecture` (`ModelSupport`).
+`-Dnanollvm.arch` may only confirm a matching family; look-alike checkpoints fail with `UnsupportedModelException`.

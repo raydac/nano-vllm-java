@@ -4,7 +4,9 @@ import static java.util.Objects.requireNonNull;
 
 import com.igormaznitsa.nanollvm.chat.LlmListener;
 import com.igormaznitsa.nanollvm.chat.LlmListeners;
+import com.igormaznitsa.nanollvm.exceptions.UnsupportedModelException;
 import com.igormaznitsa.nanollvm.llm.Config;
+import com.igormaznitsa.nanollvm.models.ModelSupport;
 import com.igormaznitsa.nanollvm.models.internal.PackedWeight;
 import com.igormaznitsa.nanollvm.models.internal.WeightBag;
 import com.igormaznitsa.nanollvm.models.internal.WeightNames;
@@ -13,7 +15,6 @@ import java.nio.ByteBuffer;
 import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.stream.IntStream;
 import java.util.stream.Stream;
@@ -67,22 +68,25 @@ public final class GgufModelLoader {
     final LlmListener streams,
     final boolean allowUnpackParameters
   ) throws IOException {
-    String arch = reader.metaString("general.architecture", "").toLowerCase(Locale.ROOT);
+    String arch = reader.metaString("general.architecture", "");
     try {
-      if (arch.contains("bert")) {
+      ModelSupport.Selection selected = ModelSupport.requireGguf(arch);
+      if (selected.isEmbedding()) {
         return loadWeights(reader, buildBertConfig(reader), streams, allowUnpackParameters, arch);
       }
-      if (arch.contains("lfm2")) {
-        return loadWeights(reader, buildLfm2Config(reader, arch), streams, allowUnpackParameters,
-          arch);
-      }
+      return loadWeights(reader, buildLfm2Config(reader, arch), streams, allowUnpackParameters,
+        arch);
+    } catch (UnsupportedModelException e) {
+      reader.close();
+      throw new UnsupportedModelException(
+        "Cannot load GGUF '" + label + "'."
+          + System.lineSeparator() + System.lineSeparator() + e.getMessage(),
+        e.modelType(),
+        e.architectures());
     } catch (RuntimeException e) {
       reader.close();
       throw e;
     }
-    reader.close();
-    throw new IllegalArgumentException(
-      "unsupported GGUF architecture '" + arch + "' (expected lfm2|bert) in " + label);
   }
 
   private static LoadedGguf loadWeights(
@@ -175,7 +179,9 @@ public final class GgufModelLoader {
       List.of(),
       10_000f,
       0f,
-      0
+      0,
+      false,
+      false
     );
   }
 
@@ -225,7 +231,9 @@ public final class GgufModelLoader {
       layerTypes,
       10_000f,
       0f,
-      convL
+      convL,
+      false,
+      false
     );
   }
 

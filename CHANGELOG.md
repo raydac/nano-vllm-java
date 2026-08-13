@@ -26,12 +26,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`SampleAdvisorPrompts`); library no longer appends advisor prose to system prompts.
 - Library chat defaults no longer inject model-family system prose (Qwen `<think>` rules, plain
   assistant text). `ChatPrompts.systemFor` is always empty; demos set policy via
-  `SampleChatPrompts` in `nano-vllm-java-samples`.
+  `SampleChatPrompts` in `nano-vllm-java-samples`. 1.0 boolean chat shims
+  (`ChatMessages.newConversation(boolean)`, `scrubSetupBoilerplateTurns`,
+  `ChatPrompts.systemFor(boolean)` / `systemFor(Tokenizer, boolean)`) are removed in this
+  unreleased line rather than kept as `@Deprecated` — use `newConversation(String)`,
+  `scrubMatchingAssistantTurns`, and `systemFor(Tokenizer)` / `LLM.Builder.systemPrompt`.
 - Maven layout is now multi-module: parent `nano-vllm-java-pom`, library `nano-vllm-java`, demos
   `nano-vllm-java-samples`. Sample mains are no longer packaged in the library JAR; run demos with
   `mvn -pl nano-vllm-java-samples exec:java` from the repository root.
 
 ### Added
+- `ModelSupport` / `UnsupportedModelException`: exact architecture detection (no substring `qwen`→Qwen3),
+  a user-facing support catalog, and fail-fast load errors for look-alike families (Qwen2, Qwen3.5/Fara,
+  Gemma 2, Mistral, vision, GGUF Qwen/Llama, HF BERT safetensors). `-Dnanollvm.arch` cannot override a
+  different family. `LLM.builder` / `LlmModel.embed` misuse messages include the same catalog.
 - `Tokenizer.ChatFormat` / `isTurnBasedChat()` / `skipSpecialTokensOnChatDecode()` (product-named
   chat helpers such as {@code isGemmaChat} removed; use format/architecture APIs).
 - RMSNorm offset scale flag renamed to {@code onePlusWeight} (math convention, not a product name).

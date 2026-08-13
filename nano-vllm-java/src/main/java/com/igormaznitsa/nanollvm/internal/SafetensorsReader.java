@@ -30,7 +30,9 @@ public final class SafetensorsReader implements AutoCloseable {
     this.channel = FileChannel.open(path);
     long size = this.channel.size();
     if (size > Integer.MAX_VALUE) {
-      throw new IOException("safetensors larger than 2GiB mmap limit: " + path);
+      throw new IOException(
+        "safetensors file is larger than the 2 GiB mmap limit: " + path
+          + " (each *.safetensors shard must be under 2 GiB)");
     }
     this.map =
       this.channel.map(FileChannel.MapMode.READ_ONLY, 0, size).order(ByteOrder.LITTLE_ENDIAN);

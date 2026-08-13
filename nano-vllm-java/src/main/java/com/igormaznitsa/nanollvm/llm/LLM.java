@@ -16,6 +16,7 @@ import com.igormaznitsa.nanollvm.exceptions.GenerationTimeoutException;
 import com.igormaznitsa.nanollvm.exceptions.ModelLoadException;
 import com.igormaznitsa.nanollvm.models.LlmModel;
 import com.igormaznitsa.nanollvm.models.LlmModelFactory;
+import com.igormaznitsa.nanollvm.models.ModelSupport;
 import com.igormaznitsa.nanollvm.rag.PreparedRag;
 import com.igormaznitsa.nanollvm.rag.RagFactory;
 import com.igormaznitsa.nanollvm.rag.RagIndex;
@@ -1387,8 +1388,7 @@ public final class LLM implements AutoCloseable {
       }
       if (this.sharedModel.isEmbeddingModel()) {
         throw new IllegalStateException(
-          "model is an embedding encoder (" + this.sharedModel.architectureName()
-            + "); use LlmModel.embed(...) instead of LLM.builder");
+          ModelSupport.chatMisuseMessage(this.sharedModel.architectureName()));
       }
       if (!this.advisors.isEmpty()) {
         this.advisors = Builder.requireUniqueAdvisors(this.advisors);

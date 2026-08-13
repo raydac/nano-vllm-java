@@ -524,13 +524,13 @@ class CoreUnitTest {
     ChatReply partial = ChatReply.parse("<think");
     assertEquals("", partial.thinking());
     assertEquals("", partial.answer());
-    assertEquals(false, partial.thinkOpen());
+    assertFalse(partial.thinkOpen());
 
     ChatReply afterClose = ChatReply.parse(
         "<think>\nplan\n</think>\n<think");
     assertEquals("plan", afterClose.thinking());
     assertEquals("", afterClose.answer());
-    assertEquals(false, afterClose.thinkOpen());
+    assertFalse(afterClose.thinkOpen());
   }
 
   @Test
@@ -539,13 +539,13 @@ class CoreUnitTest {
         "<think>\nplan\n</think>\n\n<think>\nmore");
     assertEquals("plan\nmore", openSecond.thinking());
     assertEquals("", openSecond.answer());
-    assertEquals(true, openSecond.thinkOpen());
+    assertTrue(openSecond.thinkOpen());
 
     ChatReply withAnswer = ChatReply.parse(
         "<think>\nplan\n</think>\n\n1\n<think>\nnoise</think>\n");
     assertEquals("plan\nnoise", withAnswer.thinking());
     assertEquals("1", withAnswer.answer());
-    assertEquals(false, withAnswer.thinkOpen());
+    assertFalse(withAnswer.thinkOpen());
   }
 
   @Test
@@ -566,13 +566,11 @@ class CoreUnitTest {
         "<think>\nplan\n</think>\n\nTere hommikust<|im_end|>");
     assertEquals("plan", parts.thinking());
     assertEquals("Tere hommikust", parts.answer());
-    assertEquals(false, parts.thinkOpen());
+    assertFalse(parts.thinkOpen());
   }
 
   @Test
   void chatPromptsStayModelAgnostic() {
-    assertEquals("", ChatPrompts.systemFor(false));
-    assertEquals("", ChatPrompts.systemFor(true));
     assertEquals("", ChatPrompts.systemFor((com.igormaznitsa.nanollvm.tokenizer.Tokenizer) null));
     assertTrue(ChatPrompts.foldSystemIntoFirstUser("SYS", "hi", true).startsWith("SYS"));
     assertEquals("hi", ChatPrompts.foldSystemIntoFirstUser("SYS", "hi", false));
@@ -581,8 +579,6 @@ class CoreUnitTest {
     assertEquals("Be brief.", ChatPrompts.withAdvisorGuidance("Be brief.", true));
     assertEquals("", ChatPrompts.withAdvisorGuidance("", true));
     assertEquals("Be brief.", ChatPrompts.withAdvisorGuidance("Be brief.", false));
-    assertTrue(ChatMessages.newConversation(true).isEmpty());
-    assertTrue(ChatMessages.newConversation(false).isEmpty());
     assertEquals(1, ChatMessages.newConversation("Be brief.").size());
     assertTrue(ChatMessages.newConversation("").isEmpty());
     assertTrue(ChatMessages.newConversation(null).isEmpty());
@@ -740,7 +736,7 @@ class CoreUnitTest {
                 100, 64, 128, 1, 4, 1, 16, 128, 1e-6f, "gelu", false, false,
                 1e6f, null, "float32", "gemma3_text",
                 List.of("Gemma3ForCausalLM"), "gelu_pytorch_tanh",
-              512, List.of("sliding_attention"), 10_000f, 256f, 0)));
+              512, List.of("sliding_attention"), 10_000f, 256f, 0, false, false)));
 
     Path dir = createTempDirectory("gemma-tok");
     try {
@@ -803,7 +799,7 @@ class CoreUnitTest {
     assertTrue(chatNoThink.contains("<start_of_turn>model"));
     assertFalse(chatNoThink.contains("<think>"));
     assertEquals("", ChatPrompts.systemFor(tok));
-    Config.HfConfig hf = null;
+    Config.HfConfig hf;
     try {
       hf = Config.HfConfig.load(path.resolve("config.json"));
     } catch (Exception e) {

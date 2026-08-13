@@ -42,8 +42,13 @@ import java.util.Locale;
  * during load (mmap or in-memory buffer → float tensors; no packed heap residency).
  *
  * <p>ONNX folders (<strong>since 1.1.0</strong>) use Tier A initializer import only (no ORT). When
- * both {@code *.safetensors} and {@code *.onnx} are present, safetensors wins. Stream loads reject
+ * both {@code *.safetensors} and {@code *.onnx} are present, safetensors wins (BERT embeddings use
+ * ONNX when present; Hugging Face BERT safetensors is not supported). Stream loads reject
  * ONNX {@code external_data} sidecars — use {@link #make(Path)} for those exports.
+ *
+ * <p>Architecture is checked by {@link ModelSupport} before weights are mapped. Unsupported
+ * families throw {@link com.igormaznitsa.nanollvm.exceptions.UnsupportedModelException} with a
+ * catalog of what this library can run.
  *
  * <p>Filesystem {@link #make(Path)} overloads load directly from disk and do not route through
  * {@link ModelFileSource}.
@@ -295,27 +300,26 @@ public final class LlmModelFactory {
     LlmListeners.info(io, null, "CPU backend: " + MatmulRuntime.sequential().backendInfo());
 
     Config.HfConfig hfConfig = Config.HfConfig.load(modelFolder.resolve(CONFIG_JSON));
-    boolean embedding = EmbeddingEncoderFactory.isEmbeddingArchitecture(hfConfig);
-    WeightSchema schema = embedding
+    boolean hasSafetensors = !SafetensorsReader.listSafetensors(modelFolder).isEmpty();
+    boolean hasOnnx = OnnxModelLoader.hasOnnxWeights(modelFolder);
+    ModelSupport.Source source =
+      resolveHfSource(hasSafetensors, hasOnnx, hfConfig, modelFolder.toString());
+    ModelSupport.Selection selected = ModelSupport.require(hfConfig, source);
+    WeightSchema schema = selected.isEmbedding()
       ? EmbeddingEncoderFactory.schema(hfConfig)
       : CausalLMFactory.schema(hfConfig);
-    String arch = embedding
-      ? EmbeddingEncoderFactory.detect(hfConfig)
-      : CausalLMFactory.detect(hfConfig);
+    String arch = selected.architectureId();
 
     LlmListeners.info(io, null, "Loading " + arch + " weights…");
     WeightBag weights;
-    if (!SafetensorsReader.listSafetensors(modelFolder).isEmpty()) {
+    if (source == ModelSupport.Source.HF_SAFETENSORS) {
       weights = ModelLoader.loadWeights(modelFolder, hfConfig, schema, io);
-    } else if (OnnxModelLoader.hasOnnxWeights(modelFolder)) {
-      weights = OnnxModelLoader.loadWeights(modelFolder, hfConfig, schema, io);
     } else {
-      throw new ModelLoadException(
-        "model folder has no *.safetensors or supported *.onnx weights: " + modelFolder);
+      weights = OnnxModelLoader.loadWeights(modelFolder, hfConfig, schema, io);
     }
 
     Tokenizer tokenizer = Tokenizer.fromPretrained(modelFolder);
-    if (embedding) {
+    if (selected.isEmbedding()) {
       LlmListeners.info(io, null, "Building " + arch + " embedding graph…");
       long tGraph = System.nanoTime();
       EmbeddingEncoder encoder = EmbeddingEncoderFactory.create(hfConfig, weights);
@@ -340,24 +344,23 @@ public final class LlmModelFactory {
     LlmListeners.info(io, null, "CPU backend: " + MatmulRuntime.sequential().backendInfo());
 
     Config.HfConfig hfConfig = Config.HfConfig.parse(bundle.configJson());
-    boolean embedding = EmbeddingEncoderFactory.isEmbeddingArchitecture(hfConfig);
-    WeightSchema schema = embedding
+    boolean hasSafetensors = !bundle.safetensors().isEmpty();
+    boolean hasOnnx = !bundle.onnx().isEmpty();
+    ModelSupport.Source source =
+      resolveHfSource(hasSafetensors, hasOnnx, hfConfig, bundle.displayName());
+    ModelSupport.Selection selected = ModelSupport.require(hfConfig, source);
+    WeightSchema schema = selected.isEmbedding()
       ? EmbeddingEncoderFactory.schema(hfConfig)
       : CausalLMFactory.schema(hfConfig);
-    String arch = embedding
-      ? EmbeddingEncoderFactory.detect(hfConfig)
-      : CausalLMFactory.detect(hfConfig);
+    String arch = selected.architectureId();
 
     LlmListeners.info(io, null, "Loading " + arch + " weights…");
     WeightBag weights;
-    if (!bundle.safetensors().isEmpty()) {
+    if (source == ModelSupport.Source.HF_SAFETENSORS) {
       weights = ModelLoader.loadWeights(
         bundle.safetensors(), bundle.displayName(), hfConfig, schema, io);
-    } else if (!bundle.onnx().isEmpty()) {
-      weights = loadOnnxFromBundle(bundle, hfConfig, schema, io);
     } else {
-      throw new ModelLoadException(
-        "model source has no safetensors or ONNX weights: " + bundle.displayName());
+      weights = loadOnnxFromBundle(bundle, hfConfig, schema, io);
     }
 
     Tokenizer tokenizer = Tokenizer.fromJsonDocuments(
@@ -365,7 +368,7 @@ public final class LlmModelFactory {
       bundle.textFile(ModelFileId.TOKENIZER_CONFIG).orElse(null),
       bundle.textFile(ModelFileId.GENERATION_CONFIG).orElse(null),
       bundle.configJson());
-    if (embedding) {
+    if (selected.isEmbedding()) {
       LlmListeners.info(io, null, "Building " + arch + " embedding graph…");
       long tGraph = System.nanoTime();
       EmbeddingEncoder encoder = EmbeddingEncoderFactory.create(hfConfig, weights);
@@ -382,6 +385,26 @@ public final class LlmModelFactory {
       network.architectureName(), (System.nanoTime() - tGraph) / 1e9);
     LlmListeners.infof(io, null, "Model loaded in %.1fs%n", (System.nanoTime() - t0) / 1e9);
     return new LlmModel(bundle.virtualPath(), hfConfig, weights, network, tokenizer);
+  }
+
+  private static ModelSupport.Source resolveHfSource(
+    final boolean hasSafetensors,
+    final boolean hasOnnx,
+    final Config.HfConfig hfConfig,
+    final String label
+  ) {
+    if (hasSafetensors && !ModelSupport.isEmbedding(hfConfig)) {
+      return ModelSupport.Source.HF_SAFETENSORS;
+    }
+    if (hasOnnx) {
+      return ModelSupport.Source.ONNX;
+    }
+    if (hasSafetensors) {
+      return ModelSupport.Source.HF_SAFETENSORS;
+    }
+    throw new ModelLoadException(
+      "model has no *.safetensors or supported *.onnx weights: " + label
+        + System.lineSeparator() + System.lineSeparator() + ModelSupport.CATALOG);
   }
 
   private static WeightBag loadOnnxFromBundle(

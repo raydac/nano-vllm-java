@@ -223,9 +223,7 @@ public final class LlmModel implements AutoCloseable {
 
   private CausalLM resolveNetwork(final boolean allowUnpackParameters, final LlmListener io) {
     if (this.isEmbeddingModel()) {
-      throw new IllegalStateException(
-        "model is an embedding encoder (" + this.architectureName()
-          + "); use LlmModel.embed(...) instead of LLM");
+      throw new IllegalStateException(ModelSupport.chatMisuseMessage(this.architectureName()));
     }
     CausalLM current = this.requireNetwork();
     if (!allowUnpackParameters) {
@@ -265,7 +263,7 @@ public final class LlmModel implements AutoCloseable {
     if (current == null) {
       throw new IllegalStateException(
         this.encoder.get() != null
-          ? "model is an embedding encoder; use LlmModel.embed(...)"
+          ? ModelSupport.chatMisuseMessage(this.architectureName())
           : "LlmModel is closed");
     }
     return current;
@@ -277,7 +275,7 @@ public final class LlmModel implements AutoCloseable {
     if (current == null) {
       throw new IllegalStateException(
         this.network.get() != null
-          ? "model is causal; use LLM for generate/chat"
+          ? ModelSupport.embedMisuseMessage(this.architectureName())
           : "LlmModel is closed");
     }
     return current;

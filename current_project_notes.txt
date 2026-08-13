@@ -2,6 +2,7 @@
 - Maven multi-module **`1.1.0-SNAPSHOT`**: parent `nano-vllm-java-pom`, library `nano-vllm-java`, demos `nano-vllm-java-samples` (released **1.0.0** 2026-08-09); enforcer Java `[21,)`, Maven `[3.9,)`; JPMS module `com.igormaznitsa.nanollvm` (library only)
 - **ResourceLimits** (exported utils): process-wide defaults + builder; RAG/PDF/JSON/GGUF/safetensors/corpus/history budgets
 - CausalLM: Qwen3 + Gemma3 + **Llama** + LFM2 (GGUF); tokenizers GPT-2 BPE / Metaspace / GGUF-embedded / BERT WordPiece
+- **`ModelSupport`**: exact family detection + `UnsupportedModelException` with a support catalog at load; look-alikes (Qwen2, Qwen3.5/Fara, Gemma2, VLMs, GGUF Qwen/Llama, HF BERT safetensors) fail before weight mmap; `-Dnanollvm.arch` must match the checkpoint
 - **ONNX Tier A:** folder load via `LlmModelFactory.make` — initializers only (no ORT); root or `onnx/`; safetensors preferred if both present; chat Qwen3/Gemma3/Llama + BERT embeddings (HF→GGUF name remap)
 - **GGUF BERT embeddings** (e.g. gte-small): same `LlmModelFactory.make` → `LlmModel.embed`; `LLM.builder` rejects embedding models; Q3_K + IQ4_NL dequant
 - **ModelFileSource**: `ModelFileId` → `InputStream` (+ weight shards); load into heap only (no disk cache); `make(Path)` stays direct disk I/O; ONNX ids `MODEL_ONNX` / `MODEL_ONNX_FP16`
@@ -20,6 +21,7 @@
   opt-in `ChatSession.recoverUnusableAnswers`; RAG `isolateGeneration` default false;
   RMSNorm uses `onePlusWeight` (not product-named). Architecture id `gemma3` remains only as the
   HF `model_type` / backend key (`Gemma3ForCausalLM`), same as `qwen3`/`llama`/`lfm2`.
+  1.0 boolean chat shims removed (not kept as `@Deprecated`).
 - Engine: `Transformer` owns per-LLM arenas + explicit step `Context`; `MatmulRuntime` per `LLM`; `kvHeapFraction` (default 0.25) for KV auto-size
 - `LLM.generate` / `close` use `ReentrantLock`; `assertNotClosed` on infrequent entry points; props = **`nanollvm.*` / `NANOLLVM_*` only**
 - JPMS: exports models/llm/chat/rag/exceptions/tokenizer/utils; non-exported `models.internal` (`LlmModelAccess`), prompts, engine/layers/tensor/internal
@@ -83,6 +85,7 @@
 - BM25F field weights for multi-field docs?
 - HF safetensors LFM2 directory load beside GGUF?
 - Broader ONNX initializer name maps for exotic Optimum/transformers.js exports?
+- Fara1.5-4B / Qwen3.5 (`qwen3_5`): not supported (hybrid Gated DeltaNet + vision). Load now fails fast via `ModelSupport` instead of mis-labeling as `qwen3`.
 
 
 ## 7. Useful References
