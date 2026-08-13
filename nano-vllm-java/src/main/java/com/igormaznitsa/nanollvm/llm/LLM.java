@@ -1458,12 +1458,19 @@ public final class LLM implements AutoCloseable {
   }
 
   /**
-   * Decoded text, completion token ids, and engine stats for one completed prompt in
+   * Decoded completion, token ids, and engine stats for one finished prompt in
    * {@link LLM#generate}.
    *
+   * <p>One output per input prompt, in the same order. {@link #text()} is a raw decode of
+   * {@link #tokenIds()} — it is <em>not</em> split into thinking / answer; use
+   * {@link com.igormaznitsa.nanollvm.chat.ChatReply#parse} or
+   * {@link com.igormaznitsa.nanollvm.chat.ChatSession#send} for that. {@link #tokenIds()} is
+   * completion tokens only (not the prompt). Immutable; lists are copies.
+   *
    * @param text     tokenizer decode of {@code tokenIds} ({@code null} coerced to {@code ""})
-   * @param tokenIds completion token ids only; defensive copy stored
-   * @param stats    prompt/completion counts and generate wall time; never {@code null}
+   * @param tokenIds completion token ids only; unmodifiable copy stored
+   * @param stats    prompt/completion counts and generate wall time; {@link GenerationStats#NONE}
+   *                 if the caller passed {@code null}
    */
   public record GenerationOutput(String text, List<Integer> tokenIds, GenerationStats stats) {
     public GenerationOutput {

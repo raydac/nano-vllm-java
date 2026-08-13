@@ -1972,7 +1972,7 @@ Imagine the user asks: “What is 2+2?”
      decode token …  (Sense A)  → “4”
            │
            ▼
-     parse → ChatReply(thinking, answer)
+     parse → ChatReply(thinking, answer, thinkOpen)  + stats after generate
 ```
 
 ---
@@ -2617,7 +2617,10 @@ A few lines of Java (or the example app) open the model folder and say, in effec
 try (LlmModel model = LlmModelFactory.make(modelDir);
      LLM llm = LLM.builder(model).maxModelLen(2048).build()) {
   ChatReply reply = llm.chat(256).send("What is 2+2?");
-  // reply.thinking() / reply.answer()
+  String visible = reply.answer();   // user-facing text (same as reply.text())
+  String notes   = reply.thinking(); // optional <think> scratchpad; not stored in history
+  boolean open   = reply.thinkOpen(); // false after send; true only on streaming snapshots
+  double tokPerSec = reply.stats().completionTokensPerSecond();
 } // close LLM first (try-with-resources order), then LlmModel
 ```
 
@@ -2839,7 +2842,7 @@ the finished stream for display (`thinking` vs `answer`).
 | Step               | Call                                                                             | Role                                 |
 |--------------------|----------------------------------------------------------------------------------|--------------------------------------|
 | Live UI (optional) | `onToken` → `Tokenizer#decode` → `AssistantParts#parse` → `StreamPrinter#update` | Split channels while tokens arrive   |
-| Final split        | `AssistantParts#parse` → `ChatReply#from`                                        | `thinking` + `answer` + `thinkOpen`  |
+| Final split        | `AssistantParts#parse` → `ChatReply#from`                                        | `thinking` + `answer` + `thinkOpen`; session then `withStats` |
 | Recover            | `AssistantParts#salvageFromThinking`                                             | If answer blank but notes exist      |
 | Commit history     | `ChatSession#finishTurn` → `ChatMessage#assistant(answer)`                       | **Answer only** stored for next turn |
 | Close stream       | `StreamPrinter#closeTurn`                                                        | End of CLI printing for this reply   |
@@ -3532,7 +3535,7 @@ Short glossary. For the Java home of each idea, prefer the **In the code** notes
 | Inner work (Sense A)  | Invisible stack of attention + MLP for each next token                                           |
 | Chain of thought (B)  | Reasoning written as ordinary tokens in the reply                                                |
 | Tagged scratchpad (C) | Written reasoning inside `<think>…</think>` for UI splitting                                     |
-| ChatReply             | Parsed pair of thinking text + visible answer after a turn                                       |
+| ChatReply             | Parsed assistant turn: `thinking` (scratchpad), `answer` / `text()` (visible), `thinkOpen` (unclosed `<think>` while streaming), `stats` (`GenerationStats`; `NONE` until generate finishes). `parse(raw)` splits decode; `ChatSession.send` salvages + attaches stats. History stores **answer only**. |
 | KV cache              | Stored Keys and Values, reused while decoding                                                    |
 | Prefill               | First pass over the prompt that fills the KV cache                                               |
 | Decode                | Step-by-step production of later tokens                                                          |

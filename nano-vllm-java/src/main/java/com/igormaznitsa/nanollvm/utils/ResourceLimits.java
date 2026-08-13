@@ -9,8 +9,30 @@ import java.util.concurrent.atomic.AtomicReference;
  *
  * <p>Defaults protect against accidental or hostile oversized inputs (OOM / hang). Replace the
  * process default with {@link #setCurrent(ResourceLimits)} or pass a custom instance into RAG /
- * load APIs that accept one. Values of {@code 0} or negative mean “use the field’s built-in
- * absolute ceiling” only where noted; prefer positive limits.
+ * load APIs that accept one. Every field must be {@code >= 1}. Prefer {@link #builder()} (starts
+ * from {@link #current()}) over constructing the canonical constructor by hand.
+ *
+ * <pre>{@code
+ * ResourceLimits.setCurrent(
+ *     ResourceLimits.builder()
+ *         .maxFileBytes(64L * 1024 * 1024)
+ *         .maxHistoryMessages(50)
+ *         .build());
+ * }</pre>
+ *
+ * @param maxFileBytes              cap on one document / weight sidecar read
+ * @param maxTotalCorpusBytes       cap on summed RAG corpus bytes
+ * @param maxCorpusFiles            cap on files accepted into one corpus load
+ * @param maxPdfInflateBytes        cap on decompressed PDF stream payload
+ * @param maxCmapRangeSpan          cap on one PDF ToUnicode {@code bfRange} span
+ * @param maxCmapEntries            cap on PDF cmap entries
+ * @param maxSafetensorsHeaderBytes cap on the JSON header of a {@code .safetensors} file
+ * @param maxJsonDepth              cap on JSON object/array nesting
+ * @param maxJsonChars              cap on JSON document size (config / tokenizer / cmap)
+ * @param maxGgufStringBytes        cap on one GGUF metadata string
+ * @param maxGgufDims               cap on GGUF tensor rank
+ * @param maxHistoryMessages        cap on {@link com.igormaznitsa.nanollvm.chat.ChatSession}
+ *                                  history length
  */
 public record ResourceLimits(
   long maxFileBytes,
@@ -82,6 +104,9 @@ public record ResourceLimits(
     }
   }
 
+  /**
+   * Built-in library defaults (32 MiB file, 256 MiB corpus, 200 history messages, …).
+   */
   public static ResourceLimits defaults() {
     return new ResourceLimits(
       DEFAULT_MAX_FILE_BYTES,
@@ -98,22 +123,39 @@ public record ResourceLimits(
       DEFAULT_MAX_HISTORY_MESSAGES);
   }
 
+  /**
+   * Process-wide limits used when a call does not pass its own instance.
+   */
   public static ResourceLimits current() {
     return CURRENT.get();
   }
 
+  /**
+   * Replaces {@link #current()} for this JVM. Subsequent loads / RAG / sessions pick this up.
+   *
+   * @param limits must not be {@code null}
+   */
   public static void setCurrent(final ResourceLimits limits) {
     CURRENT.set(requireNonNull(limits, "limits"));
   }
 
+  /**
+   * Restores {@link #current()} to {@link #defaults()}.
+   */
   public static void resetCurrent() {
     CURRENT.set(defaults());
   }
 
+  /**
+   * Builder seeded from {@link #current()}.
+   */
   public static Builder builder() {
     return new Builder(current());
   }
 
+  /**
+   * Copy with a new per-file byte cap ({@code >= 1}).
+   */
   public ResourceLimits withMaxFileBytes(final long maxFileBytes) {
     return new ResourceLimits(
       maxFileBytes, this.maxTotalCorpusBytes, this.maxCorpusFiles, this.maxPdfInflateBytes,
@@ -122,6 +164,9 @@ public record ResourceLimits(
       this.maxHistoryMessages);
   }
 
+  /**
+   * Copy with a new summed-corpus byte cap ({@code >= 1}).
+   */
   public ResourceLimits withMaxTotalCorpusBytes(final long maxTotalCorpusBytes) {
     return new ResourceLimits(
       this.maxFileBytes, maxTotalCorpusBytes, this.maxCorpusFiles, this.maxPdfInflateBytes,
@@ -130,6 +175,9 @@ public record ResourceLimits(
       this.maxHistoryMessages);
   }
 
+  /**
+   * Copy with a new corpus file-count cap ({@code >= 1}).
+   */
   public ResourceLimits withMaxCorpusFiles(final int maxCorpusFiles) {
     return new ResourceLimits(
       this.maxFileBytes, this.maxTotalCorpusBytes, maxCorpusFiles, this.maxPdfInflateBytes,
@@ -138,6 +186,9 @@ public record ResourceLimits(
       this.maxHistoryMessages);
   }
 
+  /**
+   * Copy with a new PDF inflate cap ({@code >= 1}).
+   */
   public ResourceLimits withMaxPdfInflateBytes(final long maxPdfInflateBytes) {
     return new ResourceLimits(
       this.maxFileBytes, this.maxTotalCorpusBytes, this.maxCorpusFiles, maxPdfInflateBytes,
@@ -146,6 +197,9 @@ public record ResourceLimits(
       this.maxHistoryMessages);
   }
 
+  /**
+   * Copy with a new chat-history message cap ({@code >= 1}).
+   */
   public ResourceLimits withMaxHistoryMessages(final int maxHistoryMessages) {
     return new ResourceLimits(
       this.maxFileBytes, this.maxTotalCorpusBytes, this.maxCorpusFiles, this.maxPdfInflateBytes,
@@ -154,6 +208,10 @@ public record ResourceLimits(
       maxHistoryMessages);
   }
 
+  /**
+   * Mutable builder for {@link ResourceLimits}. Starts from {@link #current()} via
+   * {@link ResourceLimits#builder()}. {@link #build()} validates every field ({@code >= 1}).
+   */
   public static final class Builder {
     private long maxFileBytes;
     private long maxTotalCorpusBytes;
@@ -183,66 +241,85 @@ public record ResourceLimits(
       this.maxHistoryMessages = base.maxHistoryMessages;
     }
 
+    /**
+     * Per-file read cap ({@code >= 1}).
+     */
     public Builder maxFileBytes(final long maxFileBytes) {
       this.maxFileBytes = maxFileBytes;
       return this;
     }
 
+    /** Summed RAG corpus cap ({@code >= 1}). */
     public Builder maxTotalCorpusBytes(final long maxTotalCorpusBytes) {
       this.maxTotalCorpusBytes = maxTotalCorpusBytes;
       return this;
     }
 
+    /** Max files in one corpus load ({@code >= 1}). */
     public Builder maxCorpusFiles(final int maxCorpusFiles) {
       this.maxCorpusFiles = maxCorpusFiles;
       return this;
     }
 
+    /** Decompressed PDF stream cap ({@code >= 1}). */
     public Builder maxPdfInflateBytes(final long maxPdfInflateBytes) {
       this.maxPdfInflateBytes = maxPdfInflateBytes;
       return this;
     }
 
+    /** Max span of one PDF ToUnicode {@code bfRange} ({@code >= 1}). */
     public Builder maxCmapRangeSpan(final int maxCmapRangeSpan) {
       this.maxCmapRangeSpan = maxCmapRangeSpan;
       return this;
     }
 
+    /** Max PDF cmap entries ({@code >= 1}). */
     public Builder maxCmapEntries(final int maxCmapEntries) {
       this.maxCmapEntries = maxCmapEntries;
       return this;
     }
 
+    /** {@code .safetensors} JSON header cap ({@code >= 1}). */
     public Builder maxSafetensorsHeaderBytes(final long maxSafetensorsHeaderBytes) {
       this.maxSafetensorsHeaderBytes = maxSafetensorsHeaderBytes;
       return this;
     }
 
+    /** JSON nesting cap ({@code >= 1}). */
     public Builder maxJsonDepth(final int maxJsonDepth) {
       this.maxJsonDepth = maxJsonDepth;
       return this;
     }
 
+    /** JSON document size cap ({@code >= 1}). */
     public Builder maxJsonChars(final long maxJsonChars) {
       this.maxJsonChars = maxJsonChars;
       return this;
     }
 
+    /** Max GGUF metadata string ({@code >= 1}). */
     public Builder maxGgufStringBytes(final long maxGgufStringBytes) {
       this.maxGgufStringBytes = maxGgufStringBytes;
       return this;
     }
 
+    /** Max GGUF tensor rank ({@code >= 1}). */
     public Builder maxGgufDims(final int maxGgufDims) {
       this.maxGgufDims = maxGgufDims;
       return this;
     }
 
+    /** Chat history length cap ({@code >= 1}). */
     public Builder maxHistoryMessages(final int maxHistoryMessages) {
       this.maxHistoryMessages = maxHistoryMessages;
       return this;
     }
 
+    /**
+     * Builds a validated {@link ResourceLimits}.
+     *
+     * @throws IllegalArgumentException if any field is {@code < 1}
+     */
     public ResourceLimits build() {
       return new ResourceLimits(
         this.maxFileBytes,

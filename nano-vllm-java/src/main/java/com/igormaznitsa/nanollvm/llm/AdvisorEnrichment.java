@@ -6,6 +6,19 @@ import java.util.List;
 
 /**
  * Result of the optional advisor pass: mixed user text plus named advisor replies.
+ *
+ * <p>{@link com.igormaznitsa.nanollvm.chat.ChatSession} and {@link LLM#runAdvisors} use
+ * {@link #modelUserText()} as the user string in the chat template for the main generate.
+ * {@link #responses()} is one entry per configured advisor (empty when none ran).
+ * {@link #salvageNotes()} are grounded notes kept for {@link #answerSalvageNotes()} when the
+ * main answer is unusable.
+ *
+ * <p>Lists are unmodifiable copies. Immutable; safe to share across threads.
+ *
+ * @param modelUserText user text after {@link LlmAdvisorMixer#mixPrompt}; never {@code null}
+ * @param responses     one {@link AdvisorResponse} per configured advisor, in configuration order
+ * @param salvageNotes  notes selected for fallback (may be empty; then
+ *                      {@link #answerSalvageNotes()} falls back to response texts)
  */
 public record AdvisorEnrichment(
   String modelUserText,
@@ -19,11 +32,19 @@ public record AdvisorEnrichment(
     salvageNotes = List.copyOf(requireNonNull(salvageNotes, "salvageNotes"));
   }
 
+  /**
+   * No advisors ran: {@code modelUserText} unchanged, empty responses and salvage notes.
+   *
+   * @param modelUserText prepared user string; must not be {@code null}
+   */
   public static AdvisorEnrichment passthrough(final String modelUserText) {
     return new AdvisorEnrichment(
       requireNonNull(modelUserText, "modelUserText"), List.of(), List.of());
   }
 
+  /**
+   * {@code true} when at least one advisor wrote a non-blank note.
+   */
   public boolean hasAdvisorNotes() {
     return this.responses.stream()
       .map(AdvisorResponse::text)
@@ -31,8 +52,10 @@ public record AdvisorEnrichment(
   }
 
   /**
-   * Notes usable when the main answer is unusable: prefer grounded salvage notes, else raw
-   * advisor replies (blank entries dropped).
+   * Notes usable when the main answer is unusable: prefer {@link #salvageNotes()}, else raw
+   * advisor replies. Blank entries are dropped; order is preserved; duplicates removed.
+   *
+   * @return unmodifiable list, possibly empty
    */
   public List<String> answerSalvageNotes() {
     List<String> source = this.salvageNotes.isEmpty()

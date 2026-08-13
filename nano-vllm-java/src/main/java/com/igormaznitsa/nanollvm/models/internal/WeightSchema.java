@@ -181,6 +181,11 @@ public final class WeightSchema {
     return new WeightSchema(Map.of(), expected, optional);
   }
 
+  /**
+   * {@code bert} embedding encoder schema (token/position/type embeddings + post-LN blocks).
+   *
+   * @since 1.1.0
+   */
   public static WeightSchema bert(final Config.HfConfig config) {
     Set<String> expected = new LinkedHashSet<>();
     expected.add(GGUF_TOKEN_EMBD);

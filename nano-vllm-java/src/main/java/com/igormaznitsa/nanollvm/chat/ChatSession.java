@@ -288,7 +288,8 @@ public final class ChatSession {
    * appends the assistant answer to history.
    *
    * @param userText non-blank user turn
-   * @return parsed thinking / answer for this turn
+   * @return finished {@link ChatReply}: {@code answer} for the user, optional {@code thinking},
+   *         {@code thinkOpen == false}, and measured {@code stats}
    * @throws IllegalArgumentException                                          if {@code userText} is blank after strip
    * @throws NullPointerException                                              if {@code userText} is {@code null}
    * @throws com.igormaznitsa.nanollvm.exceptions.GenerationCancelledException if {@link LLM#cancel()} fires
@@ -305,7 +306,8 @@ public final class ChatSession {
    *
    * @param historyUserText text recorded in {@link #history()}
    * @param modelUserText   text used in the chat template for this generate
-   * @return parsed thinking / answer for this turn
+   * @return finished {@link ChatReply}: {@code answer} for the user, optional {@code thinking},
+   *         {@code thinkOpen == false}, and measured {@code stats}
    * @throws IllegalArgumentException                                          if either text is blank after strip
    * @throws com.igormaznitsa.nanollvm.exceptions.GenerationCancelledException if {@link LLM#cancel()} fires
    * @throws com.igormaznitsa.nanollvm.exceptions.GenerationTimeoutException   if the session timeout elapses
@@ -322,7 +324,8 @@ public final class ChatSession {
    * @param isolateGeneration when {@code true}, the model sees only the system seed (if any) plus
    *                          the prepared user turn — prior assistant answers stay in history for
    *                          the app but are not fed into this generate (avoids tiny-model latch)
-   * @return parsed thinking / answer for this turn
+   * @return finished {@link ChatReply}: {@code answer} for the user, optional {@code thinking},
+   *         {@code thinkOpen == false}, and measured {@code stats}
    * @throws IllegalArgumentException                                          if either text is blank after strip
    * @throws com.igormaznitsa.nanollvm.exceptions.GenerationCancelledException if {@link LLM#cancel()} fires
    * @throws com.igormaznitsa.nanollvm.exceptions.GenerationTimeoutException   if the session timeout elapses

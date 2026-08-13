@@ -40,12 +40,29 @@ public final class ModelSupport {
   private ModelSupport() {
   }
 
+  /**
+   * Resolves {@code config} and checks that {@code source} can carry that architecture
+   * (e.g. Qwen3 chat is not loaded from GGUF).
+   *
+   * @return selected backend id and {@link Kind}
+   * @throws com.igormaznitsa.nanollvm.exceptions.UnsupportedModelException if the family is
+   *                                                                        unknown or the source is incompatible
+   */
   public static Selection require(final Config.HfConfig config, final Source source) {
     Selection selected = resolve(requireNonNull(config, "config"));
     rejectIncompatibleSource(selected, requireNonNull(source, "source"), config);
     return selected;
   }
 
+  /**
+   * Resolves a GGUF {@code general.architecture} string ({@code lfm2} chat or {@code bert}
+   * embeddings).
+   *
+   * @param generalArchitecture GGUF metadata architecture; {@code null} treated as missing
+   * @return selected backend id and {@link Kind}
+   * @throws com.igormaznitsa.nanollvm.exceptions.UnsupportedModelException if unrecognized or
+   *                                                                        unsupported
+   */
   public static Selection requireGguf(final String generalArchitecture) {
     String raw = generalArchitecture == null ? "" : generalArchitecture;
     Verdict verdict = classifyToken(normalize(raw));
@@ -63,6 +80,13 @@ public final class ModelSupport {
     return selected;
   }
 
+  /**
+   * Classifies an HF {@code config.json} without checking the weight-file source.
+   *
+   * @return selected backend id and {@link Kind}
+   * @throws com.igormaznitsa.nanollvm.exceptions.UnsupportedModelException if the family is
+   *                                                                        unknown or structurally unsupported
+   */
   public static Selection resolve(final Config.HfConfig config) {
     requireNonNull(config, "config");
     Verdict verdict = inspect(config);
@@ -72,6 +96,10 @@ public final class ModelSupport {
     return applyForcedArchitecture(verdict.selection(), config.modelType(), config.architectures());
   }
 
+  /**
+   * {@code true} when {@code config} is a supported embedding encoder ({@code bert}).
+   * Unknown or chat families return {@code false} (they do not throw).
+   */
   public static boolean isEmbedding(final Config.HfConfig config) {
     Verdict verdict = inspect(requireNonNull(config, "config"));
     return verdict.supported() && verdict.selection().isEmbedding();
@@ -412,23 +440,56 @@ public final class ModelSupport {
     return value == null || value.isBlank() ? "(missing)" : value;
   }
 
+  /**
+   * Load family: chat generator vs sentence-embedding encoder.
+   *
+   * @since 1.1.0
+   */
   public enum Kind {
+    /**
+     * Causal chat / completion ({@code qwen3}, {@code gemma3}, {@code llama}, {@code lfm2}).
+     */
     CHAT,
+    /** BERT-style encoder used with {@link LlmModel#embed}. */
     EMBEDDING
   }
 
+  /**
+   * Weight container the checkpoint was loaded from.
+   *
+   * @since 1.1.0
+   */
   public enum Source {
+    /** Hugging Face folder with {@code *.safetensors}. */
     HF_SAFETENSORS,
+    /** Hugging Face folder with {@code *.onnx} (Tier A, since 1.1.0). */
     ONNX,
+    /** Single {@code .gguf} file. */
     GGUF
   }
 
+  /**
+   * Architecture chosen at load: backend id plus {@link Kind}.
+   *
+   * <p>Returned by {@link ModelSupport#require} / {@link ModelSupport#resolve} /
+   * {@link ModelSupport#requireGguf}. Use {@link #isEmbedding()} to decide
+   * {@link LlmModel#embed} vs {@link com.igormaznitsa.nanollvm.llm.LLM#builder}.
+   * {@link #architectureId()} is the canonical key ({@code qwen3}, {@code gemma3}, {@code llama},
+   * {@code lfm2}, {@code bert}).
+   *
+   * @param architectureId canonical backend id; never {@code null}
+   * @param kind           chat vs embedding; never {@code null}
+   * @since 1.1.0
+   */
   public record Selection(String architectureId, Kind kind) {
     public Selection {
       requireNonNull(architectureId, "architectureId");
       requireNonNull(kind, "kind");
     }
 
+    /**
+     * {@code true} when this checkpoint is an embedding encoder, not a chat model.
+     */
     public boolean isEmbedding() {
       return this.kind == Kind.EMBEDDING;
     }

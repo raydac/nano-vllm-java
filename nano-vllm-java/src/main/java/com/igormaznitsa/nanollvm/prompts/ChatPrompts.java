@@ -30,6 +30,8 @@ public final class ChatPrompts {
 
   /**
    * Turn-based chat templates have no system role: fold non-blank system text into the first user turn.
+   *
+   * @since 1.1.0
    */
   public static String foldSystemIntoFirstUser(final String system, final String userContent,
                                                final boolean firstUser) {

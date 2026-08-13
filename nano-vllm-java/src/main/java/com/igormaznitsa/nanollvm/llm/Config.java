@@ -258,6 +258,44 @@ public final class Config {
     }
   }
 
+  /**
+   * Parsed Hugging Face {@code config.json} (or GGUF-mapped equivalent) used to size the graph.
+   *
+   * <p>Apps normally read this from {@link com.igormaznitsa.nanollvm.models.LlmModel#hfConfig()}
+   * after load rather than constructing it. {@link #load(Path)} / {@link #parse(String)} fill
+   * fields from JSON keys ({@code hidden_size}, {@code num_attention_heads}, …). Missing keys use
+   * the defaults noted below. Maps and lists are unmodifiable copies. Immutable; safe to share.
+   *
+   * @param vocabSize             {@code vocab_size}; tokenizer / LM-head width
+   * @param hiddenSize            {@code hidden_size}; residual-stream width
+   * @param intermediateSize      {@code intermediate_size}; MLP expand width
+   * @param numHiddenLayers       {@code num_hidden_layers}; stacked blocks
+   * @param numAttentionHeads     {@code num_attention_heads} (or {@code num_heads})
+   * @param numKeyValueHeads      {@code num_key_value_heads}; GQA groups (defaults to query heads)
+   * @param headDim               {@code head_dim}, or {@code hidden_size / num_attention_heads}
+   * @param maxPositionEmbeddings {@code max_position_embeddings}; context-length ceiling
+   *                              (default {@code 32768} when absent)
+   * @param rmsNormEps            {@code rms_norm_eps} or {@code norm_eps} (default {@code 1e-6})
+   * @param hiddenAct             {@code hidden_act} (default {@code silu}); see
+   *                              {@link #effectiveActivation()}
+   * @param tieWordEmbeddings     {@code tie_word_embeddings}; input embed and LM head share a matrix
+   * @param attentionBias         {@code attention_bias}
+   * @param ropeTheta             {@code rope_theta} / {@code rope_parameters.rope_theta}
+   *                              (default {@code 1e6})
+   * @param ropeScaling           {@code rope_scaling} object; empty map when absent
+   * @param torchDtype            {@code torch_dtype} (default {@code float16}); informational
+   * @param modelType             {@code model_type} architecture id ({@code qwen3}, {@code llama}, …)
+   * @param architectures         {@code architectures} class names; empty list when absent
+   * @param hiddenActivation      {@code hidden_activation} when present; wins over {@code hiddenAct}
+   * @param slidingWindow         {@code sliding_window}; {@code 0} means no window
+   * @param layerTypes            {@code layer_types} (Gemma / LFM2 hybrid); empty when absent
+   * @param ropeLocalBaseFreq     {@code rope_local_base_freq} (default {@code 10_000})
+   * @param queryPreAttnScalar    {@code query_pre_attn_scalar}; {@code 0} → use {@code headDim}
+   *                              in {@link #attentionScale()}
+   * @param convLCache            {@code conv_L_cache} (LFM2 short-conv state length)
+   * @param visionConfigPresent   {@code true} when vision/image/video keys exist (unsupported VLMs)
+   * @param nestedTextConfig      {@code true} when {@code text_config} is a nested object
+   */
   public record HfConfig(
     int vocabSize,
     int hiddenSize,
@@ -313,11 +351,20 @@ public final class Config {
       return value;
     }
 
+    /**
+     * Reads {@code config.json} from disk.
+     *
+     * @param configJson path to a Hugging Face {@code config.json}
+     */
     public static HfConfig load(final Path configJson) throws IOException {
       return parse(Files.readString(configJson));
     }
 
     /**
+     * Parses a Hugging Face {@code config.json} body.
+     *
+     * @param configJson JSON object text; must not be {@code null}
+     * @return parsed blueprint
      * @since 1.1.0
      */
     public static HfConfig parse(final String configJson) {
@@ -386,12 +433,21 @@ public final class Config {
       );
     }
 
+    /**
+     * {@code true} when {@link #layerTypes()} contains a linear-attention layer (unsupported
+     * hybrids such as Qwen3.5 / Fara).
+     *
+     * @since 1.1.0
+     */
     public boolean hasLinearAttentionLayers() {
       return this.layerTypes.stream()
         .anyMatch(
           type -> type != null && type.toLowerCase(Locale.ROOT).contains("linear_attention"));
     }
 
+    /**
+     * {@code true} when layer {@code layerIndex} is a short-convolution block (LFM2), not attention.
+     */
     public boolean isConvLayer(final int layerIndex) {
       if (this.layerTypes != null && layerIndex >= 0 && layerIndex < this.layerTypes.size()) {
         String type = this.layerTypes.get(layerIndex);
@@ -401,10 +457,17 @@ public final class Config {
       return false;
     }
 
+    /**
+     * Inverse of {@link #isConvLayer(int)}: attention (full or sliding) at {@code layerIndex}.
+     */
     public boolean isFullAttentionLayer(final int layerIndex) {
       return !this.isConvLayer(layerIndex);
     }
 
+    /**
+     * MLP activation name: {@link #hiddenActivation()} when non-blank, else {@link #hiddenAct()},
+     * else {@code silu}.
+     */
     public String effectiveActivation() {
       if (this.hiddenActivation != null && !this.hiddenActivation.isBlank()) {
         return this.hiddenActivation;
@@ -412,11 +475,20 @@ public final class Config {
       return this.hiddenAct == null ? "silu" : this.hiddenAct;
     }
 
+    /**
+     * Attention softmax scale: {@code (queryPreAttnScalar or headDim)^-0.5}.
+     */
     public float attentionScale() {
       float denom = this.queryPreAttnScalar > 0f ? this.queryPreAttnScalar : this.headDim;
       return (float) Math.pow(denom, -0.5);
     }
 
+    /**
+     * {@code true} when layer {@code layerIndex} uses a sliding attention window.
+     *
+     * <p>Reads {@link #layerTypes()} when present. If only {@link #slidingWindow()} is set, every
+     * layer except every 6th is treated as sliding (Gemma-style fallback).
+     */
     public boolean isSlidingLayer(final int layerIndex) {
       if (this.layerTypes != null && layerIndex >= 0 && layerIndex < this.layerTypes.size()) {
         String type = this.layerTypes.get(layerIndex);

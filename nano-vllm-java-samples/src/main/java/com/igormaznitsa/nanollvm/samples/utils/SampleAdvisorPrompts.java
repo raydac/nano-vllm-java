@@ -3,6 +3,8 @@ package com.igormaznitsa.nanollvm.samples.utils;
 /**
  * Demo advisor role strings and system-prompt add-ons. Not part of the published library —
  * callers build {@link com.igormaznitsa.nanollvm.llm.LlmAdvisor} with their own name + prompt.
+ *
+ * @since 1.1.0
  */
 public final class SampleAdvisorPrompts {
 

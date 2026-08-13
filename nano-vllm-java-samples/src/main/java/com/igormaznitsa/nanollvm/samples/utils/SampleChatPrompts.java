@@ -7,6 +7,8 @@ import java.util.regex.Pattern;
 /**
  * Demo-only chat system policies and turn-based recovery helpers. Not part of the published
  * library — tune per sample / model family here.
+ *
+ * @since 1.1.0
  */
 public final class SampleChatPrompts {
 

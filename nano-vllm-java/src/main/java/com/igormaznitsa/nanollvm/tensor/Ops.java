@@ -265,6 +265,8 @@ public final class Ops {
 
   /**
    * PyTorch-style GELU approximate with tanh (used by BERT / some causal MLP gates).
+   *
+   * @since 1.1.0
    */
   public static Tensor gelu(final Tensor x) {
     Tensor out = Tensor.zeros(x.shape());

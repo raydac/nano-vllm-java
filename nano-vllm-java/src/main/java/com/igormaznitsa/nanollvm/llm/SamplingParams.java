@@ -4,13 +4,16 @@ package com.igormaznitsa.nanollvm.llm;
  * Immutable sampling knobs for {@link LLM#generate} and chat turns.
  *
  * <p>Greedy sampling is rejected ({@code temperature} must be greater than {@code 1e-10}).
- * {@code topK == 0} disables top-k; {@code topP} must be in {@code (0, 1]}.
+ * {@code topK == 0} disables top-k; {@code topP} must be in {@code (0, 1]}. Prefer
+ * {@link SamplingDefaults#forTokenizer} for chat rather than constructing these by hand.
+ * Safe to share across threads and across prompts in a batch.
  *
- * <p>Safe to share across threads and across prompts in a batch.
- *
- * @param temperature softmax temperature; must be {@code > 1e-10} (greedy not supported)
- * @param maxTokens   maximum newly generated tokens per sequence; must be {@code >= 1}
- * @param ignoreEos   when {@code true}, end-of-sequence does not finish the sequence (maxTokens still applies)
+ * @param temperature softmax temperature; must be {@code > 1e-10} (greedy not supported). Lower
+ *                    values make the next-token distribution more peaked.
+ * @param maxTokens   maximum newly generated tokens per sequence; must be {@code >= 1}. The
+ *                    engine also clamps this to remaining context ({@code maxModelLen}).
+ * @param ignoreEos   when {@code true}, end-of-sequence does not finish the sequence
+ *                    ({@code maxTokens} still applies)
  * @param topK        keep only the top-{@code k} logits before nucleus; {@code 0} disables top-k
  * @param topP        nucleus sampling cumulative probability in {@code (0, 1]}
  * @see SamplingDefaults
