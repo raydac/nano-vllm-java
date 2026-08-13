@@ -3007,9 +3007,13 @@ try (LlmModel model = LlmModelFactory.make(Path.of("models/Qwen3-0.6B"));
 ```
 
 Interactive CLI wiring lives in `nano-vllm-java-samples` → `samples.Example.main`: load status and chat share
-`samples.utils.OrderedConsole` (millis-stamped queue → one stdout), then model menu, optional
-RAG-mode menu (none / BM25 / dense / hybrid — dense needs gte-small; **since 1.1.0**), then
-`llm.chat(…).streamTo(…)` or `llm.rag(index).streamTo(…)` (chapter 17).
+`samples.utils.OrderedConsole` (millis-stamped queue → stdout vs stderr), then **model menu**
+(downloaded first, Qwen3-0.6B preferred for chat quality; Enter = first; empty disk → download instructions),
+**RAG-mode menu** (none / BM25 / dense / hybrid — dense needs gte-small; **since 1.1.0**; Enter =
+none), **advisor-count menu** (`0`–`3`; Enter = none), then `llm.chat(…).streamTo(…)` or
+`llm.rag(index).streamTo(…)`. Prepared-prompt
+`TEXT_DEBUG` lines are off unless `--debug` is passed to `Example.main` (chapter 17). Embedding
+checkpoints skip RAG/advisors and open an embed REPL. Each mode is a named method in `Example`.
 
 ### Sample A1 — classpath / stream sources (**since 1.1.0**)
 
@@ -3305,7 +3309,7 @@ unused.
 
 **In the code (organization):** package `com.igormaznitsa.nanollvm.rag`; entry `RagFactory` → `PreparedRag` (and
 optionally `withEmbeddings`); session `LLM.rag(index)` → `RagSession`; demo corpus folder `rag/` via
-`samples.utils.BundledRag` in `samples.Example` (RAG-mode menu **since 1.1.0**).
+`samples.utils.BundledRag` in `samples.Example` (model → RAG-mode → advisor-count menus **since 1.1.0**).
 
 ### Load path — preparing documents
 
@@ -3460,9 +3464,9 @@ Think of the layers again:
 
 The repository folder `rag/` holds sample Markdown (fairy-tale / Grimm demos). `samples.Example` loads it through
 `samples.utils.BundledRag` when present (`-Dnanollvm.rag.dir` / `NANOLLVM_RAG_DIR` override the path). **Since 1.1.0**
-the sample asks for a **RAG mode** after you pick a chat model: none (plain chat), BM25, dense, or hybrid (dense and
-hybrid need `models/gte-small.Q2_K.gguf`). Choosing gte-small alone still opens the embedding REPL
-(`samples.EmbedHelloWorld` is the minimal embed demo).
+the sample asks for a **RAG mode** after you pick a chat model: none (plain chat; **Enter**), BM25, dense, or hybrid
+(dense and hybrid need `models/gte-small.Q2_K.gguf`), then **how many advisors** (`0`–`3`; **Enter** = none). Choosing
+gte-small alone still opens the embedding REPL (`samples.EmbedHelloWorld` is the minimal embed demo).
 
 ### What this RAG is *not*
 

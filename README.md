@@ -52,6 +52,7 @@ Stream / classpath loads (`ModelFileSource`, `fromClasspath*`) are **since 1.1.0
 Details and honest limits: [`description.md`](description.md) chapters **7** / **7a** / **7b** / **7c**. Download scripts and
 folder layout: [Download and load models](#download-and-load-models).
 
+<a id="hello-world--gemma3-log-triage-in-your-app"></a>
 ## Hello World — Gemma3 log triage in your app
 
 This is the usual path for library users: declare the dependency, point at a **local Gemma3** folder (any path you
@@ -159,7 +160,7 @@ More API samples (streaming, RAG, GGUF, advisors) are in [Library quick start](#
 - Weight crates: HF **safetensors**, **GGUF**, and (**since 1.1.0**) ONNX Tier A — see [Supported formats and variants](#supported-formats-and-variants)
 - Optional multi-thread CPU matmul (`cpuThreads` / `matmulExecutor` / `disableMultiCpu`); default = all processors on a lazily shared pool
 - GPT-2 byte BPE, Gemma Metaspace BPE, GGUF-embedded, and BERT WordPiece tokenizers
-- Optional **BM25 text RAG** over a local `rag/` corpus (used automatically by the Example CLI); dense / hybrid embeddings **since 1.1.0**
+- Optional **BM25 text RAG** over a local `rag/` corpus (Example demo menu: none / BM25 / dense / hybrid); dense / hybrid embeddings **since 1.1.0**
 - **ResourceLimits** — default caps for corpus/PDF/JSON/GGUF/safetensors (overridable)
 - Optional **advisors** before each chat/RAG turn: `LLM.Builder.advisors(LlmAdvisorMixer, LlmAdvisor…)`
 - Warmup **off** by default (`LLM.Builder.warmup()` to enable)
@@ -249,6 +250,7 @@ safetensors **or** ONNX initializers, and constructs the tokenizer. Architecture
 `architectures` unless you set `-Dnanollvm.arch=qwen3|gemma3|llama|lfm2`. If both `*.safetensors` and `*.onnx` are
 present, safetensors wins.
 
+<a id="onnx-weight-import"></a>
 ### ONNX (weight import) — since 1.1.0
 
 A folder may use ONNX weights instead of safetensors (same `config.json` + tokenizer). See
@@ -275,7 +277,7 @@ mvn -pl nano-vllm-java-samples -q exec:java \
 
 Chat-capable ONNX demo ([onnx-community/SmolLM2-135M-Instruct-ONNX](https://huggingface.co/onnx-community/SmolLM2-135M-Instruct-ONNX)) —
 Llama + ChatML (~135M). Prefer this over the base
-[SmolLM2-135M-ONNX](https://huggingface.co/onnx-community/SmolLM2-135M-ONNX) for the Example chat UI:
+[SmolLM2-135M-ONNX](https://huggingface.co/onnx-community/SmolLM2-135M-ONNX) for the Example chat demo:
 
 ```bash
 ./models/download-smollm2-135m-instruct-onnx.sh
@@ -285,6 +287,7 @@ mvn -pl nano-vllm-java-samples -q exec:java \
   -Dexec.args=models/SmolLM2-135M-Instruct-ONNX
 ```
 
+<a id="gguf-lfm2"></a>
 ### GGUF (LFM2 chat; BERT embeddings since 1.1.0)
 
 A single `.gguf` file is also valid. Example: LiquidAI [LFM2.5-2.6B-GGUF](https://huggingface.co/LiquidAI/LFM2.5-2.6B-GGUF)
@@ -358,49 +361,68 @@ The models root itself defaults to `./models`, overridable with `-Dnanollvm.mode
 | RAG corpus dir     | `-Dnanollvm.rag.dir=./docs` or `NANOLLVM_RAG_DIR` (default `./rag`) |
 | CPU matmul threads | `.cpuThreads(N)` / `.allCpuThreads()` / `.disableMultiCpu()` (builder wins); else `-Dnanollvm.cpu.threads=N`; else all processors. `.disableMultiCpu()` = calling thread only, no executor. Optional `.matmulExecutor(…)` only when workers &gt; 1 |
 
-If you start **without** any of (1)–(3), the Example TUI (or `--cli` menu) lists bundled models
-(**Qwen3 / Gemma3 / LFM2 / SmolLM2 / Tiny / gte-small / Exit**).
+If you start **without** any of (1)–(3), the Example model menu lists **downloaded** checkpoints
+first (Qwen3-0.6B preferred for chat quality, then Gemma3, LFM2, compact ONNX demos, …). Press
+**Enter** to take item 1. If nothing is on disk, the demo exits with download instructions
+(`./models/download-qwen3-0.6b.sh` is the recommended chat start).
 
 ## Run from the CLI
 
 ### Interactive chat (`Example`)
 
-Recommended entry point: **Lanterna TUI** (keyboard + mouse) with model/RAG setup and streaming chat panes.
-Pass `--cli` for the classic stdout/stderr line console (thinking → stderr, answer → stdout).
+Line-oriented terminal demo. Three setup questions, then a chat (or embed) loop:
+
+1. **Model** — bundled catalog (Enter = first downloaded; Qwen3-0.6B preferred), or a path via CLI / `-Dnanollvm.model` / `NANOLLVM_MODEL`. If none are on disk, the demo exits with download commands.
+2. **RAG mode** — none / BM25 / dense / hybrid (Enter = none; skipped for embedding models)
+3. **Advisor count** — `0`–`3` roles (Enter = none)
+
+Thinking, advisor notes, and load status go to **stderr**; answers and prompts go to **stdout**.
+Prepared-prompt dumps (`debug> …`) are **off** unless you pass `--debug`.
 
 ```bash
 # After downloading a model — heap defaults to -Xmx16g via .mvn/jvm.config
-mvn22 -pl nano-vllm-java-samples -q exec:java
-
-# Classic console menus / streaming
-mvn22 -pl nano-vllm-java-samples -q exec:java -Dexec.args="--cli"
-```
-
-Pick a model in the TUI (or CLI menu), or pass it explicitly:
-
-```bash
-mvn22 -pl nano-vllm-java-samples -q exec:java -Dexec.args="models/Gemma3-270M"
+mvn -pl nano-vllm-java-samples -q exec:java
 ```
 
 ```bash
-NANOLLVM_MODEL=models/Qwen3-0.6B mvn22 -pl nano-vllm-java-samples -q exec:java
+mvn -pl nano-vllm-java-samples -q exec:java -Dexec.args="--debug"
 ```
 
-**TUI keys:** Ctrl+Enter send · Esc quit · F5 clear · Tab to bordered Send/Clear/Quit · mouse click when supported.
+Pick a model in the menu, or pass it explicitly:
+
+```bash
+mvn -pl nano-vllm-java-samples -q exec:java -Dexec.args="models/Gemma3-270M"
+```
+
+```bash
+NANOLLVM_MODEL=models/Qwen3-0.6B mvn -pl nano-vllm-java-samples -q exec:java
+```
 
 **RAG mode:** if the directory `rag/` exists (the repo ships Grimm / Little Red Riding Hood `.txt` and fact cards),
-choose None / BM25 / dense / hybrid in the setup window (CLI: same menu after model pick).
+choose None / BM25 / dense / hybrid. Dense and hybrid need `models/gte-small.Q2_K.gguf`
+(`./models/download-gte-small-gguf.sh`).
 
-**Advisors (Example only):** at build time, named advisors are wired by architecture — **Gemma**
-Practical/Abstract/Consequence, **Qwen** Practical/Abstract, **LFM** none. Notes appear in the thinking
-pane (TUI) or on the thinking stream as `[Name] …` (`--cli`); the default mixer folds useful notes into the main prompt.
+**Advisors:** after RAG, the demo asks how many named advisors to run before each turn
+(`0` = off). Notes appear on the thinking stream as `[Name] …`; the default mixer folds useful
+notes into the main prompt.
 
-Example session (ask about the demo corpus; `--cli` prompts shown):
+Example session (ask about the demo corpus):
 
 ```text
+Select model to load:
+  1) Qwen3-0.6B (chat, safetensors)
+  …
+Choice [1-7, Enter=1]:
+Select RAG index and use mode:
+  2) BM25 lexical
+Choice [1-5, Enter=1]: 2
+How many advisors to use?
+  2) Practical, Abstract
+Choice [0-4, Enter=0]: 2
+
 Loading model from …/models/Qwen3-0.6B
-RAG: prepared BM25 over …/rag (… chunks, shared index)
-Advisors: Practical, Abstract for Qwen.
+RAG: BM25 over …/rag (… chunks)
+Advisors: Practical, Abstract.
 Type a message and press Enter. Commands: /exit  /quit  /clear
 
 rag?> who are the grimm brothers?

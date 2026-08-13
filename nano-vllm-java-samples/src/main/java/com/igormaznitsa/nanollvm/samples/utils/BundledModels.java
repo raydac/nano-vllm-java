@@ -99,13 +99,13 @@ public final class BundledModels {
       return Optional.empty();
     }
     String key = modelPathOrName.strip();
-    if (key.startsWith("/")) {
-      key = key.substring(1);
-    }
-
     Path asPath = Path.of(key);
     if (asPath.isAbsolute() && isModel(asPath)) {
       return Optional.of(asPath.normalize());
+    }
+
+    if (key.startsWith("/")) {
+      key = key.substring(1);
     }
 
     Path cwd = Path.of("").toAbsolutePath().normalize();

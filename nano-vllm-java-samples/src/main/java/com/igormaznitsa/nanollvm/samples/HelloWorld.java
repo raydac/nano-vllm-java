@@ -12,7 +12,7 @@ import java.nio.file.Path;
  * Minimal turn-based chat demo (default Gemma3-270M): say hello and print the reply.
  *
  * <p>Args: optional model directory (default {@code models/Gemma3-270M} via
- * {@link BundledModels}). Example:
+ * {@link BundledModels}). From the repository root:
  * {@code mvn -pl nano-vllm-java-samples -q exec:java -Dexec.mainClass=com.igormaznitsa.nanollvm.samples.HelloWorld}
  */
 public final class HelloWorld {

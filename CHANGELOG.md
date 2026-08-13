@@ -8,10 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased] — 1.1.0-SNAPSHOT
 
 ### Changed
-- Interactive `Example` demo defaults to a **Lanterna** terminal UI (model/RAG radios, classic
-  console palette, bordered Send/Clear/Quit buttons, chat panes, mouse-friendly controls); use
-  `--cli` for the classic line-oriented console. Shared session wiring lives in
-  `ExampleSessionSupport` / `ExampleTui` / `ExampleCli` under `nano-vllm-java-samples`.
+- Interactive `Example` demo is a **line-oriented terminal** app: model menu, RAG mode
+  (none / BM25 / dense / hybrid), then advisor count (`0`–`3`). Enter selects the first item
+  (downloaded models first; Qwen3-0.6B preferred for chat quality). If no checkpoint is on disk, the demo exits
+  with download instructions. Embedding models skip to an embed REPL. Prepared-prompt debug
+  (`debug>` on stderr) is off unless you pass `--debug`. Read `samples.Example` top to bottom —
+  each mode is a named method.
 - Library chat/sampling/RAG defaults are architecture-marker driven, not product-tuned: `Tokenizer.ChatFormat`
   (ChatML / turn-based / plain), neutral `SamplingDefaults`, no Qwen EOS id fallback, no default
   unknown-arch→Qwen3, no Gemma-only session retry or RAG isolate. Demo policies (system prompts,
@@ -39,7 +41,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Llama** causal architecture (`LlamaForCausalLM`) for HF safetensors and ONNX (Tiny-LLM-ONNX base demo;
   SmolLM2-135M-Instruct-ONNX chat demo via `models/download-smollm2-135m-instruct-onnx.sh`).
 - Transparent GGUF BERT embedding support (e.g. GTE-small): load via `LlmModelFactory.make` and call `LlmModel.embed(...)` with text or token ids; `LLM.builder` rejects embedding-only models; `Example` menu option runs an embedding REPL.
-- Dense / hybrid RAG: `DenseRagIndex`, `HybridRagIndex`, and `RagFactory.withEmbeddings(PreparedRag, LlmModel)` (BM25 + embedding cosine via RRF). `Example` offers a RAG-mode menu (none / BM25 / dense / hybrid) after choosing a chat model.
+- Dense / hybrid RAG: `DenseRagIndex`, `HybridRagIndex`, and `RagFactory.withEmbeddings(PreparedRag, LlmModel)` (BM25 + embedding cosine via RRF). `Example` offers a RAG-mode menu (none / BM25 / dense / hybrid) after choosing a chat model, then an advisor-count menu (`0`–`3`).
 - RAG classpath documents: `RagFactory.makeResource` / `Builder.addResource` (absolute ClassLoader path or `Class.getResourceAsStream` resolution); source labels use `classpath:…`.
 - GGML dequant for Q3_K and IQ4_NL (needed by common small embedding GGUF quants).
 - Stream / classpath model load: `ModelFileId` + `ModelFileSource`, `LlmModelFactory.make(source)`, and `fromClasspath` / `fromClasspathGguf` helpers (bytes stay in heap; no disk cache). Filesystem `make(Path)` unchanged.
@@ -58,6 +60,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Generation stops at `maxModelLen` (and clamps `maxTokens` to remaining context) so short-context models such as Tiny-LLM-ONNX no longer crash RoPE past `max_position_embeddings`.
 - ONNX load skips non-float graph constants (e.g. INT64) and scalar initializers so transformers.js exports like SmolLM2 Instruct load cleanly; unknown / float8 / nibble weight types fail with an explicit error instead of silent ignore.
 - Decode stops early on degenerate token loops (exact repeated blocks, long same-token streaks, or overused n-grams) so tiny models cannot fill the whole `maxTokens` budget with the same paragraph; Example caps compact ONNX demos (SmolLM2 / Tiny) to 256 new tokens in chat and RAG.
+- `BundledModels.find` accepts absolute filesystem paths (it no longer strips a leading `/` before the absolute-path check).
 
 ## [1.0.0] — 2026-08-09
 
