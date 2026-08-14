@@ -108,6 +108,12 @@ class CoreUnitTest {
       assertEquals(model.architectureName(), a.model().architectureName());
       assertTrue(model.options().isEmpty());
       assertEquals(ThinkTags.DEFAULT, model.thinkTags());
+      String text = model.toString();
+      assertTrue(text.startsWith("LlmModel{kind=chat, architecture="), text);
+      assertTrue(text.contains("container=folder"), text);
+      assertTrue(text.contains("weights=dense"), text);
+      assertTrue(text.contains("path=" + path.toAbsolutePath().normalize()), text);
+      assertFalse(text.contains("closed"), text);
     }
   }
 
@@ -155,6 +161,10 @@ class CoreUnitTest {
 
     model.close();
     assertTrue(model.isClosed());
+    String closed = model.toString();
+    assertTrue(closed.contains("kind=chat"), closed);
+    assertTrue(closed.contains("closed"), closed);
+    assertTrue(closed.contains("weights=released"), closed);
     assertThrows(IllegalStateException.class, model::architectureName);
     assertThrows(IllegalStateException.class, model::thinkTags);
     assertThrows(IllegalStateException.class, model::options);

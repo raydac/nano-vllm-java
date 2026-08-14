@@ -94,9 +94,14 @@ public final class MatmulRuntime implements AutoCloseable {
   public String backendInfo() {
     String poolKind = this.pool == null
       ? "sequential"
-      : (this.pool == SHARED_POOL.get() ? "shared-pool" : "custom-pool");
+      : (this.usesSharedPool() ? "shared-pool" : "custom-pool");
     return "%s, tileN=%d tileK=%d, cpuThreads=%d, %s".formatted(
       KERNELS.name(), TILE_N, TILE_K, this.cpuThreads, poolKind);
+  }
+
+  private boolean usesSharedPool() {
+    ExecutorService shared = SHARED_POOL.get();
+    return shared != null && this.pool.equals(shared);
   }
 
   /**
@@ -157,13 +162,13 @@ public final class MatmulRuntime implements AutoCloseable {
   ) {
     this.requireOpen();
     if (this.pool == null || this.cpuThreads <= 1 || out < MIN_PARALLEL_OUT) {
-      this.decode1Range(x, xOffset, w, wOffset, bias, y, yOffset, in, out, 0, out);
+      this.decode1Range(x, xOffset, w, wOffset, bias, y, yOffset, in, 0, out);
       return;
     }
 
     int workers = Math.min(this.cpuThreads, (out + TILE_N - 1) / TILE_N);
     if (workers <= 1) {
-      this.decode1Range(x, xOffset, w, wOffset, bias, y, yOffset, in, out, 0, out);
+      this.decode1Range(x, xOffset, w, wOffset, bias, y, yOffset, in, 0, out);
       return;
     }
 
@@ -176,7 +181,7 @@ public final class MatmulRuntime implements AutoCloseable {
         break;
       }
       tasks.add(() -> {
-        this.decode1Range(x, xOffset, w, wOffset, bias, y, yOffset, in, out, out0, out1);
+        this.decode1Range(x, xOffset, w, wOffset, bias, y, yOffset, in, out0, out1);
         return null;
       });
     }
@@ -281,7 +286,7 @@ public final class MatmulRuntime implements AutoCloseable {
     final float[] w, final int wOffset,
     final float[] bias,
     final float[] y, final int yOffset,
-    final int in, final int out,
+    final int in,
     final int out0, final int out1
   ) {
     for (int tile0 = out0; tile0 < out1; tile0 += TILE_N) {

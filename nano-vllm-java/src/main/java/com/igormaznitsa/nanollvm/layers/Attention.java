@@ -16,7 +16,6 @@ public final class Attention {
   private final int numKvHeads;
   private final int repeats;
   private final int slidingWindow;
-  private final int layerIndex;
   private final int kvLayerIndex;
   private final boolean writeKv;
 
@@ -33,7 +32,7 @@ public final class Attention {
     final int slidingWindow,
     final int layerIndex
   ) {
-    this(numHeads, headDim, scale, numKvHeads, slidingWindow, layerIndex, layerIndex, true);
+    this(numHeads, headDim, scale, numKvHeads, slidingWindow, layerIndex, true);
   }
 
   public Attention(
@@ -42,7 +41,6 @@ public final class Attention {
     final float scale,
     final int numKvHeads,
     final int slidingWindow,
-    final int layerIndex,
     final int kvLayerIndex,
     final boolean writeKv
   ) {
@@ -52,7 +50,6 @@ public final class Attention {
     this.numKvHeads = numKvHeads;
     this.repeats = numHeads / numKvHeads;
     this.slidingWindow = Math.max(0, slidingWindow);
-    this.layerIndex = layerIndex;
     this.kvLayerIndex = kvLayerIndex;
     this.writeKv = writeKv;
   }

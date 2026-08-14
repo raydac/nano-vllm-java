@@ -123,6 +123,8 @@ public final class RagFactory {
   }
 
   /**
+   * Loads one classpath resource resolved with {@code loader}.
+   *
    * @since 1.1.0
    */
   public static PreparedRag makeResource(final ClassLoader loader, final String resourcePath) {
@@ -162,6 +164,8 @@ public final class RagFactory {
   }
 
   /**
+   * Lexical BM25 plus dense embeddings, with corpus load options.
+   *
    * @since 1.1.0
    */
   public static HybridRagIndex make(
@@ -173,6 +177,8 @@ public final class RagFactory {
   }
 
   /**
+   * Lexical BM25 plus dense embeddings, with load options and a progress listener.
+   *
    * @since 1.1.0
    */
   public static HybridRagIndex make(
@@ -223,6 +229,9 @@ public final class RagFactory {
     private Path sourceRoot;
     private boolean hasContent;
     private LlmListener io = LlmListeners.silent();
+
+    private Builder() {
+    }
 
     public Builder options(final RagLoadOptions options) {
       if (this.hasContent) {
@@ -308,6 +317,8 @@ public final class RagFactory {
     }
 
     /**
+     * Adds several absolute classpath resources (no leading {@code /}).
+     *
      * @since 1.1.0
      */
     public Builder addResources(final String... resourcePaths) {
@@ -317,6 +328,8 @@ public final class RagFactory {
     }
 
     /**
+     * Adds several classpath resources resolved with {@code loader}.
+     *
      * @since 1.1.0
      */
     public Builder addResources(final ClassLoader loader, final String... resourcePaths) {

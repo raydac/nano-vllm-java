@@ -14,6 +14,7 @@ import static com.igormaznitsa.nanollvm.models.internal.WeightNames.Q_NORM_WEIGH
 import static com.igormaznitsa.nanollvm.models.internal.WeightNames.layer;
 import static com.igormaznitsa.nanollvm.models.internal.WeightNames.mlp;
 import static com.igormaznitsa.nanollvm.models.internal.WeightNames.selfAttn;
+import static java.util.Locale.ROOT;
 import static java.util.Objects.requireNonNull;
 
 import com.igormaznitsa.nanollvm.internal.Context;
@@ -148,7 +149,6 @@ public record Gemma4ForCausalLM(Gemma4Model model, ParallelLMHead lmHead, float 
           config.attentionScale(),
           config.numKeyValueHeads(),
           window,
-          layerIndex,
           config.kvProducerLayer(layerIndex),
           !shared),
         new RMSNorm(weights.require(p + Q_NORM_WEIGHT), config.rmsNormEps(), false),
@@ -210,7 +210,7 @@ public record Gemma4ForCausalLM(Gemma4Model model, ParallelLMHead lmHead, float 
       final WeightBag weights,
       final int layerIndex
     ) {
-      String act = config.effectiveActivation().toLowerCase();
+      String act = config.effectiveActivation().toLowerCase(ROOT);
       if (!act.contains("gelu")) {
         throw new IllegalArgumentException(
           "gemma4 architecture expects gelu_pytorch_tanh, got " + act);

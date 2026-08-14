@@ -133,11 +133,11 @@ public final class Json {
         case '"' -> this.parseString();
         case 't' -> {
           this.expectWord("true");
-          yield Boolean.TRUE;
+          yield true;
         }
         case 'f' -> {
           this.expectWord("false");
-          yield Boolean.FALSE;
+          yield false;
         }
         case 'n' -> {
           this.expectWord("null");

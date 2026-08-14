@@ -24,6 +24,8 @@ public final class BundledModels {
   public static final String QWEN3_0_6B = DEFAULT_MODELS_DIR + "/" + DEFAULT_MODEL_NAME;
   public static final String GEMMA3_270M = DEFAULT_MODELS_DIR + "/Gemma3-270M";
   /**
+   * Bundled Gemma 4 E2B QAT mobile folder under {@link #DEFAULT_MODELS_DIR}.
+   *
    * @since 1.1.0
    */
   public static final String GEMMA4_E2B_IT_QAT_MOBILE =
@@ -31,15 +33,21 @@ public final class BundledModels {
   public static final String LFM2_5_2_6B_GGUF =
     DEFAULT_MODELS_DIR + "/LFM2.5-2.6B-Q4_K_M.gguf";
   /**
+   * Bundled gte-small GGUF embedding checkpoint under {@link #DEFAULT_MODELS_DIR}.
+   *
    * @since 1.1.0
    */
   public static final String GTE_SMALL_GGUF =
     DEFAULT_MODELS_DIR + "/gte-small.Q2_K.gguf";
   /**
+   * Bundled Tiny-LLM ONNX folder under {@link #DEFAULT_MODELS_DIR}.
+   *
    * @since 1.1.0
    */
   public static final String TINY_LLM_ONNX = DEFAULT_MODELS_DIR + "/Tiny-LLM-ONNX";
   /**
+   * Bundled SmolLM2-135M Instruct ONNX folder under {@link #DEFAULT_MODELS_DIR}.
+   *
    * @since 1.1.0
    */
   public static final String SMOLLM2_135M_INSTRUCT_ONNX =
@@ -96,6 +104,8 @@ public final class BundledModels {
   }
 
   /**
+   * Resolves a checkpoint path or well-known bundled name under {@link #modelsRoot()}.
+   *
    * @param modelPathOrName absolute/relative path, {@code Qwen3-0.6B}, {@code Gemma3-270M},
    *                        {@code Gemma4-E2B-IT-QAT-Mobile}, {@code Tiny-LLM-ONNX},
    *                        {@code SmolLM2-135M-Instruct-ONNX}, {@code LFM2.5-2.6B-Q4_K_M.gguf},

@@ -123,10 +123,6 @@ public final class Tokenizer {
    */
   private final int padTokenId;
   /**
-   * Raw HF / GGUF chat template string when present; used to detect {@link ChatFormat}.
-   */
-  private final String chatTemplate;
-  /**
    * When a BPE piece is missing from vocab, fall back to byte / {@code <0x..>} pieces.
    */
   private final boolean byteFallback;
@@ -159,7 +155,6 @@ public final class Tokenizer {
     final int eosTokenId,
     final List<Integer> stopTokenIds,
     final int padTokenId,
-    final String chatTemplate,
     final boolean byteFallback,
     final Style style,
     final ChatFormat chatFormat,
@@ -186,7 +181,6 @@ public final class Tokenizer {
     this.eosTokenId = eosTokenId;
     this.stopTokenIds = List.copyOf(stopTokenIds);
     this.padTokenId = padTokenId;
-    this.chatTemplate = chatTemplate;
     this.byteFallback = byteFallback;
     this.style = style;
     this.chatFormat = requireNonNull(chatFormat, "chatFormat");
@@ -354,7 +348,7 @@ public final class Tokenizer {
       boolean inviteThinking = vocab.containsKey("<think>") && vocab.containsKey("</think>");
       return new Tokenizer(
         vocab, merges, addedTexts, specialTexts, eos, stopIds, pad,
-          chatTemplate, byteFallback, style, chatFormat, prependMetaSpace, false, inviteThinking
+        byteFallback, style, chatFormat, prependMetaSpace, false, inviteThinking
       );
     } catch (RuntimeException e) {
       throw new ModelLoadException("failed to load tokenizer from JSON documents", e);
@@ -443,7 +437,7 @@ public final class Tokenizer {
 
     return new Tokenizer(
       vocab, merges, addedTexts, specialTexts, eos, stopIds, pad,
-        chatTemplate, byteFallback, style, chatFormat, prependMetaSpace, bertWordPiece,
+      byteFallback, style, chatFormat, prependMetaSpace, bertWordPiece,
         inviteThinking
     );
   }
@@ -633,7 +627,7 @@ public final class Tokenizer {
     return new Tokenizer(
       vocab, Map.of(), Set.of(), Set.of(),
         eos, List.of(eos), eos,
-        null, true, Style.GPT2_BYTE_BPE, ChatFormat.PLAIN, false, false, false
+      true, Style.GPT2_BYTE_BPE, ChatFormat.PLAIN, false, false, false
     );
   }
 

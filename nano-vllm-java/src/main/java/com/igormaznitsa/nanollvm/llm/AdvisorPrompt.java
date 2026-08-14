@@ -140,6 +140,8 @@ final class AdvisorPrompt {
   }
 
   /**
+   * Returns the stripped note, or empty when blank.
+   *
    * @return stripped note, or empty when blank
    */
   static String usableNote(final String note) {
@@ -147,6 +149,8 @@ final class AdvisorPrompt {
   }
 
   /**
+   * Returns the stripped note when {@code keep} accepts it; otherwise empty.
+   *
    * @return stripped note when {@code keep} accepts it; otherwise empty
    * @since 1.1.0
    */

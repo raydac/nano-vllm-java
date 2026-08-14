@@ -75,7 +75,7 @@ public final class PackedWeight {
   }
 
   public boolean isReleased() {
-    return this.packed == RELEASED;
+    return this.packed.length == 0;
   }
 
   /**
@@ -131,7 +131,7 @@ public final class PackedWeight {
   }
 
   private void requirePackedBytes() {
-    if (this.packed == RELEASED) {
+    if (this.packed.length == 0) {
       throw new IllegalStateException("packed bytes already released");
     }
   }

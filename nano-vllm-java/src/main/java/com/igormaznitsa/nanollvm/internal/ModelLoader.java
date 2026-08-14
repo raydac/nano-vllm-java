@@ -58,6 +58,8 @@ public final class ModelLoader {
   }
 
   /**
+   * Assembles a {@link WeightBag} from in-memory safetensors blobs (classpath / {@link ModelFileBundle}).
+   *
    * @since 1.1.0
    */
   public static WeightBag loadWeights(
@@ -117,7 +119,7 @@ public final class ModelLoader {
     SafetensorsReader reader = null;
     try {
       for (PlannedTensor item : plan) {
-        if (reader == null || item.source() != current) {
+        if (reader == null || !item.source().equals(current)) {
           if (reader != null) {
             reader.close();
           }

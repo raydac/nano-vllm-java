@@ -13,6 +13,7 @@ import java.io.PrintStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Locale;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -154,7 +155,7 @@ class RagRetrievalTest {
     List<RagHit> hits = rag.retrieve(q, 3);
     assertFalse(hits.isEmpty(), "expected Grimm hits for natural long question");
     assertTrue(
-      hits.stream().anyMatch(h -> h.chunk().text().toLowerCase().contains("grimm")),
+      hits.stream().anyMatch(h -> h.chunk().text().toLowerCase(Locale.ROOT).contains("grimm")),
       () -> "expected Grimm passage, got " + hits.stream().map(h -> h.chunk().text()).toList());
   }
 
@@ -170,7 +171,7 @@ class RagRetrievalTest {
     List<RagHit> fatherHits = rag.retrieve("father of grimm brothers", 2);
     assertFalse(fatherHits.isEmpty());
     assertTrue(
-      fatherHits.getFirst().chunk().text().toLowerCase().contains("father"),
+      fatherHits.getFirst().chunk().text().toLowerCase(Locale.ROOT).contains("father"),
       () -> "expected father passage, got: " + fatherHits.getFirst().chunk().text());
   }
 

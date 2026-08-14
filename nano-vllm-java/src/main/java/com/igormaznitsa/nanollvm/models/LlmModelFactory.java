@@ -10,6 +10,7 @@ import com.igormaznitsa.nanollvm.internal.Gemma4QatLoader;
 import com.igormaznitsa.nanollvm.internal.GgufModelLoader;
 import com.igormaznitsa.nanollvm.internal.GgufModelLoader.LoadedGguf;
 import com.igormaznitsa.nanollvm.internal.GgufReader;
+import com.igormaznitsa.nanollvm.internal.ModelBinding;
 import com.igormaznitsa.nanollvm.internal.ModelFileBundle;
 import com.igormaznitsa.nanollvm.internal.ModelLoader;
 import com.igormaznitsa.nanollvm.internal.OnnxModelLoader;
@@ -49,8 +50,9 @@ import java.util.Map;
  * ONNX when present; Hugging Face BERT safetensors is not supported). Stream loads reject
  * ONNX {@code external_data} sidecars — use {@link #make(Path)} for those exports.
  *
- * <p>Architecture is checked by {@link ModelSupport} before weights are mapped. Unsupported
- * families throw {@link com.igormaznitsa.nanollvm.exceptions.UnsupportedModelException} with a
+ * <p>Architecture is checked by {@link ModelSupport} after the container catalog is opened
+ * ({@link com.igormaznitsa.nanollvm.internal.ModelBinding}). Unsupported families throw
+ * {@link com.igormaznitsa.nanollvm.exceptions.UnsupportedModelException} with a
  * catalog of what this library can run.
  *
  * <p>Optional load-time settings go in a {@code Map} (frozen as {@link java.util.Map#copyOf} on
@@ -460,11 +462,9 @@ public final class LlmModelFactory {
     boolean hasOnnx = OnnxModelLoader.hasOnnxWeights(modelFolder);
     ModelSupport.Source source =
       resolveHfSource(hasSafetensors, hasOnnx, hfConfig, modelFolder.toString());
-    ModelSupport.Selection selected = ModelSupport.require(hfConfig, source);
-    WeightSchema schema = selected.isEmbedding()
-      ? EmbeddingEncoderFactory.schema(hfConfig)
-      : CausalLMFactory.schema(hfConfig);
-    String arch = selected.architectureId();
+    ModelBinding.BoundModel bound = ModelBinding.bindHf(hfConfig, source);
+    WeightSchema schema = bound.schema();
+    String arch = bound.selection().architectureId();
 
     LlmListeners.info(io, null, "Loading " + arch + " weights…");
     WeightBag weights;
@@ -477,7 +477,7 @@ public final class LlmModelFactory {
     }
 
     Tokenizer tokenizer = Tokenizer.fromPretrained(modelFolder);
-    if (selected.isEmbedding()) {
+    if (bound.selection().isEmbedding()) {
       LlmListeners.info(io, null, "Building " + arch + " embedding graph…");
       long tGraph = System.nanoTime();
       EmbeddingEncoder encoder = EmbeddingEncoderFactory.create(hfConfig, weights);
@@ -510,11 +510,9 @@ public final class LlmModelFactory {
     boolean hasOnnx = !bundle.onnx().isEmpty();
     ModelSupport.Source source =
       resolveHfSource(hasSafetensors, hasOnnx, hfConfig, bundle.displayName());
-    ModelSupport.Selection selected = ModelSupport.require(hfConfig, source);
-    WeightSchema schema = selected.isEmbedding()
-      ? EmbeddingEncoderFactory.schema(hfConfig)
-      : CausalLMFactory.schema(hfConfig);
-    String arch = selected.architectureId();
+    ModelBinding.BoundModel bound = ModelBinding.bindHf(hfConfig, source);
+    WeightSchema schema = bound.schema();
+    String arch = bound.selection().architectureId();
 
     LlmListeners.info(io, null, "Loading " + arch + " weights…");
     WeightBag weights;
@@ -533,7 +531,7 @@ public final class LlmModelFactory {
       bundle.textFile(ModelFileId.TOKENIZER_CONFIG).orElse(null),
       bundle.textFile(ModelFileId.GENERATION_CONFIG).orElse(null),
       bundle.configJson());
-    if (selected.isEmbedding()) {
+    if (bound.selection().isEmbedding()) {
       LlmListeners.info(io, null, "Building " + arch + " embedding graph…");
       long tGraph = System.nanoTime();
       EmbeddingEncoder encoder = EmbeddingEncoderFactory.create(hfConfig, weights);
@@ -644,13 +642,6 @@ public final class LlmModelFactory {
     final long startedAtNanos,
     final Map<String, Object> options
   ) {
-    WeightSchema schema = CausalLMFactory.schema(loaded.config());
-    for (String required : schema.expectedParameters()) {
-      if (!loaded.weights().has(required)) {
-        throw new IllegalStateException("missing required GGUF weight: " + required);
-      }
-    }
-
     LlmListeners.info(io, null,
       "Building " + CausalLMFactory.detect(loaded.config()) + " model graph…");
     long tGraph = System.nanoTime();
@@ -672,13 +663,6 @@ public final class LlmModelFactory {
     final long startedAtNanos,
     final Map<String, Object> options
   ) {
-    WeightSchema schema = EmbeddingEncoderFactory.schema(loaded.config());
-    for (String required : schema.expectedParameters()) {
-      if (!loaded.weights().has(required)) {
-        throw new IllegalStateException("missing required GGUF weight: " + required);
-      }
-    }
-
     LlmListeners.info(io, null,
       "Building " + EmbeddingEncoderFactory.detect(loaded.config()) + " embedding graph…");
     long tGraph = System.nanoTime();

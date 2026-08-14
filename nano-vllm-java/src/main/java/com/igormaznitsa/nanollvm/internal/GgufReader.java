@@ -62,6 +62,8 @@ public final class GgufReader implements AutoCloseable, GgufTokenizerSource {
   }
 
   /**
+   * Reads a GGUF container from an in-memory buffer ({@code virtualPath} is the display label).
+   *
    * @since 1.1.0
    */
   public static GgufReader open(final ByteBuffer data, final Path virtualPath) throws IOException {
@@ -155,7 +157,11 @@ public final class GgufReader implements AutoCloseable, GgufTokenizerSource {
           relativeOffset));
     }
 
-    return align(cursor.position, alignment);
+    long headerEnd = align(cursor.position, alignment);
+    if (headerEnd > size) {
+      throw new IOException("GGUF header exceeds file size: " + this.path);
+    }
+    return headerEnd;
   }
 
   public Path path() {
@@ -174,11 +180,13 @@ public final class GgufReader implements AutoCloseable, GgufTokenizerSource {
     return value;
   }
 
+  @Override
   public String metaString(final String key, final String defaultValue) {
     Object value = this.metadata.get(key);
     return value instanceof String s ? s : defaultValue;
   }
 
+  @Override
   public int metaInt(final String key, final int defaultValue) {
     Object value = this.metadata.get(key);
     return value instanceof Number n ? n.intValue() : defaultValue;
@@ -194,6 +202,7 @@ public final class GgufReader implements AutoCloseable, GgufTokenizerSource {
     return value instanceof Number n ? n.floatValue() : defaultValue;
   }
 
+  @Override
   public List<String> metaStringArray(final String key) {
     Object value = this.metadata.get(key);
     if (!(value instanceof List<?> list)) {

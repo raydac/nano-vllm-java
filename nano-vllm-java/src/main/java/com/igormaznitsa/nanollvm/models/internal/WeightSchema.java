@@ -10,6 +10,7 @@ import static com.igormaznitsa.nanollvm.models.internal.WeightNames.DOWN_PROJ_WE
 import static com.igormaznitsa.nanollvm.models.internal.WeightNames.EMBED_TOKENS;
 import static com.igormaznitsa.nanollvm.models.internal.WeightNames.GATE_UP_PROJ_WEIGHT;
 import static com.igormaznitsa.nanollvm.models.internal.WeightNames.GGUF_OUTPUT;
+import static com.igormaznitsa.nanollvm.models.internal.WeightNames.GGUF_OUTPUT_NORM;
 import static com.igormaznitsa.nanollvm.models.internal.WeightNames.GGUF_POSITION_EMBD;
 import static com.igormaznitsa.nanollvm.models.internal.WeightNames.GGUF_TOKEN_EMBD;
 import static com.igormaznitsa.nanollvm.models.internal.WeightNames.GGUF_TOKEN_EMBD_NORM;
@@ -69,6 +70,15 @@ public final class WeightSchema {
     };
   }
 
+  public static WeightSchema forGguf(final String arch, final Config.HfConfig config) {
+    return switch (arch) {
+      case ARCH_QWEN3 -> qwen3Gguf(config);
+      case ARCH_LFM2 -> lfm2(config);
+      case ARCH_BERT -> bert(config);
+      default -> throw new IllegalArgumentException("unsupported GGUF architecture '" + arch + "'");
+    };
+  }
+
   /**
    * {@code llama} architecture schema (RMSNorm, RoPE, GQA, SiLU MLP; no Q/K head norms).
    *
@@ -124,6 +134,35 @@ public final class WeightSchema {
       expected.add(LM_HEAD);
     }
     return new WeightSchema(PACKED_MODULES_MAPPING, expected, optional);
+  }
+
+  public static WeightSchema qwen3Gguf(final Config.HfConfig config) {
+    Set<String> expected = new LinkedHashSet<>();
+    Set<String> optional = new LinkedHashSet<>();
+    expected.add(GGUF_TOKEN_EMBD);
+    expected.add(GGUF_OUTPUT_NORM);
+    for (int i = 0; i < config.numHiddenLayers(); i++) {
+      String blk = ggufBlk(i);
+      expected.add(blk + "attn_norm.weight");
+      expected.add(blk + "ffn_norm.weight");
+      expected.add(blk + "attn_q.weight");
+      expected.add(blk + "attn_k.weight");
+      expected.add(blk + "attn_v.weight");
+      expected.add(blk + "attn_output.weight");
+      if (!config.attentionBias()) {
+        expected.add(blk + "attn_q_norm.weight");
+        expected.add(blk + "attn_k_norm.weight");
+      }
+      expected.add(blk + "ffn_gate.weight");
+      expected.add(blk + "ffn_up.weight");
+      expected.add(blk + "ffn_down.weight");
+    }
+    if (config.tieWordEmbeddings()) {
+      optional.add(GGUF_OUTPUT);
+    } else {
+      expected.add(GGUF_OUTPUT);
+    }
+    return new WeightSchema(Map.of(), expected, optional);
   }
 
   public static WeightSchema gemma3(final Config.HfConfig config) {

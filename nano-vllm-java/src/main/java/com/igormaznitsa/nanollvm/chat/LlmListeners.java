@@ -81,6 +81,7 @@ public final class LlmListeners {
     emit(listener, source, LlmTextKind.STATUS_INFO, body.endsWith("\n") ? body : body + "\n");
   }
 
+  @SuppressWarnings("AnnotateFormatMethod")
   public static void infof(
     final LlmListener listener,
     final LLM source,
@@ -90,6 +91,7 @@ public final class LlmListeners {
     emit(listener, source, LlmTextKind.STATUS_INFO, String.format(Locale.ROOT, format, args));
   }
 
+  @SuppressWarnings("AnnotateFormatMethod")
   public static void progressf(
     final LlmListener listener,
     final LLM source,

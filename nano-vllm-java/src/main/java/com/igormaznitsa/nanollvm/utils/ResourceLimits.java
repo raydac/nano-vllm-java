@@ -10,7 +10,7 @@ import java.util.concurrent.atomic.AtomicReference;
  * <p>Defaults protect against accidental or hostile oversized inputs (OOM / hang). Replace the
  * process default with {@link #setCurrent(ResourceLimits)} or pass a custom instance into RAG /
  * load APIs that accept one. Every field must be {@code >= 1}. Prefer {@link #builder()} (starts
- * from {@link #current()}) over constructing the canonical constructor by hand.
+ * from {@link #current()}), {@link #defaults()}, or the {@code with*} copies.
  *
  * <pre>{@code
  * ResourceLimits.setCurrent(

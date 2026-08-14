@@ -43,6 +43,8 @@ public final class FloatKernelsFactory {
   }
 
   /**
+   * Selects kernels for {@code mode}: {@code auto}, {@code vector}/{@code simd}, or {@code scalar}/{@code plain}.
+   *
    * @param mode {@code auto} (default), {@code vector}/{@code simd}, or {@code scalar}/{@code plain}
    */
   public static FloatKernels create(final String mode) {

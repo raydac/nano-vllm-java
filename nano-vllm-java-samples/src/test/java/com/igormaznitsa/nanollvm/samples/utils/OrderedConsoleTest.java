@@ -62,8 +62,10 @@ class OrderedConsoleTest {
     console.println("rag?> ");
 
     assertTrue(err.toString(StandardCharsets.UTF_8).contains("Preparing RAG corpus"),
-      err.toString());
-    assertTrue(out.toString(StandardCharsets.UTF_8).contains("rag?>"), out.toString());
-    assertTrue(!out.toString(StandardCharsets.UTF_8).contains("Preparing RAG"), out.toString());
+      err.toString(StandardCharsets.UTF_8));
+    assertTrue(out.toString(StandardCharsets.UTF_8).contains("rag?>"),
+      out.toString(StandardCharsets.UTF_8));
+    assertTrue(!out.toString(StandardCharsets.UTF_8).contains("Preparing RAG"),
+      out.toString(StandardCharsets.UTF_8));
   }
 }

@@ -123,7 +123,7 @@ public final class Gemma4QatLoader {
     try {
       for (LoadItem item : plan) {
         Located locatedItem = item.located();
-        if (reader == null || locatedItem.source() != current) {
+        if (reader == null || !locatedItem.source().equals(current)) {
           if (reader != null) {
             reader.close();
           }
@@ -176,7 +176,7 @@ public final class Gemma4QatLoader {
     int rows = payload.shape()[0];
     int packedWidth = payload.shape()[payload.shape().length - 1];
     int bits = inferBits(param, payload.dtype(), hf);
-    int cols = bits == 8 ? packedWidth : packedWidth * (8 / bits);
+    int cols = (bits == 8) ? packedWidth : (packedWidth * (8 / bits));
     float inScale = scalar(reader, parts.inputScale());
     float outScale = scalar(reader, parts.outputScale());
     return new GemmaQatWeight(param, packed, scales, rows, cols, bits, scaleCols, inScale,
@@ -207,8 +207,8 @@ public final class Gemma4QatLoader {
     if ("I8".equals(dtype)) {
       return 8;
     }
-    if (param.contains("lm_head") || param.contains("embed_tokens.weight")
-      && !param.contains("per_layer")) {
+    if (param.contains("lm_head")
+      || (param.contains("embed_tokens.weight") && !param.contains("per_layer"))) {
       return 2;
     }
     Integer layer = parseLayerIndex(param);
@@ -307,6 +307,7 @@ public final class Gemma4QatLoader {
     }
   }
 
+  @SuppressWarnings("ArrayRecordComponent")
   private record Located(
     WeightSource source,
     String rawName,

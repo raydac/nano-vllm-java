@@ -409,7 +409,7 @@ public final class PreparedRag implements RagIndex {
       }
       name = name.toLowerCase(Locale.ROOT);
       List<String> tokens = new ArrayList<>();
-      for (String part : STEM_SPLIT.split(name)) {
+      for (String part : STEM_SPLIT.split(name, -1)) {
         if (part.length() > 1) {
           tokens.add(part);
         }

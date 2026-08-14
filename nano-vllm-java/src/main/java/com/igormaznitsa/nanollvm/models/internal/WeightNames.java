@@ -9,16 +9,22 @@ public final class WeightNames {
 
   public static final String ARCH_GEMMA3 = "gemma3";
   /**
+   * Hugging Face {@code model_type} for Gemma 4 text.
+   *
    * @since 1.1.0
    */
   public static final String ARCH_GEMMA4 = "gemma4";
   public static final String ARCH_QWEN3 = "qwen3";
   public static final String ARCH_LFM2 = "lfm2";
   /**
+   * Hugging Face {@code model_type} for Llama (including SmolLM2 / Tiny-LLM).
+   *
    * @since 1.1.0
    */
   public static final String ARCH_LLAMA = "llama";
   /**
+   * Hugging Face / GGUF architecture id for BERT embedding graphs.
+   *
    * @since 1.1.0
    */
   public static final String ARCH_BERT = "bert";
@@ -30,18 +36,25 @@ public final class WeightNames {
   public static final String GGUF_TOKEN_EMBD = "token_embd.weight";
   public static final String GGUF_TOKEN_EMBD_NORM = "token_embd_norm.weight";
   /**
+   * GGUF LayerNorm bias beside {@link #GGUF_TOKEN_EMBD_NORM}.
+   *
    * @since 1.1.0
    */
   public static final String GGUF_TOKEN_EMBD_NORM_BIAS = "token_embd_norm.bias";
   /**
+   * GGUF absolute position embedding table.
+   *
    * @since 1.1.0
    */
   public static final String GGUF_POSITION_EMBD = "position_embd.weight";
   /**
+   * GGUF token-type (segment) embedding table.
+   *
    * @since 1.1.0
    */
   public static final String GGUF_TOKEN_TYPES = "token_types.weight";
   public static final String GGUF_OUTPUT = "output.weight";
+  public static final String GGUF_OUTPUT_NORM = "output_norm.weight";
 
   public static final String QKV_PROJ = "qkv_proj";
   public static final String GATE_UP_PROJ = "gate_up_proj";

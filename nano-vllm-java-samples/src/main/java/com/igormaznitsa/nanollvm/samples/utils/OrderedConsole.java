@@ -66,6 +66,7 @@ public final class OrderedConsole {
     this.print("\n");
   }
 
+  @SuppressWarnings("AnnotateFormatMethod")
   public void printf(final Locale locale, final String format, final Object... args) {
     this.print(String.format(locale, format, args));
   }

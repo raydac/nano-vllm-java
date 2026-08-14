@@ -930,6 +930,7 @@ public final class PdfTextExtractor {
     }
   }
 
+  @SuppressWarnings("ArrayRecordComponent")
   private record StreamPayload(byte[] data, List<String> filters) {
   }
 
@@ -937,6 +938,7 @@ public final class PdfTextExtractor {
     static final DictInfo EMPTY = new DictInfo(-1, List.of());
   }
 
+  @SuppressWarnings("ArrayRecordComponent")
   private record ByteString(byte[] bytes, int end) {
   }
 }

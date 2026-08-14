@@ -67,6 +67,8 @@ public final class ModelFileBundle {
   }
 
   /**
+   * Reads every listed {@link ModelFileId} from {@code source} into heap buffers.
+   *
    * @since 1.1.0
    */
   public static ModelFileBundle load(final ModelFileSource source, final LlmListener io)
@@ -278,6 +280,8 @@ public final class ModelFileBundle {
   }
 
   /**
+   * ONNX graph blobs from the source ({@code model.onnx} / {@code model_fp16.onnx} / {@code onnx/}).
+   *
    * @since 1.1.0
    */
   public List<NamedBytes> onnx() {
@@ -285,8 +289,11 @@ public final class ModelFileBundle {
   }
 
   /**
+   * Heap copy of a named weight or sidecar blob.
+   *
    * @since 1.1.0
    */
+  @SuppressWarnings("ArrayRecordComponent")
   public record NamedBytes(String name, byte[] bytes) {
     public NamedBytes {
       requireNonNull(name, "name");

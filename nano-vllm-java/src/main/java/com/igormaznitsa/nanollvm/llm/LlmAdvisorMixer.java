@@ -17,6 +17,8 @@ public interface LlmAdvisorMixer {
   }
 
   /**
+   * Builds the main-user prompt from advisor replies and the current turn.
+   *
    * @param source           engine that produced the advisor replies
    * @param advisorResponses one entry per configured advisor (name + generated text)
    * @param history          prior dialog available for mix decisions (may be empty)

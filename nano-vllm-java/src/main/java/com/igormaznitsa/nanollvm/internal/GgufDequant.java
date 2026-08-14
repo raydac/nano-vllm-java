@@ -599,7 +599,7 @@ public final class GgufDequant {
     int tmp = aux[2];
     aux[2] = ((aux[0] >>> 4) & kmask2) | (((tmp >>> 4) & kmask1) << 4);
     aux[3] = ((aux[1] >>> 4) & kmask2) | (((tmp >>> 6) & kmask1) << 4);
-    aux[0] = (aux[0] & kmask2) | (((tmp) & kmask1) << 4);
+    aux[0] = (aux[0] & kmask2) | ((tmp & kmask1) << 4);
     aux[1] = (aux[1] & kmask2) | (((tmp >>> 2) & kmask1) << 4);
     byte[] scales = new byte[16];
     for (int i = 0; i < 4; i++) {

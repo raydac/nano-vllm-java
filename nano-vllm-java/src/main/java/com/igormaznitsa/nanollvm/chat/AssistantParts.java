@@ -9,6 +9,7 @@ import java.util.regex.Pattern;
 
 record AssistantParts(String thinking, String answer, boolean thinkOpen) {
 
+  private static final Pattern LINE_BREAK = Pattern.compile("\\R");
   private static final Pattern SPECIAL_TOKEN = Pattern.compile("<\\|[^\\s|>]*\\|>?");
   private static final Pattern LEADING_ASSISTANT = Pattern.compile("(?i)^\\s*assistant\\s*:?\\s*");
   private static final Pattern STATED_ANSWER = Pattern.compile(
@@ -176,7 +177,7 @@ record AssistantParts(String thinking, String answer, boolean thinkOpen) {
       return "";
     }
 
-    String[] lines = thinking.strip().split("\\R");
+    String[] lines = LINE_BREAK.split(thinking.strip(), -1);
     for (int i = lines.length - 1; i >= 0; i--) {
       String line = lines[i].strip();
       if (line.isEmpty() || line.startsWith("+")) {

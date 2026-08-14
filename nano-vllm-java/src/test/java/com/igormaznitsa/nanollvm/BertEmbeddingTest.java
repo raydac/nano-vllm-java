@@ -38,6 +38,10 @@ final class BertEmbeddingTest {
       assertTrue(model.isEmbeddingModel());
       assertFalse(model.isCausalModel());
       assertEquals("bert", model.architectureName());
+      String text = model.toString();
+      assertTrue(text.contains("kind=embedding"), text);
+      assertTrue(text.contains("architecture=bert"), text);
+      assertTrue(text.contains("container=gguf"), text);
 
       float[] a = model.embed("hello world");
       float[] b = model.embed("hello world");

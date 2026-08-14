@@ -93,6 +93,9 @@ final class CorpusLoader {
     private LlmListener io = LlmListeners.silent();
     private Path reportRoot;
 
+    private Builder() {
+    }
+
     private static String fingerprint(final String text) {
       return text.toLowerCase(Locale.ROOT).replaceAll("\\s+", " ").strip();
     }
@@ -434,6 +437,7 @@ final class CorpusLoader {
     private static final Pattern CODE_FENCE = Pattern.compile("(?s)```.*?```");
     private static final Pattern INLINE_CODE = Pattern.compile("`([^`]+)`");
     private static final Pattern BULLET = Pattern.compile("^\\s*[-*+]\\s+");
+    private static final Pattern NEWLINE = Pattern.compile("\n", Pattern.LITERAL);
     private static final Pattern SENTENCE_END =
       Pattern.compile("(?<=[.!?。！？])\\s+(?=[\\p{L}\\p{N}\"'(«])");
 
@@ -450,7 +454,7 @@ final class CorpusLoader {
       StringBuilder paragraph = new StringBuilder();
       List<String> out = new ArrayList<>();
 
-      for (String line : text.split("\n", -1)) {
+      for (String line : NEWLINE.split(text, -1)) {
         Matcher heading = HEADING_LINE.matcher(line.strip());
         if (heading.matches()) {
           flushParagraph(paragraph, section, out);
@@ -484,7 +488,7 @@ final class CorpusLoader {
       if (body.isEmpty()) {
         return;
       }
-      for (String sentence : SENTENCE_END.split(body)) {
+      for (String sentence : SENTENCE_END.split(body, -1)) {
         String s = sentence.strip();
         if (s.isEmpty()) {
           continue;

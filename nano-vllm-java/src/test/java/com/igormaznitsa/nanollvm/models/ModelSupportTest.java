@@ -1,5 +1,6 @@
 package com.igormaznitsa.nanollvm.models;
 
+import static java.util.Locale.ROOT;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -150,16 +151,13 @@ class ModelSupportTest {
       """);
     UnsupportedModelException ex = assertThrows(
       UnsupportedModelException.class, () -> ModelSupport.resolve(vlm));
-    assertTrue(ex.getMessage().toLowerCase().contains("vision")
-      || ex.getMessage().toLowerCase().contains("multimodal"));
+    assertTrue(ex.getMessage().toLowerCase(ROOT).contains("vision")
+      || ex.getMessage().toLowerCase(ROOT).contains("multimodal"));
   }
 
   @Test
-  void rejectsGgufQwen3AndLlamaWithContainerHint() {
-    UnsupportedModelException qwen = assertThrows(
-      UnsupportedModelException.class, () -> ModelSupport.requireGguf("qwen3"));
-    assertTrue(qwen.getMessage().contains("GGUF"));
-    assertTrue(qwen.getMessage().contains("Hugging Face"));
+  void acceptsGgufQwen3AndStillRejectsLlamaGguf() {
+    assertEquals(WeightNames.ARCH_QWEN3, ModelSupport.requireGguf("qwen3").architectureId());
 
     UnsupportedModelException llama = assertThrows(
       UnsupportedModelException.class, () -> ModelSupport.requireGguf("llama"));

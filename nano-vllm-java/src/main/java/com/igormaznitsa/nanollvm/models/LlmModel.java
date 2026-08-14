@@ -1,5 +1,6 @@
 package com.igormaznitsa.nanollvm.models;
 
+import static java.util.Locale.ROOT;
 import static java.util.Objects.requireNonNull;
 
 import com.igormaznitsa.nanollvm.chat.LlmListener;
@@ -64,6 +65,7 @@ public final class LlmModel implements AutoCloseable {
   private final Config.HfConfig hfConfig;
   private final Tokenizer tokenizer;
   private final Map<String, Object> options;
+  private final boolean embeddingModel;
   private final AtomicReference<WeightBag> weights;
   private final AtomicReference<CausalLM> network;
   private final AtomicReference<EmbeddingEncoder> encoder;
@@ -109,6 +111,7 @@ public final class LlmModel implements AutoCloseable {
     this.weights = new AtomicReference<>(requireNonNull(weights, "weights"));
     this.network = new AtomicReference<>(network);
     this.encoder = new AtomicReference<>(encoder);
+    this.embeddingModel = encoder != null;
     this.tokenizer = requireNonNull(tokenizer, "tokenizer");
     this.options = copyAndValidateOptions(options);
   }
@@ -182,6 +185,8 @@ public final class LlmModel implements AutoCloseable {
   }
 
   /**
+   * {@code true} when this checkpoint is a causal chat/completion graph.
+   *
    * @since 1.1.0
    */
   public boolean isCausalModel() {
@@ -190,6 +195,8 @@ public final class LlmModel implements AutoCloseable {
   }
 
   /**
+   * {@code true} when this checkpoint is an embedding encoder ({@link #embed(CharSequence)}).
+   *
    * @since 1.1.0
    */
   public boolean isEmbeddingModel() {
@@ -203,6 +210,74 @@ public final class LlmModel implements AutoCloseable {
 
   public boolean isClosed() {
     return this.closed.get();
+  }
+
+  private static String weightsLabel(final WeightBag bag) {
+    if (bag == null) {
+      return "released";
+    }
+    if (bag.hasGemmaQat()) {
+      return "qat";
+    }
+    return bag.hasPacked() ? "packed" : "dense";
+  }
+
+  @Override
+  public String toString() {
+    Config.HfConfig cfg = this.hfConfig;
+    WeightBag bag = this.weights.get();
+    return ("LlmModel{kind=%s, architecture=%s, container=%s, path=%s, layers=%d, hidden=%d, "
+      + "intermediate=%d, heads=%d/%d, headDim=%d, context=%d, vocab=%d, tensors=%s, weights=%s, "
+      + "chatFormat=%s%s%s}").formatted(
+      this.kindLabel(),
+      this.architectureId(),
+      this.containerLabel(),
+      this.path,
+      cfg.numHiddenLayers(),
+      cfg.hiddenSize(),
+      cfg.intermediateSize(),
+      cfg.numAttentionHeads(),
+      cfg.numKeyValueHeads(),
+      cfg.headDim(),
+      cfg.maxPositionEmbeddings(),
+      cfg.vocabSize(),
+      bag == null ? "released" : Integer.toString(bag.size()),
+      weightsLabel(bag),
+      this.tokenizer.chatFormat(),
+      this.thinkSuffix(),
+      this.closed.get() ? ", closed" : "");
+  }
+
+  private String kindLabel() {
+    return this.embeddingModel ? "embedding" : "chat";
+  }
+
+  private String architectureId() {
+    EmbeddingEncoder encoder = this.encoder.get();
+    if (encoder != null) {
+      return encoder.architectureName();
+    }
+    CausalLM network = this.network.get();
+    if (network != null) {
+      return network.architectureName();
+    }
+    return this.hfConfig.modelType();
+  }
+
+  private String containerLabel() {
+    String name = this.path.getFileName().toString().toLowerCase(ROOT);
+    if (name.endsWith(".gguf")) {
+      return "gguf";
+    }
+    return this.path.toString().contains("nanollvm-memory") ? "memory" : "folder";
+  }
+
+  private String thinkSuffix() {
+    Object tags = this.options.get(OPTION_THINK_TAGS);
+    if (tags instanceof ThinkTags custom && !ThinkTags.DEFAULT.equals(custom)) {
+      return ", thinkTags=%s/%s".formatted(custom.open(), custom.close());
+    }
+    return this.tokenizer.invitesThinking() ? ", think=true" : "";
   }
 
   /**

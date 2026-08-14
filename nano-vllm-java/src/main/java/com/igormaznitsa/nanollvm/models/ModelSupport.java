@@ -30,10 +30,10 @@ public final class ModelSupport {
     Supported by this library:
       Chat from a Hugging Face folder (config.json + *.safetensors or *.onnx): qwen3, gemma3 / gemma3_text, \
     gemma4 (text / QAT mobile), llama
-      Chat from a GGUF file: lfm2
+      Chat from a GGUF file: qwen3, lfm2
       Embeddings from GGUF or ONNX: bert
     Not supported: Qwen2 / Qwen2.5, Qwen3.5 / Qwen3-Next / Fara, vision-language models, Gemma 1 / 2, \
-    Gemma 4 vision/audio towers, Mistral / Mixtral, Phi, MoE, GGUF Qwen / Llama / Gemma, Hugging Face BERT safetensors.""";
+    Gemma 4 vision/audio towers, Mistral / Mixtral, Phi, MoE, GGUF Llama / Gemma, Hugging Face BERT safetensors.""";
 
   private static final Pattern HF_CLASS_SUFFIX = Pattern.compile(
     "(ForCausalLM|ForConditionalGeneration|ForSequenceClassification|ForMaskedLM"
@@ -44,7 +44,7 @@ public final class ModelSupport {
 
   /**
    * Resolves {@code config} and checks that {@code source} can carry that architecture
-   * (e.g. Qwen3 chat is not loaded from GGUF).
+   * (e.g. Gemma3 / Llama chat are not loaded from GGUF).
    *
    * @return selected backend id and {@link Kind}
    * @throws com.igormaznitsa.nanollvm.exceptions.UnsupportedModelException if the family is
@@ -57,8 +57,8 @@ public final class ModelSupport {
   }
 
   /**
-   * Resolves a GGUF {@code general.architecture} string ({@code lfm2} chat or {@code bert}
-   * embeddings).
+   * Resolves a GGUF {@code general.architecture} string ({@code qwen3} / {@code lfm2} chat or
+   * {@code bert} embeddings).
    *
    * @param generalArchitecture GGUF metadata architecture; {@code null} treated as missing
    * @return selected backend id and {@link Kind}
@@ -229,7 +229,7 @@ public final class ModelSupport {
     final Config.HfConfig config
   ) {
     String id = selected.architectureId();
-    boolean hfChat = ARCH_QWEN3.equals(id) || ARCH_GEMMA3.equals(id) || ARCH_LLAMA.equals(id);
+    boolean hfFolderOnlyChat = ARCH_GEMMA3.equals(id) || ARCH_LLAMA.equals(id);
     if (ARCH_GEMMA4.equals(id) && source != Source.HF_SAFETENSORS) {
       throw unsupported(
         ("Architecture '%s' loads from a Hugging Face folder (config.json + *.safetensors QAT), "
@@ -238,10 +238,10 @@ public final class ModelSupport {
         config == null ? id : config.modelType(),
         config == null ? List.of() : config.architectures());
     }
-    if (hfChat && source == Source.GGUF) {
+    if (hfFolderOnlyChat && source == Source.GGUF) {
       throw unsupported(
         ("Architecture '%s' loads from a Hugging Face folder (config.json + *.safetensors or "
-          + "*.onnx), not from GGUF. GGUF is supported for lfm2 (chat) and bert (embeddings).")
+          + "*.onnx), not from GGUF. GGUF chat is qwen3 and lfm2; embeddings are bert.")
           .formatted(id),
         config == null ? id : config.modelType(),
         config == null ? List.of() : config.architectures());

@@ -158,7 +158,7 @@ class PdfTextExtractorTest {
   @Test
   void extractRejectsInvalidBytes() {
     assertThrows(UncheckedIOException.class,
-      () -> PdfTextExtractor.extract("not-a-pdf".getBytes()));
+      () -> PdfTextExtractor.extract("not-a-pdf".getBytes(US_ASCII)));
   }
 
   private Path writePdfBoxFixture(String... pageTexts) throws IOException {

@@ -134,18 +134,6 @@ public final class LLM implements AutoCloseable {
   private final LlmAdvisorMixer advisorMixer;
   private final Predicate<String> advisorNoteFilter;
 
-  /**
-   * Binds a shared immutable {@link LlmModel} with default builder settings
-   * (silent listener, warmup off, GGUF left packed).
-   *
-   * @param model already-loaded model; may be shared with other {@code LLM} instances; must be non-{@code null}
-   * @throws ModelLoadException   if engine construction fails (e.g. KV estimate, unpack)
-   * @throws NullPointerException if {@code model} is {@code null}
-   */
-  public LLM(final LlmModel model) {
-    this(builder(model));
-  }
-
   private LLM(final Builder builder) {
     requireNonNull(builder, "builder");
     MatmulRuntime createdMatmul = null;

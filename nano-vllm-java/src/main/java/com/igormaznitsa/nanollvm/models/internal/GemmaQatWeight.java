@@ -123,11 +123,11 @@ public final class GemmaQatWeight {
   }
 
   public boolean isReleased() {
-    return this.packed == RELEASED;
+    return this.packed.length == 0;
   }
 
   private void requirePacked() {
-    if (this.packed == RELEASED) {
+    if (this.packed.length == 0) {
       throw new IllegalStateException("QAT packed bytes already released: " + this.name);
     }
   }

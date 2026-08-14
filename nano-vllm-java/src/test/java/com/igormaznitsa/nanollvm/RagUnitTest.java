@@ -4,6 +4,7 @@ import static java.nio.file.Files.createTempDirectory;
 import static java.nio.file.Files.createTempFile;
 import static java.nio.file.Files.deleteIfExists;
 import static java.nio.file.Files.writeString;
+import static java.util.Locale.ROOT;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -107,7 +108,7 @@ class RagUnitTest {
   void noHitPromptIsQuestionOnly() {
     String prompt = RagSession.formatUserMessage(List.of(), "где живут ведьмы?", 900);
     assertEquals("где живут ведьмы?", prompt);
-    assertFalse(prompt.toLowerCase().contains("i do not know"));
+    assertFalse(prompt.toLowerCase(ROOT).contains("i do not know"));
   }
 
   @Test
@@ -198,7 +199,7 @@ class RagUnitTest {
         .build();
     List<RagHit> hits = prepared.retrieve("Is Little Red Riding Hood a fairy tale or a fable?", 1);
     assertFalse(hits.isEmpty());
-    assertTrue(hits.getFirst().chunk().text().toLowerCase().contains("fairy tale"));
+    assertTrue(hits.getFirst().chunk().text().toLowerCase(ROOT).contains("fairy tale"));
   }
 
   @Test

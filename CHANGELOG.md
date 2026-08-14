@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased] — 1.1.0-SNAPSHOT
 
 ### Changed
+- Construct an engine only with `LLM.builder(model).build()`. The `new LLM(model)` shortcut is
+  removed so closed and embedding checkpoints cannot skip builder checks.
 - Interactive `Example` demo is a **line-oriented terminal** app: model menu, RAG mode
   (none / BM25 / dense / hybrid), then advisor count (`0`–`3`). Enter selects the first item
   (downloaded models first; Qwen3-0.6B preferred for chat quality). If no checkpoint is on disk, the demo exits
@@ -40,7 +42,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - `ModelSupport` / `UnsupportedModelException`: exact architecture detection (no substring `qwen`→Qwen3),
   a user-facing support catalog, and fail-fast load errors for look-alike families (Qwen2, Qwen3.5/Fara,
-  Gemma 2, Gemma 4 vision/audio-only variants, Mistral, other VLMs, GGUF Qwen/Llama, HF BERT safetensors). `-Dnanollvm.arch` cannot override a
+  Gemma 2, Gemma 4 vision/audio-only variants, Mistral, other VLMs, GGUF Llama/Gemma, HF BERT safetensors). `-Dnanollvm.arch` cannot override a
   different family. `LLM.builder` / `LlmModel.embed` misuse messages include the same catalog. Gemma 4 **text** (including QAT mobile) is a supported chat graph.
 - `Tokenizer.ChatFormat` / `isTurnBasedChat()` / `skipSpecialTokensOnChatDecode()` (product-named
   chat helpers such as {@code isGemmaChat} removed; use format/architecture APIs).
@@ -52,6 +54,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Llama** causal architecture (`LlamaForCausalLM`) for HF safetensors and ONNX (Tiny-LLM-ONNX base demo;
   SmolLM2-135M-Instruct-ONNX chat demo via `models/download-smollm2-135m-instruct-onnx.sh`).
 - Transparent GGUF BERT embedding support (e.g. GTE-small): load via `LlmModelFactory.make` and call `LlmModel.embed(...)` with text or token ids; `LLM.builder` rejects embedding-only models; `Example` menu option runs an embedding REPL.
+- **Qwen3 GGUF chat:** `LlmModelFactory.make(pathToQwen3.gguf)` loads a self-contained `general.architecture=qwen3` file (embedded tokenizer + packed weights). Load is split into container transport (GGUF/HF/ONNX) and a model binding that adapts catalog metadata/tensor names when they are enough for a supported graph. Qwen2, MoE, VL, and Gemma/Llama GGUF stay rejected.
 - Dense / hybrid RAG: `DenseRagIndex`, `HybridRagIndex`, and `RagFactory.withEmbeddings(PreparedRag, LlmModel)` (BM25 + embedding cosine via RRF). `Example` offers a RAG-mode menu (none / BM25 / dense / hybrid) after choosing a chat model, then an advisor-count menu (`0`–`3`).
 - RAG classpath documents: `RagFactory.makeResource` / `Builder.addResource` (absolute ClassLoader path or `Class.getResourceAsStream` resolution); source labels use `classpath:…`.
 - GGML dequant for the remaining GGUF weight types: K-quants (`Q2_K`, `Q5_K`, `Q8_K`), legacy (`Q4_1`, `Q5_0`, `Q5_1`, `Q8_1`, `Q1_0`, `Q2_0`), IQ (`IQ1_S`/`M`, `IQ2_*`, `IQ3_*`, `IQ4_XS`), ternary (`TQ1_0`/`TQ2_0`), MXFP4 / NVFP4, and integer/F64 tensors. `Q3_K` / `IQ4_NL` were already present. File recipes like `Q4_K_M` still mix those GGML types (not a separate dtype).

@@ -455,6 +455,7 @@ public final class Transformer implements AutoCloseable {
   /**
    * Per-sequence sampling knobs aligned with the scheduled batch order.
    */
+  @SuppressWarnings("ArrayRecordComponent")
   private record SamplingControls(float[] temperatures, int[] topKs, float[] topPs) {
   }
 }

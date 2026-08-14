@@ -519,7 +519,7 @@ public final class Example {
   /**
    * Builds one {@link LLM} on the loaded chat model.
    *
-   * <p>Advisor count {@code 0} skips {@link LLM.Builder#advisors()}. Counts {@code 1..3} take
+   * <p>Advisor count {@code 0} skips {@link LLM.Builder#advisors(LlmAdvisorMixer, LlmAdvisor...)}. Counts {@code 1..3} take
    * Practical / Abstract / Consequence in that order, plus a note filter that drops short
    * setup-boilerplate advisor lines.
    */
@@ -802,7 +802,7 @@ public final class Example {
   }
 
   private static boolean hasExplicitModel(final String[] args) {
-    return args != null && args.length > 0 && args[0] != null && !args[0].isBlank()
+    return (args != null && args.length > 0 && args[0] != null && !args[0].isBlank())
       || NanoLlvmProps.systemProperty(PROP_MODEL) != null
       || NanoLlvmProps.environment(ENV_MODEL) != null;
   }

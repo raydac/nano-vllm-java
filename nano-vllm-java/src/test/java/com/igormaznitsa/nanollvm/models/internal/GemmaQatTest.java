@@ -9,7 +9,7 @@ class GemmaQatTest {
 
   @Test
   void unpacksInt4LowNibbleFirst() {
-    byte packed = (byte) ((13 << 4) | 3);
+    byte packed = (byte) (13 << 4 | 3);
     float[] dst = new float[2];
     GemmaQat.unpackInt4(new byte[] {packed}, 0, 1, dst, 2);
     assertEquals(3 - 8, dst[0], 0f);
@@ -18,7 +18,7 @@ class GemmaQatTest {
 
   @Test
   void unpacksInt2CrumbsInBitOrder() {
-    byte packed = (byte) (0b11_10_01_00);
+    byte packed = (byte) 0b11_10_01_00;
     float[] dst = new float[4];
     GemmaQat.unpackInt2(new byte[] {packed}, 0, 1, dst, 4);
     assertArrayEquals(new float[] {0 - 2, 1 - 2, 2 - 2, 3 - 2}, dst);

@@ -27,7 +27,7 @@ depends on the **container** and the **architecture** — this is a curated subs
 | Format | Since | What you point at | Role |
 |--------|-------|-------------------|------|
 | **Safetensors** | **1.0.0** | HF folder: `config.json` + tokenizer + `*.safetensors` | Dense float weights (`F32` / `F16` / `BF16` / `F64` → float32). If both safetensors and ONNX are present, **safetensors wins**. |
-| **GGUF** | **1.0.0** | Single `.gguf` file | Packed GGML blocks; dequant on matmul / embed. Mmap ≤ ~2 GiB. Architectures: **`lfm2`** (chat) and **`bert`** (embeddings **since 1.1.0**). |
+| **GGUF** | **1.0.0** | Single `.gguf` file | Packed GGML blocks; dequant on matmul / embed. Mmap ≤ ~2 GiB. Architectures: **`qwen3`** / **`lfm2`** (chat) and **`bert`** (embeddings **since 1.1.0**). |
 | **ONNX** (Tier A) | **1.1.0** | HF folder: same sidecars + `model.onnx` / `model_fp16.onnx` (root or `onnx/`) | **Initializers only** — no ONNX Runtime, no graph execution. Preferred float exports; community `*_q4*` / `*_int8*` / `*_quantized*` / `with_past` names are skipped. |
 
 Stream / classpath loads (`ModelFileSource`, `fromClasspath*`) are **since 1.1.0** (bytes → heap, no disk cache). ONNX
@@ -37,7 +37,7 @@ Stream / classpath loads (`ModelFileSource`, `fromClasspath*`) are **since 1.1.0
 
 | Kind | Since | Typical crate | Public use |
 |------|-------|---------------|------------|
-| **Qwen3** / **Gemma3** causal chat | **1.0.0** | HF safetensors (also ONNX **1.1.0**) | `LLM.builder(model)` → chat / generate |
+| **Qwen3** / **Gemma3** causal chat | **1.0.0** | HF safetensors (also ONNX **1.1.0**; Qwen3 GGUF **1.1.0**) | `LLM.builder(model)` → chat / generate |
 | **LFM2** hybrid causal chat | **1.0.0** | GGUF only (`lfm2`) | Same `LLM` path; not from HF safetensors / ONNX |
 | **Llama** causal (incl. Tiny-LLM / SmolLM2 Instruct demos) | **1.1.0** | HF safetensors or ONNX | Same `LLM` path |
 | **BERT** sentence embeddings | **1.1.0** | GGUF `bert` (e.g. gte-small); ONNX BERT when names map | `LlmModel.embed(…)` — **not** `LLM.builder` |
@@ -46,7 +46,7 @@ Stream / classpath loads (`ModelFileSource`, `fromClasspath*`) are **since 1.1.0
 
 | Path | Supported | Explicitly out |
 |------|-----------|----------------|
-| GGUF GGML | Current llama.cpp weight dtypes (floats, K-quants, IQ, TQ, MXFP4/NVFP4, `Q*_0`/`Q*_1`) | Removed ggml types (`Q4_2`/`Q4_3`, SIMD-repack `*_4_4`); Qwen/Gemma/Llama GGUF **architectures** |
+| GGUF GGML | Current llama.cpp weight dtypes (floats, K-quants, IQ, TQ, MXFP4/NVFP4, `Q*_0`/`Q*_1`) | Removed ggml types (`Q4_2`/`Q4_3`, SIMD-repack `*_4_4`); Gemma/Llama GGUF **architectures** (Qwen2 / MoE / VL too) |
 | ONNX TensorProto | FLOAT / FLOAT16 / BFLOAT16 / DOUBLE → float32 | Float8 / nibble / unknown weight types (fail loud); int/bool/string/complex initializers skipped as graph constants |
 
 Details and honest limits: [`description.md`](description.md) chapters **7** / **7a** / **7b** / **7c**. Download scripts and
@@ -156,7 +156,7 @@ More API samples (streaming, RAG, GGUF, advisors) are in [Library quick start](#
 ## Key features
 
 - Continuous batching scheduler with paged KV cache and prefix caching
-- **Qwen3** (default), **Gemma3**, **Llama** (**since 1.1.0**), and **LFM2** (hybrid short-conv + GQA) causal LMs
+- **Qwen3** (default; HF safetensors, ONNX **1.1.0**, or GGUF **1.1.0**), **Gemma3**, **Llama** (**since 1.1.0**), and **LFM2** (hybrid short-conv + GQA, GGUF) causal LMs
 - Weight crates: HF **safetensors**, **GGUF**, and (**since 1.1.0**) ONNX Tier A — see [Supported formats and variants](#supported-formats-and-variants)
 - Optional multi-thread CPU matmul (`cpuThreads` / `matmulExecutor` / `disableMultiCpu`); default = all processors on a lazily shared pool
 - GPT-2 byte BPE, Gemma Metaspace BPE, GGUF-embedded, and BERT WordPiece tokenizers
@@ -186,7 +186,9 @@ mvn package
 ```
 
 This is a multi-module reactor: parent `nano-vllm-java-pom`, library `nano-vllm-java`, demos
-`nano-vllm-java-samples`. Run Maven from the **repository root**.
+`nano-vllm-java-samples`. Run Maven from the **repository root**. Unit tests do not need a Qwen3
+GGUF file. Optional local checkpoints (HF Qwen3 / Gemma, LFM2 GGUF, gte-small, …) skip their
+integration tests when those files are absent.
 
 Artifacts:
 
@@ -290,16 +292,30 @@ mvn -pl nano-vllm-java-samples -q exec:java \
 ```
 
 <a id="gguf-lfm2"></a>
-### GGUF (LFM2 chat; BERT embeddings since 1.1.0)
+### GGUF (Qwen3 / LFM2 chat; BERT embeddings since 1.1.0)
 
-A single `.gguf` file is also valid. Example: LiquidAI [LFM2.5-2.6B-GGUF](https://huggingface.co/LiquidAI/LFM2.5-2.6B-GGUF)
-`Q4_K_M` (~1.67 GB on disk). Weights **stay packed** in RAM by default; each `Linear` / embedding binds a
+A single `.gguf` file is also valid. Weights **stay packed** in RAM by default; each `Linear` / embedding binds a
 `LinearKernel` / `EmbeddingKernel` at construction (GGML type fixed in a dequant lambda). Block quants
 (`Q4_K`, `Q6_K`, …) decode **in place** into a float row during matmul / gather — no per-row full-tensor scratch.
 For float32 speed without a packed+dense peak, unpack **at load**:
 `LlmModelFactory.make(path, io, true)` (mmap → float tensors). Late unpack via
 `LLM.Builder.allowUnpackParameters()` still works on an already-packed model (releases packed bytes).
 Activations and KV remain float32 either way. Engine warmup is **off** by default (`.warmup()` to enable).
+
+**Qwen3 chat (since 1.1.0):** any self-contained `general.architecture=qwen3` file (embedded tokenizer + packed
+weights). There is **no** in-repo download script — obtain a file yourself (for example
+[Qwen/Qwen3-0.6B-GGUF](https://huggingface.co/Qwen/Qwen3-0.6B-GGUF)) and point the factory at it. The default
+`./models/download-qwen3-0.6b.sh` path is still the Hugging Face **safetensors folder**.
+
+```java
+try (LlmModel model = LlmModelFactory.make(Path.of("/opt/models/qwen3.gguf"));
+     LLM llm = LLM.builder(model).build()) {
+  System.out.println(llm.chatOnce("Hello"));
+}
+```
+
+**LFM2 chat:** LiquidAI [LFM2.5-2.6B-GGUF](https://huggingface.co/LiquidAI/LFM2.5-2.6B-GGUF) `Q4_K_M`
+(~1.67 GB on disk) has an in-repo script:
 
 ```bash
 ./models/download-lfm2.5-2.6b-gguf.sh
@@ -309,7 +325,7 @@ mvn -pl nano-vllm-java-samples -q exec:java \
 ```
 
 Supported GGUF dtypes for this path: current llama.cpp **weight** types (K-quants including `Q2_K`/`Q5_K`/`Q8_K`,
-legacy `Q4_0`/`Q4_1`/`Q5_0`/`Q5_1`/`Q8_0`/`Q8_1`, IQ, TQ, MXFP4/NVFP4, floats). Architecture must be `lfm2` for chat (or `bert` for
+legacy `Q4_0`/`Q4_1`/`Q5_0`/`Q5_1`/`Q8_0`/`Q8_1`, IQ, TQ, MXFP4/NVFP4, floats). Architecture must be `qwen3` or `lfm2` for chat (or `bert` for
 embeddings — see [Supported formats and variants](#supported-formats-and-variants)). Default heap in `.mvn/jvm.config`
 is still **16 GB** (safe headroom for KV / scratch); packed weights alone are closer to on-disk size.
 
@@ -339,7 +355,7 @@ Creates `models/Gemma4-E2B-IT-QAT-Mobile/`. Text-only chat load (vision/audio un
 ./models/download-gemma4-e2b-qat-mobile.sh
 ```
 
-**LFM2.5 GGUF** — see [GGUF (LFM2)](#gguf-lfm2) above.
+**Qwen3 GGUF / LFM2.5 GGUF** — see [GGUF](#gguf-lfm2) above. Qwen3 GGUF is bring-your-own (no download script).
 
 **Tiny-LLM-ONNX (Llama ~10M, ONNX demo)** — see [ONNX (weight import)](#onnx-weight-import) above.
 
@@ -530,7 +546,7 @@ try (LlmModel model = LlmModelFactory.make(Path.of("models/Qwen3-0.6B"));
 }
 ```
 
-### GGUF / LFM2
+### GGUF (Qwen3 or LFM2)
 
 ```java
 import com.igormaznitsa.nanollvm.chat.LlmListeners;
@@ -540,13 +556,16 @@ import com.igormaznitsa.nanollvm.models.LlmModelFactory;
 
 import java.nio.file.Path;
 
-LlmModel model = LlmModelFactory.make(Path.of("models/LFM2.5-2.6B-Q4_K_M.gguf"), LlmListeners.toSystem());
+// Qwen3 chat GGUF (since 1.1.0) — any general.architecture=qwen3 file you already have
+LlmModel model = LlmModelFactory.make(Path.of("/opt/models/qwen3.gguf"), LlmListeners.toSystem());
+// LFM2: Path.of("models/LFM2.5-2.6B-Q4_K_M.gguf") after ./models/download-lfm2.5-2.6b-gguf.sh
 // or unpack at load (no packed heap copy):
 // LlmModel model = LlmModelFactory.make(path, LlmListeners.toSystem(), true);
 try (model; LLM llm = LLM.builder(model)
     .maxModelLen(2048)
     .allCpuThreads()
     .build()) {
+  System.out.println(model); // kind, architecture, container, sizes; safe after close
   System.out.println(llm.chatOnce("Hello"));
 }
 ```

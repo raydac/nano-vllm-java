@@ -26,14 +26,28 @@ import java.util.Map;
 public final class OnnxProtoReader {
 
   /**
+   * ONNX TensorProto {@code FLOAT} (1).
+   *
    * @since 1.1.0
    */
   public static final int FLOAT = OnnxDataTypes.FLOAT;
-  /** @since 1.1.0 */
+  /**
+   * ONNX TensorProto {@code FLOAT16} (10).
+   *
+   * @since 1.1.0
+   */
   public static final int FLOAT16 = OnnxDataTypes.FLOAT16;
-  /** @since 1.1.0 */
+  /**
+   * ONNX TensorProto {@code DOUBLE} (11).
+   *
+   * @since 1.1.0
+   */
   public static final int DOUBLE = OnnxDataTypes.DOUBLE;
-  /** @since 1.1.0 */
+  /**
+   * ONNX TensorProto {@code BFLOAT16} (16).
+   *
+   * @since 1.1.0
+   */
   public static final int BFLOAT16 = OnnxDataTypes.BFLOAT16;
 
   private static final long MAX_ONNX_BYTES = 8L * 1024 * 1024 * 1024;
@@ -402,6 +416,7 @@ public final class OnnxProtoReader {
    *
    * @since 1.1.0
    */
+  @SuppressWarnings("ArrayRecordComponent")
   public record OnnxTensorProto(
     String name,
     int dataType,

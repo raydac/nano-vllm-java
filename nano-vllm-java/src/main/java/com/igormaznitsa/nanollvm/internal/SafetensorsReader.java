@@ -148,6 +148,8 @@ public final class SafetensorsReader implements AutoCloseable {
   }
 
   /**
+   * Reads a safetensors blob from an in-memory buffer ({@code label} is used in error text).
+   *
    * @since 1.1.0
    */
   public static SafetensorsReader open(final ByteBuffer data, final String label)
@@ -289,6 +291,7 @@ public final class SafetensorsReader implements AutoCloseable {
     }
   }
 
+  @SuppressWarnings("ArrayRecordComponent")
   private record TensorInfo(String dtype, int[] shape, long start, long end) {
   }
 }

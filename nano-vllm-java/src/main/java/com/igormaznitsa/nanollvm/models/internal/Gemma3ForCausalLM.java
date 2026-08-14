@@ -17,6 +17,7 @@ import static com.igormaznitsa.nanollvm.models.internal.WeightNames.Q_NORM_WEIGH
 import static com.igormaznitsa.nanollvm.models.internal.WeightNames.layer;
 import static com.igormaznitsa.nanollvm.models.internal.WeightNames.mlp;
 import static com.igormaznitsa.nanollvm.models.internal.WeightNames.selfAttn;
+import static java.util.Locale.ROOT;
 import static java.util.Objects.requireNonNull;
 
 import com.igormaznitsa.nanollvm.internal.Context;
@@ -167,7 +168,7 @@ public record Gemma3ForCausalLM(Gemma3Model model, ParallelLMHead lmHead) implem
 
     private static Gemma3MLP assemble(final Config.HfConfig config, final WeightBag weights,
                                       final int layerIndex) {
-      String act = config.effectiveActivation().toLowerCase();
+      String act = config.effectiveActivation().toLowerCase(ROOT);
       if (!act.contains("gelu")) {
         throw new IllegalArgumentException(
           "gemma3 architecture expects gelu_pytorch_tanh, got " + act);
