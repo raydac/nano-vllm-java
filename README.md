@@ -519,24 +519,26 @@ use one instance per thread, or call sequentially. `LLM.cancel()` is safe from a
 import com.igormaznitsa.nanollvm.models.LlmModel;
 import com.igormaznitsa.nanollvm.models.LlmModelFactory;
 import com.igormaznitsa.nanollvm.llm.LLM;
+import com.igormaznitsa.nanollvm.llm.SamplingParams;
 
 import java.nio.file.Path;
 
 Path modelDir = Path.of("models/Qwen3-0.6B"); // your local HF (or .gguf) path
 
-try (LlmModel model = LlmModelFactory.make(modelDir);  // quiet; make(dir, LlmListeners.toSystem()) for the same in-place percent/ETA bar on safetensors, GGUF, and ONNX
+try (LlmModel model = LlmModelFactory.make(modelDir);  // or open(dir).listen(LlmListeners.toSystem()).make()
      LLM llm = LLM.builder(model)
     .maxModelLen(2048)
+    .sampling(SamplingParams.builder().maxTokens(256).build())
     .systemPrompt("Answer briefly and factually.") // Qwen-style; prefer .noSystemPrompt() on Gemma
     .build()) {
 
-  String reply = llm.chat(256).send("Hello.").answer();
-  String once = llm.chatOnce("What is 2+2?");
-  String completion = llm.complete("The capital of France is");
+  String reply = llm.chat().send("Hello.").answer();
+  String once = llm.chatOnce("What is 2+2?", 64);
+  String completion = llm.complete("The capital of France is", 32);
 }
 ```
 
-Load weights once with {@code LlmModelFactory.make}, then bind engines with
+Load weights once with {@code LlmModelFactory.make} or {@code open(path).make()}, then bind engines with
 {@code LLM.builder(model)} so one model can be shared (close engines first, then the model):
 
 ```java
@@ -560,7 +562,7 @@ import java.nio.file.Path;
 LlmModel model = LlmModelFactory.make(Path.of("/opt/models/qwen3.gguf"), LlmListeners.toSystem());
 // LFM2: Path.of("models/LFM2.5-2.6B-Q4_K_M.gguf") after ./models/download-lfm2.5-2.6b-gguf.sh
 // or unpack at load (no packed heap copy):
-// LlmModel model = LlmModelFactory.make(path, LlmListeners.toSystem(), true);
+// LlmModel model = LlmModelFactory.open(path).listen(LlmListeners.toSystem()).unpackParameters().make();
 try (model; LLM llm = LLM.builder(model)
     .maxModelLen(2048)
     .allCpuThreads()
@@ -581,10 +583,10 @@ import com.igormaznitsa.nanollvm.models.LlmModel;
 import com.igormaznitsa.nanollvm.models.LlmModelFactory;
 
 import java.nio.file.Path;
-import java.util.Map;
 
-try (LlmModel model = LlmModelFactory.make(Path.of("models/Qwen3-0.6B"), Map.of(
-        LlmModel.OPTION_THINK_TAGS, ThinkTags.of("<scratch>", "</scratch>")))) {
+try (LlmModel model = LlmModelFactory.open(Path.of("models/Qwen3-0.6B"))
+        .thinkTags(ThinkTags.of("<scratch>", "</scratch>"))
+        .make()) {
   // ChatSession.thinkTags(...) can still override one conversation
 }
 ```

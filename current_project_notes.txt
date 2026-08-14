@@ -7,7 +7,7 @@
 - **GGUF BERT embeddings** (e.g. gte-small): same `LlmModelFactory.make` → `LlmModel.embed`; `LLM.builder` rejects embedding models; Q3_K + IQ4_NL dequant
 - **ModelFileSource**: `ModelFileId` → `InputStream` (+ weight shards); load into heap only (no disk cache); `make(Path)` stays direct disk I/O; ONNX ids `MODEL_ONNX` / `MODEL_ONNX_FP16`
 - **GGUF:** packed by default; dequant catalog matches current llama.cpp weight types (K/IQ/TQ/MX/NV/legacy); `LlmModelFactory.make(path, io, true)` unpacks at load; `LLM.Builder.allowUnpackParameters()` late-unpacks packed models. Chat GGUF: **qwen3** + **lfm2**; embeddings **bert**. Load = container **transport** (`GgufTransport` / HF folder / ONNX) then **`ModelBinding`** (adapt catalog → `HfConfig` + schema if the file is enough for a supported graph)
-- Library: `LlmModelFactory.make` → shared `LlmModel` (`AutoCloseable`); also `make(ModelFileSource)` / `fromClasspath*` (stream → heap; no disk cache); `LLM.Builder` only (warmup **off** by default); close **LLM first**, then **model**. `LlmModel.toString()` prints kind, architecture, container, sizes, packed/dense/qat, chat format (safe after close). Builder-built types (`LLM`, `Config`, `LlmAdvisor`, `MatmulRuntime`, `RagFactory`/`CorpusLoader` corpus) keep constructors private; `ResourceLimits` is a public record so its canonical constructor cannot be hidden.
+- Library: `LlmModelFactory.open(path).make()` or `make` → shared `LlmModel` (`AutoCloseable`); also `make(ModelFileSource)` / `fromClasspath*` / `openClasspath*` (stream → heap; no disk cache); `LLM.Builder` only (warmup **off** by default); `.sampling(SamplingParams)` seals chat/complete defaults; close **LLM first**, then **model**. `LlmModel.toString()` prints kind, architecture, container, sizes, packed/dense/qat, chat format (safe after close). Builder-built types (`LLM`, `Config`, `LlmAdvisor`, `MatmulRuntime`, `RagFactory`/`CorpusLoader` corpus) keep constructors private; `ResourceLimits` is a public record so its canonical constructor cannot be hidden.
 - **`description.md`:** audited for 1.1.0 — ONNX Tier A (**§7c**), Llama, SmolLM2/Tiny demos; ChatFormat /
   vocab-gated think / neutral `SamplingDefaults` / fail-unknown-arch; educational Qwen/Gemma tables kept as examples;
   **format restriction** tables in ch. 7 / 7a / 7c; **usage Java snippets** in ch. 4 / 7a / 7c / 14 / 16 / 17
@@ -21,6 +21,9 @@
   `ModelSupport.Selection`
 - Optional download scripts: Qwen3 / Gemma3 / **Gemma4 E2B QAT mobile** / LFM2 GGUF / gte-small / **Tiny-LLM-ONNX** / **SmolLM2-135M-Instruct-ONNX** (`.sh` + Windows `.ps1`/`.cmd`; PS1 ASCII-only + `$PSScriptRoot` + absolute outs)
 - ONNX JavaDoc: Tier A contracts + {@code @since 1.1.0} on public Onnx* APIs / ModelFileId ONNX roles / LlmModelFactory note
+- **API ergonomics (1.1.0):** `LlmModelFactory.open(…).make()`, `SamplingParams.builder()` / withers,
+  `LLM.Builder.sampling`, chatOnce/complete max-token shortcuts, `generate(…, Duration)`, public `LLM.TokenEvent`,
+  `ChatSession.seed`. Existing `make` / `generate` overloads remain. No-arg `SamplingParams()` matches `SamplingDefaults.neutral()`.
 - **`@since 1.1.0`:** new types (ModelSupport, ModelFileSource, DenseRagIndex, …) and new methods
   on 1.0 types (`LlmModel.embed`, `RagFactory.withEmbeddings`, `HfConfig.parse` /
   `hasLinearAttentionLayers`, `Tokenizer.ChatFormat`, …). `ResourceLimits` is 1.0 — no class `@since`
@@ -32,8 +35,8 @@
   RMSNorm uses `onePlusWeight` (not product-named). Architecture id `gemma3` remains only as the
   HF `model_type` / backend key (`Gemma3ForCausalLM`), same as `qwen3`/`llama`/`lfm2`.
   1.0 boolean chat shims removed (not kept as `@Deprecated`).
-- **ThinkTags:** opt-in custom scratchpad markers via `LlmModelFactory.make(…, Map)` key
-  `LlmModel.OPTION_THINK_TAGS` (frozen `Map.copyOf` on the model; all `LLM`s inherit).
+- **ThinkTags:** opt-in custom scratchpad markers via `LlmModelFactory.open(path).thinkTags(ThinkTags.of(open, close)).make()`
+  or `make(…, Map)` key `LlmModel.OPTION_THINK_TAGS` (frozen `Map.copyOf` on the model; all `LLM`s inherit).
   `ChatSession.thinkTags` / `RagSession.thinkTags` override one conversation. Default remains
   `<think>`/`</think>`. Tokenizer skip-seed stays string-based (no tokenizer→chat cycle).
   ChatML skip-seed only when both markers are whole vocab tokens.
@@ -63,7 +66,7 @@
 - `TEXT_DEBUG`: optional via `emitDebugPrompts`; RAG corpus/advisor notes are trusted prompt input by design
 - Dense RAG: index-time `LlmModel.embed` of all chunks; query cosine (dot); hybrid = BM25 + dense RRF; off-topic = both indexes agree
 - Lexical off-topic uses salient query terms only (skips conversational glue); file-name stems split on `/` and `\`
-- Gemma 4 text (QAT mobile): flatten nested `text_config`; skip `vision_tower`/`audio_tower`; packed int2/4/8 + SRQ (`GemmaQat`); PLE after MLP; KV share from last same-type non-shared layer; RMS `onePlusWeight=false`; attn scale 1.0; chat `<|turn>`/`<turn|>`
+- Gemma 4 text (QAT mobile): flatten nested `text_config`; skip `vision_tower`/`audio_tower`; packed int2/4/8 + SRQ (`GemmaQat`); PLE after MLP; KV share from last same-type non-shared layer; RMS `onePlusWeight=false`; attn scale 1.0; chat `<|turn>`/`<turn|>`. Weightless `RMSNorm` residual uses `Ops.addRmsNorm(x, residual, eps)` (identity scale; `weight == null` is valid).
 - Safetensors shards **> 2 GiB** (Gemma 4 QAT `model.safetensors` is ~2.29 GiB) use `FileChannel` positioned reads; files ≤ 2 GiB still mmap
 - Weight/tensor/PDF records hold `byte[]`/`float[]`/`int[]` on purpose (no List boxing); Error Prone `ArrayRecordComponent` is suppressed at those records. Packed QAT/GGUF release is `packed.length == 0`, not identity with a sentinel array.
 
@@ -117,7 +120,7 @@
 - `CHANGELOG.md` — 1.0.0 released; active line 1.1.0-SNAPSHOT
 - `README.md` — Hello World, CLI, library samples; ONNX + Tiny-LLM section
 - Build: `mvn22 -q test` / `MAVEN_OPTS="-Xmx8g" mvn22 -pl nano-vllm-java-samples -q exec:java` (document as `mvn` in README)
-- Library: `try (LlmModel m = LlmModelFactory.make(path); LLM llm = LLM.builder(m)…)` — engines close before model
+- Library: `LlmModelFactory.make(path)` / `open(path).make()` — engines close before model
 - Embeddings: `LlmModelFactory.make(gteGguf); model.embed(text)` — sample `EmbedHelloWorld`
 - ONNX demo: `./models/download-smollm2-135m-instruct-onnx.sh` (chat) or `./models/download-tiny-llm-onnx.sh` (base toy)
 - Dense RAG: `RagFactory.withEmbeddings(preparedRag, embedModel)` → `HybridRagIndex`; keep BM25 via `PreparedRag` alone
@@ -129,9 +132,10 @@
 ## 8. User Advice and Recommendations
 - Document Maven as `mvn` (portable); agent on this machine may use `mvn22`
 - Prefer `ChatSession` for dialog; raw `generate` for completions
-- Custom think/scratchpad markers: `LlmModelFactory.make(path, Map.of(LlmModel.OPTION_THINK_TAGS, ThinkTags.of(open, close)))`;
-  `ChatReply.parse(raw)` still defaults to `<think>`/`</think>` if you parse yourself
-- Prefer `LlmModelFactory.make` → `LLM.builder(LlmModel)`; close LLM then model
+- Custom think/scratchpad markers: `LlmModelFactory.open(path).thinkTags(ThinkTags.of(open, close)).make()`;
+  `ChatReply.parse(raw, llm)` uses the model pair; `ChatReply.parse(raw)` still defaults to `<think>`/`</think>`
+- Prefer `LlmModelFactory.open` / `make` → `LLM.builder(LlmModel)`; optional `.sampling(params)` on the engine;
+  close LLM then model
 - Embedding GGUFs/ONNX use the same factory; call `embed`, not `LLM.builder`
 - For Tiny-LLM-ONNX use `onnx/model.onnx` (fp32) or `model_fp16.onnx`; skip quantized community files
 - Tiny-LLM-ONNX download: `.sh` (Linux/macOS), `.ps1` / `.cmd` (Windows)

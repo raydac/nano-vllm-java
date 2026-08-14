@@ -105,6 +105,6 @@ final class AdvisorRunner {
     if (temperature <= 1e-10f) {
       temperature = ADVISOR_TEMPERATURE;
     }
-    return new SamplingParams(temperature, maxTokens, false, main.topK(), main.topP());
+    return main.withTemperature(temperature).withMaxTokens(maxTokens).withIgnoreEos(false);
   }
 }

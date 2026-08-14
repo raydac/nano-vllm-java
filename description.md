@@ -274,7 +274,7 @@ use `EmbeddingEncoderFactory`. Each `LLM.builder(model).build()` allocates its o
 (chapter 16).
 
 ```java
-try (LlmModel model = LlmModelFactory.make(Path.of("models/Qwen3-0.6B"));
+try (LlmModel model = LlmModelFactory.open(Path.of("models/Qwen3-0.6B")).make();
      LLM llm = LLM.builder(model).maxModelLen(2048).build()) {
   String answer = llm.chat(256).send("What is 2+2?").answer();
 } // close LLM first, then LlmModel (try-with-resources reverse order)
@@ -1235,7 +1235,7 @@ Many `lfm2` GGUF exports omit an embedded `chat_template` string even though the
 
 - Detects **`Tokenizer.ChatFormat`** from template/vocab markers (**ChatML** / turn-based / plain) — not from product names.
 - Sets `Tokenizer.invitesThinking()` from vocab (`<think>` + `</think>` present), for HF and GGUF loads alike.
-  Custom pairs go on `LlmModelFactory.make(path, Map.of(LlmModel.OPTION_THINK_TAGS, tags))`
+  Custom pairs go on `LlmModelFactory.open(path).thinkTags(tags).make()`
   (frozen on the model; inherited by every `LLM` sharing the checkpoint);
   skip-seed then uses `Tokenizer.invitesThinking(open, close)`. `ChatSession.thinkTags` overrides one conversation.
 - Keeps library system text empty (`ChatPrompts.systemFor`); demos set policy via samples `SampleChatPrompts`.
@@ -1947,7 +1947,7 @@ Plan: answer with 4.
 `SampleChatPrompts.PLAIN_ASSISTANT_SYSTEM` without `<think>` rules. Think invitation follows vocab markers. See §7a.
 
 Custom open/close markers are not Qwen- or GGUF-only: pass `ThinkTags` at load with
-`LlmModelFactory.make(path, Map.of(LlmModel.OPTION_THINK_TAGS, tags))` (**since 1.1.0**). That pair is frozen on the
+`LlmModelFactory.open(path).thinkTags(tags).make()` (**since 1.1.0**). That pair is frozen on the
 `LlmModel` and inherited by every `LLM`. `ChatSession.thinkTags` / `RagSession.thinkTags` override one conversation.
 `ChatReply.parse(raw)` without tags still assumes `<think>` / `</think>`.
 
@@ -2679,7 +2679,7 @@ try (LlmModel model = LlmModelFactory.make(modelDir);
 | Load once       | `LlmModelFactory#make`                    | Immutable shared `LlmModel` (weights + tokenizer)     |
 | Start builder   | `LLM#builder(LlmModel)` only           | Fluent open; **no** path overload — load with the factory |
 | Finish open     | `LLM.Builder#build` → `LLM.<init>`     | Wire engine + per-LLM KV arena                     |
-| Start session   | `LLM#chat(int)` → `ChatSession#open`   | History + `SamplingDefaults#forTokenizer`          |
+| Start session   | `LLM#chat(int)` → `ChatSession#open`   | History + `LLM#defaultSampling(maxTokens)`          |
 | Ask             | `ChatSession#send`                     | One user turn through template → generate → parse  |
 | CLI alternative | `samples.Example#main`                 | Same ideas with `streamTo` on stderr/stdout        |
 
@@ -2994,8 +2994,8 @@ packages.
 
 | Story idea                       | Primary type                                                         | Methods / entry points to open                                                                                |
 |----------------------------------|----------------------------------------------------------------------|---------------------------------------------------------------------------------------------------------------|
-| Open a model                     | `LlmModelFactory`, `LlmModel`, `LLM.Builder`                               | `make(Path)` / `make(…, Map)` / `make(ModelFileSource)` / `fromClasspath*`; HF **safetensors or ONNX** (**since 1.1.0**); GGUF **`qwen3`** / **`lfm2`** chat + **`bert`** embed; `OPTION_THINK_TAGS`; `LLM.builder(model)` for causal; `model.embed(…)` for BERT (**since 1.1.0**); `toString()` summarizes load |
-| Custom scratchpad markers        | `ThinkTags`, `LlmModel`                                                    | `make(path, Map.of(OPTION_THINK_TAGS, tags))`; `ChatSession.thinkTags` / `RagSession.thinkTags` (**since 1.1.0**) |
+| Open a model                     | `LlmModelFactory`, `LlmModel`, `LLM.Builder`                               | `open(Path).make()` / `make(Path)` / `make(…, Map)` / `fromClasspath*` / `openClasspath*`; HF **safetensors or ONNX** (**since 1.1.0**); GGUF **`qwen3`** / **`lfm2`** chat + **`bert`** embed; `thinkTags(ThinkTags)` or `OPTION_THINK_TAGS`; `LLM.builder(model)` for causal; `model.embed(…)` for BERT (**since 1.1.0**); `toString()` summarizes load |
+| Custom scratchpad markers        | `ThinkTags`, `LlmModel`                                                    | `open(path).thinkTags(tags).make()`; `ChatSession.thinkTags` / `RagSession.thinkTags` (**since 1.1.0**) |
 | Sentence embedding (BERT GGUF)   | `LlmModel` (internal `BertForEmbedding`)                                   | `make(gteGguf)` → `isEmbeddingModel()` → `embed(text)` (chapter **7b**, **since 1.1.0**)                        |
 | Named advisors                   | `LlmAdvisor`, `LlmAdvisorMixer`, `AdvisorEnrichment`, `ChatHistory`        | `Builder.advisors(mixer, …)` — unique non-blank names; `LLM#runAdvisors` → `AdvisorEnrichment`; one batched `generate` |
 | Chat turn                        | `ChatSession`                                                        | `llm.chat(maxTokens)`, `.listen(…)`, `.streamTo(…)`, `.send(user)`, `.clear()`                              |
@@ -3021,16 +3021,18 @@ packages.
 import com.igormaznitsa.nanollvm.llm.LLM;
 import com.igormaznitsa.nanollvm.llm.LlmAdvisor;
 import com.igormaznitsa.nanollvm.llm.LlmAdvisorMixer;
+import com.igormaznitsa.nanollvm.llm.SamplingParams;
 import com.igormaznitsa.nanollvm.models.LlmModel;
 import com.igormaznitsa.nanollvm.models.LlmModelFactory;
 import com.igormaznitsa.nanollvm.rag.RagFactory;
 
 import java.nio.file.Path;
 
-try (LlmModel model = LlmModelFactory.make(Path.of("models/Qwen3-0.6B"));
+try (LlmModel model = LlmModelFactory.open(Path.of("models/Qwen3-0.6B")).make();
      LLM llm = LLM.builder(model)
          .maxModelLen(2048)
          .kvHeapFraction(0.25f)                 // default; sizes KV arena vs heap
+         .sampling(SamplingParams.builder().maxTokens(256).build())
          .systemPrompt("Answer briefly and factually.")  // optional; demos often set policy themselves
          .advisors(LlmAdvisorMixer.defaults(),
              LlmAdvisor.builder().name("Facts").prompt("List only hard facts useful for the user.").build())
@@ -3040,11 +3042,11 @@ try (LlmModel model = LlmModelFactory.make(Path.of("models/Qwen3-0.6B"));
          .build()) {
 
   // Multi-turn with streaming (history + template + optional <think> parse)
-  var session = llm.chat(256).streamTo(System.err, System.out, false);
+  var session = llm.chat().streamTo(System.err, System.out, false);
   String reply = session.send("What is 2+2?").answer();
 
   // One-shot chat (no kept session)
-  String once = llm.chatOnce("What is 2+2?");
+  String once = llm.chatOnce("What is 2+2?", 64);
 
   // Raw continuation (no chat template)
   String raw = llm.complete("The capital of France is");
@@ -3108,9 +3110,7 @@ try (LlmModel model = LlmModelFactory.make(Path.of("models/Qwen3-0.6B"));
   llm.generate(
       List.of("Write a short poem about rivers."),
       llm.defaultSampling(128),
-      false,
-      Duration.ofSeconds(30),
-      tokenId -> { /* optional stream; must not re-enter generate */ });
+      Duration.ofSeconds(30));
 
   // Abort an in-flight generate from another thread
   Thread.ofVirtual().start(llm::cancel);
@@ -3592,7 +3592,7 @@ Short glossary. For the Java home of each idea, prefer the **In the code** notes
 | Inner work (Sense A)  | Invisible stack of attention + MLP for each next token                                           |
 | Chain of thought (B)  | Reasoning written as ordinary tokens in the reply                                                |
 | Tagged scratchpad (C) | Written reasoning inside open/close markers (default `<think>…</think>`; override with `ThinkTags`) |
-| ChatReply             | Parsed assistant turn: `thinking` (scratchpad), `answer` / `text()` (visible), `thinkOpen` (unclosed scratchpad while streaming), `stats` (`GenerationStats`; `NONE` until generate finishes). `parse(raw)` uses default tags; `parse(raw, ThinkTags)` / `LlmModel.OPTION_THINK_TAGS` at load / `ChatSession.thinkTags` for custom markers. `ChatSession.send` salvages + attaches stats. History stores **answer only**. |
+| ChatReply             | Parsed assistant turn: `thinking` (scratchpad), `answer` / `text()` (visible), `thinkOpen` (unclosed scratchpad while streaming), `stats` (`GenerationStats`; `NONE` until generate finishes). `parse(raw)` uses default tags; `parse(raw, ThinkTags)` / `parse(raw, llm)` / `open(path).thinkTags` at load / `ChatSession.thinkTags` for custom markers. `ChatSession.send` salvages + attaches stats. History stores **answer only**. |
 | KV cache              | Stored Keys and Values, reused while decoding                                                    |
 | Prefill               | First pass over the prompt that fills the KV cache                                               |
 | Decode                | Step-by-step production of later tokens                                                          |

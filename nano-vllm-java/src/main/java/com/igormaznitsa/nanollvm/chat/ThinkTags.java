@@ -13,8 +13,9 @@ import static java.util.Objects.requireNonNull;
  * same pair when parsing raw generate output.
  *
  * <pre>{@code
- * LlmModel model = LlmModelFactory.make(path, Map.of(
- *     LlmModel.OPTION_THINK_TAGS, ThinkTags.of("<reasoning>", "</reasoning>")));
+ * LlmModel model = LlmModelFactory.open(path)
+ *     .thinkTags(ThinkTags.of("<reasoning>", "</reasoning>"))
+ *     .make();
  * ChatReply reply = LLM.builder(model).build().chat(256).send("What is 2+2?");
  * }</pre>
  *

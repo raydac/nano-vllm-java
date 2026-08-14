@@ -1,6 +1,10 @@
 package com.igormaznitsa.nanollvm.chat;
 
+import static java.util.Objects.requireNonNull;
+
 import com.igormaznitsa.nanollvm.llm.GenerationStats;
+import com.igormaznitsa.nanollvm.llm.LLM;
+import com.igormaznitsa.nanollvm.models.LlmModel;
 
 /**
  * Parsed assistant turn: optional thinking scratchpad, visible answer, and engine stats.
@@ -95,6 +99,24 @@ public record ChatReply(
    */
   public static ChatReply parse(final String raw, final ThinkTags tags) {
     return from(AssistantParts.parse(raw, tags));
+  }
+
+  /**
+   * {@link #parse(String, ThinkTags)} using {@link LLM#thinkTags()}.
+   *
+   * @since 1.1.0
+   */
+  public static ChatReply parse(final String raw, final LLM llm) {
+    return parse(raw, requireNonNull(llm, "llm").thinkTags());
+  }
+
+  /**
+   * {@link #parse(String, ThinkTags)} using {@link LlmModel#thinkTags()}.
+   *
+   * @since 1.1.0
+   */
+  public static ChatReply parse(final String raw, final LlmModel model) {
+    return parse(raw, requireNonNull(model, "model").thinkTags());
   }
 
   /**

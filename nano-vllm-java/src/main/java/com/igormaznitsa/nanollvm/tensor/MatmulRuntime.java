@@ -101,7 +101,7 @@ public final class MatmulRuntime implements AutoCloseable {
 
   private boolean usesSharedPool() {
     ExecutorService shared = SHARED_POOL.get();
-    return shared != null && this.pool.equals(shared);
+    return this.pool.equals(shared);
   }
 
   /**

@@ -1,5 +1,6 @@
 package com.igormaznitsa.nanollvm.engine;
 
+import com.igormaznitsa.nanollvm.llm.SamplingDefaults;
 import com.igormaznitsa.nanollvm.llm.SamplingParams;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -39,7 +40,7 @@ public final class Sequence {
       throw new IllegalArgumentException("kvcacheBlockSize must be >= 1, got " + blockSize);
     }
 
-    SamplingParams sp = samplingParams == null ? new SamplingParams() : samplingParams;
+    SamplingParams sp = samplingParams == null ? SamplingDefaults.neutral() : samplingParams;
     this.seqId = NEXT_SEQ_ID.getAndIncrement();
     this.blockSize = blockSize;
     this.status = Status.WAITING;

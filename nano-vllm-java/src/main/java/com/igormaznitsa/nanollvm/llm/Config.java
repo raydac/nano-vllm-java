@@ -235,6 +235,7 @@ public final class Config {
     /**
      * Seals EOS / stop ids from the model tokenizer. Tokenizer stop ids win when non-empty;
      * otherwise {@link Tokenizer#eosTokenId()} is used when EOS was not set explicitly.
+     * Call {@link #stopTokenIds(List)} after this to override the tokenizer pair.
      */
     public Builder applyTokenizer(final Tokenizer tokenizer) {
       requireNonNull(tokenizer, "tokenizer");
@@ -250,6 +251,20 @@ public final class Config {
       if (this.stopTokenIds.isEmpty()) {
         this.stopTokenIds = List.of(this.eos);
       }
+      return this;
+    }
+
+    /**
+     * Replaces EOS / stop ids. First id is {@link Config#eos()}. Must be non-empty.
+     * Apply after {@link #applyTokenizer(Tokenizer)} so the caller wins over vocab stops.
+     */
+    public Builder stopTokenIds(final List<Integer> ids) {
+      requireNonNull(ids, "stopTokenIds");
+      if (ids.isEmpty()) {
+        throw new IllegalArgumentException("stopTokenIds must not be empty");
+      }
+      this.stopTokenIds = List.copyOf(ids);
+      this.eos = this.stopTokenIds.getFirst();
       return this;
     }
 

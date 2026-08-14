@@ -17,6 +17,7 @@ import com.igormaznitsa.nanollvm.chat.ChatMessage;
 import com.igormaznitsa.nanollvm.chat.ChatMessages;
 import com.igormaznitsa.nanollvm.chat.ChatReply;
 import com.igormaznitsa.nanollvm.chat.ChatRole;
+import com.igormaznitsa.nanollvm.chat.ChatSession;
 import com.igormaznitsa.nanollvm.chat.LlmListener;
 import com.igormaznitsa.nanollvm.chat.LlmListeners;
 import com.igormaznitsa.nanollvm.chat.LlmTextKind;
@@ -24,6 +25,7 @@ import com.igormaznitsa.nanollvm.chat.ThinkTags;
 import com.igormaznitsa.nanollvm.engine.BlockManager;
 import com.igormaznitsa.nanollvm.engine.Sequence;
 import com.igormaznitsa.nanollvm.internal.Json;
+import com.igormaznitsa.nanollvm.layers.Norms.RMSNorm;
 import com.igormaznitsa.nanollvm.llm.Config;
 import com.igormaznitsa.nanollvm.llm.GenerationStats;
 import com.igormaznitsa.nanollvm.llm.LLM;
@@ -132,7 +134,7 @@ class CoreUnitTest {
   void modelThinkTagsComeFromFactoryOptionsAndSessionCanOverride() {
     Path path = OptionalModelAssumptions.requireQwen3();
     ThinkTags custom = ThinkTags.of("<reasoning>", "</reasoning>");
-    LlmModel model = LlmModelFactory.make(path, Map.of(LlmModel.OPTION_THINK_TAGS, custom));
+    LlmModel model = LlmModelFactory.open(path).thinkTags(custom).make();
     try (model;
          LLM llm = LLM.builder(model).maxModelLen(256).numKvcacheBlocks(32).build()) {
       assertEquals(custom, model.thinkTags());
@@ -144,6 +146,9 @@ class CoreUnitTest {
       ThinkTags sessionTags = ThinkTags.of("[reasoning]", "[/reasoning]");
       assertEquals(sessionTags, llm.chat(16).thinkTags(sessionTags).thinkTags());
       assertEquals(custom, llm.thinkTags());
+      ChatReply parsed = ChatReply.parse("<reasoning>notes</reasoning>visible", llm);
+      assertEquals("notes", parsed.thinking());
+      assertEquals("visible", parsed.answer());
     }
   }
 
@@ -283,6 +288,23 @@ class CoreUnitTest {
     assertEquals(4f, summed.get(3), 1e-5);
 
     Tensor expected = Ops.rmsNorm(summed, weight, eps);
+    for (int i = 0; i < expected.numel(); i++) {
+      assertEquals(expected.get(i), fused[0].get(i), 1e-5);
+    }
+  }
+
+  @Test
+  void addRmsNormWeightlessFusedMatchesSeparateMath() {
+    Tensor x = Tensor.of(new float[] {1f, 2f, 3f, 4f}, 2, 2);
+    Tensor residual = Tensor.of(new float[] {0.5f, -0.5f, 1f, 0f}, 2, 2);
+    float eps = 1e-6f;
+
+    Tensor[] fused = RMSNorm.weightless(eps).forward(x, residual);
+    Tensor expected = Ops.rmsNorm(fused[1], eps);
+    assertEquals(1.5f, fused[1].get(0), 1e-5);
+    assertEquals(1.5f, fused[1].get(1), 1e-5);
+    assertEquals(4f, fused[1].get(2), 1e-5);
+    assertEquals(4f, fused[1].get(3), 1e-5);
     for (int i = 0; i < expected.numel(); i++) {
       assertEquals(expected.get(i), fused[0].get(i), 1e-5);
     }
@@ -659,10 +681,42 @@ class CoreUnitTest {
 
   @Test
   void samplingDefaultsAreNeutral() {
-    SamplingParams plain = SamplingDefaults.forTokenizer(null, 100);
+    SamplingParams plain = SamplingDefaults.neutral(100);
     assertEquals(0, plain.topK());
     assertEquals(100, plain.maxTokens());
     assertEquals(0.95f, plain.topP(), 1e-6f);
+    assertEquals(SamplingDefaults.neutral(), SamplingDefaults.forTokenizer(null));
+  }
+
+  @Test
+  void engineSamplingSurvivesChatMaxTokensWhenWeightsPresent() {
+    Path path = OptionalModelAssumptions.requireQwen3();
+    SamplingParams policy = SamplingParams.builder()
+      .temperature(0.2f)
+      .topK(64)
+      .maxTokens(128)
+      .build();
+    try (LlmModel model = LlmModelFactory.make(path);
+         LLM llm = LLM.builder(model)
+           .sampling(policy)
+           .maxModelLen(256)
+           .numKvcacheBlocks(32)
+           .build()) {
+      assertEquals(0.2f, llm.defaultSampling().temperature(), 1e-6f);
+      assertEquals(64, llm.defaultSampling().topK());
+      assertEquals(128, llm.defaultSampling().maxTokens());
+      assertEquals(64, llm.chat(16).samplingParams().topK());
+      assertEquals(16, llm.chat(16).samplingParams().maxTokens());
+      assertEquals(0.2f, llm.chat(16).samplingParams().temperature(), 1e-6f);
+
+      ChatSession session = llm.chat()
+        .maxTokens(32)
+        .seed(ChatMessage.user("2+2?"), ChatMessage.assistant("4"));
+      assertEquals(32, session.samplingParams().maxTokens());
+      assertEquals(64, session.samplingParams().topK());
+      assertEquals(2, session.history().size());
+      assertEquals(ChatRole.USER, session.history().getFirst().role());
+    }
   }
 
   @Test

@@ -2,6 +2,7 @@ package com.igormaznitsa.nanollvm.rag;
 
 import static java.util.Objects.requireNonNull;
 
+import com.igormaznitsa.nanollvm.chat.ChatMessage;
 import com.igormaznitsa.nanollvm.chat.ChatReply;
 import com.igormaznitsa.nanollvm.chat.ChatSession;
 import com.igormaznitsa.nanollvm.chat.LlmListener;
@@ -137,6 +138,26 @@ public final class RagSession {
   }
 
   /**
+   * Appends few-shot turns on the inner chat session.
+   *
+   * @since 1.1.0
+   */
+  public RagSession seed(final ChatMessage... messages) {
+    this.chat.seed(messages);
+    return this;
+  }
+
+  /**
+   * Appends few-shot turns on the inner chat session.
+   *
+   * @since 1.1.0
+   */
+  public RagSession seed(final List<ChatMessage> messages) {
+    this.chat.seed(messages);
+    return this;
+  }
+
+  /**
    * When retrieval returns no passages, use at least this many new tokens (capped by
    * {@link SamplingParams#maxTokens()} from {@link #sampling} when lower). Default {@code 384}.
    * Grounded turns still use the {@link #sampling} budget.
@@ -199,12 +220,7 @@ public final class RagSession {
     } else if (temperature > GROUNDED_TEMPERATURE_CAP) {
       temperature = GROUNDED_TEMPERATURE_CAP;
     }
-    this.chat.sampling(new SamplingParams(
-      temperature,
-      maxTokens,
-      base.ignoreEos(),
-      base.topK(),
-      base.topP()));
+    this.chat.sampling(base.withTemperature(temperature).withMaxTokens(maxTokens));
   }
 
   /**

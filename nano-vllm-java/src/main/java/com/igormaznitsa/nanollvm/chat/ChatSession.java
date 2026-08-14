@@ -6,7 +6,6 @@ import com.igormaznitsa.nanollvm.llm.AdvisorEnrichment;
 import com.igormaznitsa.nanollvm.llm.AdvisorResponse;
 import com.igormaznitsa.nanollvm.llm.GenerationStats;
 import com.igormaznitsa.nanollvm.llm.LLM;
-import com.igormaznitsa.nanollvm.llm.SamplingDefaults;
 import com.igormaznitsa.nanollvm.llm.SamplingParams;
 import com.igormaznitsa.nanollvm.tokenizer.Tokenizer;
 import com.igormaznitsa.nanollvm.utils.ResourceLimits;
@@ -68,14 +67,15 @@ public final class ChatSession {
   }
 
   /**
-   * Factory that pins a max new-token budget via {@link SamplingDefaults#forTokenizer}.
+   * Factory that pins a max new-token budget via {@link LLM#defaultSampling(int)}.
    *
    * @param llm       engine that owns generation
-   * @param maxTokens upper bound on new tokens per turn (neutral defaults for the rest)
+   * @param maxTokens upper bound on new tokens per turn (other engine knobs kept)
    * @return a new session
    */
   public static ChatSession open(final LLM llm, final int maxTokens) {
-    return new ChatSession(llm, SamplingDefaults.forTokenizer(llm.tokenizer(), maxTokens));
+    requireNonNull(llm, "llm");
+    return new ChatSession(llm, llm.defaultSampling(maxTokens));
   }
 
   /**
@@ -86,6 +86,44 @@ public final class ChatSession {
    */
   public ChatSession sampling(final SamplingParams samplingParams) {
     this.samplingParams = requireNonNull(samplingParams, "samplingParams");
+    return this;
+  }
+
+  /**
+   * Sets max new tokens for subsequent turns; other sampling knobs stay.
+   *
+   * @since 1.1.0
+   */
+  public ChatSession maxTokens(final int maxTokens) {
+    this.samplingParams = this.samplingParams.withMaxTokens(maxTokens);
+    return this;
+  }
+
+  /**
+   * Appends few-shot turns after the engine system seed, then trims to the history cap.
+   *
+   * @since 1.1.0
+   */
+  public ChatSession seed(final ChatMessage... messages) {
+    requireNonNull(messages, "messages");
+    return this.seed(List.of(messages));
+  }
+
+  /**
+   * Appends few-shot turns after the engine system seed, then trims to the history cap.
+   *
+   * @since 1.1.0
+   */
+  public ChatSession seed(final List<ChatMessage> messages) {
+    requireNonNull(messages, "messages");
+    for (ChatMessage message : messages) {
+      requireNonNull(message, "message");
+      if (message.content().isBlank()) {
+        throw new IllegalArgumentException("seed message content must not be blank");
+      }
+      this.history.add(message);
+    }
+    this.trimHistoryToCap();
     return this;
   }
 
@@ -324,6 +362,22 @@ public final class ChatSession {
   public ChatReply send(final String userText) {
     requireNonNull(userText, "userText");
     return this.sendPrepared(userText, userText);
+  }
+
+  /**
+   * One turn with explicit sampling; session sampling is restored afterward.
+   *
+   * @since 1.1.0
+   */
+  public ChatReply send(final String userText, final SamplingParams samplingParams) {
+    requireNonNull(samplingParams, "samplingParams");
+    SamplingParams previous = this.samplingParams;
+    this.samplingParams = samplingParams;
+    try {
+      return this.send(userText);
+    } finally {
+      this.samplingParams = previous;
+    }
   }
 
   /**

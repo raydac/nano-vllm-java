@@ -5,7 +5,7 @@ package com.igormaznitsa.nanollvm.llm;
  *
  * <p>Greedy sampling is rejected ({@code temperature} must be greater than {@code 1e-10}).
  * {@code topK == 0} disables top-k; {@code topP} must be in {@code (0, 1]}. Prefer
- * {@link SamplingDefaults#forTokenizer} for chat rather than constructing these by hand.
+ * {@link #builder()} or {@link SamplingDefaults#neutral()} rather than constructing these by hand.
  * Safe to share across threads and across prompts in a batch.
  *
  * @param temperature softmax temperature; must be {@code > 1e-10} (greedy not supported). Lower
@@ -42,10 +42,16 @@ public record SamplingParams(
   }
 
   /**
-   * Defaults: temperature {@code 0.7}, {@code maxTokens 64}, EOS honored, top-k off, top-p {@code 0.9}.
+   * Neutral defaults: temperature {@code 0.6}, {@code maxTokens 256}, EOS honored, top-k off,
+   * top-p {@code 0.95}. Same table as {@link SamplingDefaults#neutral()}.
    */
   public SamplingParams() {
-    this(0.7f, 64, false, 0, 0.9f);
+    this(
+      SamplingDefaults.DEFAULT_TEMPERATURE,
+      SamplingDefaults.DEFAULT_MAX_TOKENS,
+      false,
+      0,
+      SamplingDefaults.DEFAULT_TOP_P);
   }
 
   /**
@@ -67,5 +73,76 @@ public record SamplingParams(
    */
   public SamplingParams(final float temperature, final int maxTokens, final boolean ignoreEos) {
     this(temperature, maxTokens, ignoreEos, 0, 0.9f);
+  }
+
+  public static Builder builder() {
+    return new Builder();
+  }
+
+  public SamplingParams withTemperature(final float temperature) {
+    return new SamplingParams(temperature, this.maxTokens, this.ignoreEos, this.topK, this.topP);
+  }
+
+  public SamplingParams withMaxTokens(final int maxTokens) {
+    return new SamplingParams(this.temperature, maxTokens, this.ignoreEos, this.topK, this.topP);
+  }
+
+  public SamplingParams withIgnoreEos(final boolean ignoreEos) {
+    return new SamplingParams(this.temperature, this.maxTokens, ignoreEos, this.topK, this.topP);
+  }
+
+  public SamplingParams withTopK(final int topK) {
+    return new SamplingParams(this.temperature, this.maxTokens, this.ignoreEos, topK, this.topP);
+  }
+
+  public SamplingParams withTopP(final float topP) {
+    return new SamplingParams(this.temperature, this.maxTokens, this.ignoreEos, this.topK, topP);
+  }
+
+  /**
+   * Fluent configurator. Defaults match {@link SamplingDefaults#neutral()}.
+   *
+   * @since 1.1.0
+   */
+  public static final class Builder {
+
+    private float temperature = SamplingDefaults.DEFAULT_TEMPERATURE;
+    private int maxTokens = SamplingDefaults.DEFAULT_MAX_TOKENS;
+    private boolean ignoreEos;
+    private int topK;
+    private float topP = SamplingDefaults.DEFAULT_TOP_P;
+
+    private Builder() {
+    }
+
+    public Builder temperature(final float temperature) {
+      this.temperature = temperature;
+      return this;
+    }
+
+    public Builder maxTokens(final int maxTokens) {
+      this.maxTokens = maxTokens;
+      return this;
+    }
+
+    public Builder ignoreEos(final boolean ignoreEos) {
+      this.ignoreEos = ignoreEos;
+      return this;
+    }
+
+    public Builder topK(final int topK) {
+      this.topK = topK;
+      return this;
+    }
+
+    public Builder topP(final float topP) {
+      this.topP = topP;
+      return this;
+    }
+
+    public SamplingParams build() {
+      return new SamplingParams(
+        this.temperature, this.maxTokens, this.ignoreEos, this.topK, this.topP);
+    }
   }
 }

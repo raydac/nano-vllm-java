@@ -53,6 +53,9 @@ public final class Norms {
     }
 
     public Tensor[] forward(final Tensor x, final Tensor residual) {
+      if (this.weight == null) {
+        return Ops.addRmsNorm(x, residual, this.eps);
+      }
       return Ops.addRmsNorm(x, residual, this.weight, this.eps, this.onePlusWeight);
     }
   }

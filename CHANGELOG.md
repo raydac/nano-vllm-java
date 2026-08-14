@@ -8,6 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased] — 1.1.0-SNAPSHOT
 
 ### Changed
+- No-arg `new SamplingParams()` now matches `SamplingDefaults.neutral()` (temperature 0.6, 256 new
+  tokens, top-p 0.95). It previously used 0.7 / 64 / 0.9. Two- and three-argument constructors still
+  fill top-p 0.9.
 - Construct an engine only with `LLM.builder(model).build()`. The `new LLM(model)` shortcut is
   removed so closed and embedding checkpoints cannot skip builder checks.
 - Interactive `Example` demo is a **line-oriented terminal** app: model menu, RAG mode
@@ -40,6 +43,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `mvn -pl nano-vllm-java-samples exec:java` from the repository root.
 
 ### Added
+- Fluent load, sampling, and call shortcuts: `LlmModelFactory.open(path).listen(…).unpackParameters().thinkTags(…).make()`
+  (existing `make` / `fromClasspath*` remain); `SamplingParams.builder()` and withers; `SamplingDefaults.neutral()`;
+  `LLM.Builder.sampling` / `stopTokenIds`; `chatOnce` / `complete` max-token overloads; `generate(…, Duration)` /
+  seq-aware `LLM.TokenEvent` callbacks; `ChatSession.seed` / `maxTokens` / `send(text, params)`;
+  `ChatReply.parse(raw, llm)` using the model's think tags.
 - `ModelSupport` / `UnsupportedModelException`: exact architecture detection (no substring `qwen`→Qwen3),
   a user-facing support catalog, and fail-fast load errors for look-alike families (Qwen2, Qwen3.5/Fara,
   Gemma 2, Gemma 4 vision/audio-only variants, Mistral, other VLMs, GGUF Llama/Gemma, HF BERT safetensors). `-Dnanollvm.arch` cannot override a
@@ -66,6 +74,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   markers are in vocab.
 
 ### Fixed
+- Weightless RMSNorm (no affine scale, used on Gemma 4 shared-KV V) no longer NPEs on the fused
+  residual path `forward(x, residual)`.
 - Windows model download scripts (`.ps1` / `.cmd`) resolve their install dir via `$PSScriptRoot`,
   write with absolute paths (no longer change the caller’s working directory), prefer `curl.exe`,
   stay ASCII-only for Windows PowerShell 5.1 encoding, and the Gemma script also honors

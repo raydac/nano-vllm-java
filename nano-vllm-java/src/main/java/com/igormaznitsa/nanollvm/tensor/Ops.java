@@ -555,6 +555,16 @@ public final class Ops {
   }
 
   /**
+   * Residual add + weightless RMSNorm (identity scale).
+   *
+   * @see #addRmsNorm(Tensor, Tensor, Tensor, float, boolean)
+   * @see #rmsNorm(Tensor, float)
+   */
+  public static Tensor[] addRmsNorm(final Tensor x, final Tensor residual, final float eps) {
+    return fusedAddRmsNorm(x, residual, null, eps, false);
+  }
+
+  /**
    * Residual add + RMSNorm ({@code onePlusWeight == false}).
    *
    * @see #addRmsNorm(Tensor, Tensor, Tensor, float, boolean)
@@ -583,6 +593,12 @@ public final class Ops {
   public static Tensor[] addRmsNorm(final Tensor x, final Tensor residual, final Tensor weight,
                                     final float eps,
                                     final boolean onePlusWeight) {
+    return fusedAddRmsNorm(x, residual, requireNonNull(weight, "weight"), eps, onePlusWeight);
+  }
+
+  private static Tensor[] fusedAddRmsNorm(final Tensor x, final Tensor residual,
+                                          final Tensor weight,
+                                          final float eps, final boolean onePlusWeight) {
     requireSameSize(x, residual);
     int[] shape = x.rawShape();
     int last = shape[shape.length - 1];
@@ -593,10 +609,10 @@ public final class Ops {
     float[] rd = residual.data();
     float[] sd = summed.data();
     float[] od = out.data();
-    float[] wd = weight.data();
+    float[] wd = weight == null ? null : weight.data();
     int xOff = x.offset();
     int rOff = residual.offset();
-    int wOff = weight.offset();
+    int wOff = weight == null ? 0 : weight.offset();
     for (int r = 0; r < rows; r++) {
       int xBase = xOff + r * last;
       int rBase = rOff + r * last;
@@ -609,11 +625,15 @@ public final class Ops {
       }
       float inv = (float) (1.0 / Math.sqrt(sumSq / last + eps));
       for (int i = 0; i < last; i++) {
-        float w = wd[wOff + i];
-        if (onePlusWeight) {
-          w = 1.0f + w;
+        float scaled = sd[sBase + i] * inv;
+        if (wd != null) {
+          float w = wd[wOff + i];
+          if (onePlusWeight) {
+            w = 1.0f + w;
+          }
+          scaled *= w;
         }
-        od[sBase + i] = sd[sBase + i] * inv * w;
+        od[sBase + i] = scaled;
       }
     }
     return new Tensor[] {out, summed};

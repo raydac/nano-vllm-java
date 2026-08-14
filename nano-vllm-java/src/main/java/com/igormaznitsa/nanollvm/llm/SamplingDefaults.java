@@ -8,16 +8,33 @@ import com.igormaznitsa.nanollvm.tokenizer.Tokenizer;
  */
 public final class SamplingDefaults {
 
+  public static final float DEFAULT_TEMPERATURE = 0.6f;
   public static final int DEFAULT_MAX_TOKENS = 256;
+  public static final float DEFAULT_TOP_P = 0.95f;
 
   private SamplingDefaults() {
   }
 
-  public static SamplingParams forTokenizer(final Tokenizer tokenizer) {
-    return forTokenizer(tokenizer, DEFAULT_MAX_TOKENS);
+  public static SamplingParams neutral() {
+    return new SamplingParams();
   }
 
+  public static SamplingParams neutral(final int maxTokens) {
+    return new SamplingParams(
+      DEFAULT_TEMPERATURE, maxTokens, false, 0, DEFAULT_TOP_P);
+  }
+
+  /**
+   * Alias of {@link #neutral()}. The tokenizer is unused; family knobs stay in the application.
+   */
+  public static SamplingParams forTokenizer(final Tokenizer tokenizer) {
+    return neutral();
+  }
+
+  /**
+   * Alias of {@link #neutral(int)}. The tokenizer is unused; family knobs stay in the application.
+   */
   public static SamplingParams forTokenizer(final Tokenizer tokenizer, final int maxTokens) {
-    return new SamplingParams(0.6f, maxTokens, false, 0, 0.95f);
+    return neutral(maxTokens);
   }
 }

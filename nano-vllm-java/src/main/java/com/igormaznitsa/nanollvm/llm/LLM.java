@@ -39,6 +39,8 @@ import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.locks.ReentrantLock;
+import java.util.function.Consumer;
+import java.util.function.IntConsumer;
 import java.util.function.Predicate;
 import java.util.stream.IntStream;
 
@@ -47,17 +49,18 @@ import java.util.stream.IntStream;
  *
  * <h2>Typical use</h2>
  * <pre>{@code
- * try (LlmModel model = LlmModelFactory.make(modelDir);  // load once, share freely
+ * try (LlmModel model = LlmModelFactory.open(modelDir).make();  // load once, share freely
  *      LLM llm = LLM.builder(model)
  *         .maxModelLen(2048)
+ *         .sampling(SamplingParams.builder().temperature(0.2f).maxTokens(128).build())
  *         .systemPrompt("Answer briefly.")  // optional
  *         .advisors(LlmAdvisorMixer.defaults(),
  *             LlmAdvisor.builder().name("Facts").prompt("List key facts from the request.").build(),
  *             LlmAdvisor.builder().name("Risks").prompt("Note risks or contradictions.").build())
  *         .build()) {
- *     String reply = llm.chat(256).send("Hello").answer();
- *     String once = llm.chatOnce("What is 2+2?");
- *     String raw = llm.complete("The capital of France is");
+ *     String reply = llm.chat().send("Hello").answer();
+ *     String once = llm.chatOnce("What is 2+2?", 64);
+ *     String raw = llm.complete("The capital of France is", 32);
  * }  // LLM closes first, then model
  * }</pre>
  *
@@ -66,8 +69,10 @@ import java.util.stream.IntStream;
  *   <li>{@link #chat()} / {@link #chatOnce(String)} — chat template, history, reply parsing</li>
  *   <li>{@link #complete(String)} — raw continuation of a prompt string (no chat template)</li>
  *   <li>{@link #generate(List, SamplingParams)} — simplest batch text generate</li>
- *   <li>{@link #generate(List, SamplingParams, boolean, Duration, java.util.function.IntConsumer)} —
- *       full text generate (progress, timeout, token stream)</li>
+ *   <li>{@link #generate(List, SamplingParams, Duration)} / {@link #generate(List, SamplingParams, Consumer)} —
+ *       timeout or seq-aware token stream without dummy flags</li>
+ *   <li>{@link #generate(List, SamplingParams, boolean, Duration, IntConsumer)} —
+ *       full text generate (progress, timeout, token-id stream)</li>
  *   <li>{@link #generateTokenIds(List, SamplingParams)} — pre-tokenized batch</li>
  *   <li>{@link #rag(RagIndex)} — retrieval over a shared {@link PreparedRag} (or any index)</li>
  * </ul>
@@ -133,6 +138,7 @@ public final class LLM implements AutoCloseable {
   private final List<LlmAdvisor> advisors;
   private final LlmAdvisorMixer advisorMixer;
   private final Predicate<String> advisorNoteFilter;
+  private final SamplingParams defaultSampling;
 
   private LLM(final Builder builder) {
     requireNonNull(builder, "builder");
@@ -154,6 +160,9 @@ public final class LLM implements AutoCloseable {
       this.advisors = builder.advisors;
       this.advisorMixer = builder.advisorMixer;
       this.advisorNoteFilter = builder.advisorNoteFilter;
+      this.defaultSampling = builder.samplingParams == null
+        ? SamplingDefaults.neutral()
+        : builder.samplingParams;
       this.transformer = new Transformer(
         this.model, this.config, this.matmul, this.listener, builder.allowUnpackParameters);
       this.scheduler = new Scheduler(this.config, this.transformer::clearConvState);
@@ -292,6 +301,13 @@ public final class LLM implements AutoCloseable {
     this.cancelRequested.set(true);
   }
 
+  private static Consumer<TokenEvent> adaptTokenCallback(final IntConsumer onToken) {
+    if (onToken == null) {
+      return null;
+    }
+    return event -> onToken.accept(event.tokenId());
+  }
+
   /**
    * Generates completions for one or more text prompts (no progress line, no timeout, no token callback).
    *
@@ -307,6 +323,57 @@ public final class LLM implements AutoCloseable {
   public List<GenerationOutput> generate(final List<String> prompts,
                                          final SamplingParams samplingParams) {
     return this.generate(prompts, samplingParams, false, Duration.ZERO, null);
+  }
+
+  /**
+   * Text-prompt generate with a wall-clock limit and no token callback.
+   *
+   * @param timeout {@code null} / zero / negative = no limit
+   */
+  public List<GenerationOutput> generate(
+    final List<String> prompts,
+    final SamplingParams samplingParams,
+    final Duration timeout
+  ) {
+    return this.generate(prompts, samplingParams, false, timeout, null);
+  }
+
+  /**
+   * Text-prompt generate with a per-token id callback and no timeout.
+   */
+  public List<GenerationOutput> generate(
+    final List<String> prompts,
+    final SamplingParams samplingParams,
+    final IntConsumer onToken
+  ) {
+    return this.generate(prompts, samplingParams, false, Duration.ZERO, onToken);
+  }
+
+  /**
+   * Text-prompt generate with a seq-aware token callback and no timeout.
+   */
+  public List<GenerationOutput> generate(
+    final List<String> prompts,
+    final SamplingParams samplingParams,
+    final Consumer<TokenEvent> onToken
+  ) {
+    requireNonNull(prompts, "prompts");
+    requireNonNull(samplingParams, "samplingParams");
+    return this.generateUntyped(prompts, samplingParams, false, Duration.ZERO, onToken);
+  }
+
+  /**
+   * Text-prompt generate with a wall-clock limit and a seq-aware token callback.
+   */
+  public List<GenerationOutput> generate(
+    final List<String> prompts,
+    final SamplingParams samplingParams,
+    final Duration timeout,
+    final Consumer<TokenEvent> onToken
+  ) {
+    requireNonNull(prompts, "prompts");
+    requireNonNull(samplingParams, "samplingParams");
+    return this.generateUntyped(prompts, samplingParams, false, timeout, onToken);
   }
 
   /**
@@ -327,6 +394,16 @@ public final class LLM implements AutoCloseable {
   }
 
   /**
+   * Text-prompt generate with per-prompt sampling (no progress, no timeout, no callback).
+   */
+  public List<GenerationOutput> generate(
+    final List<String> prompts,
+    final List<SamplingParams> samplingParams
+  ) {
+    return this.generate(prompts, samplingParams, false, Duration.ZERO, null);
+  }
+
+  /**
    * Generates completions for text prompts with an optional per-token callback and no timeout.
    *
    * @param prompts        one string per sequence; non-{@code null}
@@ -343,7 +420,7 @@ public final class LLM implements AutoCloseable {
     final List<String> prompts,
     final SamplingParams samplingParams,
     final boolean useTqdm,
-    final java.util.function.IntConsumer onToken
+    final IntConsumer onToken
   ) {
     return this.generate(prompts, samplingParams, useTqdm, Duration.ZERO, onToken);
   }
@@ -369,11 +446,12 @@ public final class LLM implements AutoCloseable {
     final SamplingParams samplingParams,
     final boolean useTqdm,
     final Duration timeout,
-    final java.util.function.IntConsumer onToken
+    final IntConsumer onToken
   ) {
     requireNonNull(prompts, "prompts");
     requireNonNull(samplingParams, "samplingParams");
-    return this.generateUntyped(prompts, samplingParams, useTqdm, timeout, onToken);
+    return this.generateUntyped(
+      prompts, samplingParams, useTqdm, timeout, LLM.adaptTokenCallback(onToken));
   }
 
   /**
@@ -396,11 +474,12 @@ public final class LLM implements AutoCloseable {
     final List<SamplingParams> samplingParams,
     final boolean useTqdm,
     final Duration timeout,
-    final java.util.function.IntConsumer onToken
+    final IntConsumer onToken
   ) {
     requireNonNull(prompts, "prompts");
     requireNonNull(samplingParams, "samplingParams");
-    return this.generateUntyped(prompts, samplingParams, useTqdm, timeout, onToken);
+    return this.generateUntyped(
+      prompts, samplingParams, useTqdm, timeout, LLM.adaptTokenCallback(onToken));
   }
 
   /**
@@ -418,6 +497,65 @@ public final class LLM implements AutoCloseable {
   }
 
   /**
+   * Token-id generate with a wall-clock limit and no token callback.
+   */
+  public List<GenerationOutput> generateTokenIds(
+    final List<List<Integer>> prompts,
+    final SamplingParams samplingParams,
+    final Duration timeout
+  ) {
+    return this.generateTokenIds(prompts, samplingParams, false, timeout, null);
+  }
+
+  /**
+   * Token-id generate with a per-token id callback and no timeout.
+   */
+  public List<GenerationOutput> generateTokenIds(
+    final List<List<Integer>> prompts,
+    final SamplingParams samplingParams,
+    final IntConsumer onToken
+  ) {
+    return this.generateTokenIds(prompts, samplingParams, false, Duration.ZERO, onToken);
+  }
+
+  /**
+   * Token-id generate with a seq-aware token callback and no timeout.
+   */
+  public List<GenerationOutput> generateTokenIds(
+    final List<List<Integer>> prompts,
+    final SamplingParams samplingParams,
+    final Consumer<TokenEvent> onToken
+  ) {
+    requireNonNull(prompts, "prompts");
+    requireNonNull(samplingParams, "samplingParams");
+    return this.generateUntyped(prompts, samplingParams, false, Duration.ZERO, onToken);
+  }
+
+  /**
+   * Token-id generate with a wall-clock limit and a seq-aware token callback.
+   */
+  public List<GenerationOutput> generateTokenIds(
+    final List<List<Integer>> prompts,
+    final SamplingParams samplingParams,
+    final Duration timeout,
+    final Consumer<TokenEvent> onToken
+  ) {
+    requireNonNull(prompts, "prompts");
+    requireNonNull(samplingParams, "samplingParams");
+    return this.generateUntyped(prompts, samplingParams, false, timeout, onToken);
+  }
+
+  /**
+   * Token-id generate with per-prompt sampling (no progress, no timeout, no callback).
+   */
+  public List<GenerationOutput> generateTokenIds(
+    final List<List<Integer>> prompts,
+    final List<SamplingParams> samplingParams
+  ) {
+    return this.generateTokenIds(prompts, samplingParams, false, Duration.ZERO, null);
+  }
+
+  /**
    * Full token-id generate: enqueue → drive ticks until idle → decode completions.
    *
    * @param prompts        one {@link List} of token ids per sequence (model vocabulary); non-{@code null}
@@ -429,18 +567,19 @@ public final class LLM implements AutoCloseable {
    * @throws GenerationCancelledException if {@link #cancel()} fires
    * @throws GenerationTimeoutException   if {@code timeout} elapses
    * @throws NullPointerException         if {@code prompts} or {@code samplingParams} is {@code null}
-   * @apiNote Same exclusivity and {@code onToken} rules as {@link #generate(List, SamplingParams, boolean, Duration, java.util.function.IntConsumer)}.
+   * @apiNote Same exclusivity and {@code onToken} rules as {@link #generate(List, SamplingParams, boolean, Duration, IntConsumer)}.
    */
   public List<GenerationOutput> generateTokenIds(
     final List<List<Integer>> prompts,
     final SamplingParams samplingParams,
     final boolean useTqdm,
     final Duration timeout,
-    final java.util.function.IntConsumer onToken
+    final IntConsumer onToken
   ) {
     requireNonNull(prompts, "prompts");
     requireNonNull(samplingParams, "samplingParams");
-    return this.generateUntyped(prompts, samplingParams, useTqdm, timeout, onToken);
+    return this.generateUntyped(
+      prompts, samplingParams, useTqdm, timeout, LLM.adaptTokenCallback(onToken));
   }
 
   /**
@@ -462,11 +601,12 @@ public final class LLM implements AutoCloseable {
     final List<SamplingParams> samplingParams,
     final boolean useTqdm,
     final Duration timeout,
-    final java.util.function.IntConsumer onToken
+    final IntConsumer onToken
   ) {
     requireNonNull(prompts, "prompts");
     requireNonNull(samplingParams, "samplingParams");
-    return this.generateUntyped(prompts, samplingParams, useTqdm, timeout, onToken);
+    return this.generateUntyped(
+      prompts, samplingParams, useTqdm, timeout, LLM.adaptTokenCallback(onToken));
   }
 
   private List<GenerationOutput> generateUntyped(
@@ -474,7 +614,7 @@ public final class LLM implements AutoCloseable {
     final Object samplingParams,
     final boolean useTqdm,
     final Duration timeout,
-    final java.util.function.IntConsumer onToken
+    final Consumer<TokenEvent> onToken
   ) {
     // Business: turn prompts into decoded completions under cancel / timeout / optional streaming
     this.assertNotClosed();
@@ -567,10 +707,7 @@ public final class LLM implements AutoCloseable {
           .formatted(promptLen, maxLen));
     }
     int room = maxLen - promptLen;
-    return params.maxTokens() <= room
-      ? params
-      : new SamplingParams(
-      params.temperature(), room, params.ignoreEos(), params.topK(), params.topP());
+    return params.maxTokens() <= room ? params : params.withMaxTokens(room);
   }
 
   private List<Integer> toTokenIdList(final List<?> ids) {
@@ -583,7 +720,7 @@ public final class LLM implements AutoCloseable {
   private void driveUntilSchedulerIdle(
     final Duration timeout,
     final long deadlineNanos,
-    final java.util.function.IntConsumer onToken,
+    final Consumer<TokenEvent> onToken,
     final boolean showProgress,
     final int totalPrompts,
     final long startedAtNanos,
@@ -627,15 +764,12 @@ public final class LLM implements AutoCloseable {
     }
   }
 
-  private void dispatchTokenEvents(final StepResult step,
-                                   final java.util.function.IntConsumer onToken) {
+  private void dispatchTokenEvents(final StepResult step, final Consumer<TokenEvent> onToken) {
     // Internal: skip when the caller did not request streaming
     if (onToken == null) {
       return;
     }
-    step.tokenEvents().stream()
-      .mapToInt(TokenEvent::tokenId)
-      .forEach(onToken);
+    step.tokenEvents().forEach(onToken);
   }
 
   private int recordFinishedOutputs(
@@ -730,17 +864,18 @@ public final class LLM implements AutoCloseable {
   }
 
   /**
-   * Neutral sampling defaults with {@link SamplingDefaults#DEFAULT_MAX_TOKENS}.
+   * Engine sampling policy from {@link Builder#sampling(SamplingParams)}, or
+   * {@link SamplingDefaults#neutral()} when unset.
    *
    * @return a new immutable {@link SamplingParams}; never {@code null}
    */
   public SamplingParams defaultSampling() {
     this.assertNotClosed();
-    return SamplingDefaults.forTokenizer(this.tokenizer);
+    return this.defaultSampling;
   }
 
   /**
-   * Neutral sampling defaults with a custom max new-token budget.
+   * Engine sampling with a custom max new-token budget (other knobs unchanged).
    *
    * @param maxTokens maximum newly generated tokens per sequence; must be {@code >= 1}
    * @return a new immutable {@link SamplingParams}
@@ -748,7 +883,7 @@ public final class LLM implements AutoCloseable {
    */
   public SamplingParams defaultSampling(final int maxTokens) {
     this.assertNotClosed();
-    return SamplingDefaults.forTokenizer(this.tokenizer, maxTokens);
+    return this.defaultSampling.withMaxTokens(maxTokens);
   }
 
   /**
@@ -775,7 +910,8 @@ public final class LLM implements AutoCloseable {
   }
 
   /**
-   * Opens a multi-turn session with neutral sampling limited to {@code maxTokens}.
+   * Opens a multi-turn session with engine sampling limited to {@code maxTokens}
+   * ({@link #defaultSampling(int)}).
    *
    * @param maxTokens max new tokens per turn; must be {@code >= 1}
    * @return a new session
@@ -827,6 +963,13 @@ public final class LLM implements AutoCloseable {
   }
 
   /**
+   * Raw text completion with engine sampling limited to {@code maxTokens}.
+   */
+  public String complete(final String prompt, final int maxTokens) {
+    return this.complete(prompt, this.defaultSampling(maxTokens));
+  }
+
+  /**
    * Raw text completion (no chat template).
    *
    * @param prompt         continuation seed as plain text; non-{@code null}
@@ -853,6 +996,13 @@ public final class LLM implements AutoCloseable {
    */
   public String chatOnce(final String userMessage) {
     return this.chatOnce(userMessage, this.defaultSampling());
+  }
+
+  /**
+   * Single-turn chat with engine sampling limited to {@code maxTokens}. History is not retained.
+   */
+  public String chatOnce(final String userMessage, final int maxTokens) {
+    return this.chatOnce(userMessage, this.defaultSampling(maxTokens));
   }
 
   /**
@@ -1063,6 +1213,8 @@ public final class LLM implements AutoCloseable {
     private List<LlmAdvisor> advisors = List.of();
     private LlmAdvisorMixer advisorMixer = LlmAdvisorMixer.defaults();
     private Predicate<String> advisorNoteFilter = note -> note != null && !note.isBlank();
+    private SamplingParams samplingParams;
+    private List<Integer> stopTokenIds;
 
     private Builder(final LlmModel model) {
       this.sharedModel = requireNonNull(model, "model");
@@ -1194,6 +1346,34 @@ public final class LLM implements AutoCloseable {
     }
 
     /**
+     * Seals default sampling for {@link LLM#chat()}, {@link LLM#chatOnce(String)},
+     * {@link LLM#complete(String)}, {@link LLM#rag(RagIndex)}, and {@link LLM#defaultSampling()}.
+     * Unset → {@link SamplingDefaults#neutral()}. {@link LLM#chat(int)} / max-token shortcuts
+     * override only {@code maxTokens}.
+     *
+     * @since 1.1.0
+     */
+    public Builder sampling(final SamplingParams samplingParams) {
+      this.samplingParams = requireNonNull(samplingParams, "samplingParams");
+      return this;
+    }
+
+    /**
+     * Replaces tokenizer EOS / stop ids after {@link Config.Builder#applyTokenizer}.
+     * First id becomes {@link Config#eos()}.
+     *
+     * @since 1.1.0
+     */
+    public Builder stopTokenIds(final List<Integer> ids) {
+      requireNonNull(ids, "stopTokenIds");
+      if (ids.isEmpty()) {
+        throw new IllegalArgumentException("stopTokenIds must not be empty");
+      }
+      this.stopTokenIds = List.copyOf(ids);
+      return this;
+    }
+
+    /**
      * Max tokens across a prefill batch (scheduler / memory bound). Default {@code 16384}.
      *
      * @param value positive batch token budget
@@ -1321,7 +1501,7 @@ public final class LLM implements AutoCloseable {
 
     /**
      * Expands GGUF packed weights to float32 for denser/faster matmul (higher heap).
-     * Prefer {@link LlmModelFactory#make(Path, LlmListener, boolean)} with {@code true} so unpack
+     * Prefer {@link LlmModelFactory#open(Path)} {@code .unpackParameters()} so unpack
      * happens <em>during load</em> (mmap → float32, no packed heap copy). For an already-loaded
      * packed {@link LlmModel}, unpacks at engine build and releases packed bytes.
      * No-op for already-dense HF safetensors. Default is packed (size-first).
@@ -1407,7 +1587,7 @@ public final class LLM implements AutoCloseable {
       final LlmModel model,
       final Tokenizer tokenizer,
       final int cpuThreads) {
-      return Config.builder(model)
+      Config.Builder config = Config.builder(model)
         .maxNumBatchedTokens(this.maxNumBatchedTokens)
         .maxNumSeqs(this.maxNumSeqs)
         .maxModelLen(this.maxModelLen)
@@ -1415,8 +1595,11 @@ public final class LLM implements AutoCloseable {
         .cpuThreads(cpuThreads)
         .kvcacheBlockSize(this.kvcacheBlockSize)
         .numKvcacheBlocks(this.numKvcacheBlocks)
-        .applyTokenizer(tokenizer)
-        .build();
+        .applyTokenizer(tokenizer);
+      if (this.stopTokenIds != null) {
+        config.stopTokenIds(this.stopTokenIds);
+      }
+      return config.build();
     }
 
     private int resolveCpuThreads() {
@@ -1445,7 +1628,14 @@ public final class LLM implements AutoCloseable {
     }
   }
 
-  private record TokenEvent(int seqId, int tokenId) {
+  /**
+   * One newly decoded token in a {@link LLM#generate} batch ({@code seqId} matches prompt order).
+   *
+   * @param seqId   sequence index in the current generate batch
+   * @param tokenId vocabulary id of the appended token
+   * @since 1.1.0
+   */
+  public record TokenEvent(int seqId, int tokenId) {
   }
 
   private record StepResult(List<FinishedOutput> outputs, List<TokenEvent> tokenEvents,
