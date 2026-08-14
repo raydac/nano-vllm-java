@@ -46,7 +46,7 @@ Stream / classpath loads (`ModelFileSource`, `fromClasspath*`) are **since 1.1.0
 
 | Path | Supported | Explicitly out |
 |------|-----------|----------------|
-| GGUF GGML | `F32`, `F16`, `BF16`, `Q4_0`, `Q8_0`, `Q4_K`, `Q6_K`; **`Q3_K` / `IQ4_NL` since 1.1.0** | Other GGML types; Qwen/Gemma/Llama GGUF exports |
+| GGUF GGML | Current llama.cpp weight dtypes (floats, K-quants, IQ, TQ, MXFP4/NVFP4, `Q*_0`/`Q*_1`) | Removed ggml types (`Q4_2`/`Q4_3`, SIMD-repack `*_4_4`); Qwen/Gemma/Llama GGUF **architectures** |
 | ONNX TensorProto | FLOAT / FLOAT16 / BFLOAT16 / DOUBLE → float32 | Float8 / nibble / unknown weight types (fail loud); int/bool/string/complex initializers skipped as graph constants |
 
 Details and honest limits: [`description.md`](description.md) chapters **7** / **7a** / **7b** / **7c**. Download scripts and
@@ -308,8 +308,8 @@ mvn -pl nano-vllm-java-samples -q exec:java \
   -Dexec.args=models/LFM2.5-2.6B-Q4_K_M.gguf
 ```
 
-Supported GGUF dtypes for this path: `Q4_K`, `Q4_0`, `Q6_K`, `Q8_0`, `F16`, `BF16`, `F32` (plus `Q3_K` /
-`IQ4_NL` **since 1.1.0**, common on small embedding GGUFs). Architecture must be `lfm2` for chat (or `bert` for
+Supported GGUF dtypes for this path: current llama.cpp **weight** types (K-quants including `Q2_K`/`Q5_K`/`Q8_K`,
+legacy `Q4_0`/`Q4_1`/`Q5_0`/`Q5_1`/`Q8_0`/`Q8_1`, IQ, TQ, MXFP4/NVFP4, floats). Architecture must be `lfm2` for chat (or `bert` for
 embeddings — see [Supported formats and variants](#supported-formats-and-variants)). Default heap in `.mvn/jvm.config`
 is still **16 GB** (safe headroom for KV / scratch); packed weights alone are closer to on-disk size.
 

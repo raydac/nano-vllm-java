@@ -54,7 +54,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Transparent GGUF BERT embedding support (e.g. GTE-small): load via `LlmModelFactory.make` and call `LlmModel.embed(...)` with text or token ids; `LLM.builder` rejects embedding-only models; `Example` menu option runs an embedding REPL.
 - Dense / hybrid RAG: `DenseRagIndex`, `HybridRagIndex`, and `RagFactory.withEmbeddings(PreparedRag, LlmModel)` (BM25 + embedding cosine via RRF). `Example` offers a RAG-mode menu (none / BM25 / dense / hybrid) after choosing a chat model, then an advisor-count menu (`0`–`3`).
 - RAG classpath documents: `RagFactory.makeResource` / `Builder.addResource` (absolute ClassLoader path or `Class.getResourceAsStream` resolution); source labels use `classpath:…`.
-- GGML dequant for Q3_K and IQ4_NL (needed by common small embedding GGUF quants).
+- GGML dequant for the remaining GGUF weight types: K-quants (`Q2_K`, `Q5_K`, `Q8_K`), legacy (`Q4_1`, `Q5_0`, `Q5_1`, `Q8_1`, `Q1_0`, `Q2_0`), IQ (`IQ1_S`/`M`, `IQ2_*`, `IQ3_*`, `IQ4_XS`), ternary (`TQ1_0`/`TQ2_0`), MXFP4 / NVFP4, and integer/F64 tensors. `Q3_K` / `IQ4_NL` were already present. File recipes like `Q4_K_M` still mix those GGML types (not a separate dtype).
 - Stream / classpath model load: `ModelFileId` + `ModelFileSource`, `LlmModelFactory.make(source)`, and `fromClasspath` / `fromClasspathGguf` helpers (bytes stay in heap; no disk cache). Filesystem `make(Path)` unchanged.
 - Custom chat scratchpad markers via `ThinkTags` in `LlmModelFactory.make(…, Map)` under
   `LlmModel.OPTION_THINK_TAGS` (default remains `<think>` / `</think>`). Options are frozen with

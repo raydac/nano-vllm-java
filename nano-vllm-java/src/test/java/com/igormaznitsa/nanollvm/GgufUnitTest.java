@@ -52,6 +52,112 @@ final class GgufUnitTest {
     assertEquals(-2.0f, out[1], 1e-3f);
   }
 
+  @Test
+  void dequantQ4_1KnownBlock() {
+    ByteBuffer buf = ByteBuffer.allocate(GgufDequant.BLOCK_Q4_1).order(ByteOrder.LITTLE_ENDIAN);
+    buf.putShort(Float.floatToFloat16(0.5f));
+    buf.putShort(Float.floatToFloat16(-1f));
+    for (int i = 0; i < 16; i++) {
+      buf.put((byte) 0x21);
+    }
+    buf.flip();
+    float[] out = GgufDequant.dequantize(buf, GgufDequant.TYPE_Q4_1, GgufDequant.QK4_1);
+    assertEquals(1 * 0.5f - 1f, out[0], 1e-4f);
+    assertEquals(2 * 0.5f - 1f, out[16], 1e-4f);
+  }
+
+  @Test
+  void dequantQ8_1MatchesQ8_0Scale() {
+    ByteBuffer buf = ByteBuffer.allocate(GgufDequant.BLOCK_Q8_1).order(ByteOrder.LITTLE_ENDIAN);
+    buf.putShort(Float.floatToFloat16(0.25f));
+    buf.putShort(Float.floatToFloat16(0f));
+    for (int i = 0; i < 32; i++) {
+      buf.put((byte) 4);
+    }
+    buf.flip();
+    float[] out = GgufDequant.dequantize(buf, GgufDequant.TYPE_Q8_1, GgufDequant.QK8_1);
+    assertEquals(1f, out[0], 1e-4f);
+    assertEquals(1f, out[31], 1e-4f);
+  }
+
+  @Test
+  void dequantQ8_KUsesFloatScale() {
+    ByteBuffer buf = ByteBuffer.allocate(GgufDequant.BLOCK_Q8_K).order(ByteOrder.LITTLE_ENDIAN);
+    buf.putFloat(0.5f);
+    for (int i = 0; i < GgufDequant.QK_K; i++) {
+      buf.put((byte) 2);
+    }
+    for (int i = 0; i < GgufDequant.QK_K / 16; i++) {
+      buf.putShort((short) 0);
+    }
+    buf.flip();
+    float[] out = GgufDequant.dequantize(buf, GgufDequant.TYPE_Q8_K, GgufDequant.QK_K);
+    assertEquals(1f, out[0], 1e-5f);
+    assertEquals(1f, out[255], 1e-5f);
+  }
+
+  @Test
+  void dequantMxfp4ZeroMantissa() {
+    ByteBuffer buf = ByteBuffer.allocate(GgufDequant.BLOCK_MXFP4).order(ByteOrder.LITTLE_ENDIAN);
+    buf.put((byte) 127);
+    for (int i = 0; i < 16; i++) {
+      buf.put((byte) 0);
+    }
+    buf.flip();
+    float[] out = GgufDequant.dequantize(buf, GgufDequant.TYPE_MXFP4, GgufDequant.QK_MXFP4);
+    assertEquals(0f, out[0], 0f);
+    assertEquals(0f, out[16], 0f);
+  }
+
+  @Test
+  void dequantQ2_0KnownBlock() {
+    ByteBuffer buf = ByteBuffer.allocate(GgufDequant.BLOCK_Q2_0).order(ByteOrder.LITTLE_ENDIAN);
+    buf.putShort(Float.floatToFloat16(2f));
+    for (int i = 0; i < GgufDequant.QK2_0 / 4; i++) {
+      buf.put((byte) 0b11_10_01_00);
+    }
+    buf.flip();
+    float[] out = GgufDequant.dequantize(buf, GgufDequant.TYPE_Q2_0, GgufDequant.QK2_0);
+    assertEquals(-2f, out[0], 1e-4f);
+    assertEquals(0f, out[1], 1e-4f);
+    assertEquals(2f, out[2], 1e-4f);
+    assertEquals(4f, out[3], 1e-4f);
+  }
+
+  @Test
+  void ggmlWeightTypesHaveBlockMetadata() {
+    int[] types = {
+      GgufDequant.TYPE_Q4_1, GgufDequant.TYPE_Q5_0, GgufDequant.TYPE_Q5_1, GgufDequant.TYPE_Q8_1,
+      GgufDequant.TYPE_Q2_K, GgufDequant.TYPE_Q5_K, GgufDequant.TYPE_Q8_K,
+      GgufDequant.TYPE_IQ2_XXS, GgufDequant.TYPE_IQ2_XS, GgufDequant.TYPE_IQ2_S,
+      GgufDequant.TYPE_IQ3_XXS, GgufDequant.TYPE_IQ3_S, GgufDequant.TYPE_IQ1_S,
+      GgufDequant.TYPE_IQ1_M,
+      GgufDequant.TYPE_IQ4_XS, GgufDequant.TYPE_TQ1_0, GgufDequant.TYPE_TQ2_0,
+      GgufDequant.TYPE_MXFP4, GgufDequant.TYPE_NVFP4, GgufDequant.TYPE_Q1_0, GgufDequant.TYPE_Q2_0,
+      GgufDequant.TYPE_I8, GgufDequant.TYPE_I16, GgufDequant.TYPE_I32, GgufDequant.TYPE_I64,
+      GgufDequant.TYPE_F64
+    };
+    for (int type : types) {
+      assertTrue(GgufDequant.typeBlockSize(type) > 0, "block size " + type);
+      assertTrue(GgufDequant.typeBlockElems(type) > 0, "block elems " + type);
+      new PackedWeight(
+        new byte[(int) GgufDequant.packedByteLength(type, GgufDequant.typeBlockElems(type))],
+        type,
+        new int[] {1, GgufDequant.typeBlockElems(type)},
+        GgufDequant.typeBlockElems(type));
+    }
+  }
+
+  @Test
+  void packedKernelBindsNewGgmlTypes() {
+    int k = GgufDequant.QK_K;
+    PackedWeight q5k = new PackedWeight(
+      new byte[(int) GgufDequant.packedByteLength(GgufDequant.TYPE_Q5_K, k)],
+      GgufDequant.TYPE_Q5_K, new int[] {1, k}, k);
+    assertTrue(LinearKernel.of(q5k).name().contains("q5")
+      || LinearKernel.of(q5k).name().contains("ggml"));
+  }
+
   /**
    * Reference Q4_K kernel (pre in-place rewrite) for golden comparison.
    */

@@ -1157,20 +1157,20 @@ Each **tensor info** records:
 
 ### GGML dtypes this port dequantizes
 
-| `ggml_type` (id) | On disk | What `GgufDequant` does |
-|------------------|---------|-------------------------|
-| `0` F32 | 32-bit float | Copy into `float[]` |
-| `1` F16 | IEEE float16 | Expand to Java `float` |
-| `30` BF16 | bfloat16 | Expand to Java `float` |
-| `2` Q4_0 | 32-elem blocks (scale + nibbles) | Packed; in-place row/block dequant → float |
-| `8` Q8_0 | 32-elem blocks | Packed; in-place row/block dequant → float |
-| `11` Q3_K | 256-elem K-quants | Packed; in-place row/block dequant → float (**since 1.1.0**; common on small embedding GGUFs) |
-| `12` Q4_K | 256-elem K-quants | Packed; in-place row/block dequant → float |
-| `14` Q6_K | 256-elem K-quants | Packed; in-place row/block dequant → float |
-| `20` IQ4_NL | 32-elem IQ blocks | Packed; in-place row/block dequant → float (**since 1.1.0**) |
+Row dequant follows llama.cpp `ggml-quants.c`. File names like **Q4_K_M** / **Q5_K_S** are recipes that **mix** these
+`ggml_type` ids (not extra dtypes).
 
-A **Q4_K_M** file typically mixes **Q4_K** and **Q6_K** tensors. Weights stay packed; activations use float32 after
-per-row dequant inside the bound `LinearKernel` / `EmbeddingKernel` (via `GgufDequant.dequantizeRange`).
+| Group | `ggml_type` ids | Notes |
+|-------|-----------------|-------|
+| Floats | `0` F32, `1` F16, `30` BF16, `28` F64 | Expand / copy to Java `float` |
+| Integers | `24` I8, `25` I16, `26` I32, `27` I64 | Rare as weights; widened to float |
+| Legacy quants | `2` Q4_0, `3` Q4_1, `6` Q5_0, `7` Q5_1, `8` Q8_0, `9` Q8_1, `41` Q1_0, `42` Q2_0 | 32- or 64/128-elem blocks |
+| K-quants | `10` Q2_K, `11` Q3_K, `12` Q4_K, `13` Q5_K, `14` Q6_K, `15` Q8_K | 256-elem superblocks |
+| IQ | `16`–`19`, `20` IQ4_NL, `21`–`23`, `29` IQ1_M | Lookup grids from ggml-common.h |
+| Ternary / MX | `34` TQ1_0, `35` TQ2_0, `39` MXFP4, `40` NVFP4 | |
+
+Weights stay packed; activations use float32 after per-row dequant inside the bound `LinearKernel` /
+`EmbeddingKernel` (via `GgufDequant.dequantizeRange`).
 
 ### Supported formats / restrictions (GGUF)
 
@@ -1178,7 +1178,7 @@ per-row dequant inside the bound `LinearKernel` / `EmbeddingKernel` (via `GgufDe
 |---------|------------------|
 | GGUF **v2 / v3**; mmap payload **≤ ~2 GiB** | Larger maps / other GGUF major versions |
 | Architectures **`lfm2`** (chat) and **`bert`** (embeddings **since 1.1.0**) | **Qwen / Gemma / Llama** (or other) GGUF exports — loader expects `lfm2\|bert` |
-| GGML types in the table above (`F32`/`F16`/`BF16`, `Q4_0`, `Q8_0`, `Q3_K`, `Q4_K`, `Q6_K`, `IQ4_NL`) | Any other GGML type → `UnsupportedOperationException` (not a full llama.cpp quant catalog) |
+| GGML weight types in the table above | Removed ggml layouts (`Q4_2`/`Q4_3`, SIMD-repack `Q4_0_4_4` / `IQ4_NL_4_4`, …) |
 | Packed default; optional unpack at load / late unpack | ONNX or safetensors wrapped *inside* a `.gguf` |
 
 ### What else lives in GGUF metadata

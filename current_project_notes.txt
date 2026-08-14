@@ -6,7 +6,7 @@
 - **ONNX Tier A:** folder load via `LlmModelFactory.make` — initializers only (no ORT); root or `onnx/`; safetensors preferred if both present; chat Qwen3/Gemma3/Llama + BERT embeddings (HF→GGUF name remap)
 - **GGUF BERT embeddings** (e.g. gte-small): same `LlmModelFactory.make` → `LlmModel.embed`; `LLM.builder` rejects embedding models; Q3_K + IQ4_NL dequant
 - **ModelFileSource**: `ModelFileId` → `InputStream` (+ weight shards); load into heap only (no disk cache); `make(Path)` stays direct disk I/O; ONNX ids `MODEL_ONNX` / `MODEL_ONNX_FP16`
-- **GGUF:** packed by default; `LlmModelFactory.make(path, io, true)` unpacks at load; `LLM.Builder.allowUnpackParameters()` late-unpacks packed models
+- **GGUF:** packed by default; dequant catalog matches current llama.cpp weight types (K/IQ/TQ/MX/NV/legacy); `LlmModelFactory.make(path, io, true)` unpacks at load; `LLM.Builder.allowUnpackParameters()` late-unpacks packed models
 - Library: `LlmModelFactory.make` → shared `LlmModel` (`AutoCloseable`); also `make(ModelFileSource)` / `fromClasspath*` (stream → heap; no disk cache); `LLM.Builder` (warmup **off** by default); close **LLM first**, then **model**
 - **`description.md`:** audited for 1.1.0 — ONNX Tier A (**§7c**), Llama, SmolLM2/Tiny demos; ChatFormat /
   vocab-gated think / neutral `SamplingDefaults` / fail-unknown-arch; educational Qwen/Gemma tables kept as examples;
@@ -58,6 +58,7 @@
 - SmolLM2-135M-Instruct-ONNX = Llama ChatML chat demo; `inviteThinking` is vocab-gated (`<think>`+`</think>`); library `ChatPrompts.systemFor` is always empty — Example uses `SampleChatPrompts` / `SampleAdvisorPrompts` (turn-based demos set sampling/recovery/isolate + advisor note filter)
 - base SmolLM2-135M-ONNX / Tiny-LLM-ONNX = completion-only
 - GGUF packed by default; late unpack does not release bytes still bound by other engines
+- GGUF dequant covers current llama.cpp **weight** `ggml_type`s (K/IQ/TQ/MX/NV/legacy `Q*_0`); file tags `K_M`/`K_S` are mixes. Architecture is still `lfm2` chat + `bert` embeddings only.
 - `TEXT_DEBUG`: optional via `emitDebugPrompts`; RAG corpus/advisor notes are trusted prompt input by design
 - Dense RAG: index-time `LlmModel.embed` of all chunks; query cosine (dot); hybrid = BM25 + dense RRF; off-topic = both indexes agree
 - Lexical off-topic uses salient query terms only (skips conversational glue); file-name stems split on `/` and `\`
