@@ -1,6 +1,7 @@
 package com.igormaznitsa.nanollvm.models.internal;
 
 import static com.igormaznitsa.nanollvm.models.internal.WeightNames.ARCH_GEMMA3;
+import static com.igormaznitsa.nanollvm.models.internal.WeightNames.ARCH_GEMMA4;
 import static com.igormaznitsa.nanollvm.models.internal.WeightNames.ARCH_LFM2;
 import static com.igormaznitsa.nanollvm.models.internal.WeightNames.ARCH_LLAMA;
 import static com.igormaznitsa.nanollvm.models.internal.WeightNames.ARCH_QWEN3;
@@ -21,6 +22,7 @@ public final class CausalLMFactory {
   public static CausalLM create(final Config.HfConfig config, final WeightBag weights) {
     return switch (detect(config)) {
       case ARCH_GEMMA3 -> new Gemma3ForCausalLM(config, weights);
+      case ARCH_GEMMA4 -> new Gemma4ForCausalLM(config, weights);
       case ARCH_QWEN3 -> new Qwen3ForCausalLM(config, weights);
       case ARCH_LLAMA -> new LlamaForCausalLM(config, weights);
       case ARCH_LFM2 -> new Lfm2ForCausalLM(config, weights);

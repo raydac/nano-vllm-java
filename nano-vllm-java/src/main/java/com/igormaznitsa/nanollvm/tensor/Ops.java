@@ -263,6 +263,48 @@ public final class Ops {
     return out;
   }
 
+  public static Tensor mul(final Tensor a, final Tensor b) {
+    requireSameShape(a, b, "a", "b");
+    Tensor out = Tensor.zeros(a.shape());
+    float[] ad = a.data();
+    float[] bd = b.data();
+    float[] od = out.data();
+    int aOff = a.offset();
+    int bOff = b.offset();
+    int n = a.numel();
+    for (int i = 0; i < n; i++) {
+      od[i] = ad[aOff + i] * bd[bOff + i];
+    }
+    return out;
+  }
+
+  public static Tensor scale(final Tensor x, final float factor) {
+    Tensor out = Tensor.zeros(x.shape());
+    float[] xd = x.data();
+    float[] od = out.data();
+    int off = x.offset();
+    int n = x.numel();
+    for (int i = 0; i < n; i++) {
+      od[i] = xd[off + i] * factor;
+    }
+    return out;
+  }
+
+  public static Tensor tanhSoftcap(final Tensor logits, final float cap) {
+    if (cap <= 0f) {
+      return logits;
+    }
+    Tensor out = Tensor.zeros(logits.shape());
+    float[] ld = logits.data();
+    float[] od = out.data();
+    int off = logits.offset();
+    int n = logits.numel();
+    for (int i = 0; i < n; i++) {
+      od[i] = (float) Math.tanh(ld[off + i] / cap) * cap;
+    }
+    return out;
+  }
+
   /**
    * PyTorch-style GELU approximate with tanh (used by BERT / some causal MLP gates).
    *
@@ -448,6 +490,26 @@ public final class Ops {
    */
   public static Tensor rmsNorm(final Tensor x, final Tensor weight, final float eps) {
     return rmsNorm(x, weight, eps, false);
+  }
+
+  public static Tensor rmsNorm(final Tensor x, final float eps) {
+    int[] shape = x.rawShape();
+    int last = shape[shape.length - 1];
+    int rows = x.numel() / last;
+    Tensor out = Tensor.zeros(x.shape());
+    float[] xd = x.data();
+    int xOff = x.offset();
+    float[] od = out.data();
+    for (int r = 0; r < rows; r++) {
+      int xBase = xOff + r * last;
+      int oBase = r * last;
+      float var = VectorMath.sumSquares(xd, xBase, last) / last;
+      float inv = (float) (1.0 / Math.sqrt(var + eps));
+      for (int i = 0; i < last; i++) {
+        od[oBase + i] = xd[xBase + i] * inv;
+      }
+    }
+    return out;
   }
 
   /**

@@ -3,10 +3,13 @@ package com.igormaznitsa.nanollvm.layers;
 import static java.util.Objects.requireNonNull;
 
 import com.igormaznitsa.nanollvm.internal.Context;
+import com.igormaznitsa.nanollvm.models.internal.GemmaQat;
+import com.igormaznitsa.nanollvm.models.internal.GemmaQatWeight;
 import com.igormaznitsa.nanollvm.models.internal.PackedWeight;
 import com.igormaznitsa.nanollvm.tensor.LinearKernel;
 import com.igormaznitsa.nanollvm.tensor.MatmulRuntime;
 import com.igormaznitsa.nanollvm.tensor.Tensor;
+import com.igormaznitsa.nanollvm.tensor.kernels.PackedLinearKernel;
 
 /**
  * Immutable affine transform {@code y = x Wᵀ + b}. A {@link LinearKernel} is bound at construction
@@ -18,27 +21,63 @@ public class Linear {
   protected final PackedWeight packedWeight;
   protected final Tensor bias;
   private final LinearKernel kernel;
+  private final float inputActivationScale;
+  private final float outputActivationScale;
 
   public Linear(final Tensor weight, final Tensor bias) {
-    this.weight = requireNonNull(weight, "weight");
-    this.packedWeight = null;
-    this.bias = bias;
-    this.kernel = LinearKernel.of(weight);
+    this(LinearKernel.of(requireNonNull(weight, "weight")), bias, 0f, 0f, weight, null);
   }
 
   public Linear(final PackedWeight weight, final Tensor bias) {
-    this.weight = null;
-    this.packedWeight = requireNonNull(weight, "weight");
-    this.bias = bias;
-    this.kernel = LinearKernel.of(weight);
+    this(LinearKernel.of(requireNonNull(weight, "weight")), bias, 0f, 0f, null, weight);
   }
 
   public Linear(final PackedWeight weight) {
     this(weight, null);
   }
 
+  public Linear(final GemmaQatWeight weight) {
+    this(
+      PackedLinearKernel.of(
+        requireNonNull(weight, "weight").cols(),
+        weight.rows(),
+        weight.name(),
+        weight::dequantizeRow),
+      null,
+      weight.inputActivationScale(),
+      weight.outputActivationScale(),
+      null,
+      null);
+  }
+
+  public Linear(final LinearKernel kernel, final Tensor bias) {
+    this(kernel, bias, 0f, 0f, null, null);
+  }
+
+  private Linear(
+    final LinearKernel kernel,
+    final Tensor bias,
+    final float inputActivationScale,
+    final float outputActivationScale,
+    final Tensor weight,
+    final PackedWeight packedWeight
+  ) {
+    this.kernel = requireNonNull(kernel, "kernel");
+    this.bias = bias;
+    this.inputActivationScale = inputActivationScale;
+    this.outputActivationScale = outputActivationScale;
+    this.weight = weight;
+    this.packedWeight = packedWeight;
+  }
+
   public Tensor weight() {
-    return this.weight != null ? this.weight : this.packedWeight.materialize();
+    if (this.weight != null) {
+      return this.weight;
+    }
+    if (this.packedWeight != null) {
+      return this.packedWeight.materialize();
+    }
+    throw new IllegalStateException("linear has no dense weight table");
   }
 
   public PackedWeight packedWeight() {
@@ -78,7 +117,17 @@ public class Linear {
     if (this.bias != null) {
       biasData = this.bias.offset() == 0 ? this.bias.data() : this.bias.toFloatArray();
     }
-    this.kernel.apply(x.data(), x.offset(), biasData, y.data(), 0, rows, matmul);
+    float[] xData = x.data();
+    int xOff = x.offset();
+    if (this.inputActivationScale != 0f) {
+      Tensor quantized = this.applySrq(x, this.inputActivationScale);
+      xData = quantized.data();
+      xOff = quantized.offset();
+    }
+    this.kernel.apply(xData, xOff, biasData, y.data(), 0, rows, matmul);
+    if (this.outputActivationScale != 0f) {
+      y = this.applySrq(y, this.outputActivationScale);
+    }
     if (xs.length == 1) {
       return y.reshape(out);
     }
@@ -88,6 +137,18 @@ public class Linear {
     int[] newShape = xs.clone();
     newShape[newShape.length - 1] = out;
     return y.reshape(newShape);
+  }
+
+  private Tensor applySrq(final Tensor x, final float scale) {
+    Tensor out = Tensor.zeros(x.shape());
+    float[] xd = x.data();
+    float[] od = out.data();
+    int off = x.offset();
+    int n = x.numel();
+    for (int i = 0; i < n; i++) {
+      od[i] = GemmaQat.applySrq(xd[off + i], scale);
+    }
+    return out;
   }
 
   public static class Column extends Linear {
@@ -115,6 +176,10 @@ public class Linear {
 
     public Row(final PackedWeight weight, final Tensor bias) {
       super(weight, bias);
+    }
+
+    public Row(final GemmaQatWeight weight) {
+      super(weight);
     }
   }
 

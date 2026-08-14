@@ -34,8 +34,8 @@ class ModelSupportTest {
     assertEquals(WeightNames.ARCH_GEMMA3, CausalLMFactory.detect(parse("""
       {"model_type":"gemma3_text","architectures":["Gemma3ForCausalLM"]}
       """)));
-    assertEquals(WeightNames.ARCH_LLAMA, CausalLMFactory.detect(parse("""
-      {"model_type":"llama","architectures":["LlamaForCausalLM"]}
+    assertEquals(WeightNames.ARCH_GEMMA4, CausalLMFactory.detect(parse("""
+      {"model_type":"gemma4","architectures":["Gemma4ForCausalLM"]}
       """)));
   }
 
@@ -84,6 +84,59 @@ class ModelSupportTest {
     assertRejected("gemma2", "Gemma 2");
     assertRejected("mistral", "Mistral");
     assertRejected("phi3", "Phi");
+  }
+
+  @Test
+  void acceptsGemma4QatMobileTransformersAsTextChat() {
+    Config.HfConfig gemma4 = parse("""
+      {
+        "model_type": "gemma4",
+        "image_token_id": 258880,
+        "audio_token_id": 258881,
+        "video_token_id": 258884,
+        "vision_config": {"model_type": "gemma4_vision", "hidden_size": 768},
+        "audio_config": {"model_type": "gemma4_audio", "hidden_size": 1024},
+        "text_config": {
+          "model_type": "gemma4_text",
+          "hidden_size": 1536,
+          "num_hidden_layers": 35,
+          "num_attention_heads": 8,
+          "num_key_value_heads": 1,
+          "head_dim": 256,
+          "global_head_dim": 512,
+          "hidden_size_per_layer_input": 256,
+          "use_double_wide_mlp": true,
+          "num_kv_shared_layers": 20,
+          "intermediate_size": 6144,
+          "sliding_window": 512,
+          "layer_types": [
+            "sliding_attention","sliding_attention","sliding_attention","sliding_attention","full_attention",
+            "sliding_attention","sliding_attention","sliding_attention","sliding_attention","full_attention",
+            "sliding_attention","sliding_attention","sliding_attention","sliding_attention","full_attention",
+            "sliding_attention","sliding_attention","sliding_attention","sliding_attention","full_attention"
+          ]
+        }
+      }
+      """);
+    assertEquals(WeightNames.ARCH_GEMMA4, ModelSupport.resolve(gemma4).architectureId());
+    assertEquals(WeightNames.ARCH_GEMMA4, CausalLMFactory.detect(gemma4));
+    assertEquals("gemma4", gemma4.modelType());
+    assertEquals(1536, gemma4.hiddenSize());
+    assertEquals(35, gemma4.numHiddenLayers());
+    assertEquals(256, gemma4.headDim());
+    assertTrue(gemma4.isGemma4());
+    assertTrue(gemma4.visionConfigPresent());
+    assertTrue(gemma4.nestedTextConfig());
+    assertEquals(15, gemma4.firstKvSharedLayer());
+    assertFalse(gemma4.isKvSharedLayer(14));
+    assertTrue(gemma4.isKvSharedLayer(15));
+    assertEquals(13, gemma4.kvProducerLayer(15));
+    assertEquals(14, gemma4.kvProducerLayer(19));
+    assertEquals(256, gemma4.layerHeadDim(0));
+    assertEquals(512, gemma4.layerHeadDim(4));
+    assertEquals(6144, gemma4.mlpIntermediateSize(0));
+    assertEquals(12288, gemma4.mlpIntermediateSize(15));
+    assertEquals(1.0f, gemma4.attentionScale());
   }
 
   @Test

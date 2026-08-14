@@ -42,6 +42,20 @@ public final class PackedEmbeddingKernel implements EmbeddingKernel {
     return new PackedEmbeddingKernel(weight.size(0), weight.size(1), name, dequant);
   }
 
+  public static PackedEmbeddingKernel of(
+    final int vocabSize,
+    final int embeddingDim,
+    final String name,
+    final PackedRowDequant dequant
+  ) {
+    requireNonNull(name, "name");
+    requireNonNull(dequant, "dequant");
+    if (vocabSize <= 0 || embeddingDim <= 0) {
+      throw new IllegalArgumentException("embedding dimensions must be positive");
+    }
+    return new PackedEmbeddingKernel(vocabSize, embeddingDim, name, dequant);
+  }
+
   @Override
   public int vocabSize() {
     return this.vocabSize;

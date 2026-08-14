@@ -15,7 +15,9 @@ record AssistantParts(String thinking, String answer, boolean thinkOpen) {
     "(?i)(?:answer(?:\\s+should)?\\s+be|returns?|result(?:\\s+is)?)\\s*[:\"']?\\s*(.+)$");
   private static final List<String> BASE_CHAT_MARKUP = List.of(
     "<|im_end|>", "<|im_start|>", "<|endoftext|>",
-    "<end_of_turn>", "<start_of_turn>", "<eos>", "<bos>",
+    "<end_of_turn>", "<start_of_turn>",
+    "<|turn>user\n", "<|turn>model\n", "<|turn>system\n", "<|turn>", "<turn|>",
+    "<eos>", "<bos>",
     ThinkTags.DEFAULT.open(), ThinkTags.DEFAULT.close()
   );
 

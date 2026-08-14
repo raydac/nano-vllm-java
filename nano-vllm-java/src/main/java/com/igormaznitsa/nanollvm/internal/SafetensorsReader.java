@@ -6,6 +6,7 @@ import static java.util.Objects.requireNonNull;
 import com.igormaznitsa.nanollvm.tensor.Tensor;
 import com.igormaznitsa.nanollvm.utils.ResourceLimits;
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.channels.FileChannel;
@@ -29,15 +30,13 @@ public final class SafetensorsReader implements AutoCloseable {
     ResourceLimits limits = ResourceLimits.current();
     this.channel = FileChannel.open(path);
     long size = this.channel.size();
-    if (size > Integer.MAX_VALUE) {
-      throw new IOException(
-        "safetensors file is larger than the 2 GiB mmap limit: " + path
-          + " (each *.safetensors shard must be under 2 GiB)");
-    }
-    this.map =
-      this.channel.map(FileChannel.MapMode.READ_ONLY, 0, size).order(ByteOrder.LITTLE_ENDIAN);
+    this.map = size <= Integer.MAX_VALUE
+      ? this.channel.map(FileChannel.MapMode.READ_ONLY, 0, size).order(ByteOrder.LITTLE_ENDIAN)
+      : null;
     this.tensors = new LinkedHashMap<>();
-    this.dataOffset = parseHeader(this.map, size, limits, this.label, this.tensors);
+    this.dataOffset = this.map != null
+      ? parseHeader(this.map, size, limits, this.label, this.tensors)
+      : parseHeader(this.channel, size, limits, this.label, this.tensors);
   }
 
   private SafetensorsReader(final String label, final ByteBuffer data) throws IOException {
@@ -62,6 +61,38 @@ public final class SafetensorsReader implements AutoCloseable {
       throw new IOException("safetensors header truncated: " + label);
     }
     long headerLen = Integer.toUnsignedLong(map.getInt(0));
+    requireHeaderFits(headerLen, size, limits, label);
+    byte[] headerBytes = new byte[(int) headerLen];
+    map.position(8);
+    map.get(headerBytes);
+    return fillTensors(headerBytes, tensors);
+  }
+
+  private static long parseHeader(
+    final FileChannel channel,
+    final long size,
+    final ResourceLimits limits,
+    final String label,
+    final Map<String, TensorInfo> tensors
+  ) throws IOException {
+    if (size < 8) {
+      throw new IOException("safetensors header truncated: " + label);
+    }
+    ByteBuffer prefix = ByteBuffer.allocate(8).order(ByteOrder.LITTLE_ENDIAN);
+    readFully(channel, 0, prefix);
+    long headerLen = Integer.toUnsignedLong(prefix.getInt(0));
+    requireHeaderFits(headerLen, size, limits, label);
+    ByteBuffer header = ByteBuffer.allocate((int) headerLen);
+    readFully(channel, 8, header);
+    return fillTensors(header.array(), tensors);
+  }
+
+  private static void requireHeaderFits(
+    final long headerLen,
+    final long size,
+    final ResourceLimits limits,
+    final String label
+  ) throws IOException {
     if (headerLen > limits.maxSafetensorsHeaderBytes()) {
       throw new IOException(
         "safetensors header length " + headerLen + " exceeds maxSafetensorsHeaderBytes ("
@@ -70,10 +101,13 @@ public final class SafetensorsReader implements AutoCloseable {
     if (8L + headerLen > size) {
       throw new IOException("safetensors header extends past file end: " + label);
     }
-    byte[] headerBytes = new byte[(int) headerLen];
-    map.position(8);
-    map.get(headerBytes);
-    long dataOffset = 8L + headerLen;
+  }
+
+  private static long fillTensors(
+    final byte[] headerBytes,
+    final Map<String, TensorInfo> tensors
+  ) throws IOException {
+    long dataOffset = 8L + headerBytes.length;
     Map<String, Object> header = Json.parseObject(new String(headerBytes, UTF_8));
     for (var e : header.entrySet()) {
       if ("__metadata__".equals(e.getKey())) {
@@ -92,6 +126,21 @@ public final class SafetensorsReader implements AutoCloseable {
       tensors.put(e.getKey(), new TensorInfo(dtype, shape, start, end));
     }
     return dataOffset;
+  }
+
+  private static void readFully(
+    final FileChannel channel,
+    final long position,
+    final ByteBuffer dest
+  ) throws IOException {
+    long at = position;
+    while (dest.hasRemaining()) {
+      int n = channel.read(dest, at);
+      if (n < 0) {
+        throw new IOException("unexpected EOF at offset " + at);
+      }
+      at += n;
+    }
   }
 
   public static SafetensorsReader open(final Path path) throws IOException {
@@ -151,9 +200,7 @@ public final class SafetensorsReader implements AutoCloseable {
       numel = Math.multiplyExact(numel, d);
     }
     float[] data = new float[numel];
-    long abs = this.dataOffset + info.start;
-    ByteBuffer buf = this.map.duplicate().order(ByteOrder.LITTLE_ENDIAN);
-    buf.position((int) abs);
+    ByteBuffer buf = this.slice(this.dataOffset + info.start, info.end - info.start);
     switch (info.dtype) {
       case "F32" -> buf.asFloatBuffer().get(data);
       case "F16" -> {
@@ -180,7 +227,51 @@ public final class SafetensorsReader implements AutoCloseable {
       default ->
         throw new UnsupportedOperationException("dtype " + info.dtype + " in " + this.label);
     }
-    return Tensor.of(data, info.shape);
+    return Tensor.of(data, info.shape.length == 0 ? new int[] {1} : info.shape);
+  }
+
+  public String dtype(final String name) {
+    return this.requireInfo(name).dtype;
+  }
+
+  public int[] shape(final String name) {
+    return this.requireInfo(name).shape.clone();
+  }
+
+  public byte[] getRaw(final String name) {
+    TensorInfo info = this.requireInfo(name);
+    long length = info.end - info.start;
+    if (length < 0 || length > Integer.MAX_VALUE) {
+      throw new IllegalArgumentException("raw tensor too large: " + name);
+    }
+    byte[] data = new byte[(int) length];
+    this.slice(this.dataOffset + info.start, length).get(data);
+    return data;
+  }
+
+  private ByteBuffer slice(final long absoluteOffset, final long length) {
+    if (length < 0 || length > Integer.MAX_VALUE) {
+      throw new IllegalArgumentException("tensor slice too large in " + this.label);
+    }
+    int len = (int) length;
+    if (this.map != null) {
+      if (absoluteOffset > Integer.MAX_VALUE) {
+        throw new IllegalArgumentException("tensor offset exceeds mmap range in " + this.label);
+      }
+      int at = (int) absoluteOffset;
+      ByteBuffer buf = this.map.duplicate().order(ByteOrder.LITTLE_ENDIAN);
+      buf.position(at);
+      buf.limit(at + len);
+      return buf.slice().order(ByteOrder.LITTLE_ENDIAN);
+    }
+    ByteBuffer buf = ByteBuffer.allocate(len).order(ByteOrder.LITTLE_ENDIAN);
+    try {
+      readFully(this.channel, absoluteOffset, buf);
+    } catch (IOException e) {
+      throw new UncheckedIOException("failed to read tensor slice from " + this.label, e);
+    }
+    buf.flip();
+    return buf;
   }
 
   private TensorInfo requireInfo(final String name) {

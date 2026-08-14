@@ -31,11 +31,24 @@ public final class Norms {
       this.onePlusWeight = onePlusWeight;
     }
 
+    private RMSNorm(final float eps) {
+      this.weight = null;
+      this.eps = eps;
+      this.onePlusWeight = false;
+    }
+
+    public static RMSNorm weightless(final float eps) {
+      return new RMSNorm(eps);
+    }
+
     public Tensor weight() {
       return this.weight;
     }
 
     public Tensor forward(final Tensor x) {
+      if (this.weight == null) {
+        return Ops.rmsNorm(x, this.eps);
+      }
       return Ops.rmsNorm(x, this.weight, this.eps, this.onePlusWeight);
     }
 
@@ -73,24 +86,38 @@ public final class Norms {
 
     public RotaryEmbedding(final int headSize, final int rotaryDim, final int maxPositionEmbeddings,
                            final float base) {
+      this(headSize, maxPositionEmbeddings, defaultInvFreq(headSize, rotaryDim, base));
+    }
+
+    private RotaryEmbedding(final int headSize, final int maxPositionEmbeddings,
+                            final float[] invFreq) {
+      if (invFreq.length != headSize / 2) {
+        throw new IllegalArgumentException("invFreq length must be headSize/2");
+      }
+      this.headSize = headSize;
+      int half = headSize / 2;
+      float[] cache = new float[maxPositionEmbeddings * headSize];
+      for (int pos = 0; pos < maxPositionEmbeddings; pos++) {
+        for (int i = 0; i < half; i++) {
+          double freq = pos * invFreq[i];
+          cache[pos * headSize + i] = (float) Math.cos(freq);
+          cache[pos * headSize + half + i] = (float) Math.sin(freq);
+        }
+      }
+      this.cosSinCache = Tensor.of(cache, maxPositionEmbeddings, headSize);
+    }
+
+    private static float[] defaultInvFreq(final int headSize, final int rotaryDim,
+                                          final float base) {
       if (rotaryDim != headSize) {
         throw new IllegalArgumentException("rotaryDim must equal headSize");
       }
-      this.headSize = headSize;
       int half = rotaryDim / 2;
       float[] invFreq = new float[half];
       for (int i = 0; i < half; i++) {
         invFreq[i] = (float) (1.0 / Math.pow(base, (2.0 * i) / rotaryDim));
       }
-      float[] cache = new float[maxPositionEmbeddings * rotaryDim];
-      for (int pos = 0; pos < maxPositionEmbeddings; pos++) {
-        for (int i = 0; i < half; i++) {
-          double freq = pos * invFreq[i];
-          cache[pos * rotaryDim + i] = (float) Math.cos(freq);
-          cache[pos * rotaryDim + half + i] = (float) Math.sin(freq);
-        }
-      }
-      this.cosSinCache = Tensor.of(cache, maxPositionEmbeddings, rotaryDim);
+      return invFreq;
     }
 
     public static RotaryEmbedding get(final int headSize, final int rotaryDim,
@@ -98,6 +125,24 @@ public final class Norms {
       String key = headSize + ":" + rotaryDim + ":" + maxPosition + ":" + base;
       return CACHE.computeIfAbsent(key,
         k -> new RotaryEmbedding(headSize, rotaryDim, maxPosition, base));
+    }
+
+    public static RotaryEmbedding proportional(
+      final int headSize,
+      final int maxPosition,
+      final float base,
+      final float partialRotaryFactor
+    ) {
+      String key = "p:" + headSize + ":" + maxPosition + ":" + base + ":" + partialRotaryFactor;
+      return CACHE.computeIfAbsent(key, k -> {
+        int half = headSize / 2;
+        int ropeAngles = (int) (partialRotaryFactor * headSize / 2.0);
+        float[] invFreq = new float[half];
+        for (int i = 0; i < ropeAngles; i++) {
+          invFreq[i] = (float) (1.0 / Math.pow(base, (2.0 * i) / headSize));
+        }
+        return new RotaryEmbedding(headSize, maxPosition, invFreq);
+      });
     }
 
     public Tensor[] forward(final Tensor positions, final Tensor query, final Tensor key) {

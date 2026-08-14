@@ -1,8 +1,8 @@
 ## 1. Implementation Progress
 - Maven multi-module **`1.1.0-SNAPSHOT`**: parent `nano-vllm-java-pom`, library `nano-vllm-java`, demos `nano-vllm-java-samples` (released **1.0.0** 2026-08-09); enforcer Java `[21,)`, Maven `[3.9,)`; JPMS module `com.igormaznitsa.nanollvm` (library only)
 - **ResourceLimits** (exported utils): process-wide defaults + builder; RAG/PDF/JSON/GGUF/safetensors/corpus/history budgets
-- CausalLM: Qwen3 + Gemma3 + **Llama** + LFM2 (GGUF); tokenizers GPT-2 BPE / Metaspace / GGUF-embedded / BERT WordPiece
-- **`ModelSupport`**: exact family detection + `UnsupportedModelException` with a support catalog at load; look-alikes (Qwen2, Qwen3.5/Fara, Gemma2, VLMs, GGUF Qwen/Llama, HF BERT safetensors) fail before weight mmap; `-Dnanollvm.arch` must match the checkpoint
+- CausalLM: Qwen3 + Gemma3 + **Gemma 4 text (QAT mobile)** + **Llama** + LFM2 (GGUF); tokenizers GPT-2 BPE / Metaspace / GGUF-embedded / BERT WordPiece
+- **`ModelSupport`**: exact family detection + `UnsupportedModelException` with a support catalog at load; look-alikes (Qwen2, Qwen3.5/Fara, Gemma2, Gemma 4 vision/audio-only, VLMs, GGUF Qwen/Llama, HF BERT safetensors) fail before weight mmap; `-Dnanollvm.arch` must match the checkpoint; `gemma4` / `gemma4_text` load as text chat
 - **ONNX Tier A:** folder load via `LlmModelFactory.make` — initializers only (no ORT); root or `onnx/`; safetensors preferred if both present; chat Qwen3/Gemma3/Llama + BERT embeddings (HF→GGUF name remap)
 - **GGUF BERT embeddings** (e.g. gte-small): same `LlmModelFactory.make` → `LlmModel.embed`; `LLM.builder` rejects embedding models; Q3_K + IQ4_NL dequant
 - **ModelFileSource**: `ModelFileId` → `InputStream` (+ weight shards); load into heap only (no disk cache); `make(Path)` stays direct disk I/O; ONNX ids `MODEL_ONNX` / `MODEL_ONNX_FP16`
@@ -18,7 +18,7 @@
   `AdvisorEnrichment`, `GenerationStats`, `LLM.GenerationOutput`, `SamplingParams`,
   `Config.HfConfig`, `RagHit`, `TextChunk`, `RagLoadOptions`, `ResourceLimits`,
   `ModelSupport.Selection`
-- Optional download scripts: Qwen3 / Gemma3 / LFM2 GGUF / gte-small / **Tiny-LLM-ONNX** / **SmolLM2-135M-Instruct-ONNX** (`.sh` + Windows `.ps1`/`.cmd`; PS1 ASCII-only + `$PSScriptRoot` + absolute outs)
+- Optional download scripts: Qwen3 / Gemma3 / **Gemma4 E2B QAT mobile** / LFM2 GGUF / gte-small / **Tiny-LLM-ONNX** / **SmolLM2-135M-Instruct-ONNX** (`.sh` + Windows `.ps1`/`.cmd`; PS1 ASCII-only + `$PSScriptRoot` + absolute outs)
 - ONNX JavaDoc: Tier A contracts + {@code @since 1.1.0} on public Onnx* APIs / ModelFileId ONNX roles / LlmModelFactory note
 - **`@since 1.1.0`:** new types (ModelSupport, ModelFileSource, DenseRagIndex, …) and new methods
   on 1.0 types (`LlmModel.embed`, `RagFactory.withEmbeddings`, `HfConfig.parse` /
@@ -61,10 +61,12 @@
 - `TEXT_DEBUG`: optional via `emitDebugPrompts`; RAG corpus/advisor notes are trusted prompt input by design
 - Dense RAG: index-time `LlmModel.embed` of all chunks; query cosine (dot); hybrid = BM25 + dense RRF; off-topic = both indexes agree
 - Lexical off-topic uses salient query terms only (skips conversational glue); file-name stems split on `/` and `\`
+- Gemma 4 text (QAT mobile): flatten nested `text_config`; skip `vision_tower`/`audio_tower`; packed int2/4/8 + SRQ (`GemmaQat`); PLE after MLP; KV share from last same-type non-shared layer; RMS `onePlusWeight=false`; attn scale 1.0; chat `<|turn>`/`<turn|>`
+- Safetensors shards **> 2 GiB** (Gemma 4 QAT `model.safetensors` is ~2.29 GiB) use `FileChannel` positioned reads; files ≤ 2 GiB still mmap
 
 
 ## 3. Technical Debt & Refactoring
-- Attention O(n²); no float16 / TP / CUDA; GGUF packed by default; HF safetensors still FP32
+- Attention O(n²); no float16 / TP / CUDA; GGUF packed by default; most HF safetensors still FP32 (Gemma 4 QAT stays packed)
 - Optional GGUF perf: mmap weights; FP16 / smaller default KV; fused packed GEMM
 - GGUF metaspace pretok (prepend ▁) may need per-export tuning for exotic packs
 - Dense weight `float[]` still GC-only after model close (no eager zeroing of Tensor buffers)
@@ -74,6 +76,7 @@
 
 ## 4. Current Work In Progress
 - Development line **`1.1.0-SNAPSHOT`** (post-1.0.0); multi-module Maven layout
+- **Gemma 4 E2B QAT mobile** — text-only `LlmModel` load for `models/Gemma4-E2B-IT-QAT-Mobile/` (`google/gemma-4-E2B-it-qat-mobile-transformers`). Vision/audio unused. Packed QAT (int2/4/8 + SRQ), PLE, KV sharing, `<|turn>` chat.
 - Library de-productized (chat format markers / sample-owned demo policy); ONNX Tier A + Llama + SmolLM2 Instruct demo
 - `Example` terminal demo: downloaded models first (Qwen3-0.6B preferred); Enter = first item; empty disk exits with download help; `--debug` for prepared prompts
 - Optional GGUF perf backlog remains
@@ -88,6 +91,7 @@
 - Advisors add latency (one batched generate); matmul pool is process-shared or caller-provided
 - Closing `LlmModel` while an `LLM` still holds the graph leaves dense weights reachable until that LLM closes
 - BERT embedding GGUFs and ONNX BERT folders; HF safetensors BERT directory load still limited
+- Gemma 4 **text** (QAT mobile) loads; vision/audio towers in the same checkpoint are skipped. Gemma 4 GGUF / MoE (`enable_moe_block`) / other Gemma 4 variants are still unsupported. Gemma 3 remains `gemma3` / `gemma3_text`.
 - Model/RAG-dependent unit tests skip via test-only `OptionalModelAssumptions` /
   samples `SampleModelAssumptions` (stderr WARNING + JUnit abort) when local weights or `./rag`
   are absent — not shipped with the library JAR
@@ -101,6 +105,7 @@
 - HF safetensors LFM2 directory load beside GGUF?
 - Broader ONNX initializer name maps for exotic Optimum/transformers.js exports?
 - Fara1.5-4B / Qwen3.5 (`qwen3_5`): not supported (hybrid Gated DeltaNet + vision). Load now fails fast via `ModelSupport` instead of mis-labeling as `qwen3`.
+- Gemma 4 vision/audio generation, GGUF Gemma 4, and MoE (`enable_moe_block`) remain out of scope. Text-only QAT mobile is in this snapshot.
 
 
 ## 7. Useful References
@@ -126,3 +131,4 @@
 - Embedding GGUFs/ONNX use the same factory; call `embed`, not `LLM.builder`
 - For Tiny-LLM-ONNX use `onnx/model.onnx` (fp32) or `model_fp16.onnx`; skip quantized community files
 - Tiny-LLM-ONNX download: `.sh` (Linux/macOS), `.ps1` / `.cmd` (Windows)
+- Gemma 4 E2B QAT mobile download: `./models/download-gemma4-e2b-qat-mobile.sh` (or `.ps1` / `.cmd`) → `models/Gemma4-E2B-IT-QAT-Mobile/`

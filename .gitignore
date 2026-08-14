@@ -12,6 +12,7 @@ target/
 # External HF weights — download via models/download-*.sh
 models/Qwen3-0.6B/
 models/Gemma3-270M/
+models/Gemma4-E2B-IT-QAT-Mobile/
 models/*.gguf
 models/SmolLM2-135M-Instruct-ONNX/
 models/Tiny-LLM-ONNX/

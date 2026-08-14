@@ -40,14 +40,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - `ModelSupport` / `UnsupportedModelException`: exact architecture detection (no substring `qwen`→Qwen3),
   a user-facing support catalog, and fail-fast load errors for look-alike families (Qwen2, Qwen3.5/Fara,
-  Gemma 2, Mistral, vision, GGUF Qwen/Llama, HF BERT safetensors). `-Dnanollvm.arch` cannot override a
-  different family. `LLM.builder` / `LlmModel.embed` misuse messages include the same catalog.
+  Gemma 2, Gemma 4 vision/audio-only variants, Mistral, other VLMs, GGUF Qwen/Llama, HF BERT safetensors). `-Dnanollvm.arch` cannot override a
+  different family. `LLM.builder` / `LlmModel.embed` misuse messages include the same catalog. Gemma 4 **text** (including QAT mobile) is a supported chat graph.
 - `Tokenizer.ChatFormat` / `isTurnBasedChat()` / `skipSpecialTokensOnChatDecode()` (product-named
   chat helpers such as {@code isGemmaChat} removed; use format/architecture APIs).
 - RMSNorm offset scale flag renamed to {@code onePlusWeight} (math convention, not a product name).
 - `ChatSession.recoverUnusableAnswers` / `unusableAnswer` / `unusableAnswerFallback` (opt-in).
 - `LLM.Builder.advisorNoteFilter` so apps can drop demo setup fillers before advisor mix.
 - **ONNX folder weight import** (Tier A): `LlmModelFactory.make(folder)` loads `config.json` + tokenizer + `.onnx` (root or `onnx/`) like safetensors — Qwen3 / Gemma3 / Llama chat and BERT embeddings; no ONNX Runtime.
+- Optional download scripts for Gemma 4 E2B QAT mobile (`models/download-gemma4-e2b-qat-mobile.sh` / `.ps1` / `.cmd` → `models/Gemma4-E2B-IT-QAT-Mobile/`, ~2.3 GB). Hugging Face folders with `model_type` `gemma4` / `gemma4_text` now load as **text-only chat** (packed QAT int2/4/8, per-layer embeddings, KV sharing). Vision and audio towers in the same checkpoint are skipped. Safetensors shards larger than 2 GiB are read via `FileChannel` (Java mmap stays limited to 2 GiB).
 - **Llama** causal architecture (`LlamaForCausalLM`) for HF safetensors and ONNX (Tiny-LLM-ONNX base demo;
   SmolLM2-135M-Instruct-ONNX chat demo via `models/download-smollm2-135m-instruct-onnx.sh`).
 - Transparent GGUF BERT embedding support (e.g. GTE-small): load via `LlmModelFactory.make` and call `LlmModel.embed(...)` with text or token ids; `LLM.builder` rejects embedding-only models; `Example` menu option runs an embedding REPL.

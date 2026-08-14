@@ -24,6 +24,12 @@ public final class SampleModelAssumptions {
       "models/download-gemma3-270m.sh (HF license + HF_TOKEN)");
   }
 
+  public static Path requireGemma4E2bQatMobile() {
+    return require(BundledModels.find(BundledModels.GEMMA4_E2B_IT_QAT_MOBILE),
+      "Gemma4-E2B-IT-QAT-Mobile",
+      "models/download-gemma4-e2b-qat-mobile.sh");
+  }
+
   public static Path requireGteSmallGguf() {
     return require(BundledModels.find(BundledModels.GTE_SMALL_GGUF), "gte-small GGUF",
       "models/download-gte-small-gguf.sh");

@@ -43,6 +43,20 @@ public final class PackedLinearKernel implements LinearKernel {
     return new PackedLinearKernel(weight.size(1), weight.size(0), name, dequant);
   }
 
+  public static PackedLinearKernel of(
+    final int inFeatures,
+    final int outFeatures,
+    final String name,
+    final PackedRowDequant dequant
+  ) {
+    requireNonNull(name, "name");
+    requireNonNull(dequant, "dequant");
+    if (inFeatures <= 0 || outFeatures <= 0) {
+      throw new IllegalArgumentException("packed linear features must be positive");
+    }
+    return new PackedLinearKernel(inFeatures, outFeatures, name, dequant);
+  }
+
   @Override
   public int inFeatures() {
     return this.inFeatures;

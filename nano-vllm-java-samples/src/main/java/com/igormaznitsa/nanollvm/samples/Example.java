@@ -747,6 +747,10 @@ public final class Example {
         BundledModels.GEMMA3_270M,
         "Run models/download-gemma3-270m.sh (HF license + HF_TOKEN)"),
       choice(
+        "Gemma4-E2B QAT mobile (chat, safetensors, ~2.3GB)",
+        BundledModels.GEMMA4_E2B_IT_QAT_MOBILE,
+        "Run models/download-gemma4-e2b-qat-mobile.sh"),
+      choice(
         "LFM2.5-2.6B Q4_K_M (chat, gguf, ~16g heap)",
         BundledModels.LFM2_5_2_6B_GGUF,
         "Run models/download-lfm2.5-2.6b-gguf.sh"),
@@ -827,6 +831,7 @@ public final class Example {
     console.println();
     console.println("Other checkpoints:");
     console.println("  ./models/download-gemma3-270m.sh      (HF license + HF_TOKEN)");
+    console.println("  ./models/download-gemma4-e2b-qat-mobile.sh  (~2.3GB, Apache 2.0)");
     console.println("  ./models/download-lfm2.5-2.6b-gguf.sh");
     console.println("  ./models/download-smollm2-135m-instruct-onnx.sh  (compact onnx demo)");
     console.println("  ./models/download-tiny-llm-onnx.sh");

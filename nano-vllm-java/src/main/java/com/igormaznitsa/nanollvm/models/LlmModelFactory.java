@@ -6,6 +6,7 @@ import static java.util.Objects.requireNonNull;
 import com.igormaznitsa.nanollvm.chat.LlmListener;
 import com.igormaznitsa.nanollvm.chat.LlmListeners;
 import com.igormaznitsa.nanollvm.exceptions.ModelLoadException;
+import com.igormaznitsa.nanollvm.internal.Gemma4QatLoader;
 import com.igormaznitsa.nanollvm.internal.GgufModelLoader;
 import com.igormaznitsa.nanollvm.internal.GgufModelLoader.LoadedGguf;
 import com.igormaznitsa.nanollvm.internal.GgufReader;
@@ -20,6 +21,7 @@ import com.igormaznitsa.nanollvm.models.internal.CausalLMFactory;
 import com.igormaznitsa.nanollvm.models.internal.EmbeddingEncoder;
 import com.igormaznitsa.nanollvm.models.internal.EmbeddingEncoderFactory;
 import com.igormaznitsa.nanollvm.models.internal.WeightBag;
+import com.igormaznitsa.nanollvm.models.internal.WeightNames;
 import com.igormaznitsa.nanollvm.models.internal.WeightSchema;
 import com.igormaznitsa.nanollvm.tensor.MatmulRuntime;
 import com.igormaznitsa.nanollvm.tokenizer.Tokenizer;
@@ -467,7 +469,9 @@ public final class LlmModelFactory {
     LlmListeners.info(io, null, "Loading " + arch + " weights…");
     WeightBag weights;
     if (source == ModelSupport.Source.HF_SAFETENSORS) {
-      weights = ModelLoader.loadWeights(modelFolder, hfConfig, schema, io);
+      weights = WeightNames.ARCH_GEMMA4.equals(arch)
+        ? Gemma4QatLoader.loadWeights(modelFolder, hfConfig, schema, io)
+        : ModelLoader.loadWeights(modelFolder, hfConfig, schema, io);
     } else {
       weights = OnnxModelLoader.loadWeights(modelFolder, hfConfig, schema, io);
     }
@@ -515,7 +519,10 @@ public final class LlmModelFactory {
     LlmListeners.info(io, null, "Loading " + arch + " weights…");
     WeightBag weights;
     if (source == ModelSupport.Source.HF_SAFETENSORS) {
-      weights = ModelLoader.loadWeights(
+      weights = WeightNames.ARCH_GEMMA4.equals(arch)
+        ? Gemma4QatLoader.loadWeights(
+        bundle.safetensors(), bundle.displayName(), hfConfig, schema, io)
+        : ModelLoader.loadWeights(
         bundle.safetensors(), bundle.displayName(), hfConfig, schema, io);
     } else {
       weights = loadOnnxFromBundle(bundle, hfConfig, schema, io);

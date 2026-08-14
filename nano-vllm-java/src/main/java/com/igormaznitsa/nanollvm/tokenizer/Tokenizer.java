@@ -279,7 +279,9 @@ public final class Tokenizer {
               || content.equals("<bos>")
               || content.equals("<eos>")
               || content.equals("<start_of_turn>")
-              || content.equals("<end_of_turn>")) {
+              || content.equals("<end_of_turn>")
+              || content.equals("<|turn>")
+              || content.equals("<turn|>")) {
               specialTexts.add(content);
             }
           }
@@ -326,6 +328,7 @@ public final class Tokenizer {
       addStopIfPresent(vocab, stopIds, "<|endoftext|>");
       addStopIfPresent(vocab, stopIds, "<eos>");
       addStopIfPresent(vocab, stopIds, "<end_of_turn>");
+      addStopIfPresent(vocab, stopIds, "<turn|>");
 
       if (generationConfigJson != null && !generationConfigJson.isBlank()) {
         Map<String, Object> gc = Json.parseObject(generationConfigJson);
@@ -463,6 +466,12 @@ public final class Tokenizer {
     final String chatTemplate,
     final Map<String, Object> tokenizerRoot
   ) {
+    if (chatTemplate != null && chatTemplate.contains("<|turn>")) {
+      return ChatFormat.TURN_BASED;
+    }
+    if (vocab.containsKey("<|turn>")) {
+      return ChatFormat.TURN_BASED;
+    }
     if (chatTemplate != null && chatTemplate.contains("start_of_turn")) {
       return ChatFormat.TURN_BASED;
     }
@@ -968,9 +977,12 @@ public final class Tokenizer {
     return this.applyChatTemplate(messages, addGenerationPrompt, true);
   }
 
-  // Turn-based layout: optional system folded into first user; roles user|model with start/end markers
   private String applyTurnBasedChat(final List<Map<String, String>> messages,
-                                    final boolean addGenerationPrompt) {
+                                    final boolean addGenerationPrompt,
+                                    final boolean enableThinking) {
+    if (this.vocab.containsKey("<|turn>")) {
+      return this.applyAngleTurnChat(messages, addGenerationPrompt, enableThinking);
+    }
     String system = null;
     List<Map<String, String>> turns = new ArrayList<>();
     for (Map<String, String> msg : messages) {
@@ -1002,6 +1014,49 @@ public final class Tokenizer {
     }
     if (addGenerationPrompt) {
       sb.append("<start_of_turn>model\n");
+    }
+    return sb.toString();
+  }
+
+  private String applyAngleTurnChat(final List<Map<String, String>> messages,
+                                    final boolean addGenerationPrompt,
+                                    final boolean enableThinking) {
+    String system = null;
+    List<Map<String, String>> turns = new ArrayList<>();
+    for (Map<String, String> msg : messages) {
+      String role = msg.getOrDefault("role", "user");
+      if ("system".equals(role) || "developer".equals(role)) {
+        system = msg.getOrDefault("content", "");
+        continue;
+      }
+      turns.add(msg);
+    }
+
+    StringBuilder sb = new StringBuilder();
+    if (this.vocab.containsKey("<bos>")) {
+      sb.append("<bos>");
+    }
+    if (enableThinking || (system != null && !system.isBlank())) {
+      sb.append("<|turn>system\n");
+      if (enableThinking) {
+        sb.append("<|think|>\n");
+      }
+      if (system != null && !system.isBlank()) {
+        sb.append(system.strip());
+      }
+      sb.append("<turn|>\n");
+    }
+    for (Map<String, String> msg : turns) {
+      String role = msg.getOrDefault("role", "user");
+      if ("assistant".equals(role)) {
+        role = "model";
+      }
+      sb.append("<|turn>").append(role).append('\n')
+        .append(msg.getOrDefault("content", "").strip())
+        .append("<turn|>\n");
+    }
+    if (addGenerationPrompt) {
+      sb.append("<|turn>model\n");
     }
     return sb.toString();
   }
@@ -1097,7 +1152,7 @@ public final class Tokenizer {
     requireNonNull(thinkOpen, "thinkOpen");
     requireNonNull(thinkClose, "thinkClose");
     if (this.chatFormat == ChatFormat.TURN_BASED) {
-      return this.applyTurnBasedChat(messages, addGenerationPrompt);
+      return this.applyTurnBasedChat(messages, addGenerationPrompt, enableThinking);
     }
     if (this.chatFormat == ChatFormat.CHATML) {
       StringBuilder sb = new StringBuilder();
@@ -1245,7 +1300,8 @@ public final class Tokenizer {
      */
     CHATML,
     /**
-     * {@code <start_of_turn>} / {@code <end_of_turn>} turns (system folded into first user).
+     * {@code <start_of_turn>} / {@code <end_of_turn>} or Gemma 4 {@code <|turn>} / {@code <turn|>}
+     * turns. Gemma 3 folds system into the first user turn; Gemma 4 emits a native system turn.
      */
     TURN_BASED,
     /**

@@ -288,12 +288,19 @@ public final class Transformer implements AutoCloseable {
       throw new IllegalStateException("numKvcacheBlocks must be > 0");
     }
 
+    int layers = hf.numHiddenLayers();
+    int[] headDims = new int[layers];
+    boolean[] allocate = new boolean[layers];
+    for (int i = 0; i < layers; i++) {
+      headDims[i] = hf.layerHeadDim(i);
+      allocate[i] = !hf.isKvSharedLayer(i);
+    }
     return new KvCacheArena(
-      hf.numHiddenLayers(),
       this.config.numKvcacheBlocks(),
       this.blockSize,
       hf.numKeyValueHeads(),
-      hf.headDim());
+      headDims,
+      allocate);
   }
 
   /**

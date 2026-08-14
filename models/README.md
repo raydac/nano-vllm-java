@@ -34,6 +34,24 @@ Windows: `.\models\download-gemma3-270m.ps1` or `models\download-gemma3-270m.cmd
 
 Creates `models/Gemma3-270M/`.
 
+## Gemma4-E2B-IT-QAT-Mobile (optional)
+
+[google/gemma-4-E2B-it-qat-mobile-transformers](https://huggingface.co/google/gemma-4-E2B-it-qat-mobile-transformers)
+— instruction-tuned Gemma 4 E2B, QAT mobile (`wNa8o8`) safetensors. Apache 2.0, ungated. About **2.3 GB**.
+Default **16 GB heap** in [`.mvn/jvm.config`](../.mvn/jvm.config) is the intended headroom.
+
+```bash
+./models/download-gemma4-e2b-qat-mobile.sh
+```
+
+Windows: `.\models\download-gemma4-e2b-qat-mobile.ps1` or `models\download-gemma4-e2b-qat-mobile.cmd`.
+
+Creates `models/Gemma4-E2B-IT-QAT-Mobile/`. Resume-safe (`curl -C -`). Optional `HF_TOKEN` if Hugging Face
+rate-limits you.
+
+`LlmModelFactory.make` loads this folder as **text-only** chat (packed QAT). Vision and audio towers in the
+same checkpoint are unused.
+
 ## LFM2.5-2.6B GGUF (optional)
 
 Hybrid Liquid LFM2 checkpoint as a single GGUF file. Weights stay packed in RAM (dequant on matmul); default

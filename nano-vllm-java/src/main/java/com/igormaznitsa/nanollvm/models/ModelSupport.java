@@ -2,6 +2,7 @@ package com.igormaznitsa.nanollvm.models;
 
 import static com.igormaznitsa.nanollvm.models.internal.WeightNames.ARCH_BERT;
 import static com.igormaznitsa.nanollvm.models.internal.WeightNames.ARCH_GEMMA3;
+import static com.igormaznitsa.nanollvm.models.internal.WeightNames.ARCH_GEMMA4;
 import static com.igormaznitsa.nanollvm.models.internal.WeightNames.ARCH_LFM2;
 import static com.igormaznitsa.nanollvm.models.internal.WeightNames.ARCH_LLAMA;
 import static com.igormaznitsa.nanollvm.models.internal.WeightNames.ARCH_QWEN3;
@@ -27,11 +28,12 @@ public final class ModelSupport {
 
   public static final String CATALOG = """
     Supported by this library:
-      Chat from a Hugging Face folder (config.json + *.safetensors or *.onnx): qwen3, gemma3 / gemma3_text, llama
+      Chat from a Hugging Face folder (config.json + *.safetensors or *.onnx): qwen3, gemma3 / gemma3_text, \
+    gemma4 (text / QAT mobile), llama
       Chat from a GGUF file: lfm2
       Embeddings from GGUF or ONNX: bert
     Not supported: Qwen2 / Qwen2.5, Qwen3.5 / Qwen3-Next / Fara, vision-language models, Gemma 1 / 2, \
-    Mistral / Mixtral, Phi, MoE, GGUF Qwen / Llama / Gemma, Hugging Face BERT safetensors.""";
+    Gemma 4 vision/audio towers, Mistral / Mixtral, Phi, MoE, GGUF Qwen / Llama / Gemma, Hugging Face BERT safetensors.""";
 
   private static final Pattern HF_CLASS_SUFFIX = Pattern.compile(
     "(ForCausalLM|ForConditionalGeneration|ForSequenceClassification|ForMaskedLM"
@@ -150,6 +152,13 @@ public final class ModelSupport {
         return fromName;
       }
       if (isMultimodalClass(raw.toLowerCase(ROOT))) {
+        if (fromName != null && fromName.supported()
+          && ARCH_GEMMA4.equals(fromName.selection().architectureId())) {
+          if (firstSupported == null) {
+            firstSupported = fromName;
+          }
+          continue;
+        }
         return Verdict.rejected(multimodalReason(raw));
       }
       if (fromName != null && firstSupported == null) {
@@ -160,6 +169,14 @@ public final class ModelSupport {
   }
 
   private static Optional<String> structuralChatRejection(final Config.HfConfig config) {
+    if (config.isGemma4()) {
+      if (config.gemma4().enableMoeBlock()) {
+        return Optional.of(
+          "Gemma 4 Mixture-of-Experts checkpoints are not implemented. This library loads the "
+            + "dense E2B text decoder (including QAT mobile).");
+      }
+      return Optional.empty();
+    }
     if (config.visionConfigPresent()) {
       return Optional.of(multimodalReason(config.modelType()));
     }
@@ -191,7 +208,7 @@ public final class ModelSupport {
     String forcedId = normalizeForcedAlias(forced);
     if (forcedId == null) {
       throw unsupported(
-        "'%s' is not a valid -D%s value (use qwen3, gemma3, llama, lfm2, or bert)."
+        "'%s' is not a valid -D%s value (use qwen3, gemma3, gemma4, llama, lfm2, or bert)."
           .formatted(forced, PROP_ARCH),
         modelType,
         architectures);
@@ -213,6 +230,14 @@ public final class ModelSupport {
   ) {
     String id = selected.architectureId();
     boolean hfChat = ARCH_QWEN3.equals(id) || ARCH_GEMMA3.equals(id) || ARCH_LLAMA.equals(id);
+    if (ARCH_GEMMA4.equals(id) && source != Source.HF_SAFETENSORS) {
+      throw unsupported(
+        ("Architecture '%s' loads from a Hugging Face folder (config.json + *.safetensors QAT), "
+          + "not from GGUF or ONNX. Vision and audio towers are skipped; text chat only.")
+          .formatted(id),
+        config == null ? id : config.modelType(),
+        config == null ? List.of() : config.architectures());
+    }
     if (hfChat && source == Source.GGUF) {
       throw unsupported(
         ("Architecture '%s' loads from a Hugging Face folder (config.json + *.safetensors or "
@@ -275,6 +300,15 @@ public final class ModelSupport {
       return Verdict.rejected(
         ("Gemma3 variant '%s' is not implemented. Supported Gemma is gemma3 / gemma3_text "
           + "(Gemma3ForCausalLM), not vision checkpoints.").formatted(token));
+    }
+    if (token.equals("gemma4") || token.equals("gemma4_text")) {
+      return Verdict.ok(ARCH_GEMMA4, Kind.CHAT);
+    }
+    if (token.startsWith("gemma4")) {
+      return Verdict.rejected(
+        ("Gemma 4 variant '%s' is not implemented. Supported Gemma 4 is the text decoder "
+          + "(model_type gemma4 / gemma4_text), loaded text-only from a QAT safetensors folder.")
+          .formatted(token));
     }
     if (token.equals("gemma2") || token.startsWith("gemma2_")) {
       return Verdict.rejected(
@@ -356,7 +390,8 @@ public final class ModelSupport {
 
   private static String multimodalReason(final String label) {
     return ("Vision-language / multimodal checkpoint '%s' is not supported. This library runs "
-      + "text-only chat (qwen3, gemma3, llama, lfm2) and bert embeddings.").formatted(blank(label));
+      + "text-only chat (qwen3, gemma3, gemma4, llama, lfm2) and bert embeddings.").formatted(
+      blank(label));
   }
 
   private static boolean isQwen3Text(final String token) {
@@ -418,6 +453,7 @@ public final class ModelSupport {
     return switch (forced) {
       case ARCH_QWEN3 -> ARCH_QWEN3;
       case ARCH_GEMMA3, "gemma3_text" -> ARCH_GEMMA3;
+      case ARCH_GEMMA4, "gemma4_text" -> ARCH_GEMMA4;
       case ARCH_LLAMA, "llama2", "llama3" -> ARCH_LLAMA;
       case ARCH_LFM2, "lfm2.5", "lfm2_5" -> ARCH_LFM2;
       case ARCH_BERT -> ARCH_BERT;
@@ -447,7 +483,7 @@ public final class ModelSupport {
    */
   public enum Kind {
     /**
-     * Causal chat / completion ({@code qwen3}, {@code gemma3}, {@code llama}, {@code lfm2}).
+     * Causal chat / completion ({@code qwen3}, {@code gemma3}, {@code gemma4}, {@code llama}, {@code lfm2}).
      */
     CHAT,
     /** BERT-style encoder used with {@link LlmModel#embed}. */
@@ -474,8 +510,8 @@ public final class ModelSupport {
    * <p>Returned by {@link ModelSupport#require} / {@link ModelSupport#resolve} /
    * {@link ModelSupport#requireGguf}. Use {@link #isEmbedding()} to decide
    * {@link LlmModel#embed} vs {@link com.igormaznitsa.nanollvm.llm.LLM#builder}.
-   * {@link #architectureId()} is the canonical key ({@code qwen3}, {@code gemma3}, {@code llama},
-   * {@code lfm2}, {@code bert}).
+   * {@link #architectureId()} is the canonical key ({@code qwen3}, {@code gemma3}, {@code gemma4},
+   * {@code llama}, {@code lfm2}, {@code bert}).
    *
    * @param architectureId canonical backend id; never {@code null}
    * @param kind           chat vs embedding; never {@code null}

@@ -17,6 +17,8 @@ public final class Attention {
   private final int repeats;
   private final int slidingWindow;
   private final int layerIndex;
+  private final int kvLayerIndex;
+  private final boolean writeKv;
 
   public Attention(final int numHeads, final int headDim, final float scale, final int numKvHeads,
                    final int layerIndex) {
@@ -31,6 +33,19 @@ public final class Attention {
     final int slidingWindow,
     final int layerIndex
   ) {
+    this(numHeads, headDim, scale, numKvHeads, slidingWindow, layerIndex, layerIndex, true);
+  }
+
+  public Attention(
+    final int numHeads,
+    final int headDim,
+    final float scale,
+    final int numKvHeads,
+    final int slidingWindow,
+    final int layerIndex,
+    final int kvLayerIndex,
+    final boolean writeKv
+  ) {
     this.numHeads = numHeads;
     this.headDim = headDim;
     this.scale = scale;
@@ -38,15 +53,21 @@ public final class Attention {
     this.repeats = numHeads / numKvHeads;
     this.slidingWindow = Math.max(0, slidingWindow);
     this.layerIndex = layerIndex;
+    this.kvLayerIndex = kvLayerIndex;
+    this.writeKv = writeKv;
   }
 
   public Tensor forward(final Tensor q, final Tensor k, final Tensor v, final Context ctx) {
     KvCacheArena arena = requireNonNull(ctx.kvCache(), "KV cache arena not bound in Context");
-    Tensor kCache = arena.k(this.layerIndex);
-    Tensor vCache = arena.v(this.layerIndex);
+    Tensor kCache = arena.k(this.kvLayerIndex);
+    Tensor vCache = arena.v(this.kvLayerIndex);
     int[] slots = ctx.slotMapping();
-    if (kCache.numel() > 1 && vCache.numel() > 1 && slots != null && slots.length == k.size(0)) {
+    if (this.writeKv && kCache.numel() > 1 && vCache.numel() > 1 && slots != null
+      && slots.length == k.size(0)) {
       this.storeKvCache(k, v, slots, kCache, vCache);
+    }
+    if (!this.writeKv) {
+      return this.attendFromCache(q, ctx, kCache, vCache, slots);
     }
     if (ctx.isPrefill()) {
       if (ctx.blockTables() != null) {
@@ -55,6 +76,44 @@ public final class Attention {
       return this.prefillDense(q, k, v, ctx);
     }
     return this.decode(q, ctx, kCache, vCache);
+  }
+
+  private Tensor attendFromCache(
+    final Tensor q,
+    final Context ctx,
+    final Tensor kCache,
+    final Tensor vCache,
+    final int[] slots
+  ) {
+    if (!ctx.isPrefill()) {
+      return this.decode(q, ctx, kCache, vCache);
+    }
+    if (ctx.blockTables() != null) {
+      return this.prefillWithCache(q, ctx, kCache, vCache);
+    }
+    if (slots == null || slots.length != q.size(0)) {
+      throw new IllegalStateException(
+        "shared-KV attention needs slot mapping or block tables to read the producer cache");
+    }
+    Tensor[] gathered = this.gatherKvCache(slots, kCache, vCache);
+    return this.prefillDense(q, gathered[0], gathered[1], ctx);
+  }
+
+  private Tensor[] gatherKvCache(final int[] slotMapping, final Tensor kCache,
+                                 final Tensor vCache) {
+    int n = slotMapping.length;
+    int d = this.numKvHeads * this.headDim;
+    Tensor k = Tensor.zeros(n, this.numKvHeads, this.headDim);
+    Tensor v = Tensor.zeros(n, this.numKvHeads, this.headDim);
+    for (int i = 0; i < n; i++) {
+      int slot = slotMapping[i];
+      if (slot < 0) {
+        continue;
+      }
+      System.arraycopy(kCache.data(), kCache.offset() + slot * d, k.data(), i * d, d);
+      System.arraycopy(vCache.data(), vCache.offset() + slot * d, v.data(), i * d, d);
+    }
+    return new Tensor[] {k, v};
   }
 
   private void storeKvCache(

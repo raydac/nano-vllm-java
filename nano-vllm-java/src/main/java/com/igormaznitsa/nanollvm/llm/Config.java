@@ -97,8 +97,18 @@ public final class Config {
     int blocksPerSeq = (maxModelLen + blockSize - 1) / blockSize;
     int estimated = Math.max(maxNumSeqs * blocksPerSeq, 128);
     long free = Runtime.getRuntime().maxMemory();
-    long bytesPerBlock = 2L * hf.numHiddenLayers() * blockSize
-      * hf.numKeyValueHeads() * hf.headDim() * Float.BYTES;
+    long bytesPerBlock = 0L;
+    for (int layer = 0; layer < hf.numHiddenLayers(); layer++) {
+      if (hf.isKvSharedLayer(layer)) {
+        continue;
+      }
+      bytesPerBlock +=
+        2L * blockSize * hf.numKeyValueHeads() * hf.layerHeadDim(layer) * Float.BYTES;
+    }
+    if (bytesPerBlock <= 0L) {
+      bytesPerBlock = 2L * hf.numHiddenLayers() * blockSize
+        * hf.numKeyValueHeads() * hf.headDim() * Float.BYTES;
+    }
     int heapCap = (int) Math.max(32, (long) (free * kvHeapFraction) / Math.max(1, bytesPerBlock));
     int resolved = Math.min(estimated, heapCap);
     if (resolved <= 0) {
@@ -295,6 +305,7 @@ public final class Config {
    * @param convLCache            {@code conv_L_cache} (LFM2 short-conv state length)
    * @param visionConfigPresent   {@code true} when vision/image/video keys exist (unsupported VLMs)
    * @param nestedTextConfig      {@code true} when {@code text_config} is a nested object
+   * @param gemma4                Gemma 4 text extras; {@code null} for other families
    */
   public record HfConfig(
     int vocabSize,
@@ -321,7 +332,8 @@ public final class Config {
     float queryPreAttnScalar,
     int convLCache,
     boolean visionConfigPresent,
-    boolean nestedTextConfig
+    boolean nestedTextConfig,
+    Gemma4Text gemma4
   ) {
     public HfConfig {
       ropeScaling = freezeStringKeyedMap(ropeScaling);
@@ -368,7 +380,20 @@ public final class Config {
      * @since 1.1.0
      */
     public static HfConfig parse(final String configJson) {
-      Map<String, Object> m = Json.parseObject(requireNonNull(configJson, "configJson"));
+      Map<String, Object> root = Json.parseObject(requireNonNull(configJson, "configJson"));
+      String modelType = Json.asString(root.get("model_type"));
+      boolean nestedText = root.get("text_config") instanceof Map<?, ?>;
+      boolean vision = root.containsKey("vision_config")
+        || root.containsKey("image_token_id")
+        || root.containsKey("video_token_id");
+      Map<String, Object> m = isGemma4Family(modelType) && nestedText
+        ? flattenGemma4Text(root)
+        : root;
+      if (isGemma4Family(modelType)) {
+        modelType = Json.asString(root.get("model_type"));
+      } else {
+        modelType = Json.asString(m.get("model_type"));
+      }
       int hiddenSize = Json.asInt(m.get("hidden_size"), 0);
       int numAttentionHeads = Json.asInt(m.get("num_attention_heads"), 0);
       if (numAttentionHeads == 0) {
@@ -380,7 +405,9 @@ public final class Config {
       String hiddenAct = Json.asString(m.getOrDefault("hidden_act", "silu"));
       String hiddenActivation = Json.asString(m.get("hidden_activation"));
       List<String> architectures = null;
-      List<Object> archArr = Json.asArray(m.get("architectures"));
+      List<Object> archArr = Json.asArray(root.containsKey("architectures")
+        ? root.get("architectures")
+        : m.get("architectures"));
       if (archArr != null) {
         architectures = archArr.stream().map(Json::asString).toList();
       }
@@ -392,16 +419,10 @@ public final class Config {
       float queryPre = m.containsKey("query_pre_attn_scalar")
         ? Json.asFloat(m.get("query_pre_attn_scalar"), headDim)
         : 0f;
-      String modelType = Json.asString(m.get("model_type"));
       float rmsEps = m.containsKey("rms_norm_eps")
         ? Json.asFloat(m.get("rms_norm_eps"), 1e-6f)
         : Json.asFloat(m.get("norm_eps"), 1e-6f);
-      float ropeTheta = Json.asFloat(m.get("rope_theta"), 1_000_000f);
-      Map<String, Object> ropeScaling = Json.asObject(m.get("rope_scaling"));
-      Map<String, Object> ropeParams = Json.asObject(m.get("rope_parameters"));
-      if (ropeParams != null && ropeParams.containsKey("rope_theta")) {
-        ropeTheta = Json.asFloat(ropeParams.get("rope_theta"), ropeTheta);
-      }
+      RopeBases rope = resolveRopeBases(m);
       return new HfConfig(
         Json.asInt(m.get("vocab_size"), 0),
         hiddenSize,
@@ -413,24 +434,82 @@ public final class Config {
         Json.asInt(m.get("max_position_embeddings"), 32768),
         rmsEps,
         hiddenAct,
-        Json.asBoolean(m.get("tie_word_embeddings"), false),
+        Json.asBoolean(m.get("tie_word_embeddings"),
+          Json.asBoolean(root.get("tie_word_embeddings"), false)),
         Json.asBoolean(m.get("attention_bias"), false),
-        ropeTheta,
-        ropeScaling,
+        rope.theta(),
+        Json.asObject(m.get("rope_scaling")),
         Json.asString(m.getOrDefault("torch_dtype", "float16")),
         modelType,
         architectures,
         hiddenActivation,
         Json.asInt(m.get("sliding_window"), 0),
         layerTypes,
-        Json.asFloat(m.get("rope_local_base_freq"), 10_000f),
+        rope.localBaseFreq(),
         queryPre,
         Json.asInt(m.get("conv_L_cache"), 0),
-        m.containsKey("vision_config")
-          || m.containsKey("image_token_id")
-          || m.containsKey("video_token_id"),
-        m.get("text_config") instanceof Map<?, ?>
+        vision,
+        nestedText,
+        isGemma4Family(modelType) ? parseGemma4Text(m, rope.partialRotaryFactor()) : null
       );
+    }
+
+    static boolean isGemma4Family(final String modelType) {
+      return "gemma4".equals(modelType) || "gemma4_text".equals(modelType);
+    }
+
+    private static Map<String, Object> flattenGemma4Text(final Map<String, Object> root) {
+      Map<String, Object> text = Json.asObject(root.get("text_config"));
+      Map<String, Object> merged = new LinkedHashMap<>(text);
+      merged.put("model_type", Json.asString(root.get("model_type")));
+      return merged;
+    }
+
+    private static RopeBases resolveRopeBases(final Map<String, Object> m) {
+      float theta = Json.asFloat(m.get("rope_theta"), 1_000_000f);
+      float local = Json.asFloat(m.get("rope_local_base_freq"), 10_000f);
+      float partial = 0.25f;
+      Map<String, Object> ropeParams = Json.asObject(m.get("rope_parameters"));
+      if (ropeParams == null) {
+        return new RopeBases(theta, local, partial);
+      }
+      if (ropeParams.containsKey("rope_theta")) {
+        theta = Json.asFloat(ropeParams.get("rope_theta"), theta);
+      }
+      Map<String, Object> sliding = Json.asObject(ropeParams.get("sliding_attention"));
+      if (sliding != null) {
+        local = Json.asFloat(sliding.get("rope_theta"), local);
+      }
+      Map<String, Object> full = Json.asObject(ropeParams.get("full_attention"));
+      if (full != null) {
+        theta = Json.asFloat(full.get("rope_theta"), theta);
+        partial = Json.asFloat(full.get("partial_rotary_factor"), partial);
+      }
+      return new RopeBases(theta, local, partial);
+    }
+
+    private static Gemma4Text parseGemma4Text(final Map<String, Object> m,
+                                              final float partialRotary) {
+      return new Gemma4Text(
+        Json.asInt(m.get("hidden_size_per_layer_input"), 256),
+        Json.asInt(m.get("num_kv_shared_layers"), 0),
+        Json.asBoolean(m.get("use_double_wide_mlp"), false),
+        Json.asInt(m.get("global_head_dim"), 512),
+        partialRotary,
+        Json.asFloat(m.get("final_logit_softcapping"), 0f),
+        Json.asBoolean(m.get("enable_moe_block"), false));
+    }
+
+    /**
+     * Attention softmax scale: {@code (queryPreAttnScalar or headDim)^-0.5}.
+     * Gemma 4 uses {@code 1.0} (Q/K RMSNorm already unit-RMS).
+     */
+    public float attentionScale() {
+      if (this.gemma4 != null) {
+        return 1.0f;
+      }
+      float denom = this.queryPreAttnScalar > 0f ? this.queryPreAttnScalar : this.headDim;
+      return (float) Math.pow(denom, -0.5);
     }
 
     /**
@@ -475,12 +554,53 @@ public final class Config {
       return this.hiddenAct == null ? "silu" : this.hiddenAct;
     }
 
-    /**
-     * Attention softmax scale: {@code (queryPreAttnScalar or headDim)^-0.5}.
-     */
-    public float attentionScale() {
-      float denom = this.queryPreAttnScalar > 0f ? this.queryPreAttnScalar : this.headDim;
-      return (float) Math.pow(denom, -0.5);
+    public boolean isGemma4() {
+      return this.gemma4 != null;
+    }
+
+    public int layerHeadDim(final int layerIndex) {
+      if (this.gemma4 == null) {
+        return this.headDim;
+      }
+      return this.isSlidingLayer(layerIndex) ? this.headDim : this.gemma4.globalHeadDim();
+    }
+
+    public int mlpIntermediateSize(final int layerIndex) {
+      if (this.gemma4 == null) {
+        return this.intermediateSize;
+      }
+      return this.gemma4.useDoubleWideMlp() && this.isKvSharedLayer(layerIndex)
+        ? this.intermediateSize * 2
+        : this.intermediateSize;
+    }
+
+    public int firstKvSharedLayer() {
+      if (this.gemma4 == null || this.gemma4.numKvSharedLayers() <= 0) {
+        return this.numHiddenLayers;
+      }
+      return this.numHiddenLayers - this.gemma4.numKvSharedLayers();
+    }
+
+    public boolean isKvSharedLayer(final int layerIndex) {
+      int first = this.firstKvSharedLayer();
+      return first > 0 && layerIndex >= first;
+    }
+
+    public int kvProducerLayer(final int layerIndex) {
+      if (!this.isKvSharedLayer(layerIndex)) {
+        return layerIndex;
+      }
+      boolean sliding = this.isSlidingLayer(layerIndex);
+      for (int i = this.firstKvSharedLayer() - 1; i >= 0; i--) {
+        if (this.isSlidingLayer(i) == sliding) {
+          return i;
+        }
+      }
+      throw new IllegalStateException(
+        "no KV producer layer of matching type for shared layer " + layerIndex);
+    }
+
+    private record RopeBases(float theta, float localBaseFreq, float partialRotaryFactor) {
     }
 
     /**
@@ -500,5 +620,21 @@ public final class Config {
       }
       return false;
     }
+  }
+
+  /**
+   * Gemma 4 text extras flattened from nested {@code text_config}.
+   *
+   * @since 1.1.0
+   */
+  public record Gemma4Text(
+    int hiddenSizePerLayerInput,
+    int numKvSharedLayers,
+    boolean useDoubleWideMlp,
+    int globalHeadDim,
+    float fullPartialRotaryFactor,
+    float finalLogitSoftcapping,
+    boolean enableMoeBlock
+  ) {
   }
 }

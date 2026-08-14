@@ -854,7 +854,7 @@ class CoreUnitTest {
                 100, 64, 128, 1, 4, 1, 16, 128, 1e-6f, "gelu", false, false,
                 1e6f, null, "float32", "gemma3_text",
                 List.of("Gemma3ForCausalLM"), "gelu_pytorch_tanh",
-              512, List.of("sliding_attention"), 10_000f, 256f, 0, false, false)));
+              512, List.of("sliding_attention"), 10_000f, 256f, 0, false, false, null)));
 
     Path dir = createTempDirectory("gemma-tok");
     try {
@@ -929,10 +929,57 @@ class CoreUnitTest {
   }
 
   @Test
+  void gemma4ChatTemplateUsesAngleTurnMarkers() throws Exception {
+    Path dir = createTempDirectory("gemma4-tok");
+    try {
+      writeString(dir.resolve("config.json"),
+        "{\"model_type\":\"gemma4\",\"vocab_size\":32}");
+      writeString(dir.resolve("tokenizer_config.json"), """
+        {"eos_token":"<eos>","pad_token":"<pad>",
+         "chat_template":"{% for m in messages %}<|turn>{{ m.role }}\\n{{ m.content }}<turn|>\\n{% endfor %}"}
+        """);
+      writeString(dir.resolve("tokenizer.json"), """
+        {"model":{"type":"BPE","vocab":{"<bos>":0,"<eos>":1,"<pad>":2,"a":3,"▁":4},"merges":[]},
+         "added_tokens":[
+           {"id":0,"content":"<bos>","special":true},
+           {"id":1,"content":"<eos>","special":true},
+           {"id":5,"content":"<|turn>","special":true},
+           {"id":6,"content":"<turn|>","special":true}
+         ],
+         "pre_tokenizer":{"type":"Metaspace","replacement":"▁"}}
+        """);
+      var tok = com.igormaznitsa.nanollvm.tokenizer.Tokenizer.fromPretrained(dir);
+      assertTrue(tok.isTurnBasedChat());
+      String chat = tok.applyChatTemplate(
+        List.of(
+          Map.of("role", "system", "content", "Be brief."),
+          Map.of("role", "user", "content", "hi")),
+        true, false);
+      assertTrue(chat.contains("<|turn>system\nBe brief.<turn|>"));
+      assertTrue(chat.contains("<|turn>user\nhi<turn|>"));
+      assertTrue(chat.endsWith("<|turn>model\n"));
+      assertFalse(chat.contains("<start_of_turn>"));
+    } finally {
+      try (var walk = walk(dir)) {
+        walk.sorted(java.util.Comparator.reverseOrder()).forEach(p -> {
+          try {
+            deleteIfExists(p);
+          } catch (IOException e) {
+            throw new UncheckedIOException("failed to delete temp path " + p, e);
+          }
+        });
+      }
+    }
+  }
+
+  @Test
   void stripChatMarkupRemovesGemmaTurnTokens() {
     assertEquals("", ChatReply.stripChatMarkup("<end_of_turn>"));
     assertEquals("Hi", ChatReply.stripChatMarkup("Hi<end_of_turn>"));
+    assertEquals("Hi", ChatReply.stripChatMarkup("Hi<turn|>"));
     assertEquals("model\nplan",
       ChatReply.stripChatMarkup("<start_of_turn>model\nplan<end_of_turn>"));
+    assertEquals("plan",
+      ChatReply.stripChatMarkup("<|turn>model\nplan<turn|>"));
   }
 }

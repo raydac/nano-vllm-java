@@ -23,6 +23,11 @@ public final class BundledModels {
   public static final String DEFAULT_MODEL_NAME = "Qwen3-0.6B";
   public static final String QWEN3_0_6B = DEFAULT_MODELS_DIR + "/" + DEFAULT_MODEL_NAME;
   public static final String GEMMA3_270M = DEFAULT_MODELS_DIR + "/Gemma3-270M";
+  /**
+   * @since 1.1.0
+   */
+  public static final String GEMMA4_E2B_IT_QAT_MOBILE =
+    DEFAULT_MODELS_DIR + "/Gemma4-E2B-IT-QAT-Mobile";
   public static final String LFM2_5_2_6B_GGUF =
     DEFAULT_MODELS_DIR + "/LFM2.5-2.6B-Q4_K_M.gguf";
   /**
@@ -82,6 +87,7 @@ public final class BundledModels {
       "model not found: " + modelPathOrName
         + " (expected under " + modelsRoot()
         + "). Run models/download-qwen3-0.6b.sh, models/download-gemma3-270m.sh, "
+        + "models/download-gemma4-e2b-qat-mobile.sh, "
         + "models/download-lfm2.5-2.6b-gguf.sh, models/download-gte-small-gguf.sh, "
         + "or models/download-tiny-llm-onnx.sh, "
         + "models/download-smollm2-135m-instruct-onnx.sh, "
@@ -91,8 +97,9 @@ public final class BundledModels {
 
   /**
    * @param modelPathOrName absolute/relative path, {@code Qwen3-0.6B}, {@code Gemma3-270M},
-   *                        {@code Tiny-LLM-ONNX}, {@code SmolLM2-135M-Instruct-ONNX},
-   *                        {@code LFM2.5-2.6B-Q4_K_M.gguf}, or {@code models/…}
+   *                        {@code Gemma4-E2B-IT-QAT-Mobile}, {@code Tiny-LLM-ONNX},
+   *                        {@code SmolLM2-135M-Instruct-ONNX}, {@code LFM2.5-2.6B-Q4_K_M.gguf},
+   *                        or {@code models/…}
    */
   public static Optional<Path> find(final String modelPathOrName) {
     if (modelPathOrName == null || modelPathOrName.isBlank()) {

@@ -24,6 +24,7 @@ public final class OptionalModelAssumptions {
   private static final String RAG_DIR = "rag";
   private static final String QWEN3_0_6B = "Qwen3-0.6B";
   private static final String GEMMA3_270M = "Gemma3-270M";
+  private static final String GEMMA4_E2B_IT_QAT_MOBILE = "Gemma4-E2B-IT-QAT-Mobile";
   private static final String LFM2_5_2_6B_GGUF = "LFM2.5-2.6B-Q4_K_M.gguf";
   private static final String GTE_SMALL_GGUF = "gte-small.Q2_K.gguf";
 
@@ -42,6 +43,13 @@ public final class OptionalModelAssumptions {
       findModel(GEMMA3_270M),
       "Gemma3-270M",
       "models/download-gemma3-270m.sh (HF license + HF_TOKEN)");
+  }
+
+  public static Path requireGemma4E2bQatMobile() {
+    return require(
+      findModel(GEMMA4_E2B_IT_QAT_MOBILE),
+      "Gemma4-E2B-IT-QAT-Mobile",
+      "models/download-gemma4-e2b-qat-mobile.sh");
   }
 
   public static Path requireLfm2Gguf() {

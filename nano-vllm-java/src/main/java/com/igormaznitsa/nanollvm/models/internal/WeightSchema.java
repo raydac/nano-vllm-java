@@ -2,6 +2,7 @@ package com.igormaznitsa.nanollvm.models.internal;
 
 import static com.igormaznitsa.nanollvm.models.internal.WeightNames.ARCH_BERT;
 import static com.igormaznitsa.nanollvm.models.internal.WeightNames.ARCH_GEMMA3;
+import static com.igormaznitsa.nanollvm.models.internal.WeightNames.ARCH_GEMMA4;
 import static com.igormaznitsa.nanollvm.models.internal.WeightNames.ARCH_LFM2;
 import static com.igormaznitsa.nanollvm.models.internal.WeightNames.ARCH_LLAMA;
 import static com.igormaznitsa.nanollvm.models.internal.WeightNames.ARCH_QWEN3;
@@ -59,6 +60,7 @@ public final class WeightSchema {
   public static WeightSchema forArchitecture(final String arch, final Config.HfConfig config) {
     return switch (arch) {
       case ARCH_GEMMA3 -> gemma3(config);
+      case ARCH_GEMMA4 -> gemma4(config);
       case ARCH_QWEN3 -> qwen3(config);
       case ARCH_LLAMA -> llama(config);
       case ARCH_LFM2 -> lfm2(config);
@@ -146,6 +148,46 @@ public final class WeightSchema {
     expected.add(MODEL_NORM);
     optional.add(LM_HEAD);
     return new WeightSchema(PACKED_MODULES_MAPPING, expected, optional);
+  }
+
+  public static WeightSchema gemma4(final Config.HfConfig config) {
+    Set<String> expected = new LinkedHashSet<>();
+    Set<String> optional = new LinkedHashSet<>();
+    expected.add(EMBED_TOKENS);
+    expected.add("model.embed_tokens_per_layer.weight");
+    expected.add("model.per_layer_model_projection.weight");
+    expected.add("model.per_layer_projection_norm.weight");
+    for (int i = 0; i < config.numHiddenLayers(); i++) {
+      String p = layer(i);
+      String attn = selfAttn(i);
+      String mlpPrefix = mlp(i);
+      expected.add(p + INPUT_LAYERNORM);
+      expected.add(p + POST_ATTENTION_LAYERNORM);
+      expected.add(p + PRE_FEEDFORWARD_LAYERNORM);
+      expected.add(p + POST_FEEDFORWARD_LAYERNORM);
+      expected.add(p + "post_per_layer_input_norm.weight");
+      expected.add(p + "layer_scalar");
+      expected.add(p + "per_layer_input_gate.weight");
+      expected.add(p + "per_layer_projection.weight");
+      expected.add(attn + "q_proj.weight");
+      expected.add(attn + O_PROJ_WEIGHT);
+      expected.add(attn + Q_NORM_WEIGHT);
+      expected.add(mlpPrefix + "gate_proj.weight");
+      expected.add(mlpPrefix + "up_proj.weight");
+      expected.add(mlpPrefix + DOWN_PROJ_WEIGHT);
+      if (config.isKvSharedLayer(i)) {
+        optional.add(attn + "k_proj.weight");
+        optional.add(attn + "v_proj.weight");
+        optional.add(attn + K_NORM_WEIGHT);
+      } else {
+        expected.add(attn + "k_proj.weight");
+        expected.add(attn + "v_proj.weight");
+        expected.add(attn + K_NORM_WEIGHT);
+      }
+    }
+    expected.add(MODEL_NORM);
+    expected.add(LM_HEAD);
+    return new WeightSchema(Map.of(), expected, optional);
   }
 
   public static WeightSchema lfm2(final Config.HfConfig config) {

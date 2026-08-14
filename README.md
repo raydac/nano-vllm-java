@@ -330,13 +330,22 @@ export HF_TOKEN=hf_…   # or: huggingface-cli login
 ./models/download-gemma3-270m.sh
 ```
 
+**Gemma4-E2B QAT mobile (optional, Apache 2.0, ~2.3 GB)**
+
+[google/gemma-4-E2B-it-qat-mobile-transformers](https://huggingface.co/google/gemma-4-E2B-it-qat-mobile-transformers).
+Creates `models/Gemma4-E2B-IT-QAT-Mobile/`. Text-only chat load (vision/audio unused).
+
+```bash
+./models/download-gemma4-e2b-qat-mobile.sh
+```
+
 **LFM2.5 GGUF** — see [GGUF (LFM2)](#gguf-lfm2) above.
 
 **Tiny-LLM-ONNX (Llama ~10M, ONNX demo)** — see [ONNX (weight import)](#onnx-weight-import) above.
 
 **SmolLM2-135M-Instruct-ONNX (Llama ChatML ~135M)** — `./models/download-smollm2-135m-instruct-onnx.sh`.
 
-**Windows:** `.\models\download-qwen3-0.6b.ps1` / `.cmd` and the matching Gemma / LFM / Tiny-LLM-ONNX /
+**Windows:** `.\models\download-qwen3-0.6b.ps1` / `.cmd` and the matching Gemma 3 / Gemma 4 / LFM / Tiny-LLM-ONNX /
 SmolLM2 Instruct ONNX scripts under `models/`.
 
 You can also point the engine at **any** local HF-style directory (your own path or another download).

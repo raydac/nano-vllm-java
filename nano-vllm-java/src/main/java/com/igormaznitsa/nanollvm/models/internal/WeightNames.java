@@ -8,6 +8,10 @@ import java.util.Map;
 public final class WeightNames {
 
   public static final String ARCH_GEMMA3 = "gemma3";
+  /**
+   * @since 1.1.0
+   */
+  public static final String ARCH_GEMMA4 = "gemma4";
   public static final String ARCH_QWEN3 = "qwen3";
   public static final String ARCH_LFM2 = "lfm2";
   /**

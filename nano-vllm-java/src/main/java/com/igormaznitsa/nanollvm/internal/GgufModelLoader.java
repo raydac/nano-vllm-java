@@ -181,7 +181,8 @@ public final class GgufModelLoader {
       0f,
       0,
       false,
-      false
+      false,
+      null
     );
   }
 
@@ -233,7 +234,8 @@ public final class GgufModelLoader {
       0f,
       convL,
       false,
-      false
+      false,
+      null
     );
   }
 
