@@ -70,7 +70,8 @@ In one sentence:
 
 The rest of this guide unpacks that sentence without assuming prior ML coursework.
 
-**In the code:** front door is `LLM` / `LLM.Builder`; interactive demo is `samples.Example` (chapter 16).
+**In the code:** front door is `LLM` / `LLM.Builder`; interactive demo is `samples.Example`; linear mains include
+`HelloWorld`, `LogTriageHelloWorld`, `AdvisorRagHelloWorld`, `EmbedHelloWorld` (chapter 16).
 
 ---
 
@@ -118,11 +119,12 @@ is [The Annotated Transformer](https://nlp.seas.harvard.edu/annotated-transforme
 
 Two families of Hugging Face checkpoints are supported here (different “editions” of the book, same kind of reading
 process): **Qwen3** and **Gemma3**. **Since 1.1.0**, **Llama**-style causal graphs are also assembled (including small
-ONNX demos). The same Qwen3 graph also loads from a **GGUF** file (**since 1.1.0**). A further GGUF path loads **LFM2**
+ONNX demos), and **Gemma 4 text** (QAT mobile) loads as chat — vision and audio towers in the same crate are skipped.
+The same Qwen3 graph also loads from a **GGUF** file (**since 1.1.0**). A further GGUF path loads **LFM2**
 (hybrid short-convolution + GQA). You usually need not care which; the program detects which files you pointed it at.
 
 **In the code:** architecture pick is `CausalLMFactory.detect` / `create` → `Qwen3ForCausalLM`,
-`Gemma3ForCausalLM`, `LlamaForCausalLM`, or `Lfm2ForCausalLM`; GGUF entry is `LlmModelFactory` →
+`Gemma3ForCausalLM`, `Gemma4ForCausalLM`, `LlamaForCausalLM`, or `Lfm2ForCausalLM`; GGUF entry is `LlmModelFactory` →
 `internal.GgufTransport` (container catalog) → `internal.ModelBinding` → `internal.GgufModelLoader`;
 ONNX folders use `internal.OnnxModelLoader` (chapter **7c**); one next-token
 step is `Transformer.step` → `CausalLM.forward` / `computeLogits` → `Sampler.forward` (chapter 16).
@@ -177,7 +179,7 @@ You (or a download script in this project’s `models/` folder) fetch weights fr
 
 | Crate shape | What you point at | Typical cargo |
 |-------------|-------------------|---------------|
-| **Hugging Face folder** | A directory | `config.json` + `tokenizer.json` + `*.safetensors` **or** supported `*.onnx` (Qwen3 / Gemma3 / **Llama**; BERT embeddings from ONNX) — **since 1.1.0** for ONNX |
+| **Hugging Face folder** | A directory | `config.json` + `tokenizer.json` + `*.safetensors` **or** supported `*.onnx` (Qwen3 / Gemma3 / **Gemma 4 text** / **Llama**; BERT embeddings from ONNX) — **since 1.1.0** for ONNX and Gemma 4 |
 | **Single GGUF file** | One `.gguf` | Metadata + embedded tokenizer + quantized weights (**Qwen3** or **LFM2** chat, or **BERT** embeddings — not Gemma/Llama GGUF) |
 | **Stream / classpath** (**since 1.1.0**) | A `ModelFileSource` (or `fromClasspath*` helpers) | Same roles as above, but bytes come from streams into **heap** (no disk cache); `make(Path)` stays direct disk I/O |
 
@@ -217,8 +219,9 @@ The big cargo. Millions or billions of numbers shaped by training. These are wha
 another. **Chapter 7** (safetensors) and **chapter 7c** (ONNX **since 1.1.0**) explain layouts, dtypes, and what is
 *not* accepted. GGUF packs the same role into one file (**chapter 7a**).
 
-On disk they are often stored in a compact form (half-precision or GGUF block quants). Hugging Face float crates
-are **widened to ordinary float32 in RAM**. GGUF chat/embedding weights **stay packed** by default and dequantize a
+On disk they are often stored in a compact form (half-precision, GGUF block quants, or packed QAT). Hugging Face **float**
+crates are **widened to ordinary float32 in RAM**. **Gemma 4 text QAT** safetensors stay **packed** (int2/4/8 + SRQ) and
+dequantize on use, like GGUF. GGUF chat/embedding weights **stay packed** by default and dequantize a
 row during matmul (chapter 7a). Easy to teach; still hungry for memory (activations and KV are float32 either way).
 
 ### What loading does, step by step
@@ -386,6 +389,7 @@ same `config.json` detection (chapter **7c**).
 
 - Qwen3-0.6B: `"model_type": "qwen3"`, `"architectures": ["Qwen3ForCausalLM"]`
 - Gemma3-270M: `"model_type": "gemma3_text"`, `"architectures": ["Gemma3ForCausalLM"]`
+- Gemma 4 E2B QAT mobile: `"model_type": "gemma4"` / `"gemma4_text"` — text chat only (vision/audio unused)
 - SmolLM2 / Tiny-LLM ONNX: `"model_type": "llama"`, `"architectures": ["LlamaForCausalLM"]`
 
 ---
@@ -1003,8 +1007,11 @@ Byte length of one tensor ≈ `end - start`. For BF16, that is roughly `2 × pro
 | `BF16`  | bfloat16     | Expand to Java `float` (shift/expand bits) |
 | `F64`   | 64-bit float | Narrow to Java `float`                     |
 
-**Important:** after load, compute is **float32** in this teaching engine. A BF16 file still becomes a large F32
-resident image in RAM.
+**Important:** after load, **float** safetensors compute as **float32** in this teaching engine. A BF16 file still
+becomes a large F32 resident image in RAM. **Exception (since 1.1.0):** Gemma 4 **text QAT mobile** keeps packed
+int2/4/8 (+ SRQ) weights in heap and dequantizes during matmul — same idea as GGUF packed mode, not a full F32 expand.
+Shards larger than 2 GiB are read with `FileChannel` (Java mmap stays limited to 2 GiB). Gemma 4 **GGUF**, **MoE**
+(`enable_moe_block`), and vision/audio generation are still unsupported; towers in the QAT-mobile crate are skipped.
 
 **Samples:** both Qwen3-0.6B and Gemma3-270M ship **all** listed tensors as `BF16` in the inspected files.
 
@@ -1066,8 +1073,8 @@ in RAM, expect roughly **~2×** that payload for resident weights alone — plus
 ### Summary
 
 > **A `.safetensors` file is a named collection of tensors: a JSON index of shapes and byte ranges, followed by a raw
-> numeric payload. At load time this port widens elements to float32 and assembles them into a `WeightBag` used to
-> construct the immutable model graph.**
+> numeric payload. Float crates are widened to float32; Gemma 4 text QAT stays packed. Names assemble into a
+> `WeightBag` used to construct the immutable model graph.**
 
 **In the code:** `internal.SafetensorsReader` parses the file; `internal.ModelLoader.loadWeights` matches names
 (including packed `q_proj`/`k_proj`/`v_proj` → `qkv_proj`) and merges into `WeightBag`; `internal.LoadProgress` redraws
@@ -1668,7 +1675,8 @@ The *rule* (causal, heads, GQA, window) stays the same; the *shape of the work* 
 | **Decode**  | Usually **one** new position; it looks over past Keys/Values already in notebooks | Write the next sentence using notes you already took |
 
 So “types” of attention in engineering talk sometimes means this **phase**, not a different philosophy. This engine
-implements both; chapter 12 explains why notebooks make decode cheaper.
+implements both. **Chapter 12** is the home of the notebooks: they store each position’s **Key** and **Value** (after
+RoPE on K), not Query, not chat text, and not weights; decode then attends those pages in place.
 
 ---
 
@@ -1716,7 +1724,7 @@ embedding**: also chapter 10.
 | Global layers                             | Yes (Qwen; some Gemma layers)                     |
 | Cross-attention to a second text          | No                                                |
 | Bidirectional BERT-style                  | Yes, for embedding GGUFs only (**since 1.1.0**; ch. 7b) |
-| Fancy GPU kernels (flash-attention, etc.) | No — plain educational CPU math                   |
+| Fancy GPU kernels (flash-attention, etc.) | No — CPU math with SIMD / panel GEMV; no GPU path     |
 
 ---
 
@@ -1875,7 +1883,8 @@ So: **weights = long-term habits; notebooks = short-term notes for this conversa
 combines them every step.**
 
 **In the code (Sense A):** `LLM.generate` / `step` → `Scheduler.schedule` → `Transformer.step` → layer
-`forward` stacks on `Qwen3ForCausalLM` / `Gemma3ForCausalLM` (chapter 16).
+`forward` stacks on `Qwen3ForCausalLM` / `Gemma3ForCausalLM` / `Gemma4ForCausalLM` / `LlamaForCausalLM` /
+`Lfm2ForCausalLM` (chapter 16).
 
 ---
 
@@ -2163,7 +2172,8 @@ Both are `Tensor` instances; only weights come from `.safetensors` (chapter 7).
 | `numel` / `size` | Number of logical elements                            |
 | `reshape`        | New shape, same buffer and offset, if `numel` matches |
 
-Kernels in `Ops` often allocate a **new** output tensor rather than mutating weights in place.
+Kernels in `Ops` write a **result tensor** (they do not mutate weight shelves). Elementwise work (add, mul, scale,
+SiLU, GELU, RMSNorm, `tanhSoftcap`) goes through SIMD `FloatKernels` with a scalar tail when the Vector API is present.
 
 ```text
   flat index of E[t, j]  =  t * H + j     for shape [V, H]
@@ -2185,8 +2195,9 @@ $$
 **Layout in this port.** Weights are stored as `[out, in]` = $[m, n]$: row $o$ is the weight vector for output channel
 $o$. For one input row, output channel $o$ is the **dot product** of $\mathbf{x}$ with that row (plus bias). Batched
 over `rows`, `MatmulRuntime` tiles over output channels (`TILE_N`) and input features (`TILE_K`), calling
-`FloatKernels.dot` for each partial product — same math, cache-friendlier loops. Dense decode (`rows == 1`) uses a
-dedicated path. Packed GGUF weights dequantize one weight row in place, then dot.
+`FloatKernels.dot` for each partial product — same math, cache-friendlier loops. Dense decode (`rows == 1`) uses
+**panel GEMV**: the activation vector is loaded once and dotted across several output rows. Packed GGUF / QAT weights
+dequantize one weight row, then dot (a fused dequant-dot without float row scratch is still open).
 
 This pattern builds **Q / K / V**, the attention **output projection**, MLP **up / gate / down**, and the **LM head**.
 
@@ -2396,8 +2407,9 @@ $$
 \mathrm{dot} (\mathbf{a},\mathbf{b}) = \sum_{i=0}^{n-1} a_i b_i
 $$
 
-on float slices (`FloatKernels.dot`), with an optional Vector API (SIMD) main loop plus scalar tail. That is the numeric
-heart under attention scores and dense / packed linear dots via `MatmulRuntime`.
+on float slices (`FloatKernels.dot` / `sumSquares`), with a Vector API (SIMD) main loop that uses several independent
+accumulators, plus a scalar tail. That is the numeric heart under attention scores and dense / packed linear dots via
+`MatmulRuntime`. Paged KV attention **reads cache slots in place** (no per-step copy of K/V pages into a dense tensor).
 
 ### What this math is *not*
 
@@ -2430,8 +2442,9 @@ Then one slip is drawn. This project’s sampler uses a **Gumbel-max–style** d
 naive left-to-right walk of a cumulative table). Pure greedy decoding (temperature ≈ 0) is **rejected** by
 `SamplingParams` — use a small positive temperature instead.
 
-Default helpers (`SamplingDefaults`) use temperature `0.6`, top-p `0.95`, and **top-k off** (`0`) for every
-tokenizer. Product/family knobs (e.g. turn-based top-k 64) belong in the app or samples (`SampleChatPrompts`).
+Default helpers (`SamplingDefaults.neutral()` / `forTokenizer`, and no-arg `new SamplingParams()`) use temperature
+`0.6`, top-p `0.95`, 256 new tokens, and **top-k off** (`0`) for every tokenizer. Product/family knobs (e.g. turn-based
+top-k 64) belong in the app or samples (`SampleChatPrompts`).
 
 So the model is not forced to say the single most likely word every time. Controlled chance is why two answers to the
 same question can differ — and why “creativity” settings exist in chat products.
@@ -2454,24 +2467,131 @@ ids, `maxTokens`, `maxModelLen`, and degenerate-loop checks enforced in `Schedul
 Attention needs the Key and Value notes for **everything already seen**. Recomputing them from scratch for the whole
 prompt on every single new word would be like rereading an entire novel each time you write the next sentence.
 
-So the program keeps a **notebook** (the KV cache): once a position has been processed, its Key and Value are stored and
-reused. Loading allocated the blank pages; answering **writes** into them.
+So the program keeps a **notebook** (the **KV cache**): once a position has been processed, its Key and Value are stored
+and reused. Building an `LLM` reserves the blank pages; answering **writes** into them. This chapter says **what** is
+stored, **what is not**, **how** a write and a read look, and **when** the notebook is thrown away.
+
+### What “KV” means here
+
+At each token position, every attention layer builds three views of that place’s portrait (chapter 8):
+
+| View        | Everyday job                                      | Cached? |
+|-------------|---------------------------------------------------|---------|
+| **Query**   | “What am I looking for *from here*?”              | **No** — recomputed for the *current* token only |
+| **Key**     | “How should this place advertise itself?”         | **Yes** — the address card |
+| **Value**   | “If chosen, what content should the reader take?” | **Yes** — the page you pull |
+
+**RoPE** (chapter 8 / 10) is applied to Query and Key **before** the Key is written. The cache therefore holds
+**position-twisted Keys** and **untwisted Values**, ready for later dots. You do not store the raw hidden state or the
+token id in these tensors — only those two attention views.
+
+**Where the numbers live.** For each attention **layer** that owns a cache, this engine keeps two tensors:
+
+```text
+  kCache[layer], vCache[layer]   shape  [numBlocks, blockSize, numKvHeads, headDim]
+```
+
+- **`numKvHeads`** — how many Key/Value groups the model has (often fewer than Query heads: **GQA**, chapter 8).
+- **`headDim`** — width of one head.
+- **`blockSize`** — tokens per page (default **256**).
+- **`numBlocks`** — how many such pages the engine reserved (see “How large the shelf is” below).
+
+One **slot** is one token’s K (or V) for that layer: page number × page size + offset inside the page. Attention
+indexes those slots **in place**; it does not copy whole pages into a dense “past K/V” tensor on every decode step.
+
+**GQA.** Several Query heads share one Key/Value group, so the cache is sized by `num_key_value_heads`, not by
+`num_attention_heads`. That is the main reason long chats stay feasible on a laptop heap.
+
+**Gemma 4 shared-KV layers (since 1.1.0).** Some layers do **not** allocate their own pages. They **read** an earlier
+same-type layer’s K/V (`writeKv = false`). The notebook is still Keys and Values — just one physical copy serving two
+rooms.
+
+### What the cache is *not*
+
+| Not stored in KV | Where that lives instead |
+|------------------|--------------------------|
+| Learned **weights** | Immutable `LlmModel` (the library shelves) |
+| Chat **strings** / roles | `ChatSession` history, re-templated each `send` |
+| **Query** vectors of past tokens | Thrown away after that step; only the new token’s Q is built |
+| **Logits** / sampled token ids | `Sequence` token list for this `generate` |
+| BERT **sentence vectors** | Embedding models have **no** KV cache (chapter 7b) |
+
+The notebook is **short-term arithmetic memory for one `LLM.generate`**, not a diary of the conversation and not extra
+world knowledge.
+
+### Why decode would be unbearable without it
+
+Causal attention at token *t* needs Keys and Values for positions `0 … t`. Without a cache, every new word would force
+every layer to rebuild K and V for the **entire** prefix — work that grows with the length of the reply.
+
+With a cache:
+
+```text
+  prefill  (prompt tokens 0 … n−1, all at once)
+      compute Q, K, V for the prompt
+      write K, V into pages
+      attend (causal) using those pages
+      sample the first new token
+
+  decode   (token n, then n+1, …  one at a time)
+      compute Q, K, V for the newest token only
+      write that token’s K, V into the next slot
+      this Q  vs  all cached Keys  →  mix cached Values
+      sample the next token
+```
+
+That is why the **first pause** can feel longer than each following word: prefill walks the whole prompt; each decode
+step is “one new line in the notebook, then a glance over the pages you already have.”
+
+The *rule* of attention (causal, GQA, optional sliding window) does not change between phases. Only the **shape of the
+work** changes (chapter 8, kind 6).
 
 ### Pages, not one endless scroll
 
-Instead of one giant notebook per conversation, this project (following the vLLM idea) uses **fixed-size pages**
-(blocks). A conversation gets a list of page numbers — like a library call slip pointing to several short notebooks on a
-shelf.
+Instead of one giant contiguous notebook per conversation, this project (following the vLLM **PagedAttention** idea)
+uses **fixed-size pages** (blocks). A running sequence holds a **block table**: a list of page numbers — like a library
+call slip pointing to several short notebooks on a shared shelf.
 
-Why? So memory can be shared and recycled: many conversations, limited desk space, and sometimes **shared early pages**
-when two prompts start with the same long prefix (same opening paragraph → reuse the same notes).
+```text
+  token positions:   0 … 255     256 … 511     512 …
+  block table:       page 7      page 3        page 12     ← Sequence.blockTable()
+  physical slot:     7×256+off   3×256+off     12×256+off
+```
 
-### Two phases of work
+**Why pages?**
 
-1. **Prefill** — read the whole prompt once, fill notebooks, produce the first new token.
-2. **Decode** — for each later token, read mostly from notebooks, write one new page line, pick one new token.
+- Many conversations can share one pool of pages (`BlockManager`); unused pages go back on the free list.
+- If two prompts start with the **same token prefix** (same first full pages), the engine can **reuse** those already
+  filled pages (`hashBlocks` / prefix hash) instead of writing them twice.
+- Memory is reserved as a **fixed arena** at `LLM.builder().build()` (`KvCacheArena`), not grown as a Java `ArrayList`
+  of tokens.
 
-That is why the first pause can feel longer than each following word: the opening read is heavier than the continuation.
+Default page length is **`kvcacheBlockSize = 256`**. When a sequence crosses a page boundary, `mayAppend` takes one more
+free page.
+
+### How large the shelf is
+
+Pages are allocated **per `LLM`**, not inside `LlmModelFactory.make`. Two engines sharing one model do **not** share
+notebooks.
+
+How many pages:
+
+- You may set `.numKvcacheBlocks(N)` explicitly.
+- Otherwise the engine estimates from `maxModelLen` × `maxNumSeqs`, then **caps** by a fraction of the JVM max heap
+  (`.kvHeapFraction(0.25f)` by default) using bytes per page ≈ `2 × blockSize × numKvHeads × headDim × 4` **per
+  non-shared layer** (the `2` is K and V).
+
+If the pool runs out (`no free KV blocks`), a sequence may wait or be preempted (chapter 13). That is a **memory**
+limit, distinct from the **token** limit `maxModelLen`.
+
+### Two phases of work (same generate)
+
+1. **Prefill** — read the whole current prompt once, fill notebooks, produce the first new token.
+2. **Decode** — for each later token, read mostly from notebooks, write one new slot, pick one new token.
+
+One `ChatSession.send` (or `rag.send`) is typically **one** `generate`: one prefill of the templated prompt, then decode
+until stop. Advisor roles, if configured, are a **separate** batched generate **before** that, with their own short-lived
+pages.
 
 ### Context window, chat history, and not losing the thread
 
@@ -2524,9 +2644,11 @@ removed with its user turn) until it fits — or only the minimum kept messages 
 There is **no** separate long-term memory module beyond weights + whatever you keep in `ChatSession` history (and
 whatever fits in the context window of the next prefill).
 
-**In the code:** KV pages in `engine.BlockManager` (`allocate`, `hashBlocks`, prefix reuse); prefill/decode scheduling
-in `Scheduler`; cache write/read in `Attention.storeKvCache` / decode path; dialogue memory in `ChatSession` /
-`ChatMessages#truncateHistory` (chapter 16).
+**In the code:** arena `engine.KvCacheArena` (per-`LLM` K/V pages); paging `engine.BlockManager` (`allocate`,
+`hashBlocks`, prefix reuse, `mayAppend`); slot lists on `Sequence.blockTable()`; prefill/decode scheduling in
+`Scheduler`; write `Attention.storeKvCache`, read `attendRange` on paged slots; dialogue memory in `ChatSession` /
+`ChatMessages#truncateHistory`. Size knobs: `LLM.Builder.kvHeapFraction` / `numKvcacheBlocks` / `kvcacheBlockSize`
+(chapter 16).
 
 **Further reading:** paged KV cache and high-throughput serving —
 [Kwon et al., *Efficient Memory Management for Large Language Model Serving with
@@ -2704,7 +2826,7 @@ try (LlmModel model = LlmModelFactory.make(modelDir);
 | Step            | Call                                                               | Role                                                      |
 |-----------------|--------------------------------------------------------------------|-----------------------------------------------------------|
 | Blueprint       | `Config.HfConfig#load` (via `LlmModelFactory`)                        | Read `config.json` (HF) or GGUF metadata              |
-| Empty graph     | `CausalLMFactory#detect` → `#create` / GGUF / ONNX loaders            | `Qwen3ForCausalLM`, `Gemma3ForCausalLM`, `LlamaForCausalLM`, or `Lfm2ForCausalLM` (all under `models.internal`) |
+| Empty graph     | `CausalLMFactory#detect` → `#create` / GGUF / ONNX loaders            | `Qwen3ForCausalLM`, `Gemma3ForCausalLM`, `Gemma4ForCausalLM`, `LlamaForCausalLM`, or `Lfm2ForCausalLM` (all under `models.internal`) |
 | Pour weights    | `internal.ModelLoader#loadWeights` or `GgufTransport` + `ModelBinding` + `GgufModelLoader` → `WeightBag` | Merge shards / dequant path; construct immutable graph |
 | Seal            | (graph is immutable at construction)                               | No post-load weight mutation                              |
 | Dictionary      | `Tokenizer#fromPretrained` or `#fromGguf`                          | HF JSON or GGUF-embedded vocab + chat template / stop ids |
@@ -2747,7 +2869,7 @@ At each layer, for each position in the prompt (for example the token `2`, the t
 1. Build Query / Key / Value from that position’s hidden state.
 2. Compare this Query with Keys of **earlier** positions only (causal — no peeking at the future).
 3. Mix Values from the strong matches into an updated hidden vector.
-4. **Write** this position’s Key and Value into the KV cache for later decode.
+4. **Write** this position’s Key and Value into the KV cache for later decode (Query is not stored; chapter 12).
 
 So when the model is still “reading” `What is 2+2?`, attention is already linking pieces: the second `2` can glance at
 the first `2` and at `+`; the end of the user line can glance at the whole question. Multi-head glances (and GQA
@@ -3001,11 +3123,11 @@ packages.
 
 | Story idea                       | Primary type                                                         | Methods / entry points to open                                                                                |
 |----------------------------------|----------------------------------------------------------------------|---------------------------------------------------------------------------------------------------------------|
-| Open a model                     | `LlmModelFactory`, `LlmModel`, `LLM.Builder`                               | `open(Path).make()` / `make(Path)` / `make(…, Map)` / `fromClasspath*` / `openClasspath*`; HF **safetensors or ONNX** (**since 1.1.0**); GGUF **`qwen3`** / **`lfm2`** chat + **`bert`** embed; `thinkTags(ThinkTags)` / `OPTION_THINK_TAGS`; `chatSpecials(ChatSpecials)` / `OPTION_CHAT_SPECIALS`; `LLM.builder(model)` for causal; `model.embed(…)` for BERT (**since 1.1.0**); `toString()` summarizes load |
+| Open a model                     | `LlmModelFactory`, `LlmModel`, `LLM.Builder`                               | `open(Path).make()` / `make(Path)` / `make(…, Map)` / `fromClasspath*` / `openClasspath*`; HF **safetensors or ONNX** (**since 1.1.0**); Gemma 4 **text QAT** packed safetensors; GGUF **`qwen3`** / **`lfm2`** chat + **`bert`** embed; `thinkTags(ThinkTags)` / `OPTION_THINK_TAGS`; `chatSpecials(ChatSpecials)` / `OPTION_CHAT_SPECIALS`; `LLM.builder(model)` for causal; `model.embed(…)` for BERT (**since 1.1.0**); `toString()` summarizes load |
 | Custom scratchpad / answer specials | `ThinkTags`, `ChatSpecials`, `LlmModel`                                 | `open(path).thinkTags(tags).chatSpecials(specials).make()`; `ChatSession.thinkTags` / `RagSession.thinkTags` (**since 1.1.0**); omitted options get library defaults |
 | Sentence embedding (BERT GGUF)   | `LlmModel` (internal `BertForEmbedding`)                                   | `make(gteGguf)` → `isEmbeddingModel()` → `embed(text)` (chapter **7b**, **since 1.1.0**)                        |
 | Named advisors                   | `LlmAdvisor`, `LlmAdvisorMixer`, `AdvisorEnrichment`, `ChatHistory`        | `Builder.advisors(mixer, …)` — unique non-blank names; `LLM#runAdvisors` → `AdvisorEnrichment`; one batched `generate` |
-| Chat turn                        | `ChatSession`                                                        | `llm.chat(maxTokens)`, `.listen(…)`, `.streamTo(…)` (`TEXT_THINKING` / `TEXT_ASSISTANT`; ignores `TEXT_RAW`), `.send(user)`, `.clear()` |
+| Chat turn                        | `ChatSession`                                                        | `llm.chat(maxTokens)`, `.listen(…)`, `.streamTo(…)` (`TEXT_THINKING` / `TEXT_ASSISTANT`; ignores `TEXT_RAW`), `.send(user)`, `.clear()`; `emitDebugPrompts(true)` opts in `TEXT_DEBUG` (off by default) |
 | Stream unparsed decode           | `LlmTextKind.TEXT_RAW`, `LlmListener`                                  | `ChatSession.listen`; deltas of tokenizer decode with think tags / chat specials kept (**since 1.1.0**) |
 | One-shot / raw text              | `LLM`                                                                | `chatOnce(…)`, `complete(…)`, `generate(…)` → `GenerationOutput.stats()`                                      |
 | Token / timing stats             | `GenerationStats` / `ChatReply`                                      | `promptTokens`, `completionTokens`, `elapsedNanos`, `completionTokensPerSecond()`                             |
@@ -3052,7 +3174,8 @@ try (LlmModel model = LlmModelFactory.open(Path.of("models/Qwen3-0.6B")).make();
 
   // Multi-turn with streaming (history + template + optional <think> parse)
   var session = llm.chat().streamTo(System.err, System.out, false);
-  // streamTo prints TEXT_THINKING / TEXT_ASSISTANT only; TEXT_RAW (unparsed decode) needs .listen(…)
+  // streamTo prints TEXT_THINKING / TEXT_ASSISTANT only; TEXT_RAW needs .listen(…)
+  // TEXT_DEBUG (prepared model-user after advisors) is off unless session.emitDebugPrompts(true)
   String reply = session.send("What is 2+2?").answer();
 
   // One-shot chat (no kept session)
@@ -3191,18 +3314,19 @@ int[] tokenIds = sampler.forward(logits, temperatures, topKs, topPs);
 
 `layers.Attention.forward(q, k, v)`:
 
-1. If slot mapping is set, `storeKvCache` copies K/V into paged `kCache` / `vCache`.
+1. If slot mapping is set, `storeKvCache` writes K/V into paged `kCache` / `vCache`.
 2. Prefill → `prefillWithCache` or `prefillDense`.
-3. Decode → `decode` (gather past K/V via `blockTables`, then `attendRange`).
+3. Decode → `decode` (map `blockTables` to slots, then `attendRange` **on those cache slots in place** — no dense K/V copy).
 
-That is the code behind “write notebooks at prefill; reread them at decode.”
+That is the code behind “write notebooks at prefill; reread them at decode.” What those tensors hold, how pages map to
+slots, and how that differs from chat history: **chapter 12**.
 
 ### Sample D — loading shelves
 
 ```text
 LlmModelFactory.make(dir|gguf|ModelFileSource):
   HF safetensors: HfConfig + ModelLoader → WeightBag → CausalLMFactory
-                  (Qwen3 / Gemma3 / Llama)
+                  (Qwen3 / Gemma3 / Gemma 4 text / Llama)
   HF ONNX (1.1.0): OnnxModelLoader → same causal / BERT graphs
   GGUF: GgufTransport → ModelBinding → GgufModelLoader
         → Qwen3ForCausalLM or Lfm2ForCausalLM or BertForEmbedding; Tokenizer.fromGguf
@@ -3234,7 +3358,8 @@ ChatSession.send(user)
 Key types: `ChatSession.send` / `generateTurn` / `finishTurn`, `LlmAdvisor` / `LlmAdvisorMixer` /
 `AdvisorEnrichment` / `AdvisorResponse` / `ChatHistory`, `AssistantParts.parse`, `LlmTextKind.TEXT_RAW`
 (unparsed decode) vs `TEXT_THINKING` / `TEXT_ASSISTANT`, `ChatPrompts.systemFor` (always empty),
-`SamplingDefaults.forTokenizer` (neutral), optional `LLM.Builder#advisorNoteFilter`. Advisors need **unique non-blank
+`SamplingDefaults.forTokenizer` (neutral), optional `LLM.Builder#advisorNoteFilter`. `TEXT_DEBUG` (prepared
+model-user after mix) is off unless `ChatSession.emitDebugPrompts(true)`. Advisors need **unique non-blank
 names**; they share one batched `generate` and must not interleave with another `generate` on the same `LLM`.
 
 ### Sample F — where “2+2” meets attention in the model graph
@@ -3311,18 +3436,18 @@ nano-vllm-java/src/main/java/com/igormaznitsa/nanollvm/
   rag/PdfTextExtractor.java
   engine/Transformer.java      ← forward + sample (not exported)
   engine/Scheduler.java        ← prefill/decode batches
-  layers/Attention.java        ← QKV cache + attendRange
+  layers/Attention.java        ← QKV cache + attendRange (paged slots in place)
   models/LlmModel.java / LlmModelFactory.java
   models/ModelFileId.java / ModelFileSource.java / ModelFileSources.java   ← since 1.1.0
   models/internal/CausalLMFactory.java / WeightBag.java
   models/internal/BertForEmbedding.java / EmbeddingEncoder.java   ← since 1.1.0
-  models/internal/Qwen3ForCausalLM.java / Gemma3ForCausalLM.java / LlamaForCausalLM.java / Lfm2ForCausalLM.java
+  models/internal/Qwen3ForCausalLM.java / Gemma3ForCausalLM.java / Gemma4ForCausalLM.java / LlamaForCausalLM.java / Lfm2ForCausalLM.java
   layers/BidirectionalAttention.java   ← BERT embed path (since 1.1.0)
   tokenizer/Tokenizer.java / GgufTokenizerSource.java
   prompts/ChatPrompts.java / RagPrompts.java / AdvisorPrompts.java
   internal/ModelLoader.java / SafetensorsReader.java / Json.java
   internal/GgufModelLoader.java / GgufTransport.java / GgufReader.java / GgufDequant.java
-  internal/ModelBinding.java / GgufConfigs.java
+  internal/Gemma4QatLoader.java / ModelBinding.java / GgufConfigs.java
   internal/Context.java        ← per-step KV / conv slot maps
   utils/NanoLlvmProps.java / ResourceLimits.java   ← ResourceLimits since 1.1.0
   tensor/LinearKernel.java / EmbeddingKernel.java / MatmulRuntime.java
@@ -3609,15 +3734,15 @@ Short glossary. For the Java home of each idea, prefer the **In the code** notes
 | MQA                   | Multi-query: all Query heads share a single Key/Value pair                                       |
 | Sliding window        | Attend only within a fixed recent span, not the full past                                        |
 | Global attention      | Attend over the whole allowed past                                                               |
-| Query / Key / Value   | Linear projections used by attention (search / address / content)                                |
+| Query / Key / Value   | Linear projections used by attention (search / address / content). Only **K** and **V** are cached (ch. 12) |
 | Inner work (Sense A)  | Invisible stack of attention + MLP for each next token                                           |
 | Chain of thought (B)  | Reasoning written as ordinary tokens in the reply                                                |
 | Tagged scratchpad (C) | Written reasoning inside open/close markers (default `<think>…</think>`; override with `ThinkTags`) |
 | ChatReply             | Parsed assistant turn: `thinking` (scratchpad), `answer` / `text()` (visible), `thinkOpen` (unclosed scratchpad while streaming), `stats` (`GenerationStats`; `NONE` until generate finishes). `parse(raw)` uses default think tags and `ChatSpecials`; `parse(raw, ThinkTags)` / `parse(raw, ThinkTags, ChatSpecials)` / `parse(raw, llm)` / `open(path).thinkTags` / `.chatSpecials` at load / `ChatSession.thinkTags` for custom markers. `ChatSession.send` salvages + attaches stats. History stores **answer only**. |
 | `TEXT_RAW`            | `LlmTextKind` for the unparsed tokenizer decode on a `ChatSession` listener (think tags and chat specials kept). `TEXT_THINKING` / `TEXT_ASSISTANT` stay parsed. CLI `streamTo` ignores `TEXT_RAW`. |
-| KV cache              | Stored Keys and Values, reused while decoding                                                    |
-| Prefill               | First pass over the prompt that fills the KV cache                                               |
-| Decode                | Step-by-step production of later tokens                                                          |
+| KV cache              | Per-layer **Key** and **Value** tensors for already-seen token positions (RoPE already applied to K). Query, weights, and chat strings are **not** stored. Paged blocks; lives inside one `generate` (ch. 12) |
+| Prefill               | First pass over the prompt: compute Q/K/V for all prompt positions, write K/V into pages, sample the first new token |
+| Decode                | Later tokens: Q/K/V for the newest token only, append one K/V slot, attend cached Keys/Values    |
 | Sampling              | Drawing the next token from (filtered) probabilities                                             |
 | Temperature           | Softmax temperature $\tau$; lower → more peaked                                                  |
 | Context length        | How much past text fits in one forward pass                                                      |
@@ -3639,14 +3764,17 @@ Short glossary. For the Java home of each idea, prefer the **In the code** notes
 
 This project is a **teaching instrument**, not a production cloud service.
 
-- It runs on the ordinary processor and keeps numbers in a simple, memory-hungry form.
+- It runs on the ordinary processor. Dense float checkpoints keep numbers in a memory-hungry float32 form; GGUF and
+  Gemma 4 text QAT stay packed and dequantize on use.
 - It is slower than GPU systems you meet in products.
 - Small models hallucinate, waffle, and latch onto polite filler — especially if prompts are vague. RAG can offer the
   right passage (BM25 and, since **1.1.0**, dense/hybrid embeddings) and the generator may still garble it.
 - **ONNX demos** (**since 1.1.0**, ch. **7c**): SmolLM2 Instruct is a tiny ChatML chat model; Tiny-LLM-ONNX is a
   **base** completion toy — do not expect solid Q&A from either. Decode may stop early on degenerate loops or at a
   demo `maxTokens` cap so answers can look cut off.
-- **Weight formats are curated, not universal:** safetensors float dtypes only (ch. 7); GGUF = `qwen3|lfm2|bert` + listed
+- **Gemma 4:** text-only QAT mobile loads (**since 1.1.0**). Vision/audio generation, Gemma 4 GGUF, and MoE
+  (`enable_moe_block`) are out of scope.
+- **Weight formats are curated, not universal:** safetensors float dtypes plus packed Gemma 4 QAT (ch. 7); GGUF = `qwen3|lfm2|bert` + listed
   GGML quants (ch. 7a); ONNX = Tier A initializers, no ORT / no community `*_q4*`/`*_int8*`/`with_past` names, no
   float8 weights, no LFM2-from-ONNX (ch. **7c**).
 - “Understanding,” “knowing,” “thinking,” and “meaning” here are **metaphors** for statistical continuation and inner

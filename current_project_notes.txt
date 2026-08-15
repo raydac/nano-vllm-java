@@ -9,11 +9,15 @@
 - **ModelFileSource**: `ModelFileId` → `InputStream` (+ weight shards); load into heap only (no disk cache); `make(Path)` stays direct disk I/O; ONNX ids `MODEL_ONNX` / `MODEL_ONNX_FP16`
 - **GGUF:** packed by default; dequant catalog matches current llama.cpp weight types (K/IQ/TQ/MX/NV/legacy); `LlmModelFactory.make(path, io, true)` unpacks at load; `LLM.Builder.allowUnpackParameters()` late-unpacks packed models. Chat GGUF: **qwen3** + **lfm2**; embeddings **bert**. Load = container **transport** (`GgufTransport` / HF folder / ONNX) then **`ModelBinding`** (adapt catalog → `HfConfig` + schema if the file is enough for a supported graph)
 - Library: `LlmModelFactory.open(path).make()` or `make` → shared `LlmModel` (`AutoCloseable`); also `make(ModelFileSource)` / `fromClasspath*` / `openClasspath*` (stream → heap; no disk cache); `LLM.Builder` only (warmup **off** by default); `.sampling(SamplingParams)` seals chat/complete defaults; close **LLM first**, then **model**. `LlmModel.toString()` prints kind, architecture, container, sizes, packed/dense/qat, chat format (safe after close). Builder-built types (`LLM`, `Config`, `LlmAdvisor`, `MatmulRuntime`, `RagFactory`/`CorpusLoader` corpus) keep constructors private; `ResourceLimits` is a public record so its canonical constructor cannot be hidden.
-- **`description.md`:** audited for 1.1.0 — ONNX Tier A (**§7c**), Llama, SmolLM2/Tiny demos; ChatFormat /
-  vocab-gated think / neutral `SamplingDefaults` / fail-unknown-arch; educational Qwen/Gemma tables kept as examples;
+- **`description.md`:** re-checked against 1.1.0 — Gemma 4 text QAT (packed, not F32 widen), panel GEMV / SIMD
+  `Ops` / in-place paged KV, `TEXT_DEBUG` off unless `emitDebugPrompts(true)`, `AdvisorRagHelloWorld`; ONNX Tier A
+  (**§7c**), Llama, SmolLM2/Tiny demos; ChatFormat / vocab-gated think / neutral `SamplingDefaults` / fail-unknown-arch;
+  educational Qwen/Gemma tables kept as examples;
   **format restriction** tables in ch. 7 / 7a / 7c; **usage Java snippets** in ch. 4 / 7a / 7c / 14 / 16 / 17
   (load+chat, GGUF/ONNX, stream/cancel, classpath, advisors, BM25+classpath RAG);
   ch. **7a** covers **Qwen3 GGUF** (bring-your-own; transport + `ModelBinding`) as well as LFM2;
+  ch. **12** KV cache: what is stored (post-RoPE K/V per layer/head/position), what is not, prefill vs decode,
+  paged blocks / `blockTable` / `kvHeapFraction`, GQA + Gemma 4 shared-KV, lifetime vs chat history;
   **ThinkTags** / `OPTION_THINK_TAGS` and **ChatSpecials** / `OPTION_CHAT_SPECIALS` in ch. 4, 7a, 9, 16;
   **`TEXT_RAW`** streaming decode in ch. 9, 14, 15, 16 and the glossary; shared `LoadProgress` bar in ch. 4 / 7 / 7a / 7c / 16;
   **`ChatReply`** and other exported records: JavaDoc covers fields (`@param`) and how to
