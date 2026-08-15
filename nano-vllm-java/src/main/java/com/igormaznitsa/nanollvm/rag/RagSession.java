@@ -5,6 +5,7 @@ import static java.util.Objects.requireNonNull;
 import com.igormaznitsa.nanollvm.chat.ChatMessage;
 import com.igormaznitsa.nanollvm.chat.ChatReply;
 import com.igormaznitsa.nanollvm.chat.ChatSession;
+import com.igormaznitsa.nanollvm.chat.ChatSpecials;
 import com.igormaznitsa.nanollvm.chat.LlmListener;
 import com.igormaznitsa.nanollvm.chat.ThinkTags;
 import com.igormaznitsa.nanollvm.llm.LLM;
@@ -414,15 +415,24 @@ public final class RagSession {
     }
 
     static Optional<String> parse(final String rawModelText) {
-      return parse(rawModelText, ThinkTags.DEFAULT);
+      return parse(rawModelText, ThinkTags.DEFAULT, ChatSpecials.DEFAULT);
     }
 
     static Optional<String> parse(final String rawModelText, final ThinkTags tags) {
+      return parse(rawModelText, tags, ChatSpecials.DEFAULT);
+    }
+
+    static Optional<String> parse(
+      final String rawModelText,
+      final ThinkTags tags,
+      final ChatSpecials specials
+    ) {
       requireNonNull(tags, "tags");
+      requireNonNull(specials, "specials");
       if (rawModelText == null || rawModelText.isBlank()) {
         return Optional.empty();
       }
-      String answer = ChatReply.parse(rawModelText, tags).answer().strip();
+      String answer = ChatReply.parse(rawModelText, tags, specials).answer().strip();
       if (answer.isEmpty()) {
         return Optional.empty();
       }
@@ -466,7 +476,7 @@ public final class RagSession {
         tags.open(),
         tags.close());
       String raw = llm.generate(List.of(prompt), REWRITE_SAMPLING).getFirst().text();
-      return parse(raw, tags);
+      return parse(raw, tags, llm.chatSpecials());
     }
   }
 

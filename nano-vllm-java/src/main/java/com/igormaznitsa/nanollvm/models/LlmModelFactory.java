@@ -3,6 +3,7 @@ package com.igormaznitsa.nanollvm.models;
 import static com.igormaznitsa.nanollvm.utils.NanoLlvmProps.CONFIG_JSON;
 import static java.util.Objects.requireNonNull;
 
+import com.igormaznitsa.nanollvm.chat.ChatSpecials;
 import com.igormaznitsa.nanollvm.chat.LlmListener;
 import com.igormaznitsa.nanollvm.chat.LlmListeners;
 import com.igormaznitsa.nanollvm.chat.ThinkTags;
@@ -58,13 +59,14 @@ import java.util.Map;
  * catalog of what this library can run.
  *
  * <p>Prefer {@link #open(Path)} (or {@link #open(ModelFileSource)}) for named load knobs:
- * {@code LlmModelFactory.open(path).listen(io).unpackParameters().thinkTags(tags).make()}.
+ * {@code LlmModelFactory.open(path).listen(io).unpackParameters().thinkTags(tags).chatSpecials(specials).make()}.
  * Existing {@link #make} / {@link #fromClasspath} overloads remain.
  *
  * <p>Optional load-time settings go in a {@code Map} (frozen as {@link java.util.Map#copyOf} on
- * the model). Known keys: {@link LlmModel#OPTION_THINK_TAGS} ({@link ThinkTags}).
- * Unknown keys and wrong value types fail before weights are read. {@link Builder#thinkTags}
- * sets that key without a map.
+ * the model). Known keys: {@link LlmModel#OPTION_THINK_TAGS} ({@link ThinkTags}) and
+ * {@link LlmModel#OPTION_CHAT_SPECIALS} ({@link ChatSpecials}). Omitted keys receive library
+ * defaults. Unknown keys and wrong value types fail before weights are read.
+ * {@link Builder#thinkTags} / {@link Builder#chatSpecials} set those keys without a map.
  *
  * <p>Filesystem {@link #make(Path)} overloads load directly from disk and do not route through
  * {@link ModelFileSource}.
@@ -221,7 +223,8 @@ public final class LlmModelFactory {
   /**
    * {@link #make(Path, LlmListener, boolean)} with load-time {@link LlmModel#options() options}.
    *
-   * @param options known keys only (see {@link LlmModel#OPTION_THINK_TAGS}); must not be {@code null}
+   * @param options known keys only (see {@link LlmModel#OPTION_THINK_TAGS},
+   *                {@link LlmModel#OPTION_CHAT_SPECIALS}); must not be {@code null}
    * @since 1.1.0
    */
   public static LlmModel make(
@@ -746,14 +749,23 @@ public final class LlmModelFactory {
 
     public Builder thinkTags(final ThinkTags thinkTags) {
       requireNonNull(thinkTags, "thinkTags");
-      Map<String, Object> merged = new LinkedHashMap<>(this.options);
-      merged.put(LlmModel.OPTION_THINK_TAGS, thinkTags);
-      this.options = merged;
-      return this;
+      return this.withOption(LlmModel.OPTION_THINK_TAGS, thinkTags);
+    }
+
+    public Builder chatSpecials(final ChatSpecials chatSpecials) {
+      requireNonNull(chatSpecials, "chatSpecials");
+      return this.withOption(LlmModel.OPTION_CHAT_SPECIALS, chatSpecials);
     }
 
     public Builder options(final Map<String, ?> options) {
       this.options = requireNonNull(options, "options");
+      return this;
+    }
+
+    private Builder withOption(final String key, final Object value) {
+      Map<String, Object> merged = new LinkedHashMap<>(this.options);
+      merged.put(key, value);
+      this.options = merged;
       return this;
     }
 

@@ -164,7 +164,7 @@ public final class LlmListeners {
           this.answer = this.merge(this.answer, event);
           this.printer.update(new ChatReply(this.think, this.answer, false));
         }
-        case TEXT_DIAGNOSTICS, STATUS_INFO, STATUS_PROGRESS -> {
+        case TEXT_DIAGNOSTICS, TEXT_RAW, STATUS_INFO, STATUS_PROGRESS -> {
         }
       }
     }

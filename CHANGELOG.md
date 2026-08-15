@@ -43,11 +43,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `mvn -pl nano-vllm-java-samples exec:java` from the repository root.
 
 ### Added
-- Fluent load, sampling, and call shortcuts: `LlmModelFactory.open(path).listen(…).unpackParameters().thinkTags(…).make()`
+- Fluent load, sampling, and call shortcuts: `LlmModelFactory.open(path).listen(…).unpackParameters().thinkTags(…).chatSpecials(…).make()`
   (existing `make` / `fromClasspath*` remain); `SamplingParams.builder()` and withers; `SamplingDefaults.neutral()`;
   `LLM.Builder.sampling` / `stopTokenIds`; `chatOnce` / `complete` max-token overloads; `generate(…, Duration)` /
   seq-aware `LLM.TokenEvent` callbacks; `ChatSession.seed` / `maxTokens` / `send(text, params)`;
-  `ChatReply.parse(raw, llm)` using the model's think tags.
+  `ChatReply.parse(raw, llm)` using the model's think tags. `ChatSession` streaming also emits
+  `TEXT_RAW` (unparsed tokenizer decode, think tags and chat specials kept) alongside parsed
+  thinking/answer.
 - `ModelSupport` / `UnsupportedModelException`: exact architecture detection (no substring `qwen`→Qwen3),
   a user-facing support catalog, and fail-fast load errors for look-alike families (Qwen2, Qwen3.5/Fara,
   Gemma 2, Gemma 4 vision/audio-only variants, Mistral, other VLMs, GGUF Llama/Gemma, HF BERT safetensors). `-Dnanollvm.arch` cannot override a
@@ -68,10 +70,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - GGML dequant for the remaining GGUF weight types: K-quants (`Q2_K`, `Q5_K`, `Q8_K`), legacy (`Q4_1`, `Q5_0`, `Q5_1`, `Q8_1`, `Q1_0`, `Q2_0`), IQ (`IQ1_S`/`M`, `IQ2_*`, `IQ3_*`, `IQ4_XS`), ternary (`TQ1_0`/`TQ2_0`), MXFP4 / NVFP4, and integer/F64 tensors. `Q3_K` / `IQ4_NL` were already present. File recipes like `Q4_K_M` still mix those GGML types (not a separate dtype).
 - Stream / classpath model load: `ModelFileId` + `ModelFileSource`, `LlmModelFactory.make(source)`, and `fromClasspath` / `fromClasspathGguf` helpers (bytes stay in heap; no disk cache). Filesystem `make(Path)` unchanged.
 - Custom chat scratchpad markers via `ThinkTags` in `LlmModelFactory.make(…, Map)` under
-  `LlmModel.OPTION_THINK_TAGS` (default remains `<think>` / `</think>`). Options are frozen with
-  `Map.copyOf` on the model. `ChatSession.thinkTags` / `RagSession.thinkTags` override one
-  conversation. Parse, ChatML skip-seed, and history truncation use the same pair when both
-  markers are in vocab.
+  `LlmModel.OPTION_THINK_TAGS` (default remains `<think>` / `</think>`), and chat-markup search
+  strings via `ChatSpecials` under `LlmModel.OPTION_CHAT_SPECIALS` (defaults cover ChatML, Gemma
+  turn markers, Llama stops, and the default think pair). Omitted keys are filled with those
+  defaults on the frozen options map. `ChatSession.thinkTags` / `RagSession.thinkTags` override the
+  scratchpad pair for one conversation. Parse, ChatML skip-seed, and history truncation use the
+  same think pair when both markers are in vocab.
 
 ### Fixed
 - Weightless RMSNorm (no affine scale, used on Gemma 4 shared-KV V) no longer NPEs on the fused

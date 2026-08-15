@@ -18,6 +18,7 @@ import com.igormaznitsa.nanollvm.chat.ChatMessages;
 import com.igormaznitsa.nanollvm.chat.ChatReply;
 import com.igormaznitsa.nanollvm.chat.ChatRole;
 import com.igormaznitsa.nanollvm.chat.ChatSession;
+import com.igormaznitsa.nanollvm.chat.ChatSpecials;
 import com.igormaznitsa.nanollvm.chat.LlmListener;
 import com.igormaznitsa.nanollvm.chat.LlmListeners;
 import com.igormaznitsa.nanollvm.chat.LlmTextKind;
@@ -108,8 +109,11 @@ class CoreUnitTest {
       assertSame(model.tokenizer(), a.tokenizer());
       assertSame(model.tokenizer(), b.tokenizer());
       assertEquals(model.architectureName(), a.model().architectureName());
-      assertTrue(model.options().isEmpty());
+      assertEquals(ThinkTags.DEFAULT, model.options().get(LlmModel.OPTION_THINK_TAGS));
+      assertEquals(ChatSpecials.DEFAULT, model.options().get(LlmModel.OPTION_CHAT_SPECIALS));
+      assertEquals(2, model.options().size());
       assertEquals(ThinkTags.DEFAULT, model.thinkTags());
+      assertEquals(ChatSpecials.DEFAULT, model.chatSpecials());
       String text = model.toString();
       assertTrue(text.startsWith("LlmModel{kind=chat, architecture="), text);
       assertTrue(text.contains("container=folder"), text);
@@ -128,6 +132,8 @@ class CoreUnitTest {
       () -> LlmModelFactory.make(path, Map.of("unknown", "x")));
     assertThrows(IllegalArgumentException.class,
       () -> LlmModelFactory.make(path, Map.of(LlmModel.OPTION_THINK_TAGS, "</think>")));
+    assertThrows(IllegalArgumentException.class,
+      () -> LlmModelFactory.make(path, Map.of(LlmModel.OPTION_CHAT_SPECIALS, "<|im_end|>")));
   }
 
   @Test
@@ -139,6 +145,8 @@ class CoreUnitTest {
          LLM llm = LLM.builder(model).maxModelLen(256).numKvcacheBlocks(32).build()) {
       assertEquals(custom, model.thinkTags());
       assertEquals(custom, model.options().get(LlmModel.OPTION_THINK_TAGS));
+      assertEquals(ChatSpecials.DEFAULT, model.chatSpecials());
+      assertEquals(ChatSpecials.DEFAULT, model.options().get(LlmModel.OPTION_CHAT_SPECIALS));
       assertThrows(UnsupportedOperationException.class, () -> model.options().put("x", "y"));
       assertEquals(custom, llm.thinkTags());
       assertEquals(custom, llm.chat(16).thinkTags());
@@ -149,6 +157,24 @@ class CoreUnitTest {
       ChatReply parsed = ChatReply.parse("<reasoning>notes</reasoning>visible", llm);
       assertEquals("notes", parsed.thinking());
       assertEquals("visible", parsed.answer());
+    }
+  }
+
+  @Test
+  void modelChatSpecialsComeFromFactoryOptions() {
+    Path path = OptionalModelAssumptions.requireQwen3();
+    ChatSpecials custom = ChatSpecials.of("<|secret|>", "<|im_end|>");
+    LlmModel model = LlmModelFactory.open(path).chatSpecials(custom).make();
+    try (model;
+         LLM llm = LLM.builder(model).maxModelLen(256).numKvcacheBlocks(32).build()) {
+      assertEquals(custom, model.chatSpecials());
+      assertEquals(custom, model.options().get(LlmModel.OPTION_CHAT_SPECIALS));
+      assertEquals(ThinkTags.DEFAULT, model.thinkTags());
+      assertEquals(custom, llm.chatSpecials());
+
+      ChatReply parsed = ChatReply.parse("hello<|secret|>ignored", llm);
+      assertEquals("hello", parsed.answer());
+      assertEquals("kept<|endoftext|>", ChatReply.parse("kept<|endoftext|>", llm).answer());
     }
   }
 
@@ -172,6 +198,7 @@ class CoreUnitTest {
     assertTrue(closed.contains("weights=released"), closed);
     assertThrows(IllegalStateException.class, model::architectureName);
     assertThrows(IllegalStateException.class, model::thinkTags);
+    assertThrows(IllegalStateException.class, model::chatSpecials);
     assertThrows(IllegalStateException.class, model::options);
     assertThrows(IllegalStateException.class, () -> LLM.builder(model).build());
     model.close();
@@ -658,6 +685,24 @@ class CoreUnitTest {
     assertThrows(IllegalArgumentException.class, () -> ThinkTags.of("<x>", "<x>"));
     assertThrows(IllegalArgumentException.class, () -> ThinkTags.of("ab", "a"));
     assertThrows(NullPointerException.class, () -> ThinkTags.of(null, "</think>"));
+  }
+
+  @Test
+  void customChatSpecialsStripOnlyConfiguredMarkers() {
+    ChatSpecials specials = ChatSpecials.of("<|secret|>");
+    ChatReply parsed = ChatReply.parse("Hi<|secret|>tail", ThinkTags.DEFAULT, specials);
+    assertEquals("Hi", parsed.answer());
+
+    assertEquals("Hi<|im_end|>",
+      ChatReply.parse("Hi<|im_end|>", ThinkTags.DEFAULT, ChatSpecials.of()).answer());
+    assertEquals("visible", ChatReply.stripChatMarkup(
+      "visible<|secret|>", ThinkTags.DEFAULT, specials));
+    assertTrue(ChatSpecials.DEFAULT.markers().contains("<|im_end|>"));
+    assertTrue(ChatSpecials.DEFAULT.markers().contains(ThinkTags.DEFAULT.open()));
+    assertEquals(ChatSpecials.DEFAULT, ChatSpecials.of(ChatSpecials.DEFAULT.markers()));
+
+    assertThrows(IllegalArgumentException.class, () -> ChatSpecials.of("  "));
+    assertThrows(NullPointerException.class, () -> ChatSpecials.of((String) null));
   }
 
   @Test

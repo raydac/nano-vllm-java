@@ -2,7 +2,6 @@ package com.igormaznitsa.nanollvm.chat;
 
 import static java.util.Objects.requireNonNull;
 
-import java.util.ArrayList;
 import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -10,29 +9,30 @@ import java.util.regex.Pattern;
 record AssistantParts(String thinking, String answer, boolean thinkOpen) {
 
   private static final Pattern LINE_BREAK = Pattern.compile("\\R");
-  private static final Pattern SPECIAL_TOKEN = Pattern.compile("<\\|[^\\s|>]*\\|>?");
   private static final Pattern LEADING_ASSISTANT = Pattern.compile("(?i)^\\s*assistant\\s*:?\\s*");
   private static final Pattern STATED_ANSWER = Pattern.compile(
     "(?i)(?:answer(?:\\s+should)?\\s+be|returns?|result(?:\\s+is)?)\\s*[:\"']?\\s*(.+)$");
-  private static final List<String> BASE_CHAT_MARKUP = List.of(
-    "<|im_end|>", "<|im_start|>", "<|endoftext|>",
-    "<end_of_turn>", "<start_of_turn>",
-    "<|turn>user\n", "<|turn>model\n", "<|turn>system\n", "<|turn>", "<turn|>",
-    "<eos>", "<bos>",
-    ThinkTags.DEFAULT.open(), ThinkTags.DEFAULT.close()
-  );
 
   public static AssistantParts parse(final String raw) {
-    return parse(raw, ThinkTags.DEFAULT);
+    return parse(raw, ThinkTags.DEFAULT, ChatSpecials.DEFAULT);
   }
 
   public static AssistantParts parse(final String raw, final ThinkTags tags) {
+    return parse(raw, tags, ChatSpecials.DEFAULT);
+  }
+
+  public static AssistantParts parse(
+    final String raw,
+    final ThinkTags tags,
+    final ChatSpecials specials
+  ) {
     requireNonNull(tags, "tags");
+    requireNonNull(specials, "specials");
     if (raw == null || raw.isBlank()) {
       return new AssistantParts("", "", false);
     }
 
-    List<String> markup = markupMarkers(tags);
+    List<String> markup = specials.searchMarkers(tags);
     String text = holdIncompleteMarkupSuffix(raw, markup);
     String open = tags.open();
     String close = tags.close();
@@ -65,7 +65,8 @@ record AssistantParts(String thinking, String answer, boolean thinkOpen) {
       thinkOpen = false;
     }
 
-    return new AssistantParts(stripChatMarkup(thinking, tags), sanitizeAnswer(after, markup),
+    return new AssistantParts(stripChatMarkup(thinking, tags, specials),
+      sanitizeAnswer(after, markup),
       thinkOpen);
   }
 
@@ -133,15 +134,24 @@ record AssistantParts(String thinking, String answer, boolean thinkOpen) {
   }
 
   public static String stripChatMarkup(final String text) {
-    return stripChatMarkup(text, ThinkTags.DEFAULT);
+    return stripChatMarkup(text, ThinkTags.DEFAULT, ChatSpecials.DEFAULT);
   }
 
   public static String stripChatMarkup(final String text, final ThinkTags tags) {
+    return stripChatMarkup(text, tags, ChatSpecials.DEFAULT);
+  }
+
+  public static String stripChatMarkup(
+    final String text,
+    final ThinkTags tags,
+    final ChatSpecials specials
+  ) {
     requireNonNull(tags, "tags");
+    requireNonNull(specials, "specials");
     if (text == null || text.isEmpty()) {
       return "";
     }
-    List<String> markup = markupMarkers(tags);
+    List<String> markup = specials.searchMarkers(tags);
     String s = holdIncompleteMarkupSuffix(text, markup);
     for (String marker : markup) {
       s = s.replace(marker, "");
@@ -150,26 +160,41 @@ record AssistantParts(String thinking, String answer, boolean thinkOpen) {
   }
 
   private static String finishSanitize(final String text) {
-    final String withoutTokens = SPECIAL_TOKEN.matcher(text).replaceAll("");
-    return LEADING_ASSISTANT.matcher(withoutTokens).replaceFirst("").strip();
+    return LEADING_ASSISTANT.matcher(text).replaceFirst("").strip();
   }
 
   public static String cleanAssistantText(final String raw) {
-    return cleanAssistantText(raw, ThinkTags.DEFAULT);
+    return cleanAssistantText(raw, ThinkTags.DEFAULT, ChatSpecials.DEFAULT);
   }
 
   public static String cleanAssistantText(final String raw, final ThinkTags tags) {
-    AssistantParts parts = parse(raw, tags);
+    return cleanAssistantText(raw, tags, ChatSpecials.DEFAULT);
+  }
+
+  public static String cleanAssistantText(
+    final String raw,
+    final ThinkTags tags,
+    final ChatSpecials specials
+  ) {
+    AssistantParts parts = parse(raw, tags, specials);
     String answer = parts.answer();
     return answer.isEmpty() ? salvageFromThinking(parts.thinking()) : answer;
   }
 
   public static String streamDisplayText(final String raw) {
-    return streamDisplayText(raw, ThinkTags.DEFAULT);
+    return streamDisplayText(raw, ThinkTags.DEFAULT, ChatSpecials.DEFAULT);
   }
 
   public static String streamDisplayText(final String raw, final ThinkTags tags) {
-    return cleanAssistantText(raw, tags);
+    return streamDisplayText(raw, tags, ChatSpecials.DEFAULT);
+  }
+
+  public static String streamDisplayText(
+    final String raw,
+    final ThinkTags tags,
+    final ChatSpecials specials
+  ) {
+    return cleanAssistantText(raw, tags, specials);
   }
 
   public static String salvageFromThinking(final String thinking) {
@@ -228,7 +253,7 @@ record AssistantParts(String thinking, String answer, boolean thinkOpen) {
    * fragments like {@code <think} into the answer channel.
    */
   static String holdIncompleteMarkupSuffix(final String text) {
-    return holdIncompleteMarkupSuffix(text, BASE_CHAT_MARKUP);
+    return holdIncompleteMarkupSuffix(text, ChatSpecials.DEFAULT.searchMarkers(ThinkTags.DEFAULT));
   }
 
   static String holdIncompleteMarkupSuffix(final String text, final List<String> markers) {
@@ -249,20 +274,6 @@ record AssistantParts(String thinking, String answer, boolean thinkOpen) {
   private static boolean isStrictPrefixOfMarkup(final String suffix, final List<String> markers) {
     return markers.stream()
       .anyMatch(marker -> marker.startsWith(suffix) && !marker.equals(suffix));
-  }
-
-  private static List<String> markupMarkers(final ThinkTags tags) {
-    if (ThinkTags.DEFAULT.equals(tags)) {
-      return BASE_CHAT_MARKUP;
-    }
-    List<String> markers = new ArrayList<>(BASE_CHAT_MARKUP);
-    if (!markers.contains(tags.open())) {
-      markers.add(tags.open());
-    }
-    if (!markers.contains(tags.close())) {
-      markers.add(tags.close());
-    }
-    return List.copyOf(markers);
   }
 
   private record Remainder(String thinking, String answer, boolean open) {

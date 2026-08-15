@@ -13,9 +13,10 @@
   **format restriction** tables in ch. 7 / 7a / 7c; **usage Java snippets** in ch. 4 / 7a / 7c / 14 / 16 / 17
   (load+chat, GGUF/ONNX, stream/cancel, classpath, advisors, BM25+classpath RAG);
   ch. **7a** covers **Qwen3 GGUF** (bring-your-own; transport + `ModelBinding`) as well as LFM2;
-  **ThinkTags** / `OPTION_THINK_TAGS` in ch. 4, 7a, 9, 16; shared `LoadProgress` bar in ch. 4 / 7 / 7a / 7c / 16;
+  **ThinkTags** / `OPTION_THINK_TAGS` and **ChatSpecials** / `OPTION_CHAT_SPECIALS` in ch. 4, 7a, 9, 16;
+  **`TEXT_RAW`** streaming decode in ch. 9, 14, 15, 16 and the glossary; shared `LoadProgress` bar in ch. 4 / 7 / 7a / 7c / 16;
   **`ChatReply`** and other exported records: JavaDoc covers fields (`@param`) and how to
-  use helpers — `ChatReply`, `ThinkTags`, `ChatMessage`, `LlmTextEvent`, `AdvisorResponse`,
+  use helpers — `ChatReply`, `ThinkTags`, `ChatSpecials`, `ChatMessage`, `LlmTextEvent`, `AdvisorResponse`,
   `AdvisorEnrichment`, `GenerationStats`, `LLM.GenerationOutput`, `SamplingParams`,
   `Config.HfConfig`, `RagHit`, `TextChunk`, `RagLoadOptions`, `ResourceLimits`,
   `ModelSupport.Selection`
@@ -35,11 +36,12 @@
   RMSNorm uses `onePlusWeight` (not product-named). Architecture id `gemma3` remains only as the
   HF `model_type` / backend key (`Gemma3ForCausalLM`), same as `qwen3`/`llama`/`lfm2`.
   1.0 boolean chat shims removed (not kept as `@Deprecated`).
-- **ThinkTags:** opt-in custom scratchpad markers via `LlmModelFactory.open(path).thinkTags(ThinkTags.of(open, close)).make()`
-  or `make(…, Map)` key `LlmModel.OPTION_THINK_TAGS` (frozen `Map.copyOf` on the model; all `LLM`s inherit).
-  `ChatSession.thinkTags` / `RagSession.thinkTags` override one conversation. Default remains
-  `<think>`/`</think>`. Tokenizer skip-seed stays string-based (no tokenizer→chat cycle).
-  ChatML skip-seed only when both markers are whole vocab tokens.
+- **ThinkTags / ChatSpecials:** opt-in via `LlmModelFactory.open(path).thinkTags(…).chatSpecials(…).make()`
+  or `make(…, Map)` keys `LlmModel.OPTION_THINK_TAGS` / `OPTION_CHAT_SPECIALS` (frozen `Map.copyOf`;
+  omitted keys filled with `ThinkTags.DEFAULT` / `ChatSpecials.DEFAULT`). All `LLM`s inherit.
+  `ChatSession.thinkTags` / `RagSession.thinkTags` override the scratchpad pair for one conversation.
+  Tokenizer skip-seed stays string-based. ChatML skip-seed only when both think markers are whole vocab tokens.
+  `ChatSession` streaming emits `TEXT_RAW` (unparsed decode, specials kept) plus parsed thinking/answer.
 - Weight-load status: shared in-place bar (`LoadProgress`) for safetensors, GGUF, and ONNX
 - Engine: `Transformer` owns per-LLM arenas + explicit step `Context`; `MatmulRuntime` per `LLM`; `kvHeapFraction` (default 0.25) for KV auto-size
 - `LLM.generate` / `close` use `ReentrantLock`; `assertNotClosed` on infrequent entry points; props = **`nanollvm.*` / `NANOLLVM_*` only**
@@ -134,6 +136,10 @@
 - Prefer `ChatSession` for dialog; raw `generate` for completions
 - Custom think/scratchpad markers: `LlmModelFactory.open(path).thinkTags(ThinkTags.of(open, close)).make()`;
   `ChatReply.parse(raw, llm)` uses the model pair; `ChatReply.parse(raw)` still defaults to `<think>`/`</think>`
+- Chat markup searched in answers: `open(path).chatSpecials(ChatSpecials.of(…)).make()`; omitted options
+  always include `ThinkTags.DEFAULT` and `ChatSpecials.DEFAULT` on `model.options()`
+- Raw streaming decode (think tags and chat specials kept): `LlmTextKind.TEXT_RAW` on a `ChatSession` listener;
+  `TEXT_THINKING` / `TEXT_ASSISTANT` stay parsed. CLI `streamTo` ignores `TEXT_RAW`.
 - Prefer `LlmModelFactory.open` / `make` → `LLM.builder(LlmModel)`; optional `.sampling(params)` on the engine;
   close LLM then model
 - Embedding GGUFs/ONNX use the same factory; call `embed`, not `LLM.builder`

@@ -11,10 +11,12 @@ import com.igormaznitsa.nanollvm.models.LlmModel;
  *
  * <p>Some chat models emit a tagged scratchpad (by default {@code <think>…</think>}) before the
  * user-visible reply. {@link #parse(String)} splits decoded assistant text into those two channels
- * and strips chat specials ({@code <|im_end|>}, {@code <end_of_turn>}, …). Override the pair with
- * {@link ThinkTags} via {@link com.igormaznitsa.nanollvm.models.LlmModel#OPTION_THINK_TAGS} at
+ * and strips chat specials ({@link ChatSpecials#DEFAULT}: {@code <|im_end|>}, {@code <end_of_turn>},
+ * …). Override scratchpad markers with {@link ThinkTags} via
+ * {@link com.igormaznitsa.nanollvm.models.LlmModel#OPTION_THINK_TAGS} and the strip list with
+ * {@link ChatSpecials} via {@link com.igormaznitsa.nanollvm.models.LlmModel#OPTION_CHAT_SPECIALS} at
  * {@link com.igormaznitsa.nanollvm.models.LlmModelFactory#make} /
- * {@link ChatSession#thinkTags(ThinkTags)} / {@link #parse(String, ThinkTags)}
+ * {@link ChatSession#thinkTags(ThinkTags)} / {@link #parse(String, ThinkTags, ChatSpecials)}
  * when the model uses different markers. {@link ChatSession#send} returns a finished turn
  * ({@link #thinkOpen()} is {@code false} and {@link #stats()} is filled). Streaming listeners see
  * partial snapshots: {@code thinkOpen} stays {@code true} until the close tag arrives, and
@@ -74,7 +76,7 @@ public record ChatReply(
 
   /**
    * Splits decoded assistant text into thinking / answer / {@code thinkOpen} using
-   * {@link ThinkTags#DEFAULT}.
+   * {@link ThinkTags#DEFAULT} and {@link ChatSpecials#DEFAULT}.
    *
    * <p>Does not salvage a missing answer from the scratchpad and does not attach stats — call
    * {@link #salvageFromThinking(String)} or {@link #withStats(GenerationStats)} yourself, or use
@@ -86,11 +88,12 @@ public record ChatReply(
    * @return parsed snapshot; never {@code null}
    */
   public static ChatReply parse(final String raw) {
-    return parse(raw, ThinkTags.DEFAULT);
+    return parse(raw, ThinkTags.DEFAULT, ChatSpecials.DEFAULT);
   }
 
   /**
-   * Splits decoded assistant text using {@code tags} as the scratchpad pair.
+   * Splits decoded assistant text using {@code tags} as the scratchpad pair and
+   * {@link ChatSpecials#DEFAULT} for leftover chat markup.
    *
    * @param raw  decoded assistant tokens; {@code null} / blank yields empty channels
    * @param tags open/close markers; must not be {@code null}
@@ -98,25 +101,43 @@ public record ChatReply(
    * @since 1.1.0
    */
   public static ChatReply parse(final String raw, final ThinkTags tags) {
-    return from(AssistantParts.parse(raw, tags));
+    return parse(raw, tags, ChatSpecials.DEFAULT);
   }
 
   /**
-   * {@link #parse(String, ThinkTags)} using {@link LLM#thinkTags()}.
+   * Splits decoded assistant text using {@code tags} and {@code specials}.
+   *
+   * @param raw      decoded assistant tokens; {@code null} / blank yields empty channels
+   * @param tags     open/close scratchpad markers; must not be {@code null}
+   * @param specials chat markup searched in the answer; must not be {@code null}
+   * @return parsed snapshot; never {@code null}
+   * @since 1.1.0
+   */
+  public static ChatReply parse(final String raw, final ThinkTags tags,
+                                final ChatSpecials specials) {
+    return from(AssistantParts.parse(raw, tags, specials));
+  }
+
+  /**
+   * {@link #parse(String, ThinkTags, ChatSpecials)} using {@link LLM#thinkTags()} and
+   * {@link LLM#chatSpecials()}.
    *
    * @since 1.1.0
    */
   public static ChatReply parse(final String raw, final LLM llm) {
-    return parse(raw, requireNonNull(llm, "llm").thinkTags());
+    requireNonNull(llm, "llm");
+    return parse(raw, llm.thinkTags(), llm.chatSpecials());
   }
 
   /**
-   * {@link #parse(String, ThinkTags)} using {@link LlmModel#thinkTags()}.
+   * {@link #parse(String, ThinkTags, ChatSpecials)} using {@link LlmModel#thinkTags()} and
+   * {@link LlmModel#chatSpecials()}.
    *
    * @since 1.1.0
    */
   public static ChatReply parse(final String raw, final LlmModel model) {
-    return parse(raw, requireNonNull(model, "model").thinkTags());
+    requireNonNull(model, "model");
+    return parse(raw, model.thinkTags(), model.chatSpecials());
   }
 
   /**
@@ -129,7 +150,7 @@ public record ChatReply(
    * @return stripped visible text, never {@code null}
    */
   public static String cleanAssistantText(final String raw) {
-    return cleanAssistantText(raw, ThinkTags.DEFAULT);
+    return cleanAssistantText(raw, ThinkTags.DEFAULT, ChatSpecials.DEFAULT);
   }
 
   /**
@@ -138,7 +159,20 @@ public record ChatReply(
    * @since 1.1.0
    */
   public static String cleanAssistantText(final String raw, final ThinkTags tags) {
-    return AssistantParts.cleanAssistantText(raw, tags);
+    return cleanAssistantText(raw, tags, ChatSpecials.DEFAULT);
+  }
+
+  /**
+   * {@link #cleanAssistantText(String)} with custom scratchpad markers and chat specials.
+   *
+   * @since 1.1.0
+   */
+  public static String cleanAssistantText(
+    final String raw,
+    final ThinkTags tags,
+    final ChatSpecials specials
+  ) {
+    return AssistantParts.cleanAssistantText(raw, tags, specials);
   }
 
   /**
@@ -152,7 +186,7 @@ public record ChatReply(
    * @return stripped display text, never {@code null}
    */
   public static String streamDisplayText(final String raw) {
-    return streamDisplayText(raw, ThinkTags.DEFAULT);
+    return streamDisplayText(raw, ThinkTags.DEFAULT, ChatSpecials.DEFAULT);
   }
 
   /**
@@ -161,7 +195,20 @@ public record ChatReply(
    * @since 1.1.0
    */
   public static String streamDisplayText(final String raw, final ThinkTags tags) {
-    return AssistantParts.streamDisplayText(raw, tags);
+    return streamDisplayText(raw, tags, ChatSpecials.DEFAULT);
+  }
+
+  /**
+   * {@link #streamDisplayText(String)} with custom scratchpad markers and chat specials.
+   *
+   * @since 1.1.0
+   */
+  public static String streamDisplayText(
+    final String raw,
+    final ThinkTags tags,
+    final ChatSpecials specials
+  ) {
+    return AssistantParts.streamDisplayText(raw, tags, specials);
   }
 
   /**
@@ -189,7 +236,7 @@ public record ChatReply(
    * @return {@code text} with chat / think markers and leading {@code assistant:} removed
    */
   public static String stripChatMarkup(final String text) {
-    return stripChatMarkup(text, ThinkTags.DEFAULT);
+    return stripChatMarkup(text, ThinkTags.DEFAULT, ChatSpecials.DEFAULT);
   }
 
   /**
@@ -198,7 +245,20 @@ public record ChatReply(
    * @since 1.1.0
    */
   public static String stripChatMarkup(final String text, final ThinkTags tags) {
-    return AssistantParts.stripChatMarkup(text, tags);
+    return stripChatMarkup(text, tags, ChatSpecials.DEFAULT);
+  }
+
+  /**
+   * {@link #stripChatMarkup(String)} using {@code tags} and {@code specials}.
+   *
+   * @since 1.1.0
+   */
+  public static String stripChatMarkup(
+    final String text,
+    final ThinkTags tags,
+    final ChatSpecials specials
+  ) {
+    return AssistantParts.stripChatMarkup(text, tags, specials);
   }
 
   /**

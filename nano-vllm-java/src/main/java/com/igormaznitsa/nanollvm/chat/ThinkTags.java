@@ -10,7 +10,8 @@ import static java.util.Objects.requireNonNull;
  * none. Pass custom markers at load as {@link com.igormaznitsa.nanollvm.models.LlmModel#OPTION_THINK_TAGS}
  * so every engine sharing the checkpoint uses the same pair. Override one conversation with
  * {@link ChatSession#thinkTags(ThinkTags)}. {@link ChatReply#parse(String, ThinkTags)} uses the
- * same pair when parsing raw generate output.
+ * same pair when parsing raw generate output. Chat markup stripped from the answer is a separate
+ * list: {@link ChatSpecials} / {@link com.igormaznitsa.nanollvm.models.LlmModel#OPTION_CHAT_SPECIALS}.
  *
  * <pre>{@code
  * LlmModel model = LlmModelFactory.open(path)

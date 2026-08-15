@@ -591,12 +591,16 @@ try (LlmModel model = LlmModelFactory.open(Path.of("models/Qwen3-0.6B"))
 }
 ```
 
-`ChatReply.parse(raw)` without tags still assumes the default pair.
+`ChatReply.parse(raw)` without tags still assumes the default pair. Chat markup stripped from
+answers (`<|im_end|>`, `<end_of_turn>`, …) is `ChatSpecials.DEFAULT` unless you freeze a list with
+`.chatSpecials(ChatSpecials.of(…))` / `LlmModel.OPTION_CHAT_SPECIALS`. Both keys are always present
+on `model.options()` (library defaults when omitted).
 
 ### Streaming chat
 
 One `LlmListener` covers status (`STATUS_INFO` / `STATUS_PROGRESS`) and chat text
-(`TEXT_THINKING` / `TEXT_ASSISTANT` / …). CLI PrintStreams remain sugar over the same path:
+(`TEXT_THINKING` / `TEXT_ASSISTANT` / `TEXT_RAW` / …). CLI PrintStreams remain sugar over the same path
+(they ignore `TEXT_RAW`):
 
 ```java
 import com.igormaznitsa.nanollvm.chat.LlmListeners;
@@ -610,6 +614,7 @@ try (LLM llm = LLM.builder(model)
         switch (event.kind()) {
           case TEXT_THINKING -> System.err.print(event.text());
           case TEXT_ASSISTANT -> System.out.print(event.text());
+          case TEXT_RAW -> { /* unparsed decode including think tags / chat specials */ }
           case TEXT_ADVISOR_NOTE -> System.err.printf("[%s] %s%n", event.advisorName(), event.text());
           case TEXT_DIAGNOSTICS -> System.err.println(event.text());
           case STATUS_INFO, STATUS_PROGRESS -> { /* already handled by toSystem on the LLM */ }

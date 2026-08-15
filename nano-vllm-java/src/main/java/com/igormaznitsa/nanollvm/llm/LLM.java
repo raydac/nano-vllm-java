@@ -6,6 +6,7 @@ import com.igormaznitsa.nanollvm.chat.ChatMessage;
 import com.igormaznitsa.nanollvm.chat.ChatMessages;
 import com.igormaznitsa.nanollvm.chat.ChatReply;
 import com.igormaznitsa.nanollvm.chat.ChatSession;
+import com.igormaznitsa.nanollvm.chat.ChatSpecials;
 import com.igormaznitsa.nanollvm.chat.LlmListener;
 import com.igormaznitsa.nanollvm.chat.LlmListeners;
 import com.igormaznitsa.nanollvm.chat.ThinkTags;
@@ -1037,6 +1038,16 @@ public final class LLM implements AutoCloseable {
    */
   public ThinkTags thinkTags() {
     return this.model.thinkTags();
+  }
+
+  /**
+   * Chat-markup search strings from {@link LlmModel#chatSpecials()} — the list belongs to the
+   * checkpoint, not this engine.
+   *
+   * @since 1.1.0
+   */
+  public ChatSpecials chatSpecials() {
+    return this.model.chatSpecials();
   }
 
   /**

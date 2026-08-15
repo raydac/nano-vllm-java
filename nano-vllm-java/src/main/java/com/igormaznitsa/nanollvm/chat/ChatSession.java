@@ -22,6 +22,8 @@ import java.util.function.Predicate;
  *
  * <p>Not thread-safe; use one session per conversation thread. Text and status events compose
  * {@link LLM#listener()} with any session {@link #listen(LlmListener)} / {@link #streamTo} sink.
+ * Streaming chat emits {@link LlmTextKind#TEXT_RAW} (full tokenizer decode, specials kept) plus
+ * parsed {@link LlmTextKind#TEXT_THINKING} / {@link LlmTextKind#TEXT_ASSISTANT}.
  */
 public final class ChatSession {
 
@@ -555,14 +557,22 @@ public final class ChatSession {
       this.timeout,
       tokenId -> {
         streamedIds.add(tokenId);
-        turn.push(this.llm, this.listener,
-          ChatReply.parse(tokenizer.decode(streamedIds, skipSpecials), tags));
+        String raw = tokenizer.decode(streamedIds, false);
+        String forParse = skipSpecials ? tokenizer.decode(streamedIds, true) : raw;
+        turn.push(
+          this.llm,
+          this.listener,
+          raw,
+          ChatReply.parse(forParse, tags, this.llm.chatSpecials()));
       }
     );
 
     LLM.GenerationOutput output = outputs.getFirst();
     this.lastGenerateStats = this.mergeGenerateStats(this.lastGenerateStats, output.stats());
-    return ChatReply.parse(tokenizer.decode(output.tokenIds(), skipSpecials), tags)
+    return ChatReply.parse(
+        tokenizer.decode(output.tokenIds(), skipSpecials),
+        tags,
+        this.llm.chatSpecials())
       .withStats(this.lastGenerateStats);
   }
 
@@ -623,8 +633,7 @@ public final class ChatSession {
     }
 
     ChatReply finished = new ChatReply(thinking, answer, false, this.lastGenerateStats);
-    turn.push(this.llm, this.listener,
-      new ChatReply(finished.thinking(), finished.answer(), false, finished.stats()));
+    turn.push(this.llm, this.listener, turn.shownRaw, finished);
     this.closePrintTurn();
     this.history.add(ChatMessage.assistant(finished.answer()));
     this.trimHistoryToCap();
@@ -661,10 +670,19 @@ public final class ChatSession {
   }
 
   private static final class TurnStream {
+    private String shownRaw = "";
     private String shownThink = "";
     private String shownAnswer = "";
 
-    void push(final LLM llm, final LlmListener listener, final ChatReply parts) {
+    void push(
+      final LLM llm,
+      final LlmListener listener,
+      final String raw,
+      final ChatReply parts
+    ) {
+      String decoded = raw == null ? "" : raw;
+      this.emit(llm, listener, LlmTextKind.TEXT_RAW, decoded, this.shownRaw);
+      this.shownRaw = decoded;
       this.emit(llm, listener, LlmTextKind.TEXT_THINKING, parts.thinking(), this.shownThink);
       this.shownThink = parts.thinking();
       if (!parts.thinkOpen()) {

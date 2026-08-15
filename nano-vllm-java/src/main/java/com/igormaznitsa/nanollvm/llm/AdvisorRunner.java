@@ -95,7 +95,7 @@ final class AdvisorRunner {
     if (raw == null || raw.isBlank()) {
       raw = tokenizer.decode(output.tokenIds(), tokenizer.skipSpecialTokensOnChatDecode());
     }
-    String answer = ChatReply.parse(raw, llm.thinkTags()).answer().strip();
+    String answer = ChatReply.parse(raw, llm).answer().strip();
     return AdvisorPrompt.usableNote(answer, llm.advisorNoteFilter());
   }
 

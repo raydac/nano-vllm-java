@@ -5,7 +5,9 @@
  *
  * <p>{@link LlmModel} is safe to share across threads and across many
  * {@link com.igormaznitsa.nanollvm.llm.LLM} instances until {@link LlmModel#close()}. Scratchpad
- * markers are {@link LlmModel#thinkTags()} from load-time {@link LlmModel#options()}. Close each
+ * markers are {@link LlmModel#thinkTags()} and answer-search specials are
+ * {@link LlmModel#chatSpecials()} from load-time {@link LlmModel#options()} (library defaults
+ * when omitted). Close each
  * {@code LLM} first, then the model, to release weight resources. Architecture graphs and weight
  * maps live in non-exported {@code models.internal}. {@link ModelSupport} is the catalog of
  * architectures this library can run; unsupported checkpoints fail at load with

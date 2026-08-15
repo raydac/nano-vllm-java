@@ -27,6 +27,15 @@ class LlmListenerTest {
   }
 
   @Test
+  void rawDecodeEventKeepsMarkup() {
+    LlmTextEvent raw = LlmTextEvent.of(
+      LlmTextKind.TEXT_RAW, "<think>plan</think>\nHi<|im_end|>");
+    assertEquals(LlmTextKind.TEXT_RAW, raw.kind());
+    assertEquals("<think>plan</think>\nHi<|im_end|>", raw.text());
+    assertTrue(!raw.snapshot());
+  }
+
+  @Test
   void printStreamListenerFormatsAdvisorAndAnswer() {
     ByteArrayOutputStream think = new ByteArrayOutputStream();
     ByteArrayOutputStream answer = new ByteArrayOutputStream();
@@ -38,12 +47,16 @@ class LlmListenerTest {
     listener.onText(null, LlmTextEvent.advisorNote("Billing", "check billing"));
     listener.onText(null, LlmTextEvent.of(LlmTextKind.TEXT_ASSISTANT, "Payment "));
     listener.onText(null, LlmTextEvent.of(LlmTextKind.TEXT_ASSISTANT, "failed."));
+    listener.onText(null,
+      LlmTextEvent.of(LlmTextKind.TEXT_RAW, "<think>x</think>Payment failed.<|im_end|>"));
     ((LlmListeners.PrintStreamLlmListener) listener).closeTurn();
 
     String thinkText = think.toString(StandardCharsets.UTF_8);
     String answerText = answer.toString(StandardCharsets.UTF_8);
     assertTrue(thinkText.contains("[Billing] check billing"), thinkText);
     assertTrue(answerText.contains("Payment failed."), answerText);
+    assertTrue(!thinkText.contains("<|im_end|>"), thinkText);
+    assertTrue(!answerText.contains("<think>"), answerText);
   }
 
   @Test

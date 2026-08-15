@@ -6,8 +6,8 @@ import static java.util.Objects.requireNonNull;
  * One text or status payload delivered to {@link LlmListener#onText}.
  *
  * <p>Switch on {@link #kind()} first. For {@link LlmTextKind#TEXT_THINKING} /
- * {@link LlmTextKind#TEXT_ASSISTANT}, {@link #text()} is a <em>delta</em> unless
- * {@link #snapshot()} is {@code true} (full current buffer after a revise).
+ * {@link LlmTextKind#TEXT_ASSISTANT} / {@link LlmTextKind#TEXT_RAW}, {@link #text()} is a
+ * <em>delta</em> unless {@link #snapshot()} is {@code true} (full current buffer after a revise).
  * {@link LlmTextKind#TEXT_DEBUG} is always a full snapshot (prepared model-user after advisor mix).
  * {@link #advisorName()} is set only for {@link LlmTextKind#TEXT_ADVISOR_NOTE}; otherwise empty.
  * Null {@code text} / {@code advisorName} become {@code ""}. Immutable; safe to share.

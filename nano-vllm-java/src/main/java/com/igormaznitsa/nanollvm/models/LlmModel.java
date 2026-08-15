@@ -3,6 +3,7 @@ package com.igormaznitsa.nanollvm.models;
 import static java.util.Locale.ROOT;
 import static java.util.Objects.requireNonNull;
 
+import com.igormaznitsa.nanollvm.chat.ChatSpecials;
 import com.igormaznitsa.nanollvm.chat.LlmListener;
 import com.igormaznitsa.nanollvm.chat.LlmListeners;
 import com.igormaznitsa.nanollvm.chat.ThinkTags;
@@ -30,7 +31,8 @@ import java.util.concurrent.locks.ReentrantLock;
  *
  * <p>Safe to share across threads and across many {@link LLM} instances (causal models). Mutable
  * inference state (KV cache, scheduler, sampling) lives on each {@link LLM}, not here. Load-time
- * options ({@link #options()}, including {@link #OPTION_THINK_TAGS}) are frozen at
+ * options ({@link #options()}, including {@link #OPTION_THINK_TAGS} and
+ * {@link #OPTION_CHAT_SPECIALS}) are frozen at
  * {@link LlmModelFactory#make} and never change. Embedding models expose
  * {@link #embed(CharSequence)} instead of chat/generate.
  *
@@ -55,7 +57,15 @@ public final class LlmModel implements AutoCloseable {
    */
   public static final String OPTION_THINK_TAGS = "thinkTags";
 
-  private static final Set<String> KNOWN_OPTIONS = Set.of(OPTION_THINK_TAGS);
+  /**
+   * Factory option: {@link ChatSpecials} searched in decoded assistant text when stripping
+   * leftover chat markup from the visible answer.
+   *
+   * @since 1.1.0
+   */
+  public static final String OPTION_CHAT_SPECIALS = "chatSpecials";
+
+  private static final Set<String> KNOWN_OPTIONS = Set.of(OPTION_THINK_TAGS, OPTION_CHAT_SPECIALS);
 
   static {
     LlmModelAccess.setResolver(LlmModel::resolveNetwork);
@@ -130,12 +140,23 @@ public final class LlmModel implements AutoCloseable {
       }
       copy.put(key, value);
     });
-    Object thinkTags = copy.get(OPTION_THINK_TAGS);
-    if (thinkTags != null && !(thinkTags instanceof ThinkTags)) {
-      throw new IllegalArgumentException(
-        OPTION_THINK_TAGS + " must be a ThinkTags, got " + thinkTags.getClass().getName());
-    }
+    requireOptionType(copy, OPTION_THINK_TAGS, ThinkTags.class);
+    requireOptionType(copy, OPTION_CHAT_SPECIALS, ChatSpecials.class);
+    copy.putIfAbsent(OPTION_THINK_TAGS, ThinkTags.DEFAULT);
+    copy.putIfAbsent(OPTION_CHAT_SPECIALS, ChatSpecials.DEFAULT);
     return Map.copyOf(copy);
+  }
+
+  private static void requireOptionType(
+    final Map<String, Object> options,
+    final String key,
+    final Class<?> expected
+  ) {
+    Object value = options.get(key);
+    if (value != null && !expected.isInstance(value)) {
+      throw new IllegalArgumentException(
+        key + " must be a " + expected.getSimpleName() + ", got " + value.getClass().getName());
+    }
   }
 
   public Path path() {
@@ -154,8 +175,9 @@ public final class LlmModel implements AutoCloseable {
   }
 
   /**
-   * Load-time options frozen by {@link LlmModelFactory} ({@link Map#copyOf}). Empty when the caller
-   * passed no options.
+   * Load-time options frozen by {@link LlmModelFactory} ({@link Map#copyOf}). Always contains
+   * {@link #OPTION_THINK_TAGS} and {@link #OPTION_CHAT_SPECIALS} (library defaults when the caller
+   * omitted them).
    *
    * @since 1.1.0
    */
@@ -165,16 +187,26 @@ public final class LlmModel implements AutoCloseable {
   }
 
   /**
-   * Scratchpad open/close markers for chat parse and ChatML skip-seed. Taken from
-   * {@link #OPTION_THINK_TAGS} when present; otherwise {@link ThinkTags#DEFAULT}
-   * ({@code <think>} / {@code </think>}).
+   * Scratchpad open/close markers for chat parse and ChatML skip-seed.
+   * {@link ThinkTags#DEFAULT} ({@code <think>} / {@code </think>}) unless
+   * {@link #OPTION_THINK_TAGS} was set at load.
    *
    * @since 1.1.0
    */
   public ThinkTags thinkTags() {
     this.assertNotClosed();
-    Object value = this.options.get(OPTION_THINK_TAGS);
-    return value == null ? ThinkTags.DEFAULT : (ThinkTags) value;
+    return (ThinkTags) this.options.get(OPTION_THINK_TAGS);
+  }
+
+  /**
+   * Special-token strings searched in decoded assistant text when stripping chat markup.
+   * {@link ChatSpecials#DEFAULT} unless {@link #OPTION_CHAT_SPECIALS} was set at load.
+   *
+   * @since 1.1.0
+   */
+  public ChatSpecials chatSpecials() {
+    this.assertNotClosed();
+    return (ChatSpecials) this.options.get(OPTION_CHAT_SPECIALS);
   }
 
   public String architectureName() {
@@ -244,7 +276,7 @@ public final class LlmModel implements AutoCloseable {
       bag == null ? "released" : Integer.toString(bag.size()),
       weightsLabel(bag),
       this.tokenizer.chatFormat(),
-      this.thinkSuffix(),
+      this.thinkSuffix() + this.chatSpecialsSuffix(),
       this.closed.get() ? ", closed" : "");
   }
 
@@ -278,6 +310,14 @@ public final class LlmModel implements AutoCloseable {
       return ", thinkTags=%s/%s".formatted(custom.open(), custom.close());
     }
     return this.tokenizer.invitesThinking() ? ", think=true" : "";
+  }
+
+  private String chatSpecialsSuffix() {
+    Object specials = this.options.get(OPTION_CHAT_SPECIALS);
+    if (specials instanceof ChatSpecials custom && !ChatSpecials.DEFAULT.equals(custom)) {
+      return ", chatSpecials=%d".formatted(custom.markers().size());
+    }
+    return "";
   }
 
   /**
