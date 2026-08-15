@@ -88,7 +88,11 @@ public final class SampleChatPrompts {
    */
   public static SamplingParams samplingForDemo(final Tokenizer tokenizer, final int maxTokens) {
     int topK = tokenizer != null && tokenizer.isTurnBasedChat() ? TURN_BASED_TOP_K : 0;
-    return new SamplingParams(0.6f, maxTokens, false, topK, 0.95f);
+    return SamplingParams.builder()
+      .temperature(0.6f)
+      .maxTokens(maxTokens)
+      .topK(topK)
+      .build();
   }
 
   /**

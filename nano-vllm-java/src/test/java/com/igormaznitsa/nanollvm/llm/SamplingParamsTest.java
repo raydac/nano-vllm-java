@@ -10,19 +10,14 @@ import org.junit.jupiter.api.Test;
 class SamplingParamsTest {
 
   @Test
-  void noArgMatchesNeutralDefaults() {
-    SamplingParams params = new SamplingParams();
+  void builderDefaultsMatchNeutral() {
+    SamplingParams params = SamplingParams.builder().build();
     assertEquals(SamplingDefaults.DEFAULT_TEMPERATURE, params.temperature());
     assertEquals(SamplingDefaults.DEFAULT_MAX_TOKENS, params.maxTokens());
     assertFalse(params.ignoreEos());
     assertEquals(0, params.topK());
     assertEquals(SamplingDefaults.DEFAULT_TOP_P, params.topP());
     assertEquals(params, SamplingDefaults.neutral());
-  }
-
-  @Test
-  void builderDefaultsMatchNeutral() {
-    assertEquals(SamplingDefaults.neutral(), SamplingParams.builder().build());
   }
 
   @Test
@@ -50,7 +45,7 @@ class SamplingParamsTest {
   }
 
   @Test
-  void builderValidatesLikeRecordCtor() {
+  void builderValidates() {
     assertThrows(IllegalArgumentException.class,
       () -> SamplingParams.builder().temperature(0f).build());
     assertThrows(IllegalArgumentException.class,
@@ -61,16 +56,6 @@ class SamplingParamsTest {
       () -> SamplingParams.builder().topP(0f).build());
     assertThrows(IllegalArgumentException.class,
       () -> SamplingParams.builder().topP(1.1f).build());
-  }
-
-  @Test
-  void twoArgConvenienceKeepsTopPPointNine() {
-    SamplingParams params = new SamplingParams(0.4f, 10);
-    assertEquals(0.4f, params.temperature());
-    assertEquals(10, params.maxTokens());
-    assertFalse(params.ignoreEos());
-    assertEquals(0, params.topK());
-    assertEquals(0.9f, params.topP());
   }
 
   @Test

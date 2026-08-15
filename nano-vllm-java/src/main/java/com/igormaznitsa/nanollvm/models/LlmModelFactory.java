@@ -53,8 +53,8 @@ import java.util.Map;
  * ONNX when present; Hugging Face BERT safetensors is not supported). Stream loads reject
  * ONNX {@code external_data} sidecars — use {@link #make(Path)} for those exports.
  *
- * <p>Architecture is checked by {@link ModelSupport} after the container catalog is opened
- * ({@link com.igormaznitsa.nanollvm.internal.ModelBinding}). Unsupported families throw
+ * <p>Architecture is checked by {@link ModelSupport} after the container catalog is opened.
+ * Unsupported families throw
  * {@link com.igormaznitsa.nanollvm.exceptions.UnsupportedModelException} with a
  * catalog of what this library can run.
  *

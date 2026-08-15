@@ -31,7 +31,7 @@ class Gemma4LoadTest {
       assertTrue(prompt.contains("<|turn>model"));
       List<LLM.GenerationOutput> out = llm.generate(
         List.of(prompt),
-        new SamplingParams(0.7f, 8));
+        SamplingParams.builder().temperature(0.7f).maxTokens(8).build());
       assertEquals(1, out.size());
       assertFalse(out.getFirst().tokenIds().isEmpty());
     }

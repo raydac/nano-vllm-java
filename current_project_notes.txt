@@ -8,7 +8,7 @@
 - **GGUF BERT embeddings** (e.g. gte-small): same `LlmModelFactory.make` → `LlmModel.embed`; `LLM.builder` rejects embedding models; Q3_K + IQ4_NL dequant
 - **ModelFileSource**: `ModelFileId` → `InputStream` (+ weight shards); load into heap only (no disk cache); `make(Path)` stays direct disk I/O; ONNX ids `MODEL_ONNX` / `MODEL_ONNX_FP16`
 - **GGUF:** packed by default; dequant catalog matches current llama.cpp weight types (K/IQ/TQ/MX/NV/legacy); `LlmModelFactory.make(path, io, true)` unpacks at load; `LLM.Builder.allowUnpackParameters()` late-unpacks packed models. Chat GGUF: **qwen3** + **lfm2**; embeddings **bert**. Load = container **transport** (`GgufTransport` / HF folder / ONNX) then **`ModelBinding`** (adapt catalog → `HfConfig` + schema if the file is enough for a supported graph)
-- Library: `LlmModelFactory.open(path).make()` or `make` → shared `LlmModel` (`AutoCloseable`); also `make(ModelFileSource)` / `fromClasspath*` / `openClasspath*` (stream → heap; no disk cache); `LLM.Builder` only (warmup **off** by default); `.sampling(SamplingParams)` seals chat/complete defaults; close **LLM first**, then **model**. `LlmModel.toString()` prints kind, architecture, container, sizes, packed/dense/qat, chat format (safe after close). Builder-built types (`LLM`, `Config`, `LlmAdvisor`, `MatmulRuntime`, `RagFactory`/`CorpusLoader` corpus) keep constructors private; `ResourceLimits` is a public record so its canonical constructor cannot be hidden.
+- Library: `LlmModelFactory.open(path).make()` or `make` → shared `LlmModel` (`AutoCloseable`); also `make(ModelFileSource)` / `fromClasspath*` / `openClasspath*` (stream → heap; no disk cache); `LLM.Builder` only (warmup **off** by default); `.sampling(SamplingParams)` seals chat/complete defaults; close **LLM first**, then **model**. `LlmModel.toString()` prints kind, architecture, container, sizes, packed/dense/qat, chat format (safe after close). Builder-built types (`LLM`, `Config`, `LlmAdvisor`, `SamplingParams`, `MatmulRuntime`, `RagFactory`/`CorpusLoader` corpus) keep constructors private; `ResourceLimits` is a public record so its canonical constructor cannot be hidden.
 - **`description.md`:** re-checked against 1.1.0 — Gemma 4 text QAT (packed, not F32 widen), panel GEMV / SIMD
   `Ops` / in-place paged KV, `TEXT_DEBUG` off unless `emitDebugPrompts(true)`, `AdvisorRagHelloWorld`; ONNX Tier A
   (**§7c**), Llama, SmolLM2/Tiny demos; ChatFormat / vocab-gated think / neutral `SamplingDefaults` / fail-unknown-arch;
@@ -22,14 +22,15 @@
   **`TEXT_RAW`** streaming decode in ch. 9, 14, 15, 16 and the glossary; shared `LoadProgress` bar in ch. 4 / 7 / 7a / 7c / 16;
   **`ChatReply`** and other exported records: JavaDoc covers fields (`@param`) and how to
   use helpers — `ChatReply`, `ThinkTags`, `ChatSpecials`, `ChatMessage`, `LlmTextEvent`, `AdvisorResponse`,
-  `AdvisorEnrichment`, `GenerationStats`, `LLM.GenerationOutput`, `SamplingParams`,
+  `AdvisorEnrichment`, `GenerationStats`, `LLM.GenerationOutput`,
   `Config.HfConfig`, `RagHit`, `TextChunk`, `RagLoadOptions`, `ResourceLimits`,
   `ModelSupport.Selection`
 - Optional download scripts: Qwen3 / Gemma3 / **Gemma4 E2B QAT mobile** / LFM2 GGUF / gte-small / **Tiny-LLM-ONNX** / **SmolLM2-135M-Instruct-ONNX** (`.sh` + Windows `.ps1`/`.cmd`; PS1 ASCII-only + `$PSScriptRoot` + absolute outs)
 - ONNX JavaDoc: Tier A contracts + {@code @since 1.1.0} on public Onnx* APIs / ModelFileId ONNX roles / LlmModelFactory note
 - **API ergonomics (1.1.0):** `LlmModelFactory.open(…).make()`, `SamplingParams.builder()` / withers,
   `LLM.Builder.sampling`, chatOnce/complete max-token shortcuts, `generate(…, Duration)`, public `LLM.TokenEvent`,
-  `ChatSession.seed`. Existing `make` / `generate` overloads remain. No-arg `SamplingParams()` matches `SamplingDefaults.neutral()`.
+  `ChatSession.seed`. Existing `make` / `generate` overloads remain. `SamplingParams` is builder-only
+  (`SamplingParams.builder()` / `SamplingDefaults` / withers).
 - **`@since 1.1.0`:** new exported types (`ModelSupport`, `ModelFileSource`, `ThinkTags`,
   `ChatSpecials`, `DenseRagIndex`, …) and new public members on 1.0 types (`LlmModel.embed`,
   `SamplingParams.builder` / withers, `LLM.generate(…, Duration)` / `TokenEvent`,
@@ -52,7 +53,10 @@
 - Weight-load status: shared in-place bar (`LoadProgress`) for safetensors, GGUF, and ONNX
 - Engine: `Transformer` owns per-LLM arenas + explicit step `Context`; `MatmulRuntime` per `LLM`; `kvHeapFraction` (default 0.25) for KV auto-size
 - `LLM.generate` / `close` use `ReentrantLock`; `assertNotClosed` on infrequent entry points; props = **`nanollvm.*` / `NANOLLVM_*` only**
-- JPMS: exports models/llm/chat/rag/exceptions/tokenizer/utils; non-exported `models.internal` (`LlmModelAccess`), prompts, engine/layers/tensor/internal
+- JPMS exports (`models` / `llm` / `chat` / `rag` / `tokenizer` / `utils` / `exceptions`) cover the
+  application surface; `engine` / `layers` / `tensor` / `internal` / `prompts` / `models.internal`
+  stay module-private (no signature leaks). `RagSession` now has the same recovery / debug / history
+  knobs as `ChatSession` so RAG callers need not drop through `.chat()`.
 
 - **RAG:** `RagFactory` → `PreparedRag` (BM25); `addResource` / `makeResource` for classpath docs; optional `withEmbeddings` → `HybridRagIndex` (`DenseRagIndex` + RRF); package-private `CorpusLoader`; public API ~12 types (+ `PdfTextExtractor`)
 - **RAG off-topic:** `isOutsideCorpus` ignores conversational glue (`what`/`think`/`about`/…); source stems use `/`+`\` basename (Windows-safe)
@@ -100,7 +104,12 @@
 - `description.md` usage snippets added (API-facing chapters)
 - Error Prone / IDE compiler inspections cleaned: locale on `toLowerCase`, explicit charset, `@Override` on GGUF tokenizer meta, Javadoc summaries on `@since`-only APIs, packed-weight release via empty payload (not `==` sentinel), unused `Attention.layerIndex` / `Tokenizer.chatTemplate` dropped. Tensor/PDF `record`s keep primitive arrays (`@SuppressWarnings("ArrayRecordComponent")`).
 - **SpotBugs** (`spotbugs-maven-plugin` on library `verify`): real `Path.getFileName()` nulls guarded; `spotbugs-exclude.xml` documents by-design remainder (shared tensors/arrays, frozen maps/lists, `CT_CONSTRUCTOR_THROW` on Java 21, Sequence/Builder thread confinement, virtual `/nanollvm-memory` paths).
-- CPU kernel pass: panel GEMV, Vector 4-acc dots, SIMD `Ops`/attention axpy, paged KV in-place attend. Packed fused GEMM not done.
+- Public API / JPMS audit: exported packages are complete for load/chat/complete/stream/cancel/
+  timeout/embed/RAG/advisors/classpath/`ModelFileSource`; `RagSession` now forwards ChatSession
+  recovery/debug/history knobs (samples no longer poke `.chat()` for those).
+- Builder contract: `LLM` / `Config` / `LlmAdvisor` / `SamplingParams` / `MatmulRuntime` construct
+  only via nested `Builder` (private target ctor). `SamplingParams` is no longer a record with
+  convenience constructors. `ResourceLimits` stays a public record (canonical ctor cannot be hidden).
 
 
 ## 5. Known Issues & Limitations

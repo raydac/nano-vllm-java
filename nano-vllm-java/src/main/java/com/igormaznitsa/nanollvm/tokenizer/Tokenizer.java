@@ -34,10 +34,10 @@ import java.util.regex.Pattern;
  *
  * <h2>BPE / WordPiece styles</h2>
  * <ul>
- *   <li>{@link Style#GPT2_BYTE_BPE} — GPT-2 byte-level BPE (common with ChatML exports): UTF-8 bytes
- *       map through a printable-char encoder, then merge ranks from {@code merges}.</li>
- *   <li>{@link Style#METASPACE_BPE} — SentencePiece-style with {@code ▁} word boundaries.</li>
- *   <li>{@link Style#WORDPIECE} — BERT WordPiece (embedding models).</li>
+ *   <li>GPT-2 byte-level BPE (common with ChatML exports): UTF-8 bytes map through a printable-char
+ *       encoder, then merge ranks from {@code merges}.</li>
+ *   <li>SentencePiece-style BPE with {@code ▁} word boundaries.</li>
+ *   <li>BERT WordPiece (embedding models).</li>
  * </ul>
  * Chat prompt layout is {@link ChatFormat} detected from template/vocab markers, not product names.
  *
@@ -789,7 +789,7 @@ public final class Tokenizer {
   }
 
   /**
-   * Encodes plain text to vocabulary ids (BPE of the detected {@link Style}).
+   * Encodes plain text to vocabulary ids (detected BPE or WordPiece).
    *
    * @param text input text; non-{@code null} (may be empty)
    * @return immutable token-id list

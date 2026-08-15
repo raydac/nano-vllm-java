@@ -2442,9 +2442,9 @@ Then one slip is drawn. This project’s sampler uses a **Gumbel-max–style** d
 naive left-to-right walk of a cumulative table). Pure greedy decoding (temperature ≈ 0) is **rejected** by
 `SamplingParams` — use a small positive temperature instead.
 
-Default helpers (`SamplingDefaults.neutral()` / `forTokenizer`, and no-arg `new SamplingParams()`) use temperature
-`0.6`, top-p `0.95`, 256 new tokens, and **top-k off** (`0`) for every tokenizer. Product/family knobs (e.g. turn-based
-top-k 64) belong in the app or samples (`SampleChatPrompts`).
+Default helpers (`SamplingDefaults.neutral()` / `forTokenizer`, and `SamplingParams.builder().build()`)
+use temperature `0.6`, top-p `0.95`, 256 new tokens, and **top-k off** (`0`) for every tokenizer.
+Product/family knobs (e.g. turn-based top-k 64) belong in the app or samples (`SampleChatPrompts`).
 
 So the model is not forced to say the single most likely word every time. Controlled chance is why two answers to the
 same question can differ — and why “creativity” settings exist in chat products.
@@ -3127,7 +3127,7 @@ packages.
 | Custom scratchpad / answer specials | `ThinkTags`, `ChatSpecials`, `LlmModel`                                 | `open(path).thinkTags(tags).chatSpecials(specials).make()`; `ChatSession.thinkTags` / `RagSession.thinkTags` (**since 1.1.0**); omitted options get library defaults |
 | Sentence embedding (BERT GGUF)   | `LlmModel` (internal `BertForEmbedding`)                                   | `make(gteGguf)` → `isEmbeddingModel()` → `embed(text)` (chapter **7b**, **since 1.1.0**)                        |
 | Named advisors                   | `LlmAdvisor`, `LlmAdvisorMixer`, `AdvisorEnrichment`, `ChatHistory`        | `Builder.advisors(mixer, …)` — unique non-blank names; `LLM#runAdvisors` → `AdvisorEnrichment`; one batched `generate` |
-| Chat turn                        | `ChatSession`                                                        | `llm.chat(maxTokens)`, `.listen(…)`, `.streamTo(…)` (`TEXT_THINKING` / `TEXT_ASSISTANT`; ignores `TEXT_RAW`), `.send(user)`, `.clear()`; `emitDebugPrompts(true)` opts in `TEXT_DEBUG` (off by default) |
+| Chat turn                        | `ChatSession`                                                        | `llm.chat(maxTokens)`, `.listen(…)`, `.streamTo(…)` (`TEXT_THINKING` / `TEXT_ASSISTANT`; ignores `TEXT_RAW`), `.send(user)`, `.clear()`; `emitDebugPrompts(true)` opts in `TEXT_DEBUG` (off by default); `recoverUnusableAnswers` / `unusableAnswer` opt-in |
 | Stream unparsed decode           | `LlmTextKind.TEXT_RAW`, `LlmListener`                                  | `ChatSession.listen`; deltas of tokenizer decode with think tags / chat specials kept (**since 1.1.0**) |
 | One-shot / raw text              | `LLM`                                                                | `chatOnce(…)`, `complete(…)`, `generate(…)` → `GenerationOutput.stats()`                                      |
 | Token / timing stats             | `GenerationStats` / `ChatReply`                                      | `promptTokens`, `completionTokens`, `elapsedNanos`, `completionTokensPerSecond()`                             |
@@ -3141,7 +3141,7 @@ packages.
 | Attention + KV write             | `Attention`, `KvCacheArena`, `internal.Context`                      | `Context.bindKvCache`; `Attention.forward` by `layerIndex`; prefill/decode helpers                            |
 | Pages / prefix reuse             | `BlockManager`                                                       | `canAllocate`, `allocate`, `hashBlocks`, `mayAppend`                                                          |
 | Split thinking UI                | `AssistantParts`, `ChatReply`                                        | `AssistantParts.parse`, `salvageFromThinking`                                                                 |
-| Text RAG (prepare + retrieve)    | `RagFactory`, `PreparedRag`, `DenseRagIndex`, `HybridRagIndex`, `RagSession` | `RagFactory.make` / `withEmbeddings` → `llm.rag(index).send(…)` (chapter 17; dense/hybrid **since 1.1.0**) |
+| Text RAG (prepare + retrieve)    | `RagFactory`, `PreparedRag`, `DenseRagIndex`, `HybridRagIndex`, `RagSession` | `RagFactory.make` / `withEmbeddings` → `llm.rag(index).send(…)` (chapter 17; dense/hybrid **since 1.1.0**); session knobs match `ChatSession` (`recoverUnusableAnswers`, `emitDebugPrompts`, …) |
 | Resource caps                    | `ResourceLimits`                                                     | Process-wide defaults + builder for file/PDF/JSON/GGUF/corpus/history budgets (**since 1.1.0**)               |
 | Math bricks                      | `Ops`, `LinearKernel`, `EmbeddingKernel`, `MatmulRuntime`            | norms / MLP gates / softmax; linear & embed via kernels (internal)                                            |
 

@@ -62,11 +62,10 @@ public final class AdvisorRagHelloWorld {
         .topK(2)
         .maxContextChars(900)
         .isolateGeneration(true)
-        .sampling(SampleChatPrompts.samplingForDemo(llm.tokenizer(), 128));
-      rag.chat()
+        .sampling(SampleChatPrompts.samplingForDemo(llm.tokenizer(), 128))
         .recoverUnusableAnswers(true)
-        .unusableAnswer(SampleChatPrompts::isSetupBoilerplate);
-      rag.streamTo(System.err, System.out, false);
+        .unusableAnswer(SampleChatPrompts::isSetupBoilerplate)
+        .streamTo(System.err, System.out, false);
 
       ask(rag, "What are names of the Grimm brothers?");
       ask(rag, "Who are the Grimm brothers' father?");

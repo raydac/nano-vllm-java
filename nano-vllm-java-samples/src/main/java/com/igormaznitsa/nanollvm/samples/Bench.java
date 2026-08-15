@@ -70,7 +70,11 @@ public final class Bench {
         })
         .toList();
       List<SamplingParams> params = IntStream.range(0, numSeqs)
-        .mapToObj(i -> new SamplingParams(0.6f, rnd.nextInt(8, MAX_OUTPUT_LEN + 1), true))
+        .mapToObj(i -> SamplingParams.builder()
+          .temperature(0.6f)
+          .maxTokens(rnd.nextInt(8, MAX_OUTPUT_LEN + 1))
+          .ignoreEos(true)
+          .build())
         .toList();
 
       long started = System.nanoTime();

@@ -340,7 +340,7 @@ class CoreUnitTest {
   @Test
   void blockManagerPrefixCache() {
     BlockManager bm = new BlockManager(16, 4);
-    Sequence a = new Sequence(List.of(1, 2, 3, 4, 5, 6, 7, 8, 9), new SamplingParams(0.6f, 8), 4);
+    Sequence a = new Sequence(List.of(1, 2, 3, 4, 5, 6, 7, 8, 9), SamplingDefaults.neutral(8), 4);
     int cached = bm.canAllocate(a);
     assertTrue(cached >= 0);
     bm.allocate(a, cached);
@@ -349,32 +349,32 @@ class CoreUnitTest {
     a.addCachedTokens(a.numScheduledTokens());
     a.setNumScheduledTokens(0);
 
-    Sequence b = new Sequence(List.of(1, 2, 3, 4, 5, 6, 7, 8, 10), new SamplingParams(0.6f, 8), 4);
+    Sequence b = new Sequence(List.of(1, 2, 3, 4, 5, 6, 7, 8, 10), SamplingDefaults.neutral(8), 4);
     int cachedB = bm.canAllocate(b);
     assertEquals(2, cachedB); // first two full blocks shared
   }
 
   @Test
   void detectsDegenerateTokenRepetition() {
-    Sequence streak = new Sequence(List.of(1, 2, 3), new SamplingParams(0.6f, 128), 4);
+    Sequence streak = new Sequence(List.of(1, 2, 3), SamplingDefaults.neutral(128), 4);
     for (int i = 0; i < 40; i++) {
       streak.appendToken(9);
     }
     assertTrue(streak.hasDegenerateRepetition());
 
-    Sequence cycle = new Sequence(List.of(1), new SamplingParams(0.6f, 128), 4);
+    Sequence cycle = new Sequence(List.of(1), SamplingDefaults.neutral(128), 4);
     List<Integer> block = IntStream.rangeClosed(10, 25).boxed().toList();
     for (int copy = 0; copy < 2; copy++) {
       block.forEach(cycle::appendToken);
     }
     assertTrue(cycle.hasDegenerateRepetition());
 
-    Sequence shortOk = new Sequence(List.of(1, 2, 3), new SamplingParams(0.6f, 64), 4);
+    Sequence shortOk = new Sequence(List.of(1, 2, 3), SamplingDefaults.neutral(64), 4);
     shortOk.appendToken(4);
     shortOk.appendToken(5);
     assertFalse(shortOk.hasDegenerateRepetition());
 
-    Sequence softLoop = new Sequence(List.of(1), new SamplingParams(0.6f, 256), 4);
+    Sequence softLoop = new Sequence(List.of(1), SamplingDefaults.neutral(256), 4);
     List<Integer> line = IntStream.rangeClosed(100, 120).boxed().toList();
     for (int copy = 0; copy < 4; copy++) {
       line.forEach(softLoop::appendToken);
@@ -662,9 +662,9 @@ class CoreUnitTest {
 
   @Test
   void samplingParamsDefaultsDisableTopK() {
-    SamplingParams sp = new SamplingParams(0.6f, 64);
+    SamplingParams sp = SamplingDefaults.neutral(64);
     assertEquals(0, sp.topK());
-    assertEquals(0.9f, sp.topP(), 1e-6);
+    assertEquals(SamplingDefaults.DEFAULT_TOP_P, sp.topP(), 1e-6);
   }
 
   @Test

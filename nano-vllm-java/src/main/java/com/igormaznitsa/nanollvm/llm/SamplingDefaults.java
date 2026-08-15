@@ -33,7 +33,7 @@ public final class SamplingDefaults {
    * @since 1.1.0
    */
   public static SamplingParams neutral() {
-    return new SamplingParams();
+    return SamplingParams.builder().build();
   }
 
   /**
@@ -42,8 +42,7 @@ public final class SamplingDefaults {
    * @since 1.1.0
    */
   public static SamplingParams neutral(final int maxTokens) {
-    return new SamplingParams(
-      DEFAULT_TEMPERATURE, maxTokens, false, 0, DEFAULT_TOP_P);
+    return SamplingParams.builder().maxTokens(maxTokens).build();
   }
 
   /**

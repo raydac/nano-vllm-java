@@ -17,6 +17,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.function.Consumer;
+import java.util.function.Predicate;
 
 /**
  * Retrieval-augmented chat over an {@link LLM}: {@link RagIndex} → prompt → generate.
@@ -129,6 +130,60 @@ public final class RagSession {
    */
   public RagSession thinkTags(final ThinkTags thinkTags) {
     this.chat.thinkTags(thinkTags);
+    return this;
+  }
+
+  /**
+   * When {@code true}, retries once (scrubbing matching assistant turns) and may salvage from
+   * advisor notes if the main answer matches {@link #unusableAnswer(Predicate)}. Off by default.
+   *
+   * @since 1.1.0
+   */
+  public RagSession recoverUnusableAnswers(final boolean enable) {
+    this.chat.recoverUnusableAnswers(enable);
+    return this;
+  }
+
+  /**
+   * Predicate for answers treated as unusable when {@link #recoverUnusableAnswers(boolean)} is on.
+   * Default: blank only.
+   *
+   * @since 1.1.0
+   */
+  public RagSession unusableAnswer(final Predicate<String> predicate) {
+    this.chat.unusableAnswer(predicate);
+    return this;
+  }
+
+  /**
+   * Fallback visible reply when recovery still yields nothing usable.
+   *
+   * @since 1.1.0
+   */
+  public RagSession unusableAnswerFallback(final String fallback) {
+    this.chat.unusableAnswerFallback(fallback);
+    return this;
+  }
+
+  /**
+   * Caps retained dialog turns (system + user + assistant). Oldest non-system messages are dropped
+   * when the cap is exceeded. Default from {@link com.igormaznitsa.nanollvm.utils.ResourceLimits#maxHistoryMessages()}.
+   *
+   * @since 1.1.0
+   */
+  public RagSession maxHistoryMessages(final int maxHistoryMessages) {
+    this.chat.maxHistoryMessages(maxHistoryMessages);
+    return this;
+  }
+
+  /**
+   * When {@code true}, emits {@link com.igormaznitsa.nanollvm.chat.LlmTextKind#TEXT_DEBUG} with the
+   * prepared model-user text after advisors. Off by default.
+   *
+   * @since 1.1.0
+   */
+  public RagSession emitDebugPrompts(final boolean emitDebugPrompts) {
+    this.chat.emitDebugPrompts(emitDebugPrompts);
     return this;
   }
 
@@ -392,7 +447,8 @@ public final class RagSession {
    */
   static final class QueryRewrite {
 
-    private static final SamplingParams REWRITE_SAMPLING = new SamplingParams(0.1f, 48);
+    private static final SamplingParams REWRITE_SAMPLING =
+      SamplingParams.builder().temperature(0.1f).maxTokens(48).build();
     private static final java.util.regex.Pattern SEARCH_PREFIX =
       java.util.regex.Pattern.compile("(?i)^\\s*(?:search\\s*:\\s*)?");
     private static final java.util.regex.Pattern WRAP_QUOTES =

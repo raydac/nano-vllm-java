@@ -1,32 +1,32 @@
 package com.igormaznitsa.nanollvm.llm;
 
+import java.util.Objects;
+
 /**
  * Immutable sampling knobs for {@link LLM#generate} and chat turns.
  *
- * <p>Greedy sampling is rejected ({@code temperature} must be greater than {@code 1e-10}).
- * {@code topK == 0} disables top-k; {@code topP} must be in {@code (0, 1]}. Prefer
- * {@link #builder()} or {@link SamplingDefaults#neutral()} rather than constructing these by hand.
- * Safe to share across threads and across prompts in a batch.
+ * <p>Construct only via {@link #builder()} or {@link SamplingDefaults}. Copies use {@code with*}
+ * methods. Greedy sampling is rejected ({@code temperature} must be greater than {@code 1e-10}).
+ * {@code topK == 0} disables top-k; {@code topP} must be in {@code (0, 1]}. Safe to share across
+ * threads and across prompts in a batch.
  *
- * @param temperature softmax temperature; must be {@code > 1e-10} (greedy not supported). Lower
- *                    values make the next-token distribution more peaked.
- * @param maxTokens   maximum newly generated tokens per sequence; must be {@code >= 1}. The
- *                    engine also clamps this to remaining context ({@code maxModelLen}).
- * @param ignoreEos   when {@code true}, end-of-sequence does not finish the sequence
- *                    ({@code maxTokens} still applies)
- * @param topK        keep only the top-{@code k} logits before nucleus; {@code 0} disables top-k
- * @param topP        nucleus sampling cumulative probability in {@code (0, 1]}
  * @see SamplingDefaults
  */
-public record SamplingParams(
-  float temperature,
-  int maxTokens,
-  boolean ignoreEos,
-  int topK,
-  float topP
-) {
+public final class SamplingParams {
 
-  public SamplingParams {
+  private final float temperature;
+  private final int maxTokens;
+  private final boolean ignoreEos;
+  private final int topK;
+  private final float topP;
+
+  private SamplingParams(
+    final float temperature,
+    final int maxTokens,
+    final boolean ignoreEos,
+    final int topK,
+    final float topP
+  ) {
     if (temperature <= 1e-10f) {
       throw new IllegalArgumentException("greedy sampling is not permitted");
     }
@@ -39,40 +39,11 @@ public record SamplingParams(
     if (topP <= 0f || topP > 1f) {
       throw new IllegalArgumentException("topP must be in (0, 1]");
     }
-  }
-
-  /**
-   * Neutral defaults: temperature {@code 0.6}, {@code maxTokens 256}, EOS honored, top-k off,
-   * top-p {@code 0.95}. Same table as {@link SamplingDefaults#neutral()}.
-   */
-  public SamplingParams() {
-    this(
-      SamplingDefaults.DEFAULT_TEMPERATURE,
-      SamplingDefaults.DEFAULT_MAX_TOKENS,
-      false,
-      0,
-      SamplingDefaults.DEFAULT_TOP_P);
-  }
-
-  /**
-   * Convenience with EOS honored, top-k off, top-p {@code 0.9}.
-   *
-   * @param temperature must be {@code > 1e-10}
-   * @param maxTokens   must be {@code >= 1}
-   */
-  public SamplingParams(final float temperature, final int maxTokens) {
-    this(temperature, maxTokens, false, 0, 0.9f);
-  }
-
-  /**
-   * Convenience with top-k off and top-p {@code 0.9}.
-   *
-   * @param temperature must be {@code > 1e-10}
-   * @param maxTokens   must be {@code >= 1}
-   * @param ignoreEos   see record component
-   */
-  public SamplingParams(final float temperature, final int maxTokens, final boolean ignoreEos) {
-    this(temperature, maxTokens, ignoreEos, 0, 0.9f);
+    this.temperature = temperature;
+    this.maxTokens = maxTokens;
+    this.ignoreEos = ignoreEos;
+    this.topK = topK;
+    this.topP = topP;
   }
 
   /**
@@ -82,6 +53,44 @@ public record SamplingParams(
    */
   public static Builder builder() {
     return new Builder();
+  }
+
+  /**
+   * Softmax temperature; must be {@code > 1e-10}. Lower values make the next-token distribution
+   * more peaked.
+   */
+  public float temperature() {
+    return this.temperature;
+  }
+
+  /**
+   * Maximum newly generated tokens per sequence; must be {@code >= 1}. The engine also clamps this
+   * to remaining context ({@code maxModelLen}).
+   */
+  public int maxTokens() {
+    return this.maxTokens;
+  }
+
+  /**
+   * When {@code true}, end-of-sequence does not finish the sequence ({@code maxTokens} still
+   * applies).
+   */
+  public boolean ignoreEos() {
+    return this.ignoreEos;
+  }
+
+  /**
+   * Keep only the top-{@code k} logits before nucleus; {@code 0} disables top-k.
+   */
+  public int topK() {
+    return this.topK;
+  }
+
+  /**
+   * Nucleus sampling cumulative probability in {@code (0, 1]}.
+   */
+  public float topP() {
+    return this.topP;
   }
 
   /**
@@ -127,6 +136,27 @@ public record SamplingParams(
    */
   public SamplingParams withTopP(final float topP) {
     return new SamplingParams(this.temperature, this.maxTokens, this.ignoreEos, this.topK, topP);
+  }
+
+  @Override
+  public boolean equals(final Object other) {
+    return other instanceof SamplingParams that
+      && Float.compare(this.temperature, that.temperature) == 0
+      && this.maxTokens == that.maxTokens
+      && this.ignoreEos == that.ignoreEos
+      && this.topK == that.topK
+      && Float.compare(this.topP, that.topP) == 0;
+  }
+
+  @Override
+  public int hashCode() {
+    return Objects.hash(this.temperature, this.maxTokens, this.ignoreEos, this.topK, this.topP);
+  }
+
+  @Override
+  public String toString() {
+    return "SamplingParams[temperature=%s, maxTokens=%d, ignoreEos=%s, topK=%d, topP=%s]"
+      .formatted(this.temperature, this.maxTokens, this.ignoreEos, this.topK, this.topP);
   }
 
   /**

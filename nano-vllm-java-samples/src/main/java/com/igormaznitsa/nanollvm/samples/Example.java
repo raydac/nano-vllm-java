@@ -581,15 +581,15 @@ public final class Example {
       .maxContextChars(ragContextChars(llm, turnBased, maxTokens))
       .isolateGeneration(turnBased)
       .enableThinking(llm.tokenizer().invitesThinking())
-      .sampling(new SamplingParams(
-        turnBased ? 0.1f : 0.4f,
-        maxTokens,
-        false,
-        turnBased ? 30 : 0,
-        turnBased ? 0.8f : 0.85f));
+      .sampling(SamplingParams.builder()
+        .temperature(turnBased ? 0.1f : 0.4f)
+        .maxTokens(maxTokens)
+        .topK(turnBased ? 30 : 0)
+        .topP(turnBased ? 0.8f : 0.85f)
+        .build());
 
-    rag.chat().emitDebugPrompts(debug);
-    applyTurnBasedRecovery(rag.chat(), turnBased);
+    rag.emitDebugPrompts(debug);
+    applyTurnBasedRecovery(rag, turnBased);
     return rag;
   }
 
@@ -728,6 +728,15 @@ public final class Example {
       return;
     }
     chat.recoverUnusableAnswers(true)
+      .unusableAnswer(SampleChatPrompts::isSetupBoilerplate)
+      .unusableAnswerFallback("What would you like to explore?");
+  }
+
+  private static void applyTurnBasedRecovery(final RagSession rag, final boolean turnBased) {
+    if (!turnBased) {
+      return;
+    }
+    rag.recoverUnusableAnswers(true)
       .unusableAnswer(SampleChatPrompts::isSetupBoilerplate)
       .unusableAnswerFallback("What would you like to explore?");
   }

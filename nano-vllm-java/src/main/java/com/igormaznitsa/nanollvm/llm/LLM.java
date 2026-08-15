@@ -215,7 +215,11 @@ public final class LLM implements AutoCloseable {
     long startedAtNanos = System.nanoTime();
     this.generateTokenIds(
       List.of(this.syntheticWarmupPrompt()),
-      new SamplingParams(0.6f, WARMUP_DECODE_TOKENS, true),
+      SamplingParams.builder()
+        .temperature(0.6f)
+        .maxTokens(WARMUP_DECODE_TOKENS)
+        .ignoreEos(true)
+        .build(),
       false,
       Duration.ZERO,
       null);
@@ -1455,7 +1459,7 @@ public final class LLM implements AutoCloseable {
     }
 
     /**
-     * CPU workers for dense matmul in {@link MatmulRuntime}. {@code 1} is sequential (calling
+     * CPU workers for dense matmul. {@code 1} is sequential (calling
      * thread only; no executor created).
      *
      * <p>When this setter (or {@link #disableMultiCpu()} / {@link #allCpuThreads()}) is used, the

@@ -9,14 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - Prepared-prompt `TEXT_DEBUG` events are off unless you call `ChatSession.emitDebugPrompts(true)`
-  (the previous default dumped mixed RAG/advisor prompts to any listener / `streamTo` sink).
+  or `RagSession.emitDebugPrompts(true)` (the previous default dumped mixed RAG/advisor prompts to
+  any listener / `streamTo` sink).
 - CPU inference kernels are faster on the decode path: linear layers reuse the activation
   vector across outputs (GEMV), Vector-API dots use independent accumulators, and residual /
   MLP / RMSNorm / attention value mix run through SIMD instead of scalar Java loops. Paged KV
   attention reads cache slots in place instead of copying each page into a dense tensor.
-- No-arg `new SamplingParams()` now matches `SamplingDefaults.neutral()` (temperature 0.6, 256 new
-  tokens, top-p 0.95). It previously used 0.7 / 64 / 0.9. Two- and three-argument constructors still
-  fill top-p 0.9.
+- Construct sampling knobs only with `SamplingParams.builder()` (or `SamplingDefaults` / withers).
+  Convenience `new SamplingParams()`, two-arg, and three-arg constructors are removed so they cannot
+  skip named knobs or disagree with builder defaults (those shortcuts used top-p 0.9).
+  `SamplingParams` is a class with a private constructor, same Builder contract as `LLM` /
+  `LlmAdvisor`.
 - Construct an engine only with `LLM.builder(model).build()`. The `new LLM(model)` shortcut is
   removed so closed and embedding checkpoints cannot skip builder checks.
 - Interactive `Example` demo is a **line-oriented terminal** app: model menu, RAG mode
@@ -63,7 +66,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `Tokenizer.ChatFormat` / `isTurnBasedChat()` / `skipSpecialTokensOnChatDecode()` (product-named
   chat helpers such as {@code isGemmaChat} removed; use format/architecture APIs).
 - RMSNorm offset scale flag renamed to {@code onePlusWeight} (math convention, not a product name).
-- `ChatSession.recoverUnusableAnswers` / `unusableAnswer` / `unusableAnswerFallback` (opt-in).
+- `ChatSession` / `RagSession` opt-in `recoverUnusableAnswers` / `unusableAnswer` /
+  `unusableAnswerFallback`; `RagSession` also exposes `maxHistoryMessages` and `emitDebugPrompts`
+  so RAG chats do not have to drop through `.chat()`.
 - `LLM.Builder.advisorNoteFilter` so apps can drop demo setup fillers before advisor mix.
 - **ONNX folder weight import** (Tier A): `LlmModelFactory.make(folder)` loads `config.json` + tokenizer + `.onnx` (root or `onnx/`) like safetensors — Qwen3 / Gemma3 / Llama chat and BERT embeddings; no ONNX Runtime.
 - Optional download scripts for Gemma 4 E2B QAT mobile (`models/download-gemma4-e2b-qat-mobile.sh` / `.ps1` / `.cmd` → `models/Gemma4-E2B-IT-QAT-Mobile/`, ~2.3 GB). Hugging Face folders with `model_type` `gemma4` / `gemma4_text` now load as **text-only chat** (packed QAT int2/4/8, per-layer embeddings, KV sharing). Vision and audio towers in the same checkpoint are skipped. Safetensors shards larger than 2 GiB are read via `FileChannel` (Java mmap stays limited to 2 GiB).
