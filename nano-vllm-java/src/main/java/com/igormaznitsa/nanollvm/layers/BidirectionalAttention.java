@@ -3,6 +3,8 @@ package com.igormaznitsa.nanollvm.layers;
 import static java.util.Objects.requireNonNull;
 
 import com.igormaznitsa.nanollvm.tensor.Tensor;
+import com.igormaznitsa.nanollvm.tensor.VectorMath;
+import java.util.Arrays;
 
 /**
  * Full (non-causal) multi-head self-attention for encoder models. No KV cache.
@@ -51,14 +53,10 @@ public final class BidirectionalAttention {
       int headBase = h * this.headDim;
       for (int i = 0; i < seq; i++) {
         float max = Float.NEGATIVE_INFINITY;
+        int qi = qOff + i * qWidth + headBase;
         for (int j = 0; j < seq; j++) {
-          float dot = 0f;
-          int qi = qOff + i * qWidth + headBase;
           int kj = kOff + j * qWidth + headBase;
-          for (int d = 0; d < this.headDim; d++) {
-            dot += qd[qi + d] * kd[kj + d];
-          }
-          float score = dot * this.scale;
+          float score = VectorMath.dot(qd, qi, kd, kj, this.headDim) * this.scale;
           scores[j] = score;
           if (score > max) {
             max = score;
@@ -72,15 +70,9 @@ public final class BidirectionalAttention {
         }
         float inv = 1f / sum;
         int oi = i * qWidth + headBase;
-        for (int d = 0; d < this.headDim; d++) {
-          od[oi + d] = 0f;
-        }
+        Arrays.fill(od, oi, oi + this.headDim, 0f);
         for (int j = 0; j < seq; j++) {
-          float w = scores[j] * inv;
-          int vj = vOff + j * qWidth + headBase;
-          for (int d = 0; d < this.headDim; d++) {
-            od[oi + d] += w * vd[vj + d];
-          }
+          VectorMath.axpy(od, oi, scores[j] * inv, vd, vOff + j * qWidth + headBase, this.headDim);
         }
       }
     }

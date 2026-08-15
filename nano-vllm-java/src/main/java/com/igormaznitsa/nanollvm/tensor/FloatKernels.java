@@ -41,7 +41,6 @@ public abstract class FloatKernels {
 
   /**
    * For subclasses ({@code ScalarFloatKernels}, {@code VectorFloatKernels}) only.
-   * Application code should use {@link #get()} or {@link FloatKernelsFactory}.
    */
   protected FloatKernels() {
   }
@@ -50,11 +49,8 @@ public abstract class FloatKernels {
    * Process-wide kernel backend chosen at class initialization via {@link FloatKernelsFactory#create()}.
    *
    * <p>Honors {@code -Dnanollvm.kernels=auto|vector|scalar} (aliases {@code simd}/{@code plain}).
-   * Prefer this over constructing kernels repeatedly.
-   *
-   * @return the singleton scalar or Vector API implementation
    */
-  public static FloatKernels get() {
+  static FloatKernels get() {
     return INSTANCE;
   }
 
@@ -115,6 +111,76 @@ public abstract class FloatKernels {
    */
   public abstract void scaleAdd(
     final float[] src, final int srcOff, final float[] weight, final int wOff, final float scale,
+    final float[] dst, final int dstOff, final int n
+  );
+
+  /**
+   * Elementwise {@code dst = src * scale * (1 + weight)}.
+   */
+  public abstract void scaleAddOnePlus(
+    final float[] src, final int srcOff, final float[] weight, final int wOff, final float scale,
+    final float[] dst, final int dstOff, final int n
+  );
+
+  /**
+   * GEMV panel: {@code y[o] = bias[o] + dot(x, W[o])} for {@code o} in {@code [out0, out1)}.
+   * Weight layout is {@code [out, in]} with row stride {@code in}. {@code bias} may be {@code null}.
+   */
+  public abstract void gemv(
+    final float[] x, final int xOff,
+    final float[] w, final int wOff,
+    final float[] bias,
+    final float[] y, final int yOff,
+    final int in, final int out0, final int out1
+  );
+
+  public abstract void add(
+    final float[] a, final int aOff, final float[] b, final int bOff,
+    final float[] dst, final int dstOff, final int n
+  );
+
+  public abstract void mul(
+    final float[] a, final int aOff, final float[] b, final int bOff,
+    final float[] dst, final int dstOff, final int n
+  );
+
+  public abstract void scale(
+    final float[] src, final int srcOff, final float factor,
+    final float[] dst, final int dstOff, final int n
+  );
+
+  /**
+   * {@code dst[i] += alpha * src[i]}.
+   */
+  public abstract void axpy(
+    final float[] dst, final int dstOff, final float alpha,
+    final float[] src, final int srcOff, final int n
+  );
+
+  /**
+   * Writes {@code dst = a + b} and returns {@code Σ dst[i]²}.
+   */
+  public abstract float addSumSquares(
+    final float[] a, final int aOff, final float[] b, final int bOff,
+    final float[] dst, final int dstOff, final int n
+  );
+
+  public abstract void siluMul(
+    final float[] gate, final int gateOff, final float[] up, final int upOff,
+    final float[] dst, final int dstOff, final int n
+  );
+
+  public abstract void geluTanh(
+    final float[] src, final int srcOff, final float[] dst, final int dstOff, final int n
+  );
+
+  public abstract void geluTanhMul(
+    final float[] gate, final int gateOff, final float[] up, final int upOff,
+    final float[] dst, final int dstOff, final int n
+  );
+
+  public abstract void tanhSoftcap(
+    final float[] src, final int srcOff, final float cap,
     final float[] dst, final int dstOff, final int n
   );
 }

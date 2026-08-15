@@ -6,6 +6,7 @@ import com.igormaznitsa.nanollvm.engine.KvCacheArena;
 import com.igormaznitsa.nanollvm.internal.Context;
 import com.igormaznitsa.nanollvm.tensor.Tensor;
 import com.igormaznitsa.nanollvm.tensor.VectorMath;
+import java.util.Arrays;
 
 public final class Attention {
 
@@ -134,6 +135,14 @@ public final class Attention {
     }
   }
 
+  private static int[] pagedSlots(final int[] table, final int kLen, final int blockSize) {
+    int[] slots = new int[kLen];
+    for (int t = 0; t < kLen; t++) {
+      slots[t] = table[t / blockSize] * blockSize + (t % blockSize);
+    }
+    return slots;
+  }
+
   private Tensor prefillDense(final Tensor q, final Tensor k, final Tensor v, final Context ctx) {
     int[] cuQ = ctx.cuSeqlensQ();
     int[] cuK = ctx.cuSeqlensK();
@@ -144,7 +153,7 @@ public final class Attention {
       int qEnd = cuQ[b + 1];
       int kStart = cuK[b];
       int kEnd = cuK[b + 1];
-      this.attendRange(q, k, v, out, qStart, qEnd, kStart, kEnd - kStart, true);
+      this.attendRange(q, k, v, out, qStart, qEnd, kStart, kEnd - kStart, true, null);
     }
     return out;
   }
@@ -156,24 +165,14 @@ public final class Attention {
     int batch = cuQ.length - 1;
     int[][] blockTables = ctx.blockTables();
     Tensor out = Tensor.zeros(q.size(0), this.numHeads, this.headDim);
-    int d = this.numKvHeads * this.headDim;
     int blockSize = kCache.size(1);
 
     for (int b = 0; b < batch; b++) {
       int qStart = cuQ[b];
       int qEnd = cuQ[b + 1];
       int kLen = cuK[b + 1] - cuK[b];
-      Tensor k = Tensor.zeros(kLen, this.numKvHeads, this.headDim);
-      Tensor v = Tensor.zeros(kLen, this.numKvHeads, this.headDim);
-      int[] table = blockTables[b];
-      for (int t = 0; t < kLen; t++) {
-        int blockId = table[t / blockSize];
-        int offset = t % blockSize;
-        int slot = blockId * blockSize + offset;
-        System.arraycopy(kCache.data(), kCache.offset() + slot * d, k.data(), t * d, d);
-        System.arraycopy(vCache.data(), vCache.offset() + slot * d, v.data(), t * d, d);
-      }
-      this.attendRange(q, k, v, out, qStart, qEnd, 0, kLen, true);
+      int[] slots = pagedSlots(blockTables[b], kLen, blockSize);
+      this.attendRange(q, kCache, vCache, out, qStart, qEnd, 0, kLen, true, slots);
     }
     return out;
   }
@@ -183,33 +182,31 @@ public final class Attention {
     int bs = q.size(0);
     int[] contextLens = ctx.contextLens();
     int[][] blockTables = ctx.blockTables();
-    int d = this.numKvHeads * this.headDim;
     int blockSize = kCache.size(1);
     Tensor out = Tensor.zeros(bs, this.numHeads, this.headDim);
 
     for (int b = 0; b < bs; b++) {
       int kLen = contextLens[b];
-      Tensor k = Tensor.zeros(kLen, this.numKvHeads, this.headDim);
-      Tensor v = Tensor.zeros(kLen, this.numKvHeads, this.headDim);
-      int[] table = blockTables[b];
-      for (int t = 0; t < kLen; t++) {
-        int blockId = table[t / blockSize];
-        int offset = t % blockSize;
-        int slot = blockId * blockSize + offset;
-        System.arraycopy(kCache.data(), kCache.offset() + slot * d, k.data(), t * d, d);
-        System.arraycopy(vCache.data(), vCache.offset() + slot * d, v.data(), t * d, d);
-      }
-      this.attendRange(q, k, v, out, b, b + 1, 0, kLen, false);
+      int[] slots = pagedSlots(blockTables[b], kLen, blockSize);
+      this.attendRange(q, kCache, vCache, out, b, b + 1, 0, kLen, false, slots);
     }
     return out;
   }
 
   private void attendRange(
     final Tensor q, final Tensor k, final Tensor v, final Tensor out,
-    final int qStart, final int qEnd, final int kIndexBase, final int kLen, final boolean causal
+    final int qStart, final int qEnd, final int kIndexBase, final int kLen, final boolean causal,
+    final int[] kvSlots
   ) {
     int qLen = qEnd - qStart;
     int work = qLen * this.numHeads;
+    float[] acc = new float[this.headDim];
+    float[] tileScores = new float[KEY_TILE];
+    float[] qData = q.data();
+    float[] kData = k.data();
+    float[] vData = v.data();
+    float[] oData = out.data();
+
     for (int job = 0; job < work; job++) {
       int qi = job / this.numHeads;
       int h = job % this.numHeads;
@@ -224,17 +221,17 @@ public final class Attention {
       int qBase = q.offset() + (qPos * this.numHeads + h) * this.headDim;
       int oBase = (qPos * this.numHeads + h) * this.headDim;
 
+      Arrays.fill(acc, 0f);
       float m = Float.NEGATIVE_INFINITY;
       float l = 0f;
-      float[] acc = new float[this.headDim];
 
       for (int k0 = causalStart; k0 < causalEnd; k0 += KEY_TILE) {
         int k1 = Math.min(causalEnd, k0 + KEY_TILE);
         float tileMax = Float.NEGATIVE_INFINITY;
-        float[] tileScores = new float[k1 - k0];
         for (int kj = k0; kj < k1; kj++) {
-          int kBase = k.offset() + ((kIndexBase + kj) * this.numKvHeads + kvh) * this.headDim;
-          float score = VectorMath.dot(q.data(), qBase, k.data(), kBase, this.headDim) * this.scale;
+          float score = VectorMath.dot(
+            qData, qBase, kData, this.kvHeadBase(k, kIndexBase, kj, kvh, kvSlots), this.headDim)
+            * this.scale;
           tileScores[kj - k0] = score;
           if (score > tileMax) {
             tileMax = score;
@@ -243,25 +240,30 @@ public final class Attention {
         float mNew = Math.max(m, tileMax);
         float alpha = m == Float.NEGATIVE_INFINITY ? 0f : (float) Math.exp(m - mNew);
         float lNew = l * alpha;
-        for (int d = 0; d < this.headDim; d++) {
-          acc[d] *= alpha;
-        }
+        VectorMath.scale(acc, 0, alpha, acc, 0, this.headDim);
         for (int kj = k0; kj < k1; kj++) {
           float w = (float) Math.exp(tileScores[kj - k0] - mNew);
           lNew += w;
-          int vBase = v.offset() + ((kIndexBase + kj) * this.numKvHeads + kvh) * this.headDim;
-          for (int d = 0; d < this.headDim; d++) {
-            acc[d] += w * v.data()[vBase + d];
-          }
+          VectorMath.axpy(
+            acc, 0, w, vData, this.kvHeadBase(v, kIndexBase, kj, kvh, kvSlots), this.headDim);
         }
         m = mNew;
         l = lNew;
       }
 
       float inv = l == 0f ? 0f : 1f / l;
-      for (int d = 0; d < this.headDim; d++) {
-        out.data()[oBase + d] = acc[d] * inv;
-      }
+      VectorMath.scale(acc, 0, inv, oData, oBase, this.headDim);
     }
+  }
+
+  private int kvHeadBase(
+    final Tensor cache,
+    final int kIndexBase,
+    final int kj,
+    final int kvh,
+    final int[] kvSlots
+  ) {
+    int token = kvSlots != null ? kvSlots[kj] : kIndexBase + kj;
+    return cache.offset() + (token * this.numKvHeads + kvh) * this.headDim;
   }
 }

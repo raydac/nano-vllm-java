@@ -232,16 +232,8 @@ public final class Ops {
   public static Tensor siluAndMul(final Tensor gate, final Tensor up) {
     requireSameShape(gate, up, "gate", "up");
     Tensor out = Tensor.zeros(gate.shape());
-    float[] gd = gate.data();
-    float[] ud = up.data();
-    float[] od = out.data();
-    int gOff = gate.offset();
-    int uOff = up.offset();
-    int n = gate.numel();
-    for (int i = 0; i < n; i++) {
-      float g = gd[gOff + i];
-      od[i] = (g / (1.0f + (float) Math.exp(-g))) * ud[uOff + i];
-    }
+    VectorMath.siluMul(
+      gate.data(), gate.offset(), up.data(), up.offset(), out.data(), 0, gate.numel());
     return out;
   }
 
@@ -251,42 +243,20 @@ public final class Ops {
   public static Tensor add(final Tensor a, final Tensor b) {
     requireSameShape(a, b, "a", "b");
     Tensor out = Tensor.zeros(a.shape());
-    float[] ad = a.data();
-    float[] bd = b.data();
-    float[] od = out.data();
-    int aOff = a.offset();
-    int bOff = b.offset();
-    int n = a.numel();
-    for (int i = 0; i < n; i++) {
-      od[i] = ad[aOff + i] + bd[bOff + i];
-    }
+    VectorMath.add(a.data(), a.offset(), b.data(), b.offset(), out.data(), 0, a.numel());
     return out;
   }
 
   public static Tensor mul(final Tensor a, final Tensor b) {
     requireSameShape(a, b, "a", "b");
     Tensor out = Tensor.zeros(a.shape());
-    float[] ad = a.data();
-    float[] bd = b.data();
-    float[] od = out.data();
-    int aOff = a.offset();
-    int bOff = b.offset();
-    int n = a.numel();
-    for (int i = 0; i < n; i++) {
-      od[i] = ad[aOff + i] * bd[bOff + i];
-    }
+    VectorMath.mul(a.data(), a.offset(), b.data(), b.offset(), out.data(), 0, a.numel());
     return out;
   }
 
   public static Tensor scale(final Tensor x, final float factor) {
     Tensor out = Tensor.zeros(x.shape());
-    float[] xd = x.data();
-    float[] od = out.data();
-    int off = x.offset();
-    int n = x.numel();
-    for (int i = 0; i < n; i++) {
-      od[i] = xd[off + i] * factor;
-    }
+    VectorMath.scale(x.data(), x.offset(), factor, out.data(), 0, x.numel());
     return out;
   }
 
@@ -295,13 +265,7 @@ public final class Ops {
       return logits;
     }
     Tensor out = Tensor.zeros(logits.shape());
-    float[] ld = logits.data();
-    float[] od = out.data();
-    int off = logits.offset();
-    int n = logits.numel();
-    for (int i = 0; i < n; i++) {
-      od[i] = (float) Math.tanh(ld[off + i] / cap) * cap;
-    }
+    VectorMath.tanhSoftcap(logits.data(), logits.offset(), cap, out.data(), 0, logits.numel());
     return out;
   }
 
@@ -312,13 +276,7 @@ public final class Ops {
    */
   public static Tensor gelu(final Tensor x) {
     Tensor out = Tensor.zeros(x.shape());
-    float[] xd = x.data();
-    float[] od = out.data();
-    int xOff = x.offset();
-    int n = x.numel();
-    for (int i = 0; i < n; i++) {
-      od[i] = geluPytorchTanh(xd[xOff + i]);
-    }
+    VectorMath.geluTanh(x.data(), x.offset(), out.data(), 0, x.numel());
     return out;
   }
 
@@ -382,7 +340,7 @@ public final class Ops {
    * MLP gate: {@code gelu_pytorch_tanh(gate) * up} with gate/up packed in the last dimension.
    *
    * <p>Uses the tanh approximation of GELU ({@code gelu_pytorch_tanh}), not {@code erf}.
-   * See {@link #gatedActAndMul(Tensor, boolean)} and {@link #geluPytorchTanh(float)}.
+   * See {@link #gatedActAndMul(Tensor, boolean)}.
    *
    * @param x last dim even; layout {@code […, gate | up]}
    * @return tensor with last dim halved
@@ -417,14 +375,15 @@ public final class Ops {
     float[] xd = x.data();
     float[] od = out.data();
     int xOff = x.offset();
-    for (int r = 0; r < rows; r++) {
-      int base = xOff + r * last;
-      int outBase = r * half;
-      for (int i = 0; i < half; i++) {
-        float gate = xd[base + i];
-        float up = xd[base + half + i];
-        float act = geluTanh ? geluPytorchTanh(gate) : (gate / (1.0f + (float) Math.exp(-gate)));
-        od[outBase + i] = act * up;
+    if (geluTanh) {
+      for (int r = 0; r < rows; r++) {
+        int base = xOff + r * last;
+        VectorMath.geluTanhMul(xd, base, xd, base + half, od, r * half, half);
+      }
+    } else {
+      for (int r = 0; r < rows; r++) {
+        int base = xOff + r * last;
+        VectorMath.siluMul(xd, base, xd, base + half, od, r * half, half);
       }
     }
     if (shape.length == 1) {
@@ -433,16 +392,6 @@ public final class Ops {
     int[] ns = shape.clone();
     ns[ns.length - 1] = half;
     return out.reshape(ns);
-  }
-
-  /**
-   * PyTorch {@code gelu} approximate with tanh:
-   * {@code 0.5 * x * (1 + tanh(√(2/π) * (x + 0.044715 * x³)))}.
-   *
-   * <p>Constant {@code 0.7978845608028654} is {@code √(2/π)}.
-   */
-  private static float geluPytorchTanh(final float x) {
-    return 0.5f * x * (1.0f + (float) Math.tanh(0.7978845608028654 * (x + 0.044715 * x * x * x)));
   }
 
   /**
@@ -505,9 +454,7 @@ public final class Ops {
       int oBase = r * last;
       float var = VectorMath.sumSquares(xd, xBase, last) / last;
       float inv = (float) (1.0 / Math.sqrt(var + eps));
-      for (int i = 0; i < last; i++) {
-        od[oBase + i] = xd[xBase + i] * inv;
-      }
+      VectorMath.scale(xd, xBase, inv, od, oBase, last);
     }
     return out;
   }
@@ -543,12 +490,10 @@ public final class Ops {
       int oBase = r * last;
       float var = VectorMath.sumSquares(xd, xBase, last) / last;
       float inv = (float) (1.0 / Math.sqrt(var + eps));
-      for (int i = 0; i < last; i++) {
-        float w = wd[wOff + i];
-        if (onePlusWeight) {
-          w = 1.0f + w;
-        }
-        od[oBase + i] = xd[xBase + i] * inv * w;
+      if (onePlusWeight) {
+        VectorMath.scaleAddOnePlus(xd, xBase, wd, wOff, inv, od, oBase, last);
+      } else {
+        VectorMath.scaleAdd(xd, xBase, wd, wOff, inv, od, oBase, last);
       }
     }
     return out;
@@ -617,23 +562,14 @@ public final class Ops {
       int xBase = xOff + r * last;
       int rBase = rOff + r * last;
       int sBase = r * last;
-      float sumSq = 0f;
-      for (int i = 0; i < last; i++) {
-        float v = xd[xBase + i] + rd[rBase + i];
-        sd[sBase + i] = v;
-        sumSq += v * v;
-      }
+      float sumSq = VectorMath.addSumSquares(xd, xBase, rd, rBase, sd, sBase, last);
       float inv = (float) (1.0 / Math.sqrt(sumSq / last + eps));
-      for (int i = 0; i < last; i++) {
-        float scaled = sd[sBase + i] * inv;
-        if (wd != null) {
-          float w = wd[wOff + i];
-          if (onePlusWeight) {
-            w = 1.0f + w;
-          }
-          scaled *= w;
-        }
-        od[sBase + i] = scaled;
+      if (wd == null) {
+        VectorMath.scale(sd, sBase, inv, od, sBase, last);
+      } else if (onePlusWeight) {
+        VectorMath.scaleAddOnePlus(sd, sBase, wd, wOff, inv, od, sBase, last);
+      } else {
+        VectorMath.scaleAdd(sd, sBase, wd, wOff, inv, od, sBase, last);
       }
     }
     return new Tensor[] {out, summed};

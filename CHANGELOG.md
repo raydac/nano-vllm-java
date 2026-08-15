@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased] — 1.1.0-SNAPSHOT
 
 ### Changed
+- CPU inference kernels are faster on the decode path: linear layers reuse the activation
+  vector across outputs (GEMV), Vector-API dots use independent accumulators, and residual /
+  MLP / RMSNorm / attention value mix run through SIMD instead of scalar Java loops. Paged KV
+  attention reads cache slots in place instead of copying each page into a dense tensor.
 - No-arg `new SamplingParams()` now matches `SamplingDefaults.neutral()` (temperature 0.6, 256 new
   tokens, top-p 0.95). It previously used 0.7 / 64 / 0.9. Two- and three-argument constructors still
   fill top-p 0.9.

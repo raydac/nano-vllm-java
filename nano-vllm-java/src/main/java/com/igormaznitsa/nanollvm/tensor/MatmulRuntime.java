@@ -250,21 +250,8 @@ public final class MatmulRuntime implements AutoCloseable {
     final int out0, final int out1
   ) {
     for (int r = 0; r < rows; r++) {
-      int xBase = xOffset + r * in;
-      int yBase = yOffset + r * out;
-      for (int tile0 = out0; tile0 < out1; tile0 += TILE_N) {
-        int tile1 = Math.min(out1, tile0 + TILE_N);
-        for (int o = tile0; o < tile1; o++) {
-          y[yBase + o] = bias != null ? bias[o] : 0f;
-        }
-        for (int k0 = 0; k0 < in; k0 += TILE_K) {
-          int k1 = Math.min(in, k0 + TILE_K);
-          int kLen = k1 - k0;
-          for (int o = tile0; o < tile1; o++) {
-            y[yBase + o] += KERNELS.dot(x, xBase + k0, w, wOffset + o * in + k0, kLen);
-          }
-        }
-      }
+      KERNELS.gemv(
+        x, xOffset + r * in, w, wOffset, bias, y, yOffset + r * out, in, out0, out1);
     }
   }
 
@@ -289,19 +276,7 @@ public final class MatmulRuntime implements AutoCloseable {
     final int in,
     final int out0, final int out1
   ) {
-    for (int tile0 = out0; tile0 < out1; tile0 += TILE_N) {
-      int tile1 = Math.min(out1, tile0 + TILE_N);
-      for (int o = tile0; o < tile1; o++) {
-        y[yOffset + o] = bias != null ? bias[o] : 0f;
-      }
-      for (int k0 = 0; k0 < in; k0 += TILE_K) {
-        int k1 = Math.min(in, k0 + TILE_K);
-        int kLen = k1 - k0;
-        for (int o = tile0; o < tile1; o++) {
-          y[yOffset + o] += KERNELS.dot(x, xOffset + k0, w, wOffset + o * in + k0, kLen);
-        }
-      }
-    }
+    KERNELS.gemv(x, xOffset, w, wOffset, bias, y, yOffset, in, out0, out1);
   }
 
   private void packedLinearRange(

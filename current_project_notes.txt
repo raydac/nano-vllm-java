@@ -1,5 +1,6 @@
 ## 1. Implementation Progress
 - Maven multi-module **`1.1.0-SNAPSHOT`**: parent `nano-vllm-java-pom`, library `nano-vllm-java`, demos `nano-vllm-java-samples` (released **1.0.0** 2026-08-09); enforcer Java `[21,)`, Maven `[3.9,)`; JPMS module `com.igormaznitsa.nanollvm` (library only)
+- CPU kernels: panel GEMV for dense linear, Vector-API 4-acc dots, SIMD elementwise/RMSNorm/MLP/attention axpy; paged KV attend in place
 - **ResourceLimits** (exported utils): process-wide defaults + builder; RAG/PDF/JSON/GGUF/safetensors/corpus/history budgets
 - CausalLM: Qwen3 + Gemma3 + **Gemma 4 text (QAT mobile)** + **Llama** + LFM2 (GGUF); tokenizers GPT-2 BPE / Metaspace / GGUF-embedded / BERT WordPiece
 - **`ModelSupport`**: exact family detection + `UnsupportedModelException` with a support catalog at load; look-alikes (Qwen2, Qwen3.5/Fara, Gemma2, Gemma 4 vision/audio-only, VLMs, GGUF Llama/Gemma, HF BERT safetensors) fail before weight mmap; `-Dnanollvm.arch` must match the checkpoint; `gemma4` / `gemma4_text` load as text chat
@@ -73,11 +74,12 @@
 - Gemma 4 text (QAT mobile): flatten nested `text_config`; skip `vision_tower`/`audio_tower`; packed int2/4/8 + SRQ (`GemmaQat`); PLE after MLP; KV share from last same-type non-shared layer; RMS `onePlusWeight=false`; attn scale 1.0; chat `<|turn>`/`<turn|>`. Weightless `RMSNorm` residual uses `Ops.addRmsNorm(x, residual, eps)` (identity scale; `weight == null` is valid).
 - Safetensors shards **> 2 GiB** (Gemma 4 QAT `model.safetensors` is ~2.29 GiB) use `FileChannel` positioned reads; files ≤ 2 GiB still mmap
 - Weight/tensor/PDF records hold `byte[]`/`float[]`/`int[]` on purpose (no List boxing); Error Prone `ArrayRecordComponent` is suppressed at those records. Packed QAT/GGUF release is `packed.length == 0`, not identity with a sentinel array. SpotBugs `EI_EXPOSE_REP*` on those types (and `Tensor.data()`, `Context` tables, `Sequence.blockTable()`) is by design — copies would double RAM or break KV mutation.
+- Tensor/math perf (2026-08-15): dense decode uses panel GEMV (`FloatKernels.gemv`, x loaded once per K-vector across 8 outputs); Vector `dot`/`sumSquares` 4-acc unroll; `Ops` add/mul/scale/SiLU/GELU/RMSNorm/`tanhSoftcap` go through SIMD kernels; Attention reuses tile scratch, SIMD axpy, and reads paged KV in place (no per-step dense K/V copy). Fused packed dequant-dot still open.
 
 
 ## 3. Technical Debt & Refactoring
 - Attention O(n²); no float16 / TP / CUDA; GGUF packed by default; most HF safetensors still FP32 (Gemma 4 QAT stays packed)
-- Optional GGUF perf: mmap weights; FP16 / smaller default KV; fused packed GEMM
+- Optional GGUF perf: mmap weights; FP16 / smaller default KV; fused packed GEMM (dequant+dot without float row scratch)
 - GGUF metaspace pretok (prepend ▁) may need per-export tuning for exotic packs
 - Dense weight `float[]` still GC-only after model close (no eager zeroing of Tensor buffers)
 - Dense RAG query embeds synchronize per `DenseRagIndex`; no ANN / vector DB yet
@@ -94,6 +96,7 @@
 - `description.md` usage snippets added (API-facing chapters)
 - Error Prone / IDE compiler inspections cleaned: locale on `toLowerCase`, explicit charset, `@Override` on GGUF tokenizer meta, Javadoc summaries on `@since`-only APIs, packed-weight release via empty payload (not `==` sentinel), unused `Attention.layerIndex` / `Tokenizer.chatTemplate` dropped. Tensor/PDF `record`s keep primitive arrays (`@SuppressWarnings("ArrayRecordComponent")`).
 - **SpotBugs** (`spotbugs-maven-plugin` on library `verify`): real `Path.getFileName()` nulls guarded; `spotbugs-exclude.xml` documents by-design remainder (shared tensors/arrays, frozen maps/lists, `CT_CONSTRUCTOR_THROW` on Java 21, Sequence/Builder thread confinement, virtual `/nanollvm-memory` paths).
+- CPU kernel pass: panel GEMV, Vector 4-acc dots, SIMD `Ops`/attention axpy, paged KV in-place attend. Packed fused GEMM not done.
 
 
 ## 5. Known Issues & Limitations

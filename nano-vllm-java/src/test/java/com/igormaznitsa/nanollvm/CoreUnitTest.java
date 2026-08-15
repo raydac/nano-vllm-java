@@ -423,9 +423,19 @@ class CoreUnitTest {
         assertEquals(expected, y.get(r * out + o), 1e-4f);
       }
     }
+
+    Tensor x1 = Tensor.of(java.util.Arrays.copyOf(x, in), in);
+    Tensor y1 = Ops.linear(x1, wt, null);
+    for (int o = 0; o < out; o++) {
+      float expected = 0f;
+      for (int i = 0; i < in; i++) {
+        expected += x[i] * w[o * in + i];
+      }
+      assertEquals(expected, y1.get(o), 1e-4f);
+    }
     assertTrue(
       com.igormaznitsa.nanollvm.tensor.MatmulRuntime.sequential().backendInfo().contains("tileN"));
-    String kernels = com.igormaznitsa.nanollvm.tensor.FloatKernels.get().name();
+    String kernels = FloatKernelsFactory.create().name();
     assertTrue(kernels.contains("Vector API") || kernels.equals("scalar"), kernels);
   }
 
@@ -524,11 +534,73 @@ class CoreUnitTest {
     }
 
     assertEquals(scalar.dot(a, 0, b, 0, 64), vector.dot(a, 0, b, 0, 64), 1e-4f);
+    assertEquals(scalar.dot(a, 0, b, 0, 7), vector.dot(a, 0, b, 0, 7), 1e-5f);
     assertEquals(scalar.sumSquares(a, 0, 64), vector.sumSquares(a, 0, 64), 1e-3f);
     scalar.scaleAdd(a, 0, w, 0, 1.5f, outS, 0, 64);
     vector.scaleAdd(a, 0, w, 0, 1.5f, outV, 0, 64);
     for (int i = 0; i < 64; i++) {
       assertEquals(outS[i], outV[i], 1e-5f);
+    }
+
+    scalar.scaleAddOnePlus(a, 0, w, 0, 1.5f, outS, 0, 64);
+    vector.scaleAddOnePlus(a, 0, w, 0, 1.5f, outV, 0, 64);
+    for (int i = 0; i < 64; i++) {
+      assertEquals(outS[i], outV[i], 1e-5f);
+    }
+
+    scalar.add(a, 0, b, 0, outS, 0, 64);
+    vector.add(a, 0, b, 0, outV, 0, 64);
+    for (int i = 0; i < 64; i++) {
+      assertEquals(outS[i], outV[i], 1e-5f);
+    }
+
+    System.arraycopy(a, 0, outS, 0, 64);
+    System.arraycopy(a, 0, outV, 0, 64);
+    scalar.axpy(outS, 0, 0.25f, b, 0, 64);
+    vector.axpy(outV, 0, 0.25f, b, 0, 64);
+    for (int i = 0; i < 64; i++) {
+      assertEquals(outS[i], outV[i], 1e-5f);
+    }
+
+    float sumSqS = scalar.addSumSquares(a, 0, b, 0, outS, 0, 64);
+    float sumSqV = vector.addSumSquares(a, 0, b, 0, outV, 0, 64);
+    assertEquals(sumSqS, sumSqV, 1e-3f);
+    for (int i = 0; i < 64; i++) {
+      assertEquals(outS[i], outV[i], 1e-5f);
+    }
+
+    int in = 96;
+    int out = 24;
+    float[] x = new float[in];
+    float[] weight = new float[out * in];
+    float[] bias = new float[out];
+    float[] gemvS = new float[out];
+    float[] gemvV = new float[out];
+    for (int i = 0; i < in; i++) {
+      x[i] = (i % 11) * 0.04f;
+    }
+    for (int i = 0; i < weight.length; i++) {
+      weight[i] = (i * 3 % 17) * 0.02f;
+    }
+    for (int i = 0; i < out; i++) {
+      bias[i] = i * 0.01f;
+    }
+    scalar.gemv(x, 0, weight, 0, bias, gemvS, 0, in, 0, out);
+    vector.gemv(x, 0, weight, 0, bias, gemvV, 0, in, 0, out);
+    for (int i = 0; i < out; i++) {
+      assertEquals(gemvS[i], gemvV[i], 1e-4f, "gemv " + i);
+    }
+
+    scalar.siluMul(a, 0, b, 0, outS, 0, 64);
+    vector.siluMul(a, 0, b, 0, outV, 0, 64);
+    for (int i = 0; i < 64; i++) {
+      assertEquals(outS[i], outV[i], 1e-4f);
+    }
+
+    scalar.geluTanhMul(a, 0, b, 0, outS, 0, 64);
+    vector.geluTanhMul(a, 0, b, 0, outV, 0, 64);
+    for (int i = 0; i < 64; i++) {
+      assertEquals(outS[i], outV[i], 2e-4f);
     }
 
     FloatKernels best = FloatKernelsFactory.createBestAvailable();
