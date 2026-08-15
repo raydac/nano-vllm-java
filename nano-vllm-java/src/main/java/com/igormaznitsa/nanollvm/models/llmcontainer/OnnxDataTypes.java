@@ -1,7 +1,7 @@
-package com.igormaznitsa.nanollvm.internal;
+package com.igormaznitsa.nanollvm.models.llmcontainer;
 
 import com.igormaznitsa.nanollvm.exceptions.ModelLoadException;
-import com.igormaznitsa.nanollvm.internal.OnnxProtoReader.OnnxTensorProto;
+import com.igormaznitsa.nanollvm.models.llmcontainer.OnnxProtoReader.OnnxTensorProto;
 
 /**
  * ONNX {@code TensorProto.DataType} catalog for Tier A weight import.

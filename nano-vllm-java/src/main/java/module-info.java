@@ -6,7 +6,8 @@
  *
  * <p><b>Not exported:</b> {@code prompts} (engine wording), {@code models.internal} (CausalLM graph /
  * weights; in-module {@code LlmModelAccess} bridge), {@code engine}, {@code layers}, {@code tensor},
- * {@code internal} (safetensors / GGUF / JSON helpers). Application code should use
+ * {@code internal} (JSON / GGUF dequant / runtime helpers), {@code models.llmcontainer}
+ * (weight-file transport), {@code models.llmarch} (architecture bind/fill/create). Application code should use
  * {@code LlmModelFactory} / {@code LLM} / {@code RagFactory}. Runnable demos live in the separate
  * {@code nano-vllm-java-samples} Maven module.
  *

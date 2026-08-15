@@ -762,7 +762,8 @@ public final class GgufDequant {
     return (int) numel;
   }
 
-  static ByteBuffer littleEndianSlice(final ByteBuffer map, final int position, final int length) {
+  public static ByteBuffer littleEndianSlice(final ByteBuffer map, final int position,
+                                             final int length) {
     ByteBuffer slice = map.duplicate().order(ByteOrder.LITTLE_ENDIAN);
     slice.position(position);
     slice.limit(position + length);

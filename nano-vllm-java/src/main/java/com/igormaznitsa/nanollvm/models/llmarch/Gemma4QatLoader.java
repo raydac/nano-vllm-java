@@ -1,4 +1,4 @@
-package com.igormaznitsa.nanollvm.internal;
+package com.igormaznitsa.nanollvm.models.llmarch;
 
 import static java.util.Objects.requireNonNull;
 
@@ -7,18 +7,21 @@ import com.igormaznitsa.nanollvm.chat.LlmListeners;
 import com.igormaznitsa.nanollvm.llm.Config;
 import com.igormaznitsa.nanollvm.models.internal.GemmaQatWeight;
 import com.igormaznitsa.nanollvm.models.internal.WeightBag;
-import com.igormaznitsa.nanollvm.models.internal.WeightSchema;
+import com.igormaznitsa.nanollvm.models.llmcontainer.LoadProgress;
+import com.igormaznitsa.nanollvm.models.llmcontainer.SafetensorsReader;
+import com.igormaznitsa.nanollvm.models.llmcontainer.SafetensorsTransport;
 import com.igormaznitsa.nanollvm.tensor.Tensor;
 import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
 /**
- * Loads Gemma 4 QAT language weights from safetensors (skips vision/audio towers; keeps int2/4/8 packed).
+ * Model-layer Gemma 4 QAT decode: skip vision/audio tensors, canonicalize language names, keep
+ * int2/4/8 packed. Reads payloads from {@link SafetensorsTransport}.
+ *
+ * @since 1.1.0
  */
 public final class Gemma4QatLoader {
 
@@ -27,71 +30,41 @@ public final class Gemma4QatLoader {
   private Gemma4QatLoader() {
   }
 
-  public static WeightBag loadWeights(
-    final Path modelDir,
-    final Config.HfConfig hfConfig,
-    final WeightSchema schema,
-    final LlmListener io
+  /**
+   * Reads packed QAT language tensors; skips vision/audio towers.
+   *
+   * @since 1.1.0
+   */
+  static WeightBag fill(
+    final SafetensorsTransport transport,
+    final ModelBinding.BoundModel bound,
+    final LlmListener streams
   ) throws IOException {
-    LlmListener streams = io == null ? LlmListeners.silent() : io;
-    List<Path> files = SafetensorsReader.listSafetensors(modelDir);
-    if (files.isEmpty()) {
-      throw new IllegalArgumentException("no .safetensors files in " + modelDir);
-    }
-    long fileBytes = 0L;
-    for (Path file : files) {
-      fileBytes += Files.size(file);
-    }
+    requireNonNull(transport, "transport");
+    requireNonNull(bound, "bound");
+    long fileBytes = transport.tensorIndex().stream()
+      .mapToLong(SafetensorsTransport.TensorRef::byteSize)
+      .sum();
     LlmListeners.infof(streams, null, "Loading Gemma 4 QAT language weights from %s (%.2f GiB)%n",
-      modelDir, fileBytes / (1024.0 * 1024.0 * 1024.0));
-    List<WeightSource> sources = files.stream()
-      .map(file -> new WeightSource(PathNames.of(file), () -> SafetensorsReader.open(file)))
-      .toList();
-    return assemble(sources, modelDir.toString(), hfConfig, schema, streams);
-  }
-
-  public static WeightBag loadWeights(
-    final List<ModelFileBundle.NamedBytes> blobs,
-    final String label,
-    final Config.HfConfig hfConfig,
-    final WeightSchema schema,
-    final LlmListener io
-  ) throws IOException {
-    LlmListener streams = io == null ? LlmListeners.silent() : io;
-    if (blobs.isEmpty()) {
-      throw new IllegalArgumentException("no .safetensors blobs for " + label);
-    }
-    List<WeightSource> sources = blobs.stream()
-      .map(blob -> new WeightSource(
-        blob.name(),
-        () -> SafetensorsReader.open(blob.buffer(), blob.name())))
-      .toList();
-    return assemble(sources, label, hfConfig, schema, streams);
+      transport.label(), fileBytes / (1024.0 * 1024.0 * 1024.0));
+    return assemble(transport, bound, streams);
   }
 
   private static WeightBag assemble(
-    final List<WeightSource> sources,
-    final String label,
-    final Config.HfConfig hfConfig,
-    final WeightSchema schema,
+    final SafetensorsTransport transport,
+    final ModelBinding.BoundModel bound,
     final LlmListener streams
   ) throws IOException {
     List<Located> located = new ArrayList<>();
-    for (WeightSource source : sources) {
-      try (SafetensorsReader probe = source.open()) {
-        for (String rawName : probe.keys()) {
-          if (shouldSkip(rawName)) {
-            continue;
-          }
-          String canonical = canonicalize(rawName);
-          located.add(new Located(
-            source, rawName, canonical, probe.dtype(rawName), probe.shape(rawName),
-            probe.byteSize(rawName)));
-        }
+    for (SafetensorsTransport.TensorRef ref : transport.tensorIndex()) {
+      if (shouldSkip(ref.name())) {
+        continue;
       }
+      located.add(new Located(ref, canonicalize(ref.name())));
     }
     if (located.isEmpty()) {
-      throw new IllegalStateException("no Gemma 4 language tensors found in " + label);
+      throw new IllegalStateException(
+        "no Gemma 4 language tensors found in " + transport.label());
     }
 
     Map<String, ModuleParts> modules = new LinkedHashMap<>();
@@ -116,29 +89,30 @@ public final class Gemma4QatLoader {
     }
 
     LoadProgress progress = new LoadProgress("Gemma 4 QAT", plan.size(), streams);
-    WeightSource current = null;
+    String currentShard = null;
     SafetensorsReader reader = null;
     long loadedBytes = 0L;
     try {
       for (LoadItem item : plan) {
         Located locatedItem = item.located();
-        if (reader == null || !locatedItem.source().equals(current)) {
+        String shardLabel = locatedItem.shardLabel();
+        if (reader == null || !shardLabel.equals(currentShard)) {
           if (reader != null) {
             reader.close();
           }
-          current = locatedItem.source();
-          reader = current.open();
+          currentShard = shardLabel;
+          reader = transport.openShard(currentShard);
         }
         if (item.qatParam() == null) {
           bag.put(locatedItem.canonical(), reader.getTensor(locatedItem.rawName()));
           loadedBytes += locatedItem.byteSize();
         } else {
           ModuleParts parts = modules.get(item.qatParam());
-          bag.put(item.qatParam(), loadQat(reader, parts, hfConfig, item.qatParam()));
+          bag.put(item.qatParam(), loadQat(reader, parts, bound.config(), item.qatParam()));
           loadedBytes += parts.payload().byteSize();
         }
         progress.step("%s | %s (%.0f MiB)".formatted(
-          locatedItem.source().label(),
+          shardLabel,
           locatedItem.rawName(),
           loadedBytes / (1024.0 * 1024.0)));
       }
@@ -153,7 +127,7 @@ public final class Gemma4QatLoader {
     }
 
     WeightBag weights = new WeightBag(bag);
-    for (String required : schema.expectedParameters()) {
+    for (String required : bound.schema().expectedParameters()) {
       if (!weights.has(required)) {
         throw new IllegalStateException("missing required Gemma 4 weight after load: " + required);
       }
@@ -169,7 +143,7 @@ public final class Gemma4QatLoader {
   ) {
     Located payload = parts.payload();
     byte[] packed = reader.getRaw(payload.rawName());
-    Tensor scaleTensor = readAssociated(reader, parts.scale());
+    Tensor scaleTensor = readAssociated(reader, payload, parts.scale());
     float[] scales = scaleTensor.toFloatArray();
     int scaleCols = scaleTensor.ndim() >= 2 ? scaleTensor.size(scaleTensor.ndim() - 1) : 1;
     int rows = payload.shape()[0];
@@ -182,12 +156,15 @@ public final class Gemma4QatLoader {
       outScale);
   }
 
-  private static Tensor readAssociated(final SafetensorsReader reader, final Located located) {
+  private static Tensor readAssociated(
+    final SafetensorsReader reader,
+    final Located payload,
+    final Located located
+  ) {
     if (located == null) {
       throw new IllegalStateException("missing QAT scale tensor");
     }
-    if (located.source() != null && !located.source().label().equals(reader.label())
-      && !reader.contains(located.rawName())) {
+    if (!located.shardLabel().equals(payload.shardLabel()) && !reader.contains(located.rawName())) {
       throw new IllegalStateException("QAT scale not in the same shard as packed weight: "
         + located.rawName());
     }
@@ -295,26 +272,26 @@ public final class Gemma4QatLoader {
     };
   }
 
-  @FunctionalInterface
-  private interface ReaderOpen {
-    SafetensorsReader open() throws IOException;
-  }
-
-  private record WeightSource(String label, ReaderOpen opener) {
-    SafetensorsReader open() throws IOException {
-      return this.opener.open();
+  private record Located(SafetensorsTransport.TensorRef ref, String canonical) {
+    String shardLabel() {
+      return this.ref.shardLabel();
     }
-  }
 
-  @SuppressWarnings("ArrayRecordComponent")
-  private record Located(
-    WeightSource source,
-    String rawName,
-    String canonical,
-    String dtype,
-    int[] shape,
-    long byteSize
-  ) {
+    String rawName() {
+      return this.ref.name();
+    }
+
+    String dtype() {
+      return this.ref.dtype();
+    }
+
+    int[] shape() {
+      return this.ref.shape();
+    }
+
+    long byteSize() {
+      return this.ref.byteSize();
+    }
   }
 
   private record LoadItem(Located located, String qatParam) {

@@ -1,8 +1,9 @@
-package com.igormaznitsa.nanollvm.internal;
+package com.igormaznitsa.nanollvm.models.llmcontainer;
 
 import static java.nio.charset.StandardCharsets.UTF_8;
 import static java.util.Objects.requireNonNull;
 
+import com.igormaznitsa.nanollvm.internal.GgufDequant;
 import com.igormaznitsa.nanollvm.models.internal.PackedWeight;
 import com.igormaznitsa.nanollvm.tensor.Tensor;
 import com.igormaznitsa.nanollvm.tokenizer.GgufTokenizerSource;
@@ -20,6 +21,8 @@ import java.util.stream.LongStream;
 
 /**
  * Memory-mapped GGUF v2/v3 reader: metadata KV map + named tensors (packed or float32).
+ *
+ * @since 1.1.0
  */
 public final class GgufReader implements AutoCloseable, GgufTokenizerSource {
 

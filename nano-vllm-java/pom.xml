@@ -65,6 +65,8 @@
                             -->
                             <additionalOptions>
                                 <additionalOption>-Xdoclint:reference</additionalOption>
+                                <additionalOption>--show-module-contents</additionalOption>
+                                <additionalOption>api</additionalOption>
                                 <additionalOption>-tag</additionalOption>
                                 <additionalOption>apiNote:a:API&#160;Note:</additionalOption>
                             </additionalOptions>

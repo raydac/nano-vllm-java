@@ -1,4 +1,4 @@
-package com.igormaznitsa.nanollvm.internal;
+package com.igormaznitsa.nanollvm.models.llmarch;
 
 import static com.igormaznitsa.nanollvm.models.internal.WeightNames.GATE_UP_PROJ;
 import static com.igormaznitsa.nanollvm.models.internal.WeightNames.QKV_PROJ;
@@ -9,10 +9,11 @@ import com.igormaznitsa.nanollvm.chat.LlmListeners;
 import com.igormaznitsa.nanollvm.llm.Config;
 import com.igormaznitsa.nanollvm.models.internal.WeightBag;
 import com.igormaznitsa.nanollvm.models.internal.WeightSchema;
+import com.igormaznitsa.nanollvm.models.llmcontainer.LoadProgress;
+import com.igormaznitsa.nanollvm.models.llmcontainer.SafetensorsReader;
+import com.igormaznitsa.nanollvm.models.llmcontainer.SafetensorsTransport;
 import com.igormaznitsa.nanollvm.tensor.Tensor;
 import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
@@ -20,117 +21,76 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Reads {@code *.safetensors} into an immutable {@link WeightBag} (packed Q/K/V and gate/up
- * shards are merged before the bag is returned).
+ * Model-layer safetensors decode: match container tensor names to {@link WeightSchema}, merge
+ * packed Q/K/V and gate/up shards, then return an immutable {@link WeightBag}.
+ *
+ * @since 1.1.0
  */
 public final class ModelLoader {
 
   private ModelLoader() {
   }
 
-  public static WeightBag loadWeights(
-    final Path modelDir,
-    final Config.HfConfig hfConfig,
-    final WeightSchema schema,
-    final LlmListener io
-  ) throws IOException {
-    LlmListener streams = io == null ? LlmListeners.silent() : io;
-    List<Path> files = SafetensorsReader.listSafetensors(modelDir);
-    if (files.isEmpty()) {
-      throw new IllegalArgumentException("no .safetensors files in " + modelDir);
-    }
-
-    long fileBytes = 0L;
-    for (Path file : files) {
-      fileBytes += Files.size(file);
-    }
-    LlmListeners.infof(streams, null, "Loading weights from %s (%.2f GiB, %d file%s)%n",
-      modelDir,
-      fileBytes / (1024.0 * 1024.0 * 1024.0),
-      files.size(),
-      files.size() == 1 ? "" : "s");
-
-    List<WeightSource> sources = files.stream()
-      .map(file -> new WeightSource(PathNames.of(file), () -> SafetensorsReader.open(file)))
-      .toList();
-    return assembleWeights(sources, modelDir.toString(), hfConfig, schema, streams);
-  }
-
   /**
-   * Assembles a {@link WeightBag} from in-memory safetensors blobs (classpath / {@link ModelFileBundle}).
+   * Reads safetensors shards into a bag using the bound schema.
    *
    * @since 1.1.0
    */
-  public static WeightBag loadWeights(
-    final List<ModelFileBundle.NamedBytes> blobs,
-    final String label,
-    final Config.HfConfig hfConfig,
-    final WeightSchema schema,
-    final LlmListener io
+  static WeightBag fill(
+    final SafetensorsTransport transport,
+    final ModelBinding.BoundModel bound,
+    final LlmListener streams
   ) throws IOException {
-    LlmListener streams = io == null ? LlmListeners.silent() : io;
-    if (blobs.isEmpty()) {
-      throw new IllegalArgumentException("no .safetensors blobs for " + label);
-    }
-    long fileBytes = blobs.stream().mapToLong(b -> b.bytes().length).sum();
-    LlmListeners.infof(streams, null, "Loading weights from %s (%.2f GiB, %d file%s)%n",
-      label,
-      fileBytes / (1024.0 * 1024.0 * 1024.0),
-      blobs.size(),
-      blobs.size() == 1 ? "" : "s");
-    List<WeightSource> sources = blobs.stream()
-      .map(blob -> new WeightSource(
-        blob.name(),
-        () -> SafetensorsReader.open(blob.buffer(), blob.name())))
-      .toList();
-    return assembleWeights(sources, label, hfConfig, schema, streams);
+    requireNonNull(transport, "transport");
+    requireNonNull(bound, "bound");
+    long fileBytes =
+      transport.tensorIndex().stream().mapToLong(SafetensorsTransport.TensorRef::byteSize).sum();
+    LlmListeners.infof(streams, null, "Loading weights from %s (%.2f GiB)%n",
+      transport.label(),
+      fileBytes / (1024.0 * 1024.0 * 1024.0));
+    return assembleWeights(transport, bound.config(), bound.schema(), streams);
   }
 
   private static WeightBag assembleWeights(
-    final List<WeightSource> sources,
-    final String label,
+    final SafetensorsTransport transport,
     final Config.HfConfig hfConfig,
     final WeightSchema schema,
     final LlmListener streams
   ) throws IOException {
     Map<String, Object[]> packed = schema.packedModulesMapping();
     List<PlannedTensor> plan = new ArrayList<>();
-    for (WeightSource source : sources) {
-      try (SafetensorsReader probe = source.open()) {
-        for (String weightName : probe.keys()) {
-          ResolvedParam resolved = resolveParam(weightName, schema, packed);
-          if (resolved == null) {
-            continue;
-          }
-          plan.add(new PlannedTensor(source, weightName, resolved.paramName(), resolved.shardId(),
-            probe.byteSize(weightName)));
-        }
+    for (SafetensorsTransport.TensorRef ref : transport.tensorIndex()) {
+      ResolvedParam resolved = resolveParam(ref.name(), schema, packed);
+      if (resolved == null) {
+        continue;
       }
+      plan.add(new PlannedTensor(ref, resolved.paramName(), resolved.shardId()));
     }
     if (plan.isEmpty()) {
-      throw new IllegalStateException("no matching weight tensors found in " + label);
+      throw new IllegalStateException("no matching weight tensors found in " + transport.label());
     }
 
     WeightAssembler assembler = new WeightAssembler(hfConfig);
     LoadProgress progress = new LoadProgress("Weights", plan.size(), streams);
     long loadedBytes = 0L;
-    WeightSource current = null;
+    String currentShard = null;
     SafetensorsReader reader = null;
     try {
       for (PlannedTensor item : plan) {
-        if (reader == null || !item.source().equals(current)) {
+        String shardLabel = item.ref().shardLabel();
+        if (reader == null || !shardLabel.equals(currentShard)) {
           if (reader != null) {
             reader.close();
           }
-          current = item.source();
-          reader = current.open();
+          currentShard = shardLabel;
+          reader = transport.openShard(currentShard);
         }
-        Tensor tensor = reader.getTensor(item.weightName());
+        Tensor tensor = reader.getTensor(item.ref().name());
         assembler.accept(item.paramName(), item.shardId(), tensor);
-        loadedBytes += item.byteSize();
+        loadedBytes += item.ref().byteSize();
         progress.step("%s | %s (%.0f MiB)".formatted(
-          item.source().label(),
-          item.weightName(),
+          shardLabel,
+          item.ref().name(),
           loadedBytes / (1024.0 * 1024.0)));
       }
       progress.finish("%.0f MiB loaded".formatted(loadedBytes / (1024.0 * 1024.0)));
@@ -221,27 +181,14 @@ public final class ModelLoader {
     Tensor finish();
   }
 
-  @FunctionalInterface
-  private interface ReaderOpen {
-    SafetensorsReader open() throws IOException;
-  }
-
   private record ResolvedParam(String paramName, Object shardId) {
   }
 
   private record PlannedTensor(
-    WeightSource source,
-    String weightName,
+    SafetensorsTransport.TensorRef ref,
     String paramName,
-    Object shardId,
-    long byteSize
+    Object shardId
   ) {
-  }
-
-  private record WeightSource(String label, ReaderOpen opener) {
-    SafetensorsReader open() throws IOException {
-      return this.opener.open();
-    }
   }
 
   private static final class WeightAssembler {

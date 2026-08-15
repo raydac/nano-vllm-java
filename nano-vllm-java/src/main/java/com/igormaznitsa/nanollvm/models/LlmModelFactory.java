@@ -1,6 +1,7 @@
 package com.igormaznitsa.nanollvm.models;
 
 import static com.igormaznitsa.nanollvm.utils.NanoLlvmProps.CONFIG_JSON;
+import static java.nio.charset.StandardCharsets.UTF_8;
 import static java.util.Objects.requireNonNull;
 
 import com.igormaznitsa.nanollvm.chat.ChatSpecials;
@@ -8,25 +9,22 @@ import com.igormaznitsa.nanollvm.chat.LlmListener;
 import com.igormaznitsa.nanollvm.chat.LlmListeners;
 import com.igormaznitsa.nanollvm.chat.ThinkTags;
 import com.igormaznitsa.nanollvm.exceptions.ModelLoadException;
-import com.igormaznitsa.nanollvm.internal.Gemma4QatLoader;
-import com.igormaznitsa.nanollvm.internal.GgufModelLoader;
-import com.igormaznitsa.nanollvm.internal.GgufModelLoader.LoadedGguf;
-import com.igormaznitsa.nanollvm.internal.GgufReader;
-import com.igormaznitsa.nanollvm.internal.ModelBinding;
 import com.igormaznitsa.nanollvm.internal.ModelFileBundle;
-import com.igormaznitsa.nanollvm.internal.ModelLoader;
-import com.igormaznitsa.nanollvm.internal.OnnxModelLoader;
-import com.igormaznitsa.nanollvm.internal.SafetensorsReader;
 import com.igormaznitsa.nanollvm.llm.Config;
 import com.igormaznitsa.nanollvm.llm.LLM;
 import com.igormaznitsa.nanollvm.models.internal.CausalLM;
-import com.igormaznitsa.nanollvm.models.internal.CausalLMFactory;
 import com.igormaznitsa.nanollvm.models.internal.EmbeddingEncoder;
-import com.igormaznitsa.nanollvm.models.internal.EmbeddingEncoderFactory;
 import com.igormaznitsa.nanollvm.models.internal.WeightBag;
-import com.igormaznitsa.nanollvm.models.internal.WeightNames;
-import com.igormaznitsa.nanollvm.models.internal.WeightSchema;
+import com.igormaznitsa.nanollvm.models.llmarch.GgufModelLoader;
+import com.igormaznitsa.nanollvm.models.llmarch.GgufModelLoader.LoadedGguf;
+import com.igormaznitsa.nanollvm.models.llmarch.ModelBinding;
+import com.igormaznitsa.nanollvm.models.llmarch.ModelFill;
+import com.igormaznitsa.nanollvm.models.llmcontainer.ContainerTransport;
+import com.igormaznitsa.nanollvm.models.llmcontainer.GgufTransport;
+import com.igormaznitsa.nanollvm.models.llmcontainer.OnnxTransport;
+import com.igormaznitsa.nanollvm.models.llmcontainer.SafetensorsTransport;
 import com.igormaznitsa.nanollvm.tensor.MatmulRuntime;
+import com.igormaznitsa.nanollvm.tokenizer.GgufTokenizerSource;
 import com.igormaznitsa.nanollvm.tokenizer.Tokenizer;
 import java.io.IOException;
 import java.nio.file.Files;
@@ -53,7 +51,9 @@ import java.util.Map;
  * ONNX when present; Hugging Face BERT safetensors is not supported). Stream loads reject
  * ONNX {@code external_data} sidecars — use {@link #make(Path)} for those exports.
  *
- * <p>Architecture is checked by {@link ModelSupport} after the container catalog is opened.
+ * <p>Architecture is checked by {@link ModelSupport} after the container catalog is opened
+ * ({@code GgufTransport} / {@code SafetensorsTransport} / {@code OnnxTransport} →
+ * {@code ArchitectureProcessor} bind/fill/create).
  * Unsupported families throw
  * {@link com.igormaznitsa.nanollvm.exceptions.UnsupportedModelException} with a
  * catalog of what this library can run.
@@ -546,11 +546,11 @@ public final class LlmModelFactory {
     }
 
     LoadedGguf loaded = GgufModelLoader.load(ggufFile, io, allowUnpackParameters);
-    try (GgufReader reader = loaded.reader()) {
-      if (EmbeddingEncoderFactory.isEmbeddingArchitecture(loaded.config())) {
-        return loadGgufEmbedding(ggufFile, loaded, reader, io, t0, options);
+    try (GgufTransport transport = loaded.transport()) {
+      if (loaded.processor().isEmbedding()) {
+        return loadGgufEmbedding(ggufFile, loaded, transport, io, t0, options);
       }
-      return loadGgufCausal(ggufFile, loaded, reader, io, t0, options);
+      return loadGgufCausal(ggufFile, loaded, transport, io, t0, options);
     }
   }
 
@@ -563,43 +563,19 @@ public final class LlmModelFactory {
     long t0 = System.nanoTime();
     LlmListeners.info(io, null, "CPU backend: " + MatmulRuntime.sequential().backendInfo());
 
-    Config.HfConfig hfConfig = Config.HfConfig.load(modelFolder.resolve(CONFIG_JSON));
-    boolean hasSafetensors = !SafetensorsReader.listSafetensors(modelFolder).isEmpty();
-    boolean hasOnnx = OnnxModelLoader.hasOnnxWeights(modelFolder);
-    ModelSupport.Source source =
-      resolveHfSource(hasSafetensors, hasOnnx, hfConfig, modelFolder.toString());
-    ModelBinding.BoundModel bound = ModelBinding.bindHf(hfConfig, source);
-    WeightSchema schema = bound.schema();
-    String arch = bound.selection().architectureId();
-
-    LlmListeners.info(io, null, "Loading " + arch + " weights…");
-    WeightBag weights;
-    if (source == ModelSupport.Source.HF_SAFETENSORS) {
-      weights = WeightNames.ARCH_GEMMA4.equals(arch)
-        ? Gemma4QatLoader.loadWeights(modelFolder, hfConfig, schema, io)
-        : ModelLoader.loadWeights(modelFolder, hfConfig, schema, io);
-    } else {
-      weights = OnnxModelLoader.loadWeights(modelFolder, hfConfig, schema, io);
+    String configJson = Files.readString(modelFolder.resolve(CONFIG_JSON), UTF_8);
+    boolean hasSafetensors = SafetensorsTransport.present(modelFolder);
+    boolean hasOnnx = OnnxTransport.present(modelFolder);
+    ModelSupport.Source source = resolveHfSource(
+      hasSafetensors, hasOnnx, Config.HfConfig.parse(configJson), modelFolder.toString());
+    try (ContainerTransport transport = openHfTransport(source, modelFolder, configJson)) {
+      ModelBinding.BoundModel bound = ModelBinding.bind(transport.catalog());
+      LlmListeners.info(io, null, "Loading " + bound.selection().architectureId() + " weights…");
+      WeightBag weights = ModelFill.fill(transport, bound, io, false);
+      Tokenizer tokenizer = Tokenizer.fromPretrained(modelFolder);
+      return finishLoadedModel(
+        modelFolder, bound, weights, tokenizer, io, t0, options);
     }
-
-    Tokenizer tokenizer = Tokenizer.fromPretrained(modelFolder);
-    if (bound.selection().isEmbedding()) {
-      LlmListeners.info(io, null, "Building " + arch + " embedding graph…");
-      long tGraph = System.nanoTime();
-      EmbeddingEncoder encoder = EmbeddingEncoderFactory.create(hfConfig, weights);
-      LlmListeners.infof(io, null, "Embedding graph ready (%s) in %.1fs%n",
-        encoder.architectureName(), (System.nanoTime() - tGraph) / 1e9);
-      LlmListeners.infof(io, null, "Model loaded in %.1fs%n", (System.nanoTime() - t0) / 1e9);
-      return new LlmModel(modelFolder, hfConfig, weights, encoder, tokenizer, options);
-    }
-
-    LlmListeners.info(io, null, "Building " + arch + " model graph…");
-    long tGraph = System.nanoTime();
-    CausalLM network = CausalLMFactory.create(hfConfig, weights);
-    LlmListeners.infof(io, null, "Model graph ready (%s) in %.1fs%n",
-      network.architectureName(), (System.nanoTime() - tGraph) / 1e9);
-    LlmListeners.infof(io, null, "Model loaded in %.1fs%n", (System.nanoTime() - t0) / 1e9);
-    return new LlmModel(modelFolder, hfConfig, weights, network, tokenizer, options);
   }
 
   private static LlmModel loadHf(
@@ -611,49 +587,83 @@ public final class LlmModelFactory {
     long t0 = System.nanoTime();
     LlmListeners.info(io, null, "CPU backend: " + MatmulRuntime.sequential().backendInfo());
 
-    Config.HfConfig hfConfig = Config.HfConfig.parse(bundle.configJson());
+    String configJson = bundle.configJson();
     boolean hasSafetensors = !bundle.safetensors().isEmpty();
     boolean hasOnnx = !bundle.onnx().isEmpty();
-    ModelSupport.Source source =
-      resolveHfSource(hasSafetensors, hasOnnx, hfConfig, bundle.displayName());
-    ModelBinding.BoundModel bound = ModelBinding.bindHf(hfConfig, source);
-    WeightSchema schema = bound.schema();
-    String arch = bound.selection().architectureId();
-
-    LlmListeners.info(io, null, "Loading " + arch + " weights…");
-    WeightBag weights;
-    if (source == ModelSupport.Source.HF_SAFETENSORS) {
-      weights = WeightNames.ARCH_GEMMA4.equals(arch)
-        ? Gemma4QatLoader.loadWeights(
-        bundle.safetensors(), bundle.displayName(), hfConfig, schema, io)
-        : ModelLoader.loadWeights(
-        bundle.safetensors(), bundle.displayName(), hfConfig, schema, io);
-    } else {
-      weights = loadOnnxFromBundle(bundle, hfConfig, schema, io);
+    ModelSupport.Source source = resolveHfSource(
+      hasSafetensors, hasOnnx, Config.HfConfig.parse(configJson), bundle.displayName());
+    try (ContainerTransport transport = openHfTransport(source, bundle, configJson)) {
+      ModelBinding.BoundModel bound = ModelBinding.bind(transport.catalog());
+      LlmListeners.info(io, null, "Loading " + bound.selection().architectureId() + " weights…");
+      WeightBag weights = ModelFill.fill(transport, bound, io, false);
+      Tokenizer tokenizer = Tokenizer.fromJsonDocuments(
+        bundle.textFile(ModelFileId.TOKENIZER).orElse(null),
+        bundle.textFile(ModelFileId.TOKENIZER_CONFIG).orElse(null),
+        bundle.textFile(ModelFileId.GENERATION_CONFIG).orElse(null),
+        bundle.configJson());
+      return finishLoadedModel(
+        bundle.virtualPath(), bound, weights, tokenizer, io, t0, options);
     }
+  }
 
-    Tokenizer tokenizer = Tokenizer.fromJsonDocuments(
-      bundle.textFile(ModelFileId.TOKENIZER).orElse(null),
-      bundle.textFile(ModelFileId.TOKENIZER_CONFIG).orElse(null),
-      bundle.textFile(ModelFileId.GENERATION_CONFIG).orElse(null),
-      bundle.configJson());
-    if (bound.selection().isEmbedding()) {
+  private static ContainerTransport openHfTransport(
+    final ModelSupport.Source source,
+    final Path modelFolder,
+    final String configJson
+  ) throws IOException {
+    return switch (source) {
+      case HF_SAFETENSORS -> SafetensorsTransport.open(modelFolder, configJson);
+      case ONNX -> OnnxTransport.open(modelFolder, configJson);
+      case GGUF -> throw new ModelLoadException("HF folder cannot be a GGUF container");
+    };
+  }
+
+  private static ContainerTransport openHfTransport(
+    final ModelSupport.Source source,
+    final ModelFileBundle bundle,
+    final String configJson
+  ) throws IOException {
+    return switch (source) {
+      case HF_SAFETENSORS -> SafetensorsTransport.open(
+        bundle.safetensors(), configJson, bundle.displayName());
+      case ONNX -> {
+        ModelFileBundle.NamedBytes primary = bundle.onnx().getFirst();
+        yield OnnxTransport.open(primary.bytes(), primary.name(), configJson);
+      }
+      case GGUF -> throw new ModelLoadException("HF bundle cannot be a GGUF container");
+    };
+  }
+
+  private static LlmModel finishLoadedModel(
+    final Path modelPath,
+    final ModelBinding.BoundModel bound,
+    final WeightBag weights,
+    final Tokenizer tokenizer,
+    final LlmListener io,
+    final long startedAtNanos,
+    final Map<String, Object> options
+  ) {
+    String arch = bound.selection().architectureId();
+    Config.HfConfig hfConfig = bound.config();
+    if (bound.processor().isEmbedding()) {
       LlmListeners.info(io, null, "Building " + arch + " embedding graph…");
       long tGraph = System.nanoTime();
-      EmbeddingEncoder encoder = EmbeddingEncoderFactory.create(hfConfig, weights);
+      EmbeddingEncoder encoder = bound.processor().createEmbedding(hfConfig, weights);
       LlmListeners.infof(io, null, "Embedding graph ready (%s) in %.1fs%n",
         encoder.architectureName(), (System.nanoTime() - tGraph) / 1e9);
-      LlmListeners.infof(io, null, "Model loaded in %.1fs%n", (System.nanoTime() - t0) / 1e9);
-      return new LlmModel(bundle.virtualPath(), hfConfig, weights, encoder, tokenizer, options);
+      LlmListeners.infof(io, null, "Model loaded in %.1fs%n",
+        (System.nanoTime() - startedAtNanos) / 1e9);
+      return new LlmModel(modelPath, hfConfig, weights, encoder, tokenizer, options);
     }
 
     LlmListeners.info(io, null, "Building " + arch + " model graph…");
     long tGraph = System.nanoTime();
-    CausalLM network = CausalLMFactory.create(hfConfig, weights);
+    CausalLM network = bound.processor().createCausal(hfConfig, weights);
     LlmListeners.infof(io, null, "Model graph ready (%s) in %.1fs%n",
       network.architectureName(), (System.nanoTime() - tGraph) / 1e9);
-    LlmListeners.infof(io, null, "Model loaded in %.1fs%n", (System.nanoTime() - t0) / 1e9);
-    return new LlmModel(bundle.virtualPath(), hfConfig, weights, network, tokenizer, options);
+    LlmListeners.infof(io, null, "Model loaded in %.1fs%n",
+      (System.nanoTime() - startedAtNanos) / 1e9);
+    return new LlmModel(modelPath, hfConfig, weights, network, tokenizer, options);
   }
 
   private static ModelSupport.Source resolveHfSource(
@@ -676,17 +686,6 @@ public final class LlmModelFactory {
         + System.lineSeparator() + System.lineSeparator() + ModelSupport.CATALOG);
   }
 
-  private static WeightBag loadOnnxFromBundle(
-    final ModelFileBundle bundle,
-    final Config.HfConfig hfConfig,
-    final WeightSchema schema,
-    final LlmListener io
-  ) throws IOException {
-    ModelFileBundle.NamedBytes primary = bundle.onnx().getFirst();
-    return OnnxModelLoader.loadWeightsFromBytes(
-      primary.bytes(), primary.name(), hfConfig, schema, io);
-  }
-
   private static LlmModel loadGguf(
     final ModelFileBundle bundle,
     final LlmListener io,
@@ -706,11 +705,11 @@ public final class LlmModelFactory {
 
     LoadedGguf loaded = GgufModelLoader.load(
       bundle.ggufBuffer(), bundle.virtualPath(), io, allowUnpackParameters);
-    try (GgufReader reader = loaded.reader()) {
-      if (EmbeddingEncoderFactory.isEmbeddingArchitecture(loaded.config())) {
-        return loadGgufEmbedding(bundle.virtualPath(), loaded, reader, io, t0, options);
+    try (GgufTransport transport = loaded.transport()) {
+      if (loaded.processor().isEmbedding()) {
+        return loadGgufEmbedding(bundle.virtualPath(), loaded, transport, io, t0, options);
       }
-      return loadGgufCausal(bundle.virtualPath(), loaded, reader, io, t0, options);
+      return loadGgufCausal(bundle.virtualPath(), loaded, transport, io, t0, options);
     }
   }
 
@@ -724,19 +723,19 @@ public final class LlmModelFactory {
   private static LlmModel loadGgufCausal(
     final Path modelPath,
     final LoadedGguf loaded,
-    final GgufReader reader,
+    final GgufTokenizerSource tokenizerSource,
     final LlmListener io,
     final long startedAtNanos,
     final Map<String, Object> options
   ) {
     LlmListeners.info(io, null,
-      "Building " + CausalLMFactory.detect(loaded.config()) + " model graph…");
+      "Building " + loaded.processor().architectureId() + " model graph…");
     long tGraph = System.nanoTime();
-    CausalLM network = CausalLMFactory.create(loaded.config(), loaded.weights());
+    CausalLM network = loaded.processor().createCausal(loaded.config(), loaded.weights());
     LlmListeners.infof(io, null, "Model graph ready (%s) in %.1fs%n",
       network.architectureName(), (System.nanoTime() - tGraph) / 1e9);
 
-    Tokenizer tokenizer = Tokenizer.fromGguf(reader);
+    Tokenizer tokenizer = Tokenizer.fromGguf(tokenizerSource);
     LlmListeners.infof(io, null, "Model loaded in %.1fs%n",
       (System.nanoTime() - startedAtNanos) / 1e9);
     return new LlmModel(modelPath, loaded.config(), loaded.weights(), network, tokenizer, options);
@@ -745,19 +744,20 @@ public final class LlmModelFactory {
   private static LlmModel loadGgufEmbedding(
     final Path modelPath,
     final LoadedGguf loaded,
-    final GgufReader reader,
+    final GgufTokenizerSource tokenizerSource,
     final LlmListener io,
     final long startedAtNanos,
     final Map<String, Object> options
   ) {
     LlmListeners.info(io, null,
-      "Building " + EmbeddingEncoderFactory.detect(loaded.config()) + " embedding graph…");
+      "Building " + loaded.processor().architectureId() + " embedding graph…");
     long tGraph = System.nanoTime();
-    EmbeddingEncoder encoder = EmbeddingEncoderFactory.create(loaded.config(), loaded.weights());
+    EmbeddingEncoder encoder =
+      loaded.processor().createEmbedding(loaded.config(), loaded.weights());
     LlmListeners.infof(io, null, "Embedding graph ready (%s) in %.1fs%n",
       encoder.architectureName(), (System.nanoTime() - tGraph) / 1e9);
 
-    Tokenizer tokenizer = Tokenizer.fromGguf(reader);
+    Tokenizer tokenizer = Tokenizer.fromGguf(tokenizerSource);
     LlmListeners.infof(io, null, "Model loaded in %.1fs%n",
       (System.nanoTime() - startedAtNanos) / 1e9);
     return new LlmModel(modelPath, loaded.config(), loaded.weights(), encoder, tokenizer, options);

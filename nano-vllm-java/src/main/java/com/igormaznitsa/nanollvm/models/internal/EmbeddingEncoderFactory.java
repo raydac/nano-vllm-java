@@ -1,9 +1,8 @@
 package com.igormaznitsa.nanollvm.models.internal;
 
-import static com.igormaznitsa.nanollvm.models.internal.WeightNames.ARCH_BERT;
-
 import com.igormaznitsa.nanollvm.llm.Config;
 import com.igormaznitsa.nanollvm.models.ModelSupport;
+import com.igormaznitsa.nanollvm.models.llmarch.ArchitectureProcessors;
 
 /**
  * Builds an immutable {@link EmbeddingEncoder} from HF/GGUF config + {@link WeightBag}.
@@ -16,10 +15,7 @@ public final class EmbeddingEncoderFactory {
   }
 
   public static EmbeddingEncoder create(final Config.HfConfig config, final WeightBag weights) {
-    return switch (detect(config)) {
-      case ARCH_BERT -> new BertForEmbedding(config, weights);
-      default -> throw new IllegalStateException("unsupported embedding architecture after detect");
-    };
+    return ArchitectureProcessors.of(detect(config)).createEmbedding(config, weights);
   }
 
   public static WeightSchema schema(final Config.HfConfig config) {

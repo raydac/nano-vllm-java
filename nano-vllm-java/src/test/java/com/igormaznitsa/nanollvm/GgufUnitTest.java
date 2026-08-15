@@ -7,10 +7,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.igormaznitsa.nanollvm.internal.Context;
 import com.igormaznitsa.nanollvm.internal.GgufDequant;
-import com.igormaznitsa.nanollvm.internal.GgufReader;
 import com.igormaznitsa.nanollvm.layers.ShortConv;
 import com.igormaznitsa.nanollvm.models.internal.PackedWeight;
 import com.igormaznitsa.nanollvm.models.internal.WeightBag;
+import com.igormaznitsa.nanollvm.models.llmcontainer.GgufReader;
 import com.igormaznitsa.nanollvm.prompts.ChatPrompts;
 import com.igormaznitsa.nanollvm.tensor.EmbeddingKernel;
 import com.igormaznitsa.nanollvm.tensor.LinearKernel;

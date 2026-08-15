@@ -7,7 +7,7 @@
 - **ONNX Tier A:** folder load via `LlmModelFactory.make` — initializers only (no ORT); root or `onnx/`; safetensors preferred if both present; chat Qwen3/Gemma3/Llama + BERT embeddings (HF→GGUF name remap)
 - **GGUF BERT embeddings** (e.g. gte-small): same `LlmModelFactory.make` → `LlmModel.embed`; `LLM.builder` rejects embedding models; Q3_K + IQ4_NL dequant
 - **ModelFileSource**: `ModelFileId` → `InputStream` (+ weight shards); load into heap only (no disk cache); `make(Path)` stays direct disk I/O; ONNX ids `MODEL_ONNX` / `MODEL_ONNX_FP16`
-- **GGUF:** packed by default; dequant catalog matches current llama.cpp weight types (K/IQ/TQ/MX/NV/legacy); `LlmModelFactory.make(path, io, true)` unpacks at load; `LLM.Builder.allowUnpackParameters()` late-unpacks packed models. Chat GGUF: **qwen3** + **lfm2**; embeddings **bert**. Load = container **transport** (`GgufTransport` / HF folder / ONNX) then **`ModelBinding`** (adapt catalog → `HfConfig` + schema if the file is enough for a supported graph)
+- **GGUF:** packed by default; dequant catalog matches current llama.cpp weight types (K/IQ/TQ/MX/NV/legacy); `LlmModelFactory.make(path, io, true)` unpacks at load; `LLM.Builder.allowUnpackParameters()` late-unpacks packed models. Chat GGUF: **qwen3** + **lfm2**; embeddings **bert**. Load = `models.llmcontainer` transport → `models.llmarch` ArchitectureProcessor bind/fill/create
 - Library: `LlmModelFactory.open(path).make()` or `make` → shared `LlmModel` (`AutoCloseable`); also `make(ModelFileSource)` / `fromClasspath*` / `openClasspath*` (stream → heap; no disk cache); `LLM.Builder` only (warmup **off** by default); `.sampling(SamplingParams)` seals chat/complete defaults; close **LLM first**, then **model**. `LlmModel.toString()` prints kind, architecture, container, sizes, packed/dense/qat, chat format (safe after close). Builder-built types (`LLM`, `Config`, `LlmAdvisor`, `SamplingParams`, `MatmulRuntime`, `RagFactory`/`CorpusLoader` corpus) keep constructors private; `ResourceLimits` is a public record so its canonical constructor cannot be hidden.
 - **`description.md`:** re-checked against 1.1.0 — Gemma 4 text QAT (packed, not F32 widen), panel GEMV / SIMD
   `Ops` / in-place paged KV, `TEXT_DEBUG` off unless `emitDebugPrompts(true)`, `AdvisorRagHelloWorld`; ONNX Tier A
@@ -15,7 +15,7 @@
   educational Qwen/Gemma tables kept as examples;
   **format restriction** tables in ch. 7 / 7a / 7c; **usage Java snippets** in ch. 4 / 7a / 7c / 14 / 16 / 17
   (load+chat, GGUF/ONNX, stream/cancel, classpath, advisors, BM25+classpath RAG);
-  ch. **7a** covers **Qwen3 GGUF** (bring-your-own; transport + `ModelBinding`) as well as LFM2;
+  ch. **7a** covers **Qwen3 GGUF** (bring-your-own; transport + architecture processor) as well as LFM2;
   ch. **12** KV cache: what is stored (post-RoPE K/V per layer/head/position), what is not, prefill vs decode,
   paged blocks / `blockTable` / `kvHeapFraction`, GQA + Gemma 4 shared-KV, lifetime vs chat history;
   **ThinkTags** / `OPTION_THINK_TAGS` and **ChatSpecials** / `OPTION_CHAT_SPECIALS` in ch. 4, 7a, 9, 16;
@@ -54,8 +54,9 @@
 - Engine: `Transformer` owns per-LLM arenas + explicit step `Context`; `MatmulRuntime` per `LLM`; `kvHeapFraction` (default 0.25) for KV auto-size
 - `LLM.generate` / `close` use `ReentrantLock`; `assertNotClosed` on infrequent entry points; props = **`nanollvm.*` / `NANOLLVM_*` only**
 - JPMS exports (`models` / `llm` / `chat` / `rag` / `tokenizer` / `utils` / `exceptions`) cover the
-  application surface; `engine` / `layers` / `tensor` / `internal` / `prompts` / `models.internal`
-  stay module-private (no signature leaks). `RagSession` now has the same recovery / debug / history
+  application surface; `engine` / `layers` / `tensor` / `internal` / `prompts` /
+  `models.internal` / `models.llmcontainer` / `models.llmarch`
+  stay module-private (no signature leaks; `ModuleExportsTest` locks this). `RagSession` has the same recovery / debug / history
   knobs as `ChatSession` so RAG callers need not drop through `.chat()`.
 
 - **RAG:** `RagFactory` → `PreparedRag` (BM25); `addResource` / `makeResource` for classpath docs; optional `withEmbeddings` → `HybridRagIndex` (`DenseRagIndex` + RRF); package-private `CorpusLoader`; public API ~12 types (+ `PdfTextExtractor`)
@@ -64,7 +65,7 @@
 
 
 ## 2. Architecture & Technical Discoveries
-- Multi-module: library JAR no longer contains `samples`; demos in `nano-vllm-java-samples` (classpath / `exec:java`, not a JPMS module). Surefire sets `nanollvm.models.dir` / `nanollvm.rag.dir` to `${maven.multiModuleProjectDirectory}/…`; samples `exec:java` uses that directory as `workingDirectory`
+- Load pipeline: `models.llmcontainer.ContainerTransport` → `ContainerCatalog` → `ArchitectureProcessor` (`CausalArchitecture` for chat, `EmbeddingArchitecture` for BERT) bind → fill → create graph. HF-only chat (Gemma3 / Gemma4 / Llama) uses the causal default bind; Qwen3/BERT override with dual-source; LFM2 is GGUF-only. No Gemma3+Gemma4 parent — fill/graph differ. Those types carry contract Javadoc and `@since 1.1.0`.
 - Share one `LlmModel` / `PreparedRag` across many `LLM`s; one LLM not concurrent-safe for generate (`cancel()` is cross-thread)
 - Lifecycle: `LLM.close()` frees scheduler + KV/conv arenas + matmul mark (drops network ref); `LlmModel.close()` releases packed payloads / clears weight+network/encoder refs — close engines before model
 - `.disableMultiCpu()` / `cpuThreads(1)` → `MatmulRuntime.sequential()` (pool=null, calling thread only); builder thread count wins over `-Dnanollvm.cpu.threads`
@@ -99,14 +100,12 @@
 - **Gemma 4 E2B QAT mobile** — text-only `LlmModel` load for `models/Gemma4-E2B-IT-QAT-Mobile/` (`google/gemma-4-E2B-it-qat-mobile-transformers`). Vision/audio unused. Packed QAT (int2/4/8 + SRQ), PLE, KV sharing, `<|turn>` chat.
 - Library de-productized (chat format markers / sample-owned demo policy); ONNX Tier A + Llama + SmolLM2 Instruct demo
 - `Example` terminal demo: downloaded models first (Qwen3-0.6B preferred); Enter = first item; empty disk exits with download help; `--debug` for prepared prompts
-- **Qwen3 GGUF** — `LlmModelFactory.make(qwen3.gguf)` via transport + `ModelBinding`; unfused packed Q/K/V (no qkv_proj concat). HF safetensors Qwen3 folder unchanged. Live `Qwen3-0.6B-Q8_0.gguf` load test removed (file not kept in `models/`); `ModelBindingTest` uses a synthetic catalog only. README / `description.md` §7a / `models/README.md` document bring-your-own Qwen3 GGUF (no download script).
+- **Qwen3 GGUF** — `LlmModelFactory.make(qwen3.gguf)` via transport + `ArchitectureProcessor`; unfused packed Q/K/V (no qkv_proj concat). HF safetensors Qwen3 folder unchanged. Live `Qwen3-0.6B-Q8_0.gguf` load test removed (file not kept in `models/`); `ModelBindingTest` uses a synthetic catalog only. README / `description.md` §7a / `models/README.md` document bring-your-own Qwen3 GGUF (no download script).
 - Windows download scripts audited/hardened (parity with `.sh` URLs/files OK)
 - `description.md` usage snippets added (API-facing chapters)
 - Error Prone / IDE compiler inspections cleaned: locale on `toLowerCase`, explicit charset, `@Override` on GGUF tokenizer meta, Javadoc summaries on `@since`-only APIs, packed-weight release via empty payload (not `==` sentinel), unused `Attention.layerIndex` / `Tokenizer.chatTemplate` dropped. Tensor/PDF `record`s keep primitive arrays (`@SuppressWarnings("ArrayRecordComponent")`).
 - **SpotBugs** (`spotbugs-maven-plugin` on library `verify`): real `Path.getFileName()` nulls guarded; `spotbugs-exclude.xml` documents by-design remainder (shared tensors/arrays, frozen maps/lists, `CT_CONSTRUCTOR_THROW` on Java 21, Sequence/Builder thread confinement, virtual `/nanollvm-memory` paths).
-- Public API / JPMS audit: exported packages are complete for load/chat/complete/stream/cancel/
-  timeout/embed/RAG/advisors/classpath/`ModelFileSource`; `RagSession` now forwards ChatSession
-  recovery/debug/history knobs (samples no longer poke `.chat()` for those).
+- IDE inspections: ModelSupport gemma4 multimodal branch dropped a redundant `supported()` (always true after the reject-return); Linear SRQ helper renamed so output `y` is not passed as parameter `x`.
 - Builder contract: `LLM` / `Config` / `LlmAdvisor` / `SamplingParams` / `MatmulRuntime` construct
   only via nested `Builder` (private target ctor). `SamplingParams` is no longer a record with
   convenience constructors. `ResourceLimits` stays a public record (canonical ctor cannot be hidden).

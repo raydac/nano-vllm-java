@@ -172,8 +172,7 @@ public final class ModelSupport {
         return fromName;
       }
       if (isMultimodalClass(raw.toLowerCase(ROOT))) {
-        if (fromName != null && fromName.supported()
-          && ARCH_GEMMA4.equals(fromName.selection().architectureId())) {
+        if (fromName != null && ARCH_GEMMA4.equals(fromName.selection().architectureId())) {
           if (firstSupported == null) {
             firstSupported = fromName;
           }

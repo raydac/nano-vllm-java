@@ -1,4 +1,4 @@
-package com.igormaznitsa.nanollvm.internal;
+package com.igormaznitsa.nanollvm.models.llmarch;
 
 import static java.util.Objects.requireNonNull;
 
@@ -8,7 +8,7 @@ import com.igormaznitsa.nanollvm.exceptions.UnsupportedModelException;
 import com.igormaznitsa.nanollvm.llm.Config;
 import com.igormaznitsa.nanollvm.models.internal.WeightBag;
 import com.igormaznitsa.nanollvm.models.internal.WeightSchema;
-
+import com.igormaznitsa.nanollvm.models.llmcontainer.GgufTransport;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.ByteBuffer;
@@ -16,19 +16,38 @@ import java.nio.file.Path;
 
 /**
  * Orchestrates GGUF load: {@link GgufTransport} reads the container, {@link ModelBinding} selects
- * a supported graph (Qwen3 / LFM2 chat, BERT embeddings) and expected tensor names, then payloads
- * are copied. Default keeps large matrices GGML-packed; {@code allowUnpackParameters} dequantizes
- * each tensor to float32 from the mmap during load (no packed heap copy).
+ * an {@link ArchitectureProcessor} (Qwen3 / LFM2 chat, BERT embeddings), then that processor fills
+ * the weight bag. Default keeps large matrices GGML-packed;
+ * {@code allowUnpackParameters} dequantizes each tensor to float32 from the mmap during load.
+ *
+ * @since 1.1.0
  */
 public final class GgufModelLoader {
 
   private GgufModelLoader() {
   }
 
+  /**
+   * Loads a GGUF file with packed weights (no float32 unpack).
+   *
+   * @param ggufPath path to a {@code .gguf} file
+   * @param io       load progress; {@code null} is treated as silent
+   * @return config, weights, open transport, schema, and processor
+   * @since 1.1.0
+   */
   public static LoadedGguf load(final Path ggufPath, final LlmListener io) throws IOException {
     return load(ggufPath, io, false);
   }
 
+  /**
+   * Loads a GGUF file, optionally unpacking packed tensors to float32 during mmap.
+   *
+   * @param ggufPath              path to a {@code .gguf} file
+   * @param io                    load progress; {@code null} is treated as silent
+   * @param allowUnpackParameters {@code true} to dequantize to float32 at load
+   * @return config, weights, open transport, schema, and processor
+   * @since 1.1.0
+   */
   public static LoadedGguf load(
     final Path ggufPath,
     final LlmListener io,
@@ -63,7 +82,7 @@ public final class GgufModelLoader {
     final boolean allowUnpackParameters
   ) throws IOException {
     try {
-      ModelBinding.BoundModel bound = ModelBinding.bindGguf(transport.catalog());
+      ModelBinding.BoundModel bound = ModelBinding.bind(transport.catalog());
       Config.HfConfig config = bound.config();
       LlmListeners.infof(streams, null,
         "GGUF %s: layers=%d hidden=%d ff=%d heads=%d/%d%n",
@@ -73,9 +92,8 @@ public final class GgufModelLoader {
         config.intermediateSize(),
         config.numAttentionHeads(),
         config.numKeyValueHeads());
-      WeightBag weights = transport.loadWeights(allowUnpackParameters, streams);
-      bound.requireLoadedWeights(weights);
-      return new LoadedGguf(config, weights, transport.reader(), bound.schema());
+      WeightBag weights = ModelFill.fill(transport, bound, streams, allowUnpackParameters);
+      return new LoadedGguf(config, weights, transport, bound.schema(), bound.processor());
     } catch (UnsupportedModelException e) {
       closeTransport(transport);
       throw new UnsupportedModelException(
@@ -83,7 +101,7 @@ public final class GgufModelLoader {
           + System.lineSeparator() + System.lineSeparator() + e.getMessage(),
         e.modelType(),
         e.architectures());
-    } catch (RuntimeException e) {
+    } catch (RuntimeException | IOException e) {
       closeTransport(transport);
       throw e;
     }
@@ -97,11 +115,30 @@ public final class GgufModelLoader {
     }
   }
 
+  /**
+   * Loaded GGUF: config, weights, live transport, schema, and architecture processor.
+   *
+   * @param config     GGUF metadata mapped onto Hugging Face-shaped config
+   * @param weights    filled parameter bag
+   * @param transport  open GGUF container (caller must close)
+   * @param schema     expected parameter names
+   * @param processor  family that bound and filled this file
+   * @since 1.1.0
+   */
   public record LoadedGguf(
     Config.HfConfig config,
     WeightBag weights,
-    GgufReader reader,
-    WeightSchema schema
+    GgufTransport transport,
+    WeightSchema schema,
+    ArchitectureProcessor processor
   ) {
+
+    public LoadedGguf {
+      requireNonNull(config, "config");
+      requireNonNull(weights, "weights");
+      requireNonNull(transport, "transport");
+      requireNonNull(schema, "schema");
+      requireNonNull(processor, "processor");
+    }
   }
 }

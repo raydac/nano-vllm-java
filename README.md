@@ -225,11 +225,11 @@ requires com.igormaznitsa.nanollvm;
 ```
 
 Public API packages: `models`, `llm`, `chat`, `rag`, `tokenizer`, `utils`, `exceptions`.
-(`prompts` and `models.internal` are module-private.)
-`engine`, `layers`, `tensor`, and `internal` are **not** exported — use `LlmModelFactory` / `LLM` /
-`RagFactory` from application code. Runnable demos (`HelloWorld`, `LogTriageHelloWorld`,
-`AdvisorRagHelloWorld`, `Example`, `Bench`, `samples.utils`) live in the separate
-`nano-vllm-java-samples` module.
+Weight-load internals (`models.llmcontainer`, `models.llmarch`, `models.internal`),
+`prompts`, `engine`, `layers`, `tensor`, and `internal` are **not** exported — use
+`LlmModelFactory` / `LLM` / `RagFactory` from application code. Runnable demos
+(`HelloWorld`, `LogTriageHelloWorld`, `AdvisorRagHelloWorld`, `Example`, `Bench`,
+`samples.utils`) live in the separate `nano-vllm-java-samples` module.
 
 The packaged library JAR has no `Main-Class`. In-repo demos:
 

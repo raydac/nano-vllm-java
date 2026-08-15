@@ -1,4 +1,4 @@
-package com.igormaznitsa.nanollvm.internal;
+package com.igormaznitsa.nanollvm.models.llmarch;
 
 import static com.igormaznitsa.nanollvm.models.internal.WeightNames.ARCH_BERT;
 import static com.igormaznitsa.nanollvm.models.internal.WeightNames.ARCH_LFM2;
@@ -7,19 +7,26 @@ import static com.igormaznitsa.nanollvm.models.internal.WeightNames.GGUF_OUTPUT;
 import static java.util.Objects.requireNonNull;
 
 import com.igormaznitsa.nanollvm.llm.Config;
-
+import com.igormaznitsa.nanollvm.models.llmcontainer.ContainerCatalog;
 import java.util.List;
 import java.util.stream.IntStream;
 import java.util.stream.Stream;
 
 /**
  * Maps GGUF metadata keys onto {@link Config.HfConfig} for architectures this library can run.
+ *
+ * @since 1.1.0
  */
 final class GgufConfigs {
 
   private GgufConfigs() {
   }
 
+  /**
+   * Qwen3 GGUF {@code general.architecture=qwen3} → Hugging Face-shaped config.
+   *
+   * @since 1.1.0
+   */
   static Config.HfConfig qwen3(final ContainerCatalog catalog) {
     requireNonNull(catalog, "catalog");
     String prefix = metadataPrefix(catalog, "qwen3");
@@ -70,6 +77,11 @@ final class GgufConfigs {
     );
   }
 
+  /**
+   * LFM2 GGUF {@code general.architecture=lfm2} → Hugging Face-shaped config.
+   *
+   * @since 1.1.0
+   */
   static Config.HfConfig lfm2(final ContainerCatalog catalog) {
     requireNonNull(catalog, "catalog");
     String arch = catalog.architectureHint();
@@ -121,6 +133,11 @@ final class GgufConfigs {
     );
   }
 
+  /**
+   * BERT GGUF {@code general.architecture=bert} → Hugging Face-shaped config.
+   *
+   * @since 1.1.0
+   */
   static Config.HfConfig bert(final ContainerCatalog catalog) {
     requireNonNull(catalog, "catalog");
     String prefix = "bert";

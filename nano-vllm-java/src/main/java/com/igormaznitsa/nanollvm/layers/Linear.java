@@ -120,13 +120,13 @@ public class Linear {
     float[] xData = x.data();
     int xOff = x.offset();
     if (this.inputActivationScale != 0f) {
-      Tensor quantized = this.applySrq(x, this.inputActivationScale);
+      Tensor quantized = this.scaleActivations(x, this.inputActivationScale);
       xData = quantized.data();
       xOff = quantized.offset();
     }
     this.kernel.apply(xData, xOff, biasData, y.data(), 0, rows, matmul);
     if (this.outputActivationScale != 0f) {
-      y = this.applySrq(y, this.outputActivationScale);
+      y = this.scaleActivations(y, this.outputActivationScale);
     }
     if (xs.length == 1) {
       return y.reshape(out);
@@ -139,14 +139,14 @@ public class Linear {
     return y.reshape(newShape);
   }
 
-  private Tensor applySrq(final Tensor x, final float scale) {
-    Tensor out = Tensor.zeros(x.shape());
-    float[] xd = x.data();
-    float[] od = out.data();
-    int off = x.offset();
-    int n = x.numel();
+  private Tensor scaleActivations(final Tensor values, final float scale) {
+    Tensor out = Tensor.zeros(values.shape());
+    float[] source = values.data();
+    float[] dest = out.data();
+    int off = values.offset();
+    int n = values.numel();
     for (int i = 0; i < n; i++) {
-      od[i] = GemmaQat.applySrq(xd[off + i], scale);
+      dest[i] = GemmaQat.applySrq(source[off + i], scale);
     }
     return out;
   }

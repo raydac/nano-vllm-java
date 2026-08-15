@@ -123,10 +123,10 @@ ONNX demos), and **Gemma 4 text** (QAT mobile) loads as chat — vision and audi
 The same Qwen3 graph also loads from a **GGUF** file (**since 1.1.0**). A further GGUF path loads **LFM2**
 (hybrid short-convolution + GQA). You usually need not care which; the program detects which files you pointed it at.
 
-**In the code:** architecture pick is `CausalLMFactory.detect` / `create` → `Qwen3ForCausalLM`,
+**In the code:** architecture pick is `ArchitectureProcessors.of` → `Qwen3ForCausalLM`,
 `Gemma3ForCausalLM`, `Gemma4ForCausalLM`, `LlamaForCausalLM`, or `Lfm2ForCausalLM`; GGUF entry is `LlmModelFactory` →
-`internal.GgufTransport` (container catalog) → `internal.ModelBinding` → `internal.GgufModelLoader`;
-ONNX folders use `internal.OnnxModelLoader` (chapter **7c**); one next-token
+`models.llmcontainer.GgufTransport` (container catalog) → `models.llmarch.ArchitectureProcessor.bind` / `fill` / `create`;
+ONNX folders use `models.llmcontainer.OnnxTransport` → the same architecture processor (chapter **7c**); one next-token
 step is `Transformer.step` → `CausalLM.forward` / `computeLogits` → `Sampler.forward` (chapter 16).
 
 ---
@@ -273,8 +273,8 @@ worksheets change while answering. Close order: close each **`LLM` first**, then
 Optional `Map` load options (**since 1.1.0**) include `LlmModel.OPTION_THINK_TAGS` (`ThinkTags`) and
 `LlmModel.OPTION_CHAT_SPECIALS` (`ChatSpecials`; both frozen on the model, library defaults when omitted).
 A non-silent `LlmListener` sees the same in-place percent/ETA bar while **safetensors**, **GGUF**, or **ONNX** weights
-are poured (`internal.LoadProgress`). Causal graphs use internal `CausalLMFactory` + weight loaders; embedding GGUFs
-use `EmbeddingEncoderFactory`. Each `LLM.builder(model).build()` allocates its own KV arena via `Transformer`
+are poured (`models.llmcontainer.LoadProgress`). Causal graphs use `ArchitectureProcessor.createCausal`; embedding GGUFs
+use `ArchitectureProcessor.createEmbedding`. Each `LLM.builder(model).build()` allocates its own KV arena via `Transformer`
 (chapter 16).
 
 ```java
@@ -313,9 +313,8 @@ If loading failed halfway, you would have a building with missing furniture: som
 crashes. A successful **model** load means: **every expected shelf has its numbers**, dictionary ready. A successful
 **engine** open means notebooks are allocated for that `LLM`.
 
-**In the code (shelves):** internal `ModelLoader` / `GgufTransport` + `ModelBinding` / `GgufModelLoader` merge into a
-`WeightBag`; `CausalLMFactory` (or
-embedding factory) builds an immutable graph. Notebooks via per-`LLM` `KvCacheArena` bound into `internal.Context` for
+**In the code (shelves):** `ContainerTransport` (`SafetensorsTransport` / `OnnxTransport` / `GgufTransport`) +
+`ArchitectureProcessor` (bind catalog → fill `WeightBag` → create graph). Notebooks via per-`LLM` `KvCacheArena` bound into `internal.Context` for
 `Attention` (chapter 16).
 
 ### Why the first load feels slow and heavy
@@ -908,7 +907,7 @@ names); encode/decode and `applyChatTemplate` live on `Tokenizer` (chapter 16).
 ## 7. Tensors and `*.safetensors` — parameters on disk
 
 The large files named `model.safetensors` or `model-00001-of-00003.safetensors` hold the **learned parameters** of the
-model. This project reads them with `internal.SafetensorsReader` and copies them into the empty parameter buffers allocated from
+model. This project reads them with `models.llmcontainer.SafetensorsReader` and copies them into the empty parameter buffers allocated from
 `config.json`. Before the file format, it helps to fix what a **tensor** is — because every weight, every activation,
 and every intermediate result in chapters 8–11 is one.
 
@@ -1049,7 +1048,7 @@ collide across shards for the same parameter.
   1. Read header → names, dtypes, shapes, byte ranges
   2. Match name → canonical param (rewrite q_proj/k_proj/v_proj → fused qkv_proj, etc.)
   3. mmap / read payload slice → convert to float32 Tensor
-  4. Assemble into WeightBag (merge packed shards), then CausalLMFactory.create builds the graph
+  4. Assemble into WeightBag (merge packed shards), then ArchitectureProcessor.createCausal builds the graph
 ```
 
 Unknown names are skipped. Missing **required** names fail the load.
@@ -1076,9 +1075,9 @@ in RAM, expect roughly **~2×** that payload for resident weights alone — plus
 > numeric payload. Float crates are widened to float32; Gemma 4 text QAT stays packed. Names assemble into a
 > `WeightBag` used to construct the immutable model graph.**
 
-**In the code:** `internal.SafetensorsReader` parses the file; `internal.ModelLoader.loadWeights` matches names
-(including packed `q_proj`/`k_proj`/`v_proj` → `qkv_proj`) and merges into `WeightBag`; `internal.LoadProgress` redraws
-the same percent/ETA bar used by GGUF and ONNX when a listener is attached; `CausalLMFactory.create` builds
+**In the code:** `models.llmcontainer.SafetensorsTransport` lists shards and headers; `models.llmcontainer.SafetensorsReader` reads payloads; `ArchitectureProcessor.bind` + `fill` (`ModelLoader` / `Gemma4QatLoader`) match names
+(including packed `q_proj`/`k_proj`/`v_proj` → `qkv_proj`) and merges into `WeightBag`; `models.llmcontainer.LoadProgress` redraws
+the same percent/ETA bar used by GGUF and ONNX when a listener is attached; `ArchitectureProcessor.createCausal` builds
 the graph (chapter 16). Conceptual tensor definitions: chapter 10.
 
 **Further reading:** format overview in the
@@ -1101,9 +1100,7 @@ and **GGML-typed weight blocks** (often quantized). This engine supports **GGUF 
 - architecture **`lfm2`** — hybrid short-convolution + GQA **chat** models (this section);
 - architecture **`bert`** — sentence-embedding encoders (**chapter 7b**, **since 1.1.0**).
 
-Load is two layers: the GGUF **transport** (`GgufTransport`) opens any v2/v3 file (metadata + tensor catalog, then
-payloads). A **model binding** (`ModelBinding.bindGguf`) then checks whether that catalog is enough for a graph this
-library implements. Unsupported families (Qwen2, Gemma/Llama GGUF, MoE, VL) still fail before weights are copied, with
+Load is three layers for every container: **transport** opens the file or folder (`GgufTransport`, `SafetensorsTransport`, `OnnxTransport`) and reports a catalog (metadata + tensor names). **Architecture processing** (`ArchitectureProcessor`) then decodes the family (`qwen3` / `gemma3` / `gemma4` / `llama` / `lfm2` / `bert`). Chat families share a causal template (`CausalArchitecture`: Hugging Face bind by default, required `createCausal`); BERT uses `EmbeddingArchitecture`. Processors bind config + schema, fill weights, and build the graph. Gemma 4 still overrides fill (QAT safetensors only) and LFM2 overrides bind/fill (GGUF only) — they are not subclasses of Gemma 3 or of each other. Unsupported families (Qwen2, Gemma/Llama GGUF, MoE, VL) still fail before weights are copied, with
 `ModelSupport.CATALOG`.
 
 There is **no** in-repo download for a Qwen3 GGUF. Place any `general.architecture=qwen3` file yourself (for example
@@ -1282,9 +1279,9 @@ weight RAM stays near packed size (KV / activations are still float32).
 > safetensors. Chat graphs are `qwen3` and `lfm2`; the same container also loads BERT embedding graphs (chapter 7b).**
 
 **In the code (application entry):** `LlmModelFactory.make` / `make(…, true)` / `LLM.Builder.allowUnpackParameters()`;
-tokenizer via the sealed `LlmModel`. **Internal map:** `internal.GgufTransport` (catalog) → `internal.ModelBinding`
-(adapt metadata → `HfConfig` + schema) → `internal.GgufModelLoader` (payloads via `GgufReader` / `GgufDequant`);
-weight-load status uses the same `internal.LoadProgress` bar as safetensors and ONNX;
+tokenizer via the sealed `LlmModel`. **Internal map:** `models.llmcontainer.GgufTransport` (catalog) → `ArchitectureProcessor.bind`
+(adapt metadata → `HfConfig` + schema) → `ArchitectureProcessor.fill` (payloads via `GgufReader` / `GgufDequant`);
+weight-load status uses the same `models.llmcontainer.LoadProgress` bar as safetensors and ONNX;
 `models.internal.PackedWeight` / `Qwen3ForCausalLM` (unfused GGUF linears) / `Lfm2ForCausalLM`;
 `tensor.LinearKernel` / `EmbeddingKernel`; short-conv state in
 `engine.ConvStateArena` via `Transformer` / `internal.Context`; chat defaults via `ChatPrompts.systemFor(Tokenizer)`
@@ -1343,7 +1340,7 @@ try (LlmModel model = LlmModelFactory.make(Path.of("models/gte-small.Q2_K.gguf")
 }
 ```
 
-**In the code:** `LlmModelFactory` → `EmbeddingEncoderFactory` → `BertForEmbedding`; public surface `LlmModel.embed`;
+**In the code:** `LlmModelFactory` → `ArchitectureProcessor.createEmbedding` → `BertForEmbedding`; public surface `LlmModel.embed`;
 samples `EmbedHelloWorld`, `Example` menu item “gte-small (embeddings)”.
 
 ### Inside one `embed` call (pipeline)
@@ -1416,8 +1413,8 @@ This is **weight import**, not an ONNX Runtime session:
 | Map names onto the existing Java causal / BERT graphs | Depend on native ORT |
 | Prefer **safetensors** if both formats are present | Treat every community `.onnx` as loadable (see filters below) |
 
-**In the code:** `internal.OnnxProtoReader` → `OnnxWeightReader` / `OnnxDataTypes` → `OnnxModelLoader` →
-`ModelLoader.assembleFromNamedTensors` → `CausalLMFactory` / `EmbeddingEncoderFactory`.
+**In the code:** `models.llmcontainer.OnnxTransport` (file pick + protobuf + dtype decode) → `ArchitectureProcessor.bind` → `fill` (name remap / MatMul transpose) →
+`ModelLoader.assembleFromNamedTensors` → `ArchitectureProcessor.createCausal` / `createEmbedding`.
 
 ### Supported formats / restrictions (ONNX)
 
@@ -1489,7 +1486,7 @@ try (LlmModel model = LlmModelFactory.make(Path.of("models/SmolLM2-135M-Instruct
 > ORT), applies file-name and TensorProto filters, builds Qwen3 / Gemma3 / Llama / BERT graphs as usual, and rejects
 > float8/nibble weight types and unsupported community quant exports explicitly.**
 
-**In the code:** `internal.OnnxModelLoader` reads graph initializers (no ORT); `internal.LoadProgress` reports decode
+**In the code:** `models.llmcontainer.OnnxTransport` reads graph initializers (no ORT); `models.llmcontainer.LoadProgress` reports decode
 with the same percent/ETA bar as safetensors and GGUF; `ModelLoader.assembleFromNamedTensors` matches names into
 `WeightBag`. Application entry is still `LlmModelFactory.make(folder)`.
 
@@ -2745,13 +2742,12 @@ then this path for the **turn**:
 ```text
 OPEN (once)
   LlmModelFactory#make(Path | ModelFileSource | fromClasspath*)
-      → (HF safetensors) CausalLMFactory#detect / #create
-         + internal.ModelLoader#loadWeights (+ SafetensorsReader; merge into WeightBag)
+      → (HF safetensors) SafetensorsTransport → ArchitectureProcessor bind/fill/create
          + Tokenizer#fromPretrained
-      → (HF ONNX, since 1.1.0) OnnxModelLoader → same CausalLM / EmbeddingEncoder graphs
-      → (GGUF causal) GgufTransport → ModelBinding.bindGguf → GgufModelLoader
+      → (HF ONNX, since 1.1.0) OnnxTransport → ArchitectureProcessor bind/fill/create → same CausalLM / EmbeddingEncoder graphs
+      → (GGUF causal) GgufTransport → ArchitectureProcessor bind/fill
          → Qwen3ForCausalLM or Lfm2ForCausalLM + Tokenizer#fromGguf
-      → (GGUF bert) EmbeddingEncoderFactory → BertForEmbedding   // embed only; no LLM.builder
+      → (GGUF bert) ArchitectureProcessor.createEmbedding → BertForEmbedding   // embed only; no LLM.builder
   LLM#builder(LlmModel) → LLM.Builder#build → LLM.<init>         // causal models only
       → Transformer.<init>                 (binds shared model; allocates KvCacheArena)
       → Scheduler.<init>                   (owns BlockManager)
@@ -2826,8 +2822,8 @@ try (LlmModel model = LlmModelFactory.make(modelDir);
 | Step            | Call                                                               | Role                                                      |
 |-----------------|--------------------------------------------------------------------|-----------------------------------------------------------|
 | Blueprint       | `Config.HfConfig#load` (via `LlmModelFactory`)                        | Read `config.json` (HF) or GGUF metadata              |
-| Empty graph     | `CausalLMFactory#detect` → `#create` / GGUF / ONNX loaders            | `Qwen3ForCausalLM`, `Gemma3ForCausalLM`, `Gemma4ForCausalLM`, `LlamaForCausalLM`, or `Lfm2ForCausalLM` (all under `models.internal`) |
-| Pour weights    | `internal.ModelLoader#loadWeights` or `GgufTransport` + `ModelBinding` + `GgufModelLoader` → `WeightBag` | Merge shards / dequant path; construct immutable graph |
+| Empty graph     | `ArchitectureProcessor#createCausal` / `#createEmbedding`            | `Qwen3ForCausalLM`, `Gemma3ForCausalLM`, `Gemma4ForCausalLM`, `LlamaForCausalLM`, `Lfm2ForCausalLM`, or `BertForEmbedding` (all under `models.internal`) |
+| Pour weights    | `ContainerTransport` + `ArchitectureProcessor#fill` → `WeightBag` | Merge shards / dequant path; construct immutable graph |
 | Seal            | (graph is immutable at construction)                               | No post-load weight mutation                              |
 | Dictionary      | `Tokenizer#fromPretrained` or `#fromGguf`                          | HF JSON or GGUF-embedded vocab + chat template / stop ids |
 | Blank notebooks | `Transformer` → `KvCacheArena`                                     | Per-`LLM` KV pages; bound into `Context` for `Attention`  |
@@ -3096,21 +3092,24 @@ You do not need to read every file. Use the tables to jump, then skim the named 
 ### Package layout (folders ↔ ideas)
 
 **JPMS:** module `com.igormaznitsa.nanollvm` **exports** `models`, `llm`, `chat`, `rag`, `exceptions`, `tokenizer`,
-`utils`. Everything else below (`models.internal`, `engine`, `layers`, `tensor`, `internal`, `prompts`, `samples`) is
+`utils`. Everything else below (`models.internal`, `models.llmcontainer`, `models.llmarch`, `engine`, `layers`,
+`tensor`, `internal`, `prompts`) is
 **not exported** — fine to read in this guide; application code under the module system should stay on the exported
-packages.
+packages. Demos live in the separate Maven module `nano-vllm-java-samples`.
 
 | Folder / type                                                                          | Role in the story                                    | Exported? |
 |----------------------------------------------------------------------------------------|------------------------------------------------------|-----------|
 | `llm/` — `LLM`, `LLM.Builder`, `Config`, `SamplingParams`, `GenerationStats`, `LlmAdvisor`, `LlmAdvisorMixer`, `AdvisorResponse`, `AdvisorEnrichment` | Front door; named advisors + mixer; stats | yes |
-| `models/` — `LlmModel`, `LlmModelFactory`, `ModelFileId`, `ModelFileSource`, `ModelFileSources` | Shared immutable loaded model + stream/classpath sources (**since 1.1.0**) | yes |
+| `models/` — `LlmModel`, `LlmModelFactory`, `ModelSupport`, `ModelFileId`, `ModelFileSource`, `ModelFileSources` | Shared immutable loaded model + architecture catalog + stream/classpath sources (**since 1.1.0**) | yes |
 | `models.internal/` — `WeightBag`, `CausalLM*`, `BertForEmbedding`, `EmbeddingEncoder`, … | Graphs, weight bags, BERT encode (use `LlmModel.embed`) | **no** |
+| `models.llmcontainer/` — `ContainerTransport`, `GgufTransport`, `SafetensorsTransport`, `OnnxTransport`, `LoadProgress` | Weight-file I/O and catalog | **no** |
+| `models.llmarch/` — `ArchitectureProcessor`, family processors, `ModelBinding` / `ModelFill` | Bind / fill / create per architecture | **no** |
 | `chat/` — `ChatSession`, `ChatHistory`, `ChatMessage`, `ChatMessages`, `ThinkTags`, `ChatSpecials`, `LlmListener`, `LlmTextKind`, `ChatReply`, `StreamPrinter` | Dialog + unified text/status events | yes |
 | `tokenizer/Tokenizer`, `GgufTokenizerSource`                                           | HF / GGUF vocab → encode / decode / chat template   | yes |
 | `utils/NanoLlvmProps`, `ResourceLimits`                                                | Property/env knobs; process-wide parser/corpus caps (**since 1.1.0**) | yes |
 | `exceptions/`                                                                          | Typed library failures                               | yes |
 | `rag/` — `RagFactory`, `PreparedRag`, `DenseRagIndex`, `HybridRagIndex`, `RagSession`, `RagIndex`, `RagHit`, `RagLoadOptions`, … | Text RAG: BM25 and (since **1.1.0**) dense/hybrid + classpath docs | yes |
-| `internal/` — `ModelLoader`, `LoadProgress`, `SafetensorsReader`, `Gguf*`, `Json`, `Context`           | Loaders, shared weight-load bar, JSON helper, per-step context               | **no** |
+| `internal/` — `Json`, `Context`, `GgufDequant`, `ModelFileBundle` | JSON helper, per-step context, GGUF dequant, in-memory file bundle | **no** |
 | `engine/` — `Scheduler`, `Sequence`, `BlockManager`, `Transformer`, `KvCacheArena`     | Prefill/decode loop, pages, one forward+sample       | **no** |
 | `layers/` — `Attention`, `BidirectionalAttention`, `Sampler`, `Linear`, `Norms`, …     | Attention, sampling, projections, norms/RoPE         | **no** |
 | `tensor/` — `Tensor`, `Ops`, `MatmulRuntime`, `LinearKernel`, `EmbeddingKernel`, …     | Arrays, float ops, parallel GEMM                     | **no** |
@@ -3134,13 +3133,13 @@ packages.
 | Cancel / timeout                 | `LLM`                                                                | `cancel()`; `generate(…, timeout, onToken)`                                                                   |
 | Tokenize                         | `Tokenizer` (on `LlmModel`)                                             | `LlmModel.tokenizer()`; `encode`, `decode`, `applyChatTemplate(…, enableThinking)`                               |
 | Token embedding / RoPE / LM head | (internal) `VocabParallelEmbedding`, kernels, `RotaryEmbedding`, … | Via `CausalLM#forward` / LM head — not public app API                                                         |
-| Blueprint                        | `Config.HfConfig`                                                    | `HfConfig.load(config.json)`; internal `CausalLMFactory.detect/create`                                        |
+| Blueprint                        | `Config.HfConfig`                                                    | `HfConfig.load(config.json)`; internal `ArchitectureProcessor` bind/create                                        |
 | Pour weights                     | `LlmModelFactory` + internal loaders / `WeightBag`                      | Sealed inside `make`; apps do not call `ModelLoader` directly                                                 |
 | One engine tick                  | `LLM` (private `stepUnlocked`), `Scheduler`, `Transformer`           | Inside `generate`: `schedule` → `Transformer.step` → `postprocess`                                            |
 | Forward + sample                 | `Transformer`, internal `CausalLM`, `Sampler`                        | `network.forward` → `computeLogits` → `sampler.forward`                                                       |
 | Attention + KV write             | `Attention`, `KvCacheArena`, `internal.Context`                      | `Context.bindKvCache`; `Attention.forward` by `layerIndex`; prefill/decode helpers                            |
 | Pages / prefix reuse             | `BlockManager`                                                       | `canAllocate`, `allocate`, `hashBlocks`, `mayAppend`                                                          |
-| Split thinking UI                | `AssistantParts`, `ChatReply`                                        | `AssistantParts.parse`, `salvageFromThinking`                                                                 |
+| Split thinking UI                | `ChatReply`                                                          | `ChatReply.parse` / `parse(raw, llm)` / `salvageFromThinking`                                                 |
 | Text RAG (prepare + retrieve)    | `RagFactory`, `PreparedRag`, `DenseRagIndex`, `HybridRagIndex`, `RagSession` | `RagFactory.make` / `withEmbeddings` → `llm.rag(index).send(…)` (chapter 17; dense/hybrid **since 1.1.0**); session knobs match `ChatSession` (`recoverUnusableAnswers`, `emitDebugPrompts`, …) |
 | Resource caps                    | `ResourceLimits`                                                     | Process-wide defaults + builder for file/PDF/JSON/GGUF/corpus/history budgets (**since 1.1.0**)               |
 | Math bricks                      | `Ops`, `LinearKernel`, `EmbeddingKernel`, `MatmulRuntime`            | norms / MLP gates / softmax; linear & embed via kernels (internal)                                            |
@@ -3325,13 +3324,13 @@ slots, and how that differs from chat history: **chapter 12**.
 
 ```text
 LlmModelFactory.make(dir|gguf|ModelFileSource):
-  HF safetensors: HfConfig + ModelLoader → WeightBag → CausalLMFactory
+  HF safetensors: HfConfig + ArchitectureProcessor → WeightBag → causal graph
                   (Qwen3 / Gemma3 / Gemma 4 text / Llama)
-  HF ONNX (1.1.0): OnnxModelLoader → same causal / BERT graphs
-  GGUF: GgufTransport → ModelBinding → GgufModelLoader
+  HF ONNX (1.1.0): OnnxTransport → ArchitectureProcessor bind/fill/create → same causal / BERT graphs
+  GGUF: GgufTransport → ArchitectureProcessor bind/fill/create
         → Qwen3ForCausalLM or Lfm2ForCausalLM or BertForEmbedding; Tokenizer.fromGguf
   Classpath / streams (1.1.0): ModelFileSources → heap bytes (no disk cache)
-  Load status (all three weight formats): internal.LoadProgress — one in-place percent/ETA bar
+  Load status (all three weight formats): models.llmcontainer.LoadProgress — one in-place percent/ETA bar
   Optional Map (1.1.0): LlmModel.OPTION_THINK_TAGS → ThinkTags; OPTION_CHAT_SPECIALS → ChatSpecials
                         (frozen on the model; omitted keys get library defaults)
 LLM.builder(causalModel).build():   // rejected for embedding models
@@ -3445,9 +3444,11 @@ nano-vllm-java/src/main/java/com/igormaznitsa/nanollvm/
   layers/BidirectionalAttention.java   ← BERT embed path (since 1.1.0)
   tokenizer/Tokenizer.java / GgufTokenizerSource.java
   prompts/ChatPrompts.java / RagPrompts.java / AdvisorPrompts.java
-  internal/ModelLoader.java / SafetensorsReader.java / Json.java
-  internal/GgufModelLoader.java / GgufTransport.java / GgufReader.java / GgufDequant.java
-  internal/Gemma4QatLoader.java / ModelBinding.java / GgufConfigs.java
+  models/llmcontainer/SafetensorsTransport.java / SafetensorsReader.java / OnnxTransport.java / ContainerTransport.java
+  models/llmcontainer/GgufTransport.java / GgufReader.java
+  models/llmarch/ArchitectureProcessor.java / ArchitectureProcessors.java / ModelBinding.java
+  models/llmarch/ModelLoader.java / GgufModelLoader.java / Gemma4QatLoader.java / GgufConfigs.java
+  internal/Json.java / GgufDequant.java
   internal/Context.java        ← per-step KV / conv slot maps
   utils/NanoLlvmProps.java / ResourceLimits.java   ← ResourceLimits since 1.1.0
   tensor/LinearKernel.java / EmbeddingKernel.java / MatmulRuntime.java

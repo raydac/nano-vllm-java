@@ -385,9 +385,11 @@ class CoreUnitTest {
 
   @Test
   void float16Conversion() {
-    float one = com.igormaznitsa.nanollvm.internal.SafetensorsReader.float16ToFloat(0x3C00);
+    float one =
+      com.igormaznitsa.nanollvm.models.llmcontainer.SafetensorsReader.float16ToFloat(0x3C00);
     assertEquals(1.0f, one, 1e-3);
-    float bf = com.igormaznitsa.nanollvm.internal.SafetensorsReader.bfloat16ToFloat(0x3F80);
+    float bf =
+      com.igormaznitsa.nanollvm.models.llmcontainer.SafetensorsReader.bfloat16ToFloat(0x3F80);
     assertEquals(1.0f, bf, 1e-3);
   }
 

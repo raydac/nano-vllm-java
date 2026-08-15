@@ -9,7 +9,9 @@
  * {@link LlmModel#chatSpecials()} from load-time {@link LlmModel#options()} (library defaults
  * when omitted). Close each
  * {@code LLM} first, then the model, to release weight resources. Architecture graphs and weight
- * maps live in non-exported {@code models.internal}. {@link ModelSupport} is the catalog of
+ * maps live in non-exported {@code models.internal}. Load layers live in non-exported
+ * {@code models.llmcontainer} (weight files) and {@code models.llmarch} (architecture processors).
+ * {@link ModelSupport} is the catalog of
  * architectures this library can run; unsupported checkpoints fail at load with
  * {@link com.igormaznitsa.nanollvm.exceptions.UnsupportedModelException}.
  */

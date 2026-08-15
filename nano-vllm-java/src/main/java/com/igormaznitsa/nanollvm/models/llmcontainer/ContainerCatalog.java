@@ -1,9 +1,9 @@
-package com.igormaznitsa.nanollvm.internal;
+package com.igormaznitsa.nanollvm.models.llmcontainer;
 
 import static java.util.Objects.requireNonNull;
 
+import com.igormaznitsa.nanollvm.internal.Json;
 import com.igormaznitsa.nanollvm.models.ModelSupport;
-
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -11,9 +11,16 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * Architecture-agnostic snapshot of one weight container (GGUF file, HF folder, ONNX). Transport
- * fills this from on-disk layout; {@link ModelBinding} decides whether a supported graph can be
- * built from the metadata and tensor names.
+ * Architecture-agnostic snapshot of one weight container (GGUF file, HF safetensors, ONNX).
+ * Transport fills this from container layout; {@link com.igormaznitsa.nanollvm.models.llmarch.ArchitectureProcessor}
+ * decides whether a supported graph can be built from the metadata and tensor names.
+ *
+ * @param source           GGUF, safetensors, or ONNX
+ * @param label            path or virtual name for logs
+ * @param architectureHint GGUF {@code general.architecture} or HF {@code model_type}; may be blank
+ * @param metadata         string/number GGUF keys, or {@link #META_CONFIG_JSON} for HF/ONNX
+ * @param tensorNames      payload tensor ids in this container
+ * @since 1.1.0
  */
 public record ContainerCatalog(
   ModelSupport.Source source,
@@ -23,12 +30,45 @@ public record ContainerCatalog(
   Set<String> tensorNames
 ) {
 
+  /**
+   * Metadata key for Hugging Face / ONNX {@code config.json} text.
+   *
+   * @since 1.1.0
+   */
+  public static final String META_CONFIG_JSON = "config.json";
+
   public ContainerCatalog {
     requireNonNull(source, "source");
     requireNonNull(label, "label");
     architectureHint = architectureHint == null ? "" : architectureHint;
     metadata = Map.copyOf(requireNonNull(metadata, "metadata"));
     tensorNames = Set.copyOf(requireNonNull(tensorNames, "tensorNames"));
+  }
+
+  /**
+   * Hugging Face or ONNX catalog from {@code config.json} plus tensor names.
+   *
+   * @since 1.1.0
+   */
+  public static ContainerCatalog ofHf(
+    final ModelSupport.Source source,
+    final String label,
+    final String configJson,
+    final Set<String> tensorNames
+  ) {
+    requireNonNull(configJson, "configJson");
+    return new ContainerCatalog(
+      source,
+      label,
+      modelTypeOf(configJson),
+      Map.of(META_CONFIG_JSON, configJson),
+      tensorNames);
+  }
+
+  public static String modelTypeOf(final String configJson) {
+    Map<String, Object> root = Json.parseObject(requireNonNull(configJson, "configJson"));
+    String type = Json.asString(root.get("model_type"));
+    return type == null ? "" : type;
   }
 
   public static Set<String> namesOf(final Iterable<String> names) {

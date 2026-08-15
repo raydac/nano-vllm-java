@@ -10,6 +10,8 @@
             <Package name="com.igormaznitsa.nanollvm.layers"/>
             <Package name="com.igormaznitsa.nanollvm.tensor"/>
             <Package name="com.igormaznitsa.nanollvm.internal"/>
+            <Package name="com.igormaznitsa.nanollvm.models.llmcontainer"/>
+            <Package name="com.igormaznitsa.nanollvm.models.llmarch"/>
             <Package name="com.igormaznitsa.nanollvm.models.internal"/>
         </Or>
         <Bug pattern="EI_EXPOSE_REP,EI_EXPOSE_REP2"/>
@@ -41,15 +43,10 @@
         <Bug pattern="AT_NONATOMIC_OPERATIONS_ON_SHARED_VARIABLE,AT_STALE_THREAD_WRITE_OF_PRIMITIVE"/>
     </Match>
 
-    <!-- Synthetic labels, not filesystem opens: /nanollvm-memory/… and in-memory ONNX dummy base. -->
+    <!-- Synthetic labels, not filesystem opens: /nanollvm-memory/… -->
     <Match>
         <Class name="com.igormaznitsa.nanollvm.internal.ModelFileBundle"/>
         <Method name="virtualPath"/>
-        <Bug pattern="DMI_HARDCODED_ABSOLUTE_FILENAME"/>
-    </Match>
-    <Match>
-        <Class name="com.igormaznitsa.nanollvm.internal.OnnxModelLoader"/>
-        <Method name="loadWeightsFromBytes"/>
         <Bug pattern="DMI_HARDCODED_ABSOLUTE_FILENAME"/>
     </Match>
 </FindBugsFilter>

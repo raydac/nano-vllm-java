@@ -1,13 +1,13 @@
-package com.igormaznitsa.nanollvm.internal;
+package com.igormaznitsa.nanollvm.models.llmcontainer;
 
-import static com.igormaznitsa.nanollvm.internal.OnnxDataTypes.BFLOAT16;
-import static com.igormaznitsa.nanollvm.internal.OnnxDataTypes.DOUBLE;
-import static com.igormaznitsa.nanollvm.internal.OnnxDataTypes.FLOAT;
-import static com.igormaznitsa.nanollvm.internal.OnnxDataTypes.FLOAT16;
-import static com.igormaznitsa.nanollvm.internal.SafetensorsReader.bfloat16ToFloat;
+import static com.igormaznitsa.nanollvm.models.llmcontainer.OnnxDataTypes.BFLOAT16;
+import static com.igormaznitsa.nanollvm.models.llmcontainer.OnnxDataTypes.DOUBLE;
+import static com.igormaznitsa.nanollvm.models.llmcontainer.OnnxDataTypes.FLOAT;
+import static com.igormaznitsa.nanollvm.models.llmcontainer.OnnxDataTypes.FLOAT16;
+import static com.igormaznitsa.nanollvm.models.llmcontainer.SafetensorsReader.bfloat16ToFloat;
 import static java.util.Objects.requireNonNull;
 
-import com.igormaznitsa.nanollvm.internal.OnnxProtoReader.OnnxTensorProto;
+import com.igormaznitsa.nanollvm.models.llmcontainer.OnnxProtoReader.OnnxTensorProto;
 import com.igormaznitsa.nanollvm.tensor.Tensor;
 import java.io.IOException;
 import java.nio.ByteBuffer;
@@ -30,14 +30,14 @@ public final class OnnxWeightReader {
   }
 
   /**
-   * Materializes one floating initializer; {@code modelDir} is the base for external sidecars.
+   * Materializes one floating initializer. {@code modelDir} is the base for external sidecars and
+   * may be {@code null} when the payload is embedded.
    *
    * @since 1.1.0
    */
   public static Tensor toTensor(final OnnxTensorProto proto, final Path modelDir)
     throws IOException {
     requireNonNull(proto, "proto");
-    requireNonNull(modelDir, "modelDir");
     if (!OnnxDataTypes.isLoadableFloatingWeight(proto.dataType())) {
       throw new UnsupportedOperationException(
         "unsupported ONNX data_type " + OnnxDataTypes.name(proto.dataType())
@@ -64,6 +64,7 @@ public final class OnnxWeightReader {
     final int numel
   ) throws IOException {
     if (proto.hasExternalData()) {
+      requireNonNull(modelDir, "modelDir");
       return decodeExternal(proto, modelDir, numel);
     }
     if (proto.rawData() != null) {

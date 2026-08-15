@@ -6,17 +6,17 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.igormaznitsa.nanollvm.exceptions.ModelLoadException;
-import com.igormaznitsa.nanollvm.internal.OnnxDataTypes;
-import com.igormaznitsa.nanollvm.internal.OnnxDataTypes.Kind;
-import com.igormaznitsa.nanollvm.internal.OnnxModelLoader;
-import com.igormaznitsa.nanollvm.internal.OnnxProtoReader;
-import com.igormaznitsa.nanollvm.internal.OnnxProtoReader.OnnxTensorProto;
-import com.igormaznitsa.nanollvm.internal.OnnxWeightNames;
-import com.igormaznitsa.nanollvm.internal.OnnxWeightReader;
 import com.igormaznitsa.nanollvm.llm.Config;
 import com.igormaznitsa.nanollvm.models.internal.CausalLMFactory;
 import com.igormaznitsa.nanollvm.models.internal.EmbeddingEncoderFactory;
 import com.igormaznitsa.nanollvm.models.internal.WeightNames;
+import com.igormaznitsa.nanollvm.models.llmarch.OnnxWeightNames;
+import com.igormaznitsa.nanollvm.models.llmcontainer.OnnxDataTypes;
+import com.igormaznitsa.nanollvm.models.llmcontainer.OnnxDataTypes.Kind;
+import com.igormaznitsa.nanollvm.models.llmcontainer.OnnxProtoReader;
+import com.igormaznitsa.nanollvm.models.llmcontainer.OnnxProtoReader.OnnxTensorProto;
+import com.igormaznitsa.nanollvm.models.llmcontainer.OnnxTransport;
+import com.igormaznitsa.nanollvm.models.llmcontainer.OnnxWeightReader;
 import com.igormaznitsa.nanollvm.tensor.Tensor;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
@@ -150,10 +150,10 @@ class OnnxSupportUnitTest {
 
   @Test
   void rejectsQuantizedOnnxNames() {
-    assertTrue(OnnxModelLoader.isAllowedOnnxName("model.onnx"));
-    assertTrue(OnnxModelLoader.isAllowedOnnxName("model_fp16.onnx"));
-    assertFalse(OnnxModelLoader.isAllowedOnnxName("model_q4.onnx"));
-    assertFalse(OnnxModelLoader.isAllowedOnnxName("decoder_with_past_model.onnx"));
+    assertTrue(OnnxTransport.isAllowedName("model.onnx"));
+    assertTrue(OnnxTransport.isAllowedName("model_fp16.onnx"));
+    assertFalse(OnnxTransport.isAllowedName("model_q4.onnx"));
+    assertFalse(OnnxTransport.isAllowedName("decoder_with_past_model.onnx"));
   }
 
   @Test

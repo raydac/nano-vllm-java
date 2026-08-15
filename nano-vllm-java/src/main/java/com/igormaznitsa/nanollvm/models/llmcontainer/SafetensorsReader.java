@@ -1,8 +1,9 @@
-package com.igormaznitsa.nanollvm.internal;
+package com.igormaznitsa.nanollvm.models.llmcontainer;
 
 import static java.nio.charset.StandardCharsets.UTF_8;
 import static java.util.Objects.requireNonNull;
 
+import com.igormaznitsa.nanollvm.internal.Json;
 import com.igormaznitsa.nanollvm.tensor.Tensor;
 import com.igormaznitsa.nanollvm.utils.ResourceLimits;
 import java.io.IOException;
@@ -16,6 +17,11 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
+/**
+ * Memory-mapped Hugging Face {@code .safetensors} reader: JSON header plus float payloads.
+ *
+ * @since 1.1.0
+ */
 public final class SafetensorsReader implements AutoCloseable {
 
   private final String label;

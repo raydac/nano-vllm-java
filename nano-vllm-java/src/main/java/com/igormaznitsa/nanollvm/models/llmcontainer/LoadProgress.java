@@ -1,11 +1,16 @@
-package com.igormaznitsa.nanollvm.internal;
+package com.igormaznitsa.nanollvm.models.llmcontainer;
 
 import static java.util.Locale.ROOT;
 
 import com.igormaznitsa.nanollvm.chat.LlmListener;
 import com.igormaznitsa.nanollvm.chat.LlmListeners;
 
-final class LoadProgress {
+/**
+ * In-place percent / ETA bar for weight-file decode (safetensors, GGUF, ONNX).
+ *
+ * @since 1.1.0
+ */
+public final class LoadProgress {
   private final String label;
   private final int total;
   private final LlmListener io;
@@ -14,7 +19,12 @@ final class LoadProgress {
   private String detail = "";
   private boolean finished;
 
-  LoadProgress(final String label, final int total, final LlmListener io) {
+  /**
+   * Starts a bar for {@code total} steps. {@code io} may be {@code null} (silent).
+   *
+   * @since 1.1.0
+   */
+  public LoadProgress(final String label, final int total, final LlmListener io) {
     this.label = label;
     this.total = Math.max(1, total);
     this.io = io;
@@ -28,13 +38,23 @@ final class LoadProgress {
     return String.format(ROOT, "%dm%02ds", (int) (seconds / 60), (int) (seconds % 60));
   }
 
-  void step(final String detail) {
+  /**
+   * Advances one step and redraws.
+   *
+   * @since 1.1.0
+   */
+  public void step(final String detail) {
     this.current = Math.min(this.current + 1, this.total);
     this.detail = detail == null ? "" : detail;
     this.render();
   }
 
-  void finish(final String message) {
+  /**
+   * Completes the bar with a final status line. Idempotent.
+   *
+   * @since 1.1.0
+   */
+  public void finish(final String message) {
     if (this.finished) {
       return;
     }
