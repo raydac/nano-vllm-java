@@ -72,7 +72,7 @@ The rest of this guide unpacks that sentence without assuming prior ML coursewor
 
 **In the code:** front door is `LLM` / `LLM.Builder`; interactive demo is `samples.Example`; linear mains include
 `HelloWorld`, `NextTokenHelloWorld`, `LogTriageHelloWorld`, `AdvisorRagHelloWorld`,
-`EmbedHelloWorld` (chapter 16).
+`EmbeddingsHelloWorld` (chapter 16).
 
 ---
 
@@ -1343,7 +1343,7 @@ try (LlmModel model = LlmModelFactory.make(Path.of("models/gte-small.Q2_K.gguf")
 ```
 
 **In the code:** `LlmModelFactory` → `ArchitectureProcessor.createEmbedding` → `BertForEmbedding`; public surface `LlmModel.embed`;
-samples `EmbedHelloWorld`, `Example` menu item “gte-small (embeddings)”.
+samples `EmbeddingsHelloWorld`, `Example` menu item “gte-small (embeddings)”.
 
 ### Inside one `embed` call (pipeline)
 
@@ -1371,7 +1371,7 @@ GGUF loads — not a public enum apps set), often with lowercase and metaspace-s
 
 ### What you use the vectors for
 
-- **Semantic similarity** between two strings (REPL in `Example` / `EmbedHelloWorld`).
+- **Semantic similarity** between two strings (REPL in `Example` / `EmbeddingsHelloWorld`).
 - **Dense RAG** (**since 1.1.0**, chapter 17): embed every corpus chunk once, embed the question, rank by cosine —
   `DenseRagIndex` or hybrid BM25+dense via `RagFactory.withEmbeddings`.
 
@@ -3117,7 +3117,7 @@ packages. Demos live in the separate Maven module `nano-vllm-java-samples`.
 | `layers/` — `Attention`, `BidirectionalAttention`, `Sampler`, `Linear`, `Norms`, …     | Attention, sampling, projections, norms/RoPE         | **no** |
 | `tensor/` — `Tensor`, `Ops`, `MatmulRuntime`, `LinearKernel`, `EmbeddingKernel`, …     | Arrays, float ops, parallel GEMM                     | **no** |
 | `prompts/` — `ChatPrompts`, `RagPrompts`, `AdvisorPrompts`                             | Default system / RAG / advisor wording               | **no** |
-| *(Maven module `nano-vllm-java-samples`)* `Example`, `HelloWorld`, `NextTokenHelloWorld`, `Bench`, `EmbedHelloWorld`, `LogTriageHelloWorld`, `AdvisorRagHelloWorld`, `utils/Bundled*` | Runnable demos (not in the library JAR) | n/a |
+| *(Maven module `nano-vllm-java-samples`)* `Example`, `HelloWorld`, `NextTokenHelloWorld`, `Bench`, `EmbeddingsHelloWorld`, `LogTriageHelloWorld`, `AdvisorRagHelloWorld`, `utils/Bundled*` | Runnable demos (not in the library JAR) | n/a |
 
 `Config.HfConfig` (in `llm/Config`) holds the blueprint plus per-LLM engine knobs (`maxModelLen`, `kvHeapFraction`, …).
 
@@ -3429,7 +3429,7 @@ model.embed(text)
 // Dense RAG: DenseRagIndex.of(prepared, model) / RagFactory.withEmbeddings (ch. 17)
 ```
 
-Narrative: **chapter 7b**. Demo: `samples.EmbedHelloWorld`, `Example` menu “gte-small (embeddings)”.
+Narrative: **chapter 7b**. Demo: `samples.EmbeddingsHelloWorld`, `Example` menu “gte-small (embeddings)”.
 
 ### Sample G — text RAG (prepare once, ask many times)
 
@@ -3492,7 +3492,7 @@ nano-vllm-java/src/main/java/com/igormaznitsa/nanollvm/
   exceptions/…
 
 nano-vllm-java-samples/src/main/java/com/igormaznitsa/nanollvm/samples/
-  Example.java / HelloWorld.java / NextTokenHelloWorld.java / Bench.java / EmbedHelloWorld.java / LogTriageHelloWorld.java / AdvisorRagHelloWorld.java
+  Example.java / HelloWorld.java / NextTokenHelloWorld.java / Bench.java / EmbeddingsHelloWorld.java / LogTriageHelloWorld.java / AdvisorRagHelloWorld.java
   utils/BundledModels.java / BundledRag.java / OrderedConsole.java
 ```
 
@@ -3707,7 +3707,7 @@ The repository folder `rag/` holds sample Markdown (fairy-tale / Grimm demos). `
 `samples.utils.BundledRag` when present (`-Dnanollvm.rag.dir` / `NANOLLVM_RAG_DIR` override the path). **Since 1.1.0**
 the sample asks for a **RAG mode** after you pick a chat model: none (plain chat; **Enter**), BM25, dense, or hybrid
 (dense and hybrid need `models/gte-small.Q2_K.gguf`), then **how many advisors** (`0`–`3`; **Enter** = none). Choosing
-gte-small alone still opens the embedding REPL (`samples.EmbedHelloWorld` is the minimal embed demo).
+gte-small alone still opens the embedding REPL (`samples.EmbeddingsHelloWorld` is the minimal embed demo).
 `samples.AdvisorRagHelloWorld` is the non-interactive BM25 + custom-advisor path (Gemma3-270M, advisor Alex,
 Grimm names and father).
 

@@ -160,6 +160,15 @@ mvn -pl nano-vllm-java-samples -q exec:java \
 # optional: … -Dexec.args="models/Tiny-LLM-ONNX Once upon a time"
 ```
 
+Sentence embeddings (encode text to an L2-normalized vector; defaults to gte-small GGUF —
+download with `./models/download-gte-small-gguf.sh`):
+
+```bash
+mvn -pl nano-vllm-java-samples -q exec:java \
+  -Dexec.mainClass=com.igormaznitsa.nanollvm.samples.EmbeddingsHelloWorld
+# optional: … -Dexec.args="models/gte-small.Q2_K.gguf hello world"
+```
+
 Custom advisor **Alex** plus lexical **BM25** RAG over `rag/` (Grimm names and father; Gemma3-270M):
 
 ```bash
@@ -238,7 +247,7 @@ Weight-load internals (`models.llmcontainer`, `models.llmarch`, `models.internal
 `prompts`, `engine`, `layers`, `tensor`, and `internal` are **not** exported — use
 `LlmModelFactory` / `LLM` / `RagFactory` from application code. Runnable demos
 (`HelloWorld`, `NextTokenHelloWorld`, `LogTriageHelloWorld`, `AdvisorRagHelloWorld`,
-`EmbedHelloWorld`, `Example`, `Bench`, `samples.utils`) live in the separate
+`EmbeddingsHelloWorld`, `Example`, `Bench`, `samples.utils`) live in the separate
 `nano-vllm-java-samples` module.
 
 The packaged library JAR has no `Main-Class`. In-repo demos:
@@ -379,8 +388,11 @@ Creates `models/Gemma4-E2B-IT-QAT-Mobile/`. Text-only chat load (vision/audio un
 
 **SmolLM2-135M-Instruct-ONNX (Llama ChatML ~135M)** — `./models/download-smollm2-135m-instruct-onnx.sh`.
 
+**gte-small GGUF (BERT embeddings, ~25 MB)** — `./models/download-gte-small-gguf.sh`. Linear demo:
+`EmbeddingsHelloWorld`.
+
 **Windows:** `.\models\download-qwen3-0.6b.ps1` / `.cmd` and the matching Gemma 3 / Gemma 4 / LFM / Tiny-LLM-ONNX /
-SmolLM2 Instruct ONNX scripts under `models/`.
+SmolLM2 Instruct ONNX / gte-small scripts under `models/`.
 
 You can also point the engine at **any** local HF-style directory (your own path or another download).
 
