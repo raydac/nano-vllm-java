@@ -10,6 +10,9 @@ import java.util.List;
 enum DefaultAdvisorMixer implements LlmAdvisorMixer {
   INSTANCE;
 
+  /**
+   * {@inheritDoc}
+   */
   @Override
   public String mixPrompt(
     final LLM source,

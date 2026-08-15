@@ -98,6 +98,9 @@ public final class ModelFileSources {
 
   private record FolderSource(Path folder) implements ModelFileSource {
 
+    /**
+     * {@inheritDoc}
+     */
     @Override
     public InputStream open(final ModelFileId id) throws IOException {
       Path file = this.folder.resolve(id.fileName());
@@ -113,6 +116,7 @@ public final class ModelFileSources {
       return null;
     }
 
+    /** {@inheritDoc} */
     @Override
     public InputStream openWeightShard(final String fileName) throws IOException {
       Path file = this.folder.resolve(requireNonNull(fileName, "fileName"));
@@ -122,6 +126,7 @@ public final class ModelFileSources {
       return Files.isRegularFile(file) ? Files.newInputStream(file) : null;
     }
 
+    /** {@inheritDoc} */
     @Override
     public String displayName() {
       return this.folder.toString();
@@ -130,11 +135,13 @@ public final class ModelFileSources {
 
   private record GgufFileSource(Path ggufFile) implements ModelFileSource {
 
+    /** {@inheritDoc} */
     @Override
     public InputStream open(final ModelFileId id) throws IOException {
       return id == ModelFileId.GGUF ? Files.newInputStream(this.ggufFile) : null;
     }
 
+    /** {@inheritDoc} */
     @Override
     public String displayName() {
       return this.ggufFile.toString();
@@ -144,6 +151,7 @@ public final class ModelFileSources {
   private record ClasspathFolderSource(ClassLoader loader, String resourceFolder)
     implements ModelFileSource {
 
+    /** {@inheritDoc} */
     @Override
     public InputStream open(final ModelFileId id) {
       InputStream in = this.loader.getResourceAsStream(this.resourceFolder + "/" + id.fileName());
@@ -157,6 +165,7 @@ public final class ModelFileSources {
       return null;
     }
 
+    /** {@inheritDoc} */
     @Override
     public InputStream openWeightShard(final String fileName) {
       requireNonNull(fileName, "fileName");
@@ -166,6 +175,7 @@ public final class ModelFileSources {
       return this.loader.getResourceAsStream(this.resourceFolder + "/" + fileName);
     }
 
+    /** {@inheritDoc} */
     @Override
     public String displayName() {
       return "classpath:" + this.resourceFolder;
@@ -175,6 +185,7 @@ public final class ModelFileSources {
   private record ClasspathGgufFileSource(ClassLoader loader, String ggufResourceFile)
     implements ModelFileSource {
 
+    /** {@inheritDoc} */
     @Override
     public InputStream open(final ModelFileId id) {
       return id == ModelFileId.GGUF
@@ -182,6 +193,7 @@ public final class ModelFileSources {
         : null;
     }
 
+    /** {@inheritDoc} */
     @Override
     public String displayName() {
       return "classpath:" + this.ggufResourceFile;

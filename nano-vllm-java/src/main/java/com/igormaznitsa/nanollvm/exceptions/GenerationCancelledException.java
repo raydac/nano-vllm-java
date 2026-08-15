@@ -6,6 +6,9 @@ package com.igormaznitsa.nanollvm.exceptions;
  */
 public final class GenerationCancelledException extends NanoLlvmException {
 
+  /**
+   * Cancels the in-flight generate with a fixed message.
+   */
   public GenerationCancelledException() {
     super("generation cancelled");
   }

@@ -12,6 +12,9 @@ import java.util.List;
 @FunctionalInterface
 public interface LlmAdvisorMixer {
 
+  /**
+   * Built-in mixer: inserts non-empty advisor notes into the facts block of {@code prompt}.
+   */
   static LlmAdvisorMixer defaults() {
     return DefaultAdvisorMixer.INSTANCE;
   }

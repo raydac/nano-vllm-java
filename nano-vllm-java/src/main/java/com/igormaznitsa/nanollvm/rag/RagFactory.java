@@ -30,14 +30,29 @@ public final class RagFactory {
   private RagFactory() {
   }
 
+  /**
+   * Indexes a file or folder with {@link RagLoadOptions#defaults()}.
+   *
+   * @throws ModelLoadException if the path yields no indexable chunks
+   */
   public static PreparedRag make(final Path folderOrFile) {
     return make(folderOrFile, RagLoadOptions.defaults(), LlmListeners.silent());
   }
 
+  /**
+   * Indexes a file or folder with explicit chunk/preprocess options.
+   *
+   * @throws ModelLoadException if the path yields no indexable chunks
+   */
   public static PreparedRag make(final Path folderOrFile, final RagLoadOptions options) {
     return make(folderOrFile, options, LlmListeners.silent());
   }
 
+  /**
+   * Indexes a file or folder, emitting per-file load lines to {@code io}.
+   *
+   * @throws ModelLoadException if the path yields no indexable chunks
+   */
   public static PreparedRag make(
     final Path folderOrFile,
     final RagLoadOptions options,
@@ -55,11 +70,21 @@ public final class RagFactory {
     return tryMake(folderOrFile, RagLoadOptions.defaults(), LlmListeners.silent());
   }
 
+  /**
+   * Like {@link #tryMake(Path, RagLoadOptions, LlmListener)} with default options and a silent
+   * listener.
+   */
   public static Optional<PreparedRag> tryMake(final Path folderOrFile,
                                               final RagLoadOptions options) {
     return tryMake(folderOrFile, options, LlmListeners.silent());
   }
 
+  /**
+   * Like {@link #make(Path, RagLoadOptions, LlmListener)} but returns empty when the path exists
+   * yet yields no indexable text (empty folder, only README, blank files).
+   *
+   * @throws IllegalArgumentException if {@code folderOrFile} is not a file or directory
+   */
   public static Optional<PreparedRag> tryMake(
     final Path folderOrFile,
     final RagLoadOptions options,
@@ -91,10 +116,20 @@ public final class RagFactory {
     }
   }
 
+  /**
+   * Inline documents with {@link RagLoadOptions#defaults()}.
+   *
+   * @throws ModelLoadException if every text is blank
+   */
   public static PreparedRag of(String... texts) {
     return of(RagLoadOptions.defaults(), texts);
   }
 
+  /**
+   * Inline documents with explicit chunk/preprocess options.
+   *
+   * @throws ModelLoadException if every text is blank
+   */
   public static PreparedRag of(final RagLoadOptions options, String... texts) {
     requireNonNull(options, "options");
     requireNonNull(texts, "texts");
@@ -105,10 +140,16 @@ public final class RagFactory {
     return seal(corpus.build(), null, options, LlmListeners.silent());
   }
 
+  /**
+   * {@link #of(String...)} from a list.
+   */
   public static PreparedRag of(final List<String> texts) {
     return of(RagLoadOptions.defaults(), texts.toArray(String[]::new));
   }
 
+  /**
+   * Fluent corpus builder (inline text, files, folders, classpath resources).
+   */
   public static Builder builder() {
     return new Builder();
   }
@@ -233,6 +274,9 @@ public final class RagFactory {
     private Builder() {
     }
 
+    /**
+     * Chunk/preprocess knobs. Must be set before adding documents.
+     */
     public Builder options(final RagLoadOptions options) {
       if (this.hasContent) {
         throw new IllegalStateException("options must be set before adding documents");
@@ -242,6 +286,9 @@ public final class RagFactory {
       return this;
     }
 
+    /**
+     * {@link RagLoadOptions#forTinyModels()} (shorter chunks for small context windows).
+     */
     public Builder forTinyModels() {
       return this.options(RagLoadOptions.forTinyModels());
     }
@@ -255,28 +302,43 @@ public final class RagFactory {
       return this;
     }
 
+    /**
+     * Folder used as the corpus root label in logs and {@link PreparedRag#sourceRoot()}.
+     */
     public Builder sourceRoot(final Path sourceRoot) {
       this.sourceRoot = requireNonNull(sourceRoot, "sourceRoot").toAbsolutePath().normalize();
       return this;
     }
 
+    /**
+     * Filename suffixes visited by {@link #addFolder(Path)} (include the dot, e.g. {@code .md}).
+     */
     public Builder folderExtensions(final Set<String> extensions) {
       this.corpus.folderExtensions(extensions);
       return this;
     }
 
+    /**
+     * Adds one inline document (id/source assigned automatically).
+     */
     public Builder add(final String text) {
       this.hasContent = true;
       this.corpus.add(text);
       return this;
     }
 
+    /**
+     * Adds one inline document with an explicit id (source matches id).
+     */
     public Builder add(final String id, final String text) {
       this.hasContent = true;
       this.corpus.add(id, text);
       return this;
     }
 
+    /**
+     * Adds one file (text or PDF) from disk.
+     */
     public Builder addFile(final Path file) {
       this.hasContent = true;
       this.corpus.addFile(file);
@@ -338,6 +400,10 @@ public final class RagFactory {
       return this;
     }
 
+    /**
+     * Walks {@code folder} for {@link #folderExtensions(Set)} (sets {@link #sourceRoot(Path)} if
+     * unset).
+     */
     public Builder addFolder(final Path folder) {
       this.hasContent = true;
       this.corpus.addFolder(folder);
@@ -347,12 +413,20 @@ public final class RagFactory {
       return this;
     }
 
+    /**
+     * Adds several files from disk.
+     */
     public Builder addFiles(Path... files) {
       this.hasContent = true;
       this.corpus.addFiles(files);
       return this;
     }
 
+    /**
+     * Builds an immutable lexical {@link PreparedRag}.
+     *
+     * @throws ModelLoadException if no non-blank chunks were added
+     */
     public PreparedRag build() {
       return seal(this.corpus.build(), this.sourceRoot, this.options, this.io);
     }
@@ -366,6 +440,9 @@ public final class RagFactory {
       return withEmbeddings(this.build(), embeddingModel);
     }
 
+    /**
+     * {@inheritDoc}
+     */
     @Override
     public String toString() {
       return "RagFactory.Builder{options=%s, source=%s}".formatted(

@@ -17,18 +17,31 @@ public final class LlmAdvisor {
     this.prompt = prompt;
   }
 
+  /**
+   * Starts a fluent builder. {@link Builder#name(String)} and {@link Builder#prompt(String)} are
+   * required before {@link Builder#build()}.
+   */
   public static Builder builder() {
     return new Builder();
   }
 
+  /**
+   * Unique non-blank role name (must be unique among advisors on one {@link LLM}).
+   */
   public String name() {
     return this.name;
   }
 
+  /**
+   * Instruction text sent to this advisor on each turn.
+   */
   public String prompt() {
     return this.prompt;
   }
 
+  /**
+   * {@inheritDoc}
+   */
   @Override
   public String toString() {
     return "LlmAdvisor[name=%s]".formatted(this.name);
@@ -42,16 +55,25 @@ public final class LlmAdvisor {
     private Builder() {
     }
 
+    /**
+     * Unique non-blank role name.
+     */
     public Builder name(final String name) {
       this.name = requireNonNull(name, "name");
       return this;
     }
 
+    /**
+     * Instruction text sent to this advisor on each turn.
+     */
     public Builder prompt(final String prompt) {
       this.prompt = requireNonNull(prompt, "prompt");
       return this;
     }
 
+    /**
+     * @throws IllegalArgumentException if name or prompt is missing or blank
+     */
     public LlmAdvisor build() {
       String trimmedName = requireNonNull(this.name, "name").strip();
       if (trimmedName.isEmpty()) {

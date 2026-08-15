@@ -138,6 +138,9 @@ public final class SamplingParams {
     return new SamplingParams(this.temperature, this.maxTokens, this.ignoreEos, this.topK, topP);
   }
 
+  /**
+   * {@inheritDoc}
+   */
   @Override
   public boolean equals(final Object other) {
     return other instanceof SamplingParams that
@@ -148,11 +151,13 @@ public final class SamplingParams {
       && Float.compare(this.topP, that.topP) == 0;
   }
 
+  /** {@inheritDoc} */
   @Override
   public int hashCode() {
     return Objects.hash(this.temperature, this.maxTokens, this.ignoreEos, this.topK, this.topP);
   }
 
+  /** {@inheritDoc} */
   @Override
   public String toString() {
     return "SamplingParams[temperature=%s, maxTokens=%d, ignoreEos=%s, topK=%d, topP=%s]"

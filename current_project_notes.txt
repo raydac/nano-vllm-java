@@ -57,7 +57,11 @@
   application surface; `engine` / `layers` / `tensor` / `internal` / `prompts` /
   `models.internal` / `models.llmcontainer` / `models.llmarch`
   stay module-private (no signature leaks; `ModuleExportsTest` locks this). `RagSession` has the same recovery / debug / history
-  knobs as `ChatSession` so RAG callers need not drop through `.chat()`.
+  knobs as `ChatSession` so RAG callers need not drop through `.chat()`. Public `RagSession` methods
+  have ChatSession-style JavaDoc (`@param` / `@return` / `@throws`); non-trivial private retrieve /
+  rewrite / prompt helpers are documented too. `RagIndex.size()` has a contract comment (`-1` = unknown).
+  Exported public types in `chat` / `rag` / `llm` / `models` / `exceptions` / `tokenizer` / `utils`
+  now have method JavaDoc as well (factories, accessors, builders, `{@inheritDoc}` on overrides).
 
 - **RAG:** `RagFactory` → `PreparedRag` (BM25); `addResource` / `makeResource` for classpath docs; optional `withEmbeddings` → `HybridRagIndex` (`DenseRagIndex` + RRF); package-private `CorpusLoader`; public API ~12 types (+ `PdfTextExtractor`)
 - **RAG off-topic:** `isOutsideCorpus` ignores conversational glue (`what`/`think`/`about`/…); source stems use `/`+`\` basename (Windows-safe)
@@ -103,7 +107,7 @@
 - **Qwen3 GGUF** — `LlmModelFactory.make(qwen3.gguf)` via transport + `ArchitectureProcessor`; unfused packed Q/K/V (no qkv_proj concat). HF safetensors Qwen3 folder unchanged. Live `Qwen3-0.6B-Q8_0.gguf` load test removed (file not kept in `models/`); `ModelBindingTest` uses a synthetic catalog only. README / `description.md` §7a / `models/README.md` document bring-your-own Qwen3 GGUF (no download script).
 - Windows download scripts audited/hardened (parity with `.sh` URLs/files OK)
 - `description.md` usage snippets added (API-facing chapters)
-- Error Prone / IDE compiler inspections cleaned: locale on `toLowerCase`, explicit charset, `@Override` on GGUF tokenizer meta, Javadoc summaries on `@since`-only APIs, packed-weight release via empty payload (not `==` sentinel), unused `Attention.layerIndex` / `Tokenizer.chatTemplate` dropped. Tensor/PDF `record`s keep primitive arrays (`@SuppressWarnings("ArrayRecordComponent")`).
+- Error Prone / IDE compiler inspections cleaned: locale on `toLowerCase`, explicit charset, `@Override` on GGUF tokenizer meta, Javadoc summaries on `@since`-only APIs, packed-weight release via empty payload (not `==` sentinel), unused `Attention.layerIndex` / `Tokenizer.chatTemplate` dropped. Tensor/PDF `record`s keep primitive arrays (`@SuppressWarnings("ArrayRecordComponent")`). Public methods on exported types have JavaDoc (`RagSession` plus `RagFactory`/`PreparedRag`/`ChatHistory`/`LlmListeners`/`Config`/`LlmModel`/exceptions/…).
 - **SpotBugs** (`spotbugs-maven-plugin` on library `verify`): real `Path.getFileName()` nulls guarded; `spotbugs-exclude.xml` documents by-design remainder (shared tensors/arrays, frozen maps/lists, `CT_CONSTRUCTOR_THROW` on Java 21, Sequence/Builder thread confinement, virtual `/nanollvm-memory` paths).
 - IDE inspections: ModelSupport gemma4 multimodal branch dropped a redundant `supported()` (always true after the reject-return); Linear SRQ helper renamed so output `y` is not passed as parameter `x`.
 - Builder contract: `LLM` / `Config` / `LlmAdvisor` / `SamplingParams` / `MatmulRuntime` construct

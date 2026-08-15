@@ -26,6 +26,9 @@ public final class NanoLlvmProps {
   private NanoLlvmProps() {
   }
 
+  /**
+   * Non-blank {@link System#getProperty(String)}, or {@code null} when unset/blank.
+   */
   public static String systemProperty(final String key) {
     String value = System.getProperty(key);
     if (value != null && !value.isBlank()) {
@@ -34,6 +37,9 @@ public final class NanoLlvmProps {
     return null;
   }
 
+  /**
+   * Non-blank {@link System#getenv(String)}, or {@code null} when unset/blank.
+   */
   public static String environment(final String key) {
     String value = System.getenv(key);
     if (value != null && !value.isBlank()) {

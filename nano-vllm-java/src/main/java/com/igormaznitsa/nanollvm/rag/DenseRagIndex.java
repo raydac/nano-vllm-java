@@ -113,6 +113,9 @@ public final class DenseRagIndex implements RagIndex {
     return sum;
   }
 
+  /**
+   * {@inheritDoc}
+   */
   @Override
   public int size() {
     return this.chunks.size();
@@ -136,6 +139,7 @@ public final class DenseRagIndex implements RagIndex {
     return this.encoder;
   }
 
+  /** {@inheritDoc} Off-topic when the best cosine similarity is below a dense floor. */
   @Override
   public boolean isOutsideCorpus(final String query) {
     requireNonNull(query, "query");
@@ -145,6 +149,7 @@ public final class DenseRagIndex implements RagIndex {
     return this.bestSimilarity(query) < OUTSIDE_MAX_SIMILARITY;
   }
 
+  /** {@inheritDoc} Cosine (dot of L2-normalized embeddings), then a relative score floor. */
   @Override
   public List<RagHit> retrieve(final String query, final int topK) {
     requireNonNull(query, "query");
@@ -169,6 +174,7 @@ public final class DenseRagIndex implements RagIndex {
     return List.copyOf(keepStrongHits(scored, topK));
   }
 
+  /** {@inheritDoc} */
   @Override
   public String toString() {
     return "DenseRagIndex{passages=%d, dim=%d, encoder=%s}".formatted(

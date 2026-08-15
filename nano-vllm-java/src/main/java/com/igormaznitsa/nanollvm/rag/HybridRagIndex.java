@@ -101,16 +101,23 @@ public final class HybridRagIndex implements RagIndex {
     return this.dense;
   }
 
+  /**
+   * {@inheritDoc}
+   */
   @Override
   public int size() {
     return this.lexical.size();
   }
 
+  /**
+   * {@inheritDoc} Off-topic only when <em>both</em> BM25 and dense agree.
+   */
   @Override
   public boolean isOutsideCorpus(final String query) {
     return this.lexical.isOutsideCorpus(query) && this.dense.isOutsideCorpus(query);
   }
 
+  /** {@inheritDoc} Reciprocal-rank fusion of BM25 and dense rankings. */
   @Override
   public List<RagHit> retrieve(final String query, final int topK) {
     requireNonNull(query, "query");
@@ -121,6 +128,7 @@ public final class HybridRagIndex implements RagIndex {
     return fuse(this.lexical.retrieve(query, pool), this.dense.retrieve(query, pool), topK);
   }
 
+  /** {@inheritDoc} */
   @Override
   public String toString() {
     return "HybridRagIndex{passages=%d, dense=%s}".formatted(

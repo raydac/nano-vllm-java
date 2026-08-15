@@ -14,14 +14,24 @@ public final class LlmListeners {
   private LlmListeners() {
   }
 
+  /**
+   * No-op listener (load/generate status and chat text are discarded).
+   */
   public static LlmListener silent() {
     return Silent.INSTANCE;
   }
 
+  /**
+   * {@code true} when {@code listener} is {@code null} or {@link #silent()}.
+   */
   public static boolean isSilent(final LlmListener listener) {
     return listener == null || listener == Silent.INSTANCE;
   }
 
+  /**
+   * Forwards each event to {@code first} then {@code second}. {@code null} / silent sides collapse
+   * so a single listener is not wrapped.
+   */
   public static LlmListener compose(final LlmListener first, final LlmListener second) {
     LlmListener left = first == null ? Silent.INSTANCE : first;
     LlmListener right = second == null ? Silent.INSTANCE : second;
@@ -42,6 +52,13 @@ public final class LlmListeners {
     return ofStatusStreams(System.out, System.err);
   }
 
+  /**
+   * Status only: {@link LlmTextKind#STATUS_PROGRESS} → {@code out},
+   * {@link LlmTextKind#STATUS_INFO} → {@code err}. Chat text is ignored.
+   *
+   * @param out progress sink; must not be {@code null}
+   * @param err info sink; must not be {@code null}
+   */
   public static LlmListener ofStatusStreams(final PrintStream out, final PrintStream err) {
     PrintStream progress = requireNonNull(out, "out");
     PrintStream info = requireNonNull(err, "err");
@@ -76,11 +93,18 @@ public final class LlmListeners {
         color));
   }
 
+  /**
+   * Emits {@link LlmTextKind#STATUS_INFO} (appends a newline when missing).
+   */
   public static void info(final LlmListener listener, final LLM source, final String message) {
     String body = message == null ? "" : message;
     emit(listener, source, LlmTextKind.STATUS_INFO, body.endsWith("\n") ? body : body + "\n");
   }
 
+  /**
+   * {@link String#format(Locale, String, Object...)} then {@link LlmTextKind#STATUS_INFO}
+   * ({@link Locale#ROOT}).
+   */
   @SuppressWarnings("AnnotateFormatMethod")
   public static void infof(
     final LlmListener listener,
@@ -91,6 +115,10 @@ public final class LlmListeners {
     emit(listener, source, LlmTextKind.STATUS_INFO, String.format(Locale.ROOT, format, args));
   }
 
+  /**
+   * {@link String#format(Locale, String, Object...)} then {@link LlmTextKind#STATUS_PROGRESS}
+   * ({@link Locale#ROOT}).
+   */
   @SuppressWarnings("AnnotateFormatMethod")
   public static void progressf(
     final LlmListener listener,
@@ -128,12 +156,16 @@ public final class LlmListeners {
   enum Silent implements LlmListener {
     INSTANCE;
 
+    /**
+     * {@inheritDoc}
+     */
     @Override
     public void onText(final LLM source, final LlmTextEvent event) {
     }
   }
 
   private record Composite(LlmListener left, LlmListener right) implements LlmListener {
+    /** {@inheritDoc} */
     @Override
     public void onText(final LLM source, final LlmTextEvent event) {
       this.left.onText(source, event);
@@ -151,6 +183,7 @@ public final class LlmListeners {
       this.printer = printer;
     }
 
+    /** {@inheritDoc} */
     @Override
     public void onText(final LLM source, final LlmTextEvent event) {
       switch (event.kind()) {

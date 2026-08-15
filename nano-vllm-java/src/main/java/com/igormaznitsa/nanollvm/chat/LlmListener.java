@@ -12,5 +12,12 @@ import com.igormaznitsa.nanollvm.llm.LLM;
 @FunctionalInterface
 public interface LlmListener {
 
+  /**
+   * Receives one chat or status event. {@code source} is {@code null} for load-time status before an
+   * {@link LLM} exists.
+   *
+   * @param source engine that emitted the event, or {@code null} during load
+   * @param event  text or status payload; must not be {@code null}
+   */
   void onText(LLM source, LlmTextEvent event);
 }

@@ -8,9 +8,18 @@ import java.util.List;
  */
 public interface GgufTokenizerSource {
 
+  /**
+   * GGUF string-array metadata for {@code key}, or empty when absent.
+   */
   List<String> metaStringArray(String key);
 
+  /**
+   * GGUF string metadata for {@code key}, or {@code defaultValue} when absent.
+   */
   String metaString(String key, String defaultValue);
 
+  /**
+   * GGUF integer metadata for {@code key}, or {@code defaultValue} when absent.
+   */
   int metaInt(String key, int defaultValue);
 }

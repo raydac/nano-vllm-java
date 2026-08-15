@@ -159,16 +159,25 @@ public final class LlmModel implements AutoCloseable {
     }
   }
 
+  /**
+   * Checkpoint folder or GGUF file path this model was loaded from.
+   */
   public Path path() {
     this.assertNotClosed();
     return this.path;
   }
 
+  /**
+   * Hugging Face / GGUF-mapped architecture config.
+   */
   public Config.HfConfig hfConfig() {
     this.assertNotClosed();
     return this.hfConfig;
   }
 
+  /**
+   * Tokenizer bound to this checkpoint.
+   */
   public Tokenizer tokenizer() {
     this.assertNotClosed();
     return this.tokenizer;
@@ -209,6 +218,10 @@ public final class LlmModel implements AutoCloseable {
     return (ChatSpecials) this.options.get(OPTION_CHAT_SPECIALS);
   }
 
+  /**
+   * Architecture id (e.g. {@code qwen3}, {@code gemma3}, {@code bert}). Safe to call after
+   * {@link #close()}.
+   */
   public String architectureName() {
     if (this.isEmbeddingModel()) {
       return this.requireEncoder().architectureName();
@@ -236,10 +249,16 @@ public final class LlmModel implements AutoCloseable {
     return this.encoder.get() != null;
   }
 
+  /**
+   * {@code true} when GGUF/QAT weights are still packed (not widened to float32).
+   */
   public boolean hasPackedWeights() {
     return this.requireWeights().hasPacked();
   }
 
+  /**
+   * {@code true} after {@link #close()} (further accessors throw).
+   */
   public boolean isClosed() {
     return this.closed.get();
   }
@@ -389,6 +408,9 @@ public final class LlmModel implements AutoCloseable {
     return ids;
   }
 
+  /**
+   * Releases packed payloads and drops weight/network/encoder refs. Close engines first.
+   */
   @Override
   public void close() {
     if (!this.closed.compareAndSet(false, true)) {

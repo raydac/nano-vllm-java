@@ -162,29 +162,43 @@ public final class PreparedRag implements RagIndex {
     return this.passages;
   }
 
+  /**
+   * Frozen passage list (chunk order).
+   */
   public List<TextChunk> chunks() {
     return this.chunks;
   }
 
+  /**
+   * Folder or file the corpus was loaded from, empty for inline {@link RagFactory#of}.
+   */
   public Optional<Path> sourceRoot() {
     return Optional.ofNullable(this.sourceRoot);
   }
 
+  /**
+   * Chunk/preprocess knobs used when this index was built.
+   */
   public RagLoadOptions options() {
     return this.options;
   }
 
+  /**
+   * {@inheritDoc}
+   */
   @Override
   public int size() {
     return this.docCount;
   }
 
+  /** {@inheritDoc} */
   @Override
   public boolean isOutsideCorpus(final String query) {
     List<String> raw = List.copyOf(new LinkedHashSet<>(Lexicon.tokenizeSurface(query)));
     return QueryTerms.queryOutsideCorpus(this.docFreq, this.docCount, raw);
   }
 
+  /** {@inheritDoc} BM25 then re-rank by query-term coverage and passage length. */
   @Override
   public List<RagHit> retrieve(final String query, final int topK) {
     List<String> terms = this.selectedQueryTerms(query);
@@ -202,6 +216,7 @@ public final class PreparedRag implements RagIndex {
       .toList();
   }
 
+  /** {@inheritDoc} */
   @Override
   public String toString() {
     return "PreparedRag{passages=%d, source=%s}".formatted(
@@ -291,14 +306,17 @@ public final class PreparedRag implements RagIndex {
       }
     }
 
+    /** Chunk id. */
     public String id() {
       return this.chunk.id();
     }
 
+    /** Source label (path or {@code classpath:…}). */
     public String source() {
       return this.chunk.source();
     }
 
+    /** Passage text fed to the model. */
     public String modelText() {
       return this.chunk.text();
     }

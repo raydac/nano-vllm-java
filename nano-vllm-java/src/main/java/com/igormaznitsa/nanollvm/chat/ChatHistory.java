@@ -54,10 +54,16 @@ public final class ChatHistory {
     return this.messages;
   }
 
+  /**
+   * {@code true} when {@link #messages()} is empty.
+   */
   public boolean isEmpty() {
     return this.messages.isEmpty();
   }
 
+  /**
+   * Number of turns in {@link #messages()}.
+   */
   public int size() {
     return this.messages.size();
   }

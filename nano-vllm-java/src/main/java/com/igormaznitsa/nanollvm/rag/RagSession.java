@@ -67,21 +67,55 @@ public final class RagSession {
     this.chat.enableThinking(false);
   }
 
+  /**
+   * Opens a session using {@link LLM#defaultSampling()} and a fresh inner {@link ChatSession}.
+   *
+   * @param llm   engine that owns generation and optional query rewrite; must not be {@code null}
+   * @param index corpus index; must not be {@code null}; may be shared across sessions
+   * @return a new session; not thread-safe
+   */
   public static RagSession open(final LLM llm, final RagIndex index) {
     requireNonNull(llm, "llm");
     return new RagSession(llm, new ChatSession(llm), index);
   }
 
+  /**
+   * Opens a session with a max new-token budget via {@link ChatSession#open(LLM, int)}.
+   *
+   * @param llm       engine that owns generation and optional query rewrite
+   * @param index     corpus index; must not be {@code null}
+   * @param maxTokens upper bound on new tokens per grounded turn (other engine knobs kept)
+   * @return a new session; not thread-safe
+   */
   public static RagSession open(final LLM llm, final RagIndex index, final int maxTokens) {
     requireNonNull(llm, "llm");
     return new RagSession(llm, ChatSession.open(llm, maxTokens), index);
   }
 
+  /**
+   * Reuses {@code chat}'s {@link LLM} and conversation (rewrite stays enabled). Sampling, listeners,
+   * history, and recovery knobs on {@code chat} remain in effect.
+   *
+   * @param chat  existing chat session; must not be {@code null}
+   * @param index corpus index; must not be {@code null}
+   * @return a new RAG wrapper around {@code chat}
+   */
   public static RagSession open(final ChatSession chat, final RagIndex index) {
     requireNonNull(chat, "chat");
     return new RagSession(chat.llm(), chat, index);
   }
 
+  /**
+   * Builds the model-facing user turn from retrieved passages plus {@code question}. Empty hits
+   * produce the no-context RAG prompt.
+   *
+   * @param hits            retrieved passages, highest score first; must not be {@code null}
+   * @param question        user question; must not be blank after strip
+   * @param maxContextChars cap on concatenated passage text; must be {@code >= 64}
+   * @return prompt text for the chat template (history still stores the original question)
+   * @throws IllegalArgumentException if {@code question} is blank after strip or
+   *                                  {@code maxContextChars < 64}
+   */
   public static String formatUserMessage(
     final List<RagHit> hits,
     final String question,
@@ -90,10 +124,25 @@ public final class RagSession {
     return UserMessage.format(hits, question, maxContextChars);
   }
 
+  /**
+   * {@link #formatUserMessage(List, String, int)} with no passage-length cap
+   * ({@link Integer#MAX_VALUE}).
+   *
+   * @param hits     retrieved passages, highest score first; must not be {@code null}
+   * @param question user question; must not be blank after strip
+   * @return prompt text for the chat template
+   */
   public static String formatUserMessage(final List<RagHit> hits, final String question) {
     return UserMessage.format(hits, question, Integer.MAX_VALUE);
   }
 
+  /**
+   * Number of passages kept after retrieve (and prior-source preference). Default {@code 4}.
+   *
+   * @param topK must be {@code > 0}
+   * @return {@code this} for fluent configuration
+   * @throws IllegalArgumentException if {@code topK <= 0}
+   */
   public RagSession topK(final int topK) {
     if (topK <= 0) {
       throw new IllegalArgumentException("topK must be > 0");
@@ -102,6 +151,13 @@ public final class RagSession {
     return this;
   }
 
+  /**
+   * Cap on concatenated passage text in the model-facing user turn. Default {@code 3500}.
+   *
+   * @param maxContextChars must be {@code >= 64}
+   * @return {@code this} for fluent configuration
+   * @throws IllegalArgumentException if {@code maxContextChars < 64}
+   */
   public RagSession maxContextChars(final int maxContextChars) {
     if (maxContextChars < 64) {
       throw new IllegalArgumentException("maxContextChars must be >= 64");
@@ -111,9 +167,12 @@ public final class RagSession {
   }
 
   /**
-   * RAG defaults to thinking off so the token budget goes to the grounded answer.
-   * Re-enable when the tokenizer {@link com.igormaznitsa.nanollvm.tokenizer.Tokenizer#invitesThinking()}
-   * and the budget allows.
+   * RAG defaults to thinking off so the token budget goes to the grounded answer. Re-enable when
+   * the tokenizer {@link com.igormaznitsa.nanollvm.tokenizer.Tokenizer#invitesThinking()} and the
+   * budget allow.
+   *
+   * @param enableThinking {@code true} to invite chain-of-thought, {@code false} to suppress it
+   * @return {@code this} for fluent configuration
    */
   public RagSession enableThinking(final boolean enableThinking) {
     this.chat.enableThinking(enableThinking);
@@ -123,9 +182,11 @@ public final class RagSession {
   /**
    * Scratchpad markers for parse and ChatML skip-seed. Delegates to the inner
    * {@link ChatSession#thinkTags(ThinkTags)}. Prefer
-   * {@link com.igormaznitsa.nanollvm.models.LlmModel#OPTION_THINK_TAGS} at load
-   * so every session sharing the checkpoint uses the same pair.
+   * {@link com.igormaznitsa.nanollvm.models.LlmModel#OPTION_THINK_TAGS} at load so every session
+   * sharing the checkpoint uses the same pair.
    *
+   * @param thinkTags must not be {@code null}
+   * @return {@code this} for fluent configuration
    * @since 1.1.0
    */
   public RagSession thinkTags(final ThinkTags thinkTags) {
@@ -137,6 +198,8 @@ public final class RagSession {
    * When {@code true}, retries once (scrubbing matching assistant turns) and may salvage from
    * advisor notes if the main answer matches {@link #unusableAnswer(Predicate)}. Off by default.
    *
+   * @param enable {@code true} to retry / salvage unusable answers
+   * @return {@code this} for fluent configuration
    * @since 1.1.0
    */
   public RagSession recoverUnusableAnswers(final boolean enable) {
@@ -148,6 +211,8 @@ public final class RagSession {
    * Predicate for answers treated as unusable when {@link #recoverUnusableAnswers(boolean)} is on.
    * Default: blank only.
    *
+   * @param predicate must not be {@code null}
+   * @return {@code this} for fluent configuration
    * @since 1.1.0
    */
   public RagSession unusableAnswer(final Predicate<String> predicate) {
@@ -158,6 +223,8 @@ public final class RagSession {
   /**
    * Fallback visible reply when recovery still yields nothing usable.
    *
+   * @param fallback non-blank text shown to the user
+   * @return {@code this} for fluent configuration
    * @since 1.1.0
    */
   public RagSession unusableAnswerFallback(final String fallback) {
@@ -167,8 +234,11 @@ public final class RagSession {
 
   /**
    * Caps retained dialog turns (system + user + assistant). Oldest non-system messages are dropped
-   * when the cap is exceeded. Default from {@link com.igormaznitsa.nanollvm.utils.ResourceLimits#maxHistoryMessages()}.
+   * when the cap is exceeded. Default from
+   * {@link com.igormaznitsa.nanollvm.utils.ResourceLimits#maxHistoryMessages()}.
    *
+   * @param maxHistoryMessages must be {@code >= 1}
+   * @return {@code this} for fluent configuration
    * @since 1.1.0
    */
   public RagSession maxHistoryMessages(final int maxHistoryMessages) {
@@ -180,6 +250,8 @@ public final class RagSession {
    * When {@code true}, emits {@link com.igormaznitsa.nanollvm.chat.LlmTextKind#TEXT_DEBUG} with the
    * prepared model-user text after advisors. Off by default.
    *
+   * @param emitDebugPrompts {@code true} to send prepared prompts to listeners
+   * @return {@code this} for fluent configuration
    * @since 1.1.0
    */
   public RagSession emitDebugPrompts(final boolean emitDebugPrompts) {
@@ -187,6 +259,13 @@ public final class RagSession {
     return this;
   }
 
+  /**
+   * Replaces sampling parameters for subsequent turns. Grounded turns still clamp temperature in
+   * {@link #send(String)}; no-hit turns may raise max tokens via {@link #maxTokensWhenNoHits(int)}.
+   *
+   * @param samplingParams new knobs; must not be {@code null}
+   * @return {@code this} for fluent configuration
+   */
   public RagSession sampling(final SamplingParams samplingParams) {
     this.baseSampling = requireNonNull(samplingParams, "samplingParams");
     this.chat.sampling(this.baseSampling);
@@ -196,6 +275,8 @@ public final class RagSession {
   /**
    * Appends few-shot turns on the inner chat session.
    *
+   * @param messages seed turns after the engine system seed; must not be {@code null}
+   * @return {@code this} for fluent configuration
    * @since 1.1.0
    */
   public RagSession seed(final ChatMessage... messages) {
@@ -206,6 +287,8 @@ public final class RagSession {
   /**
    * Appends few-shot turns on the inner chat session.
    *
+   * @param messages seed turns after the engine system seed; must not be {@code null}
+   * @return {@code this} for fluent configuration
    * @since 1.1.0
    */
   public RagSession seed(final List<ChatMessage> messages) {
@@ -215,8 +298,12 @@ public final class RagSession {
 
   /**
    * When retrieval returns no passages, use at least this many new tokens (capped by
-   * {@link SamplingParams#maxTokens()} from {@link #sampling} when lower). Default {@code 384}.
-   * Grounded turns still use the {@link #sampling} budget.
+   * {@link SamplingParams#maxTokens()} from {@link #sampling(SamplingParams)} when lower). Default
+   * {@code 384}. Grounded turns still use the {@link #sampling(SamplingParams)} budget.
+   *
+   * @param maxTokens must be {@code >= 1}
+   * @return {@code this} for fluent configuration
+   * @throws IllegalArgumentException if {@code maxTokens < 1}
    */
   public RagSession maxTokensWhenNoHits(final int maxTokens) {
     if (maxTokens < 1) {
@@ -226,35 +313,81 @@ public final class RagSession {
     return this;
   }
 
+  /**
+   * Caps wall-clock time for the inner {@link ChatSession} generate of each turn. Delegates to
+   * {@link ChatSession#timeout(Duration)}.
+   *
+   * @param timeout generate deadline, or {@code null} / zero / negative for no limit
+   * @return {@code this} for fluent configuration
+   */
   public RagSession timeout(final Duration timeout) {
     this.chat.timeout(timeout);
     return this;
   }
 
+  /**
+   * CLI sugar: installs {@link ChatSession#streamTo(PrintStream, PrintStream, boolean)} on the inner
+   * session.
+   *
+   * @param thinkOut  destination for thinking / advisor notes
+   * @param answerOut destination for the visible assistant answer
+   * @param color     when {@code true}, dim cyan ANSI styling on the thinking stream
+   * @return {@code this} for fluent configuration
+   */
   public RagSession streamTo(final PrintStream thinkOut, final PrintStream answerOut,
                              final boolean color) {
     this.chat.streamTo(thinkOut, answerOut, color);
     return this;
   }
 
+  /**
+   * Sets the session-level {@link LlmListener} on the inner {@link ChatSession}.
+   *
+   * @param listener chat / diagnostics sink, or {@code null} for silent
+   * @return {@code this} for fluent configuration
+   */
   public RagSession listen(final LlmListener listener) {
     this.chat.listen(listener);
     return this;
   }
 
+  /**
+   * Composes a diagnostics sink on the inner {@link ChatSession}
+   * ({@link ChatSession#diagnostics(Consumer)}). Does not wipe a prior {@link #listen(LlmListener)} /
+   * {@link #streamTo(PrintStream, PrintStream, boolean)}; {@code null} is a no-op.
+   *
+   * @param diagnostics consumer of diagnostic lines, or {@code null} as a no-op
+   * @return {@code this} for fluent configuration
+   */
   public RagSession diagnostics(final Consumer<String> diagnostics) {
     this.chat.diagnostics(diagnostics);
     return this;
   }
 
+  /**
+   * Passages used for the last {@link #send(String)} / {@link #ask(String)} (empty when the corpus
+   * was skipped or retrieval returned nothing).
+   *
+   * @return an unmodifiable snapshot; empty before the first turn
+   */
   public List<RagHit> lastHits() {
     return this.lastHits;
   }
 
+  /**
+   * Inner chat session (history, sampling, listeners). Prefer the {@code RagSession} knobs when they
+   * exist so RAG callers need not drop through this method.
+   *
+   * @return the wrapped {@link ChatSession}; not a copy
+   */
   public ChatSession chat() {
     return this.chat;
   }
 
+  /**
+   * Drops conversation history and retrieval state (hits, anchor query, last source). Sampling,
+   * timeout, and listeners on the inner session stay.
+   */
   public void clear() {
     this.chat.clear();
     this.lastHits = List.of();
@@ -263,6 +396,10 @@ public final class RagSession {
     this.lastRetrievalQuery = "";
   }
 
+  /**
+   * Per-turn sampling: raise max tokens when retrieval missed, otherwise cap temperature at
+   * {@value #GROUNDED_TEMPERATURE_CAP} so grounded answers stay conservative.
+   */
   private void applyTurnSampling() {
     SamplingParams base = this.baseSampling != null
       ? this.baseSampling
@@ -282,6 +419,8 @@ public final class RagSession {
   /**
    * Convenience: {@link #send(String)} then {@link ChatReply#answer()}.
    *
+   * @param question non-blank user turn
+   * @return visible assistant answer (thinking stripped)
    * @throws IllegalArgumentException                                          if {@code question} is blank after strip
    * @throws com.igormaznitsa.nanollvm.exceptions.GenerationCancelledException if cancel fires
    * @throws com.igormaznitsa.nanollvm.exceptions.GenerationTimeoutException   if the session timeout elapses
@@ -302,6 +441,9 @@ public final class RagSession {
    * When {@code true}, grounded turns (retrieval hits) see only the RAG-augmented user message,
    * not earlier assistant replies — avoids tiny-model latch on prior answers. Default {@code false}.
    * No-hit turns always isolate regardless of this flag.
+   *
+   * @param isolateGeneration {@code true} to omit prior assistant answers from grounded generates
+   * @return {@code this} for fluent configuration
    */
   public RagSession isolateGeneration(final boolean isolateGeneration) {
     this.isolateGeneration = isolateGeneration;
@@ -309,8 +451,12 @@ public final class RagSession {
   }
 
   /**
-   * Generates a grounded reply for {@code question} (rewrite / retrieve / prompt / chat).
+   * Generates a grounded reply for {@code question} (rewrite / retrieve / prompt / chat). History
+   * stores the original question; the model sees a context-augmented last turn when retrieval hits.
    *
+   * @param question non-blank user turn
+   * @return finished {@link ChatReply}: {@code answer} for the user, optional {@code thinking},
+   *         and measured {@code stats}
    * @throws IllegalArgumentException                                          if {@code question} is blank after strip
    * @throws com.igormaznitsa.nanollvm.exceptions.GenerationCancelledException if cancel fires
    * @throws com.igormaznitsa.nanollvm.exceptions.GenerationTimeoutException   if the session timeout elapses
@@ -340,6 +486,12 @@ public final class RagSession {
     return this.chat.sendPrepared(q, prompt, isolate);
   }
 
+  /**
+   * Resolves a search string, fetches a candidate pool from the index, then clips to
+   * {@link #topK(int)} (preferring the prior source on short follow-ups).
+   *
+   * @return an unmodifiable list; empty when the query is off-topic or rewrite yields nothing
+   */
   private List<RagHit> retrieve(final String question) {
     Optional<String> retrievalQuery = this.resolveRetrievalQuery(question);
     if (retrievalQuery.isEmpty()) {
@@ -357,6 +509,10 @@ public final class RagSession {
     return candidates;
   }
 
+  /**
+   * Keeps the last successful retrieval string as the follow-up anchor, or replaces the anchor
+   * when {@code question} is a standalone (non-short) turn.
+   */
   private void updateAnchorAfterRetrieve(final String question) {
     if (Retrieval.shortFollowUp(question)) {
       if (!this.lastHits.isEmpty() && !this.lastRetrievalQuery.isBlank()) {
@@ -369,6 +525,12 @@ public final class RagSession {
     }
   }
 
+  /**
+   * Chooses the index query: skip off-topic; use a short follow-up as-is when it already hits;
+   * otherwise rewrite or expand with the conversation anchor.
+   *
+   * @return empty when retrieval should be skipped
+   */
   private Optional<String> resolveRetrievalQuery(final String question) {
     if (this.index.isOutsideCorpus(question)) {
       return Optional.empty();
@@ -397,6 +559,10 @@ public final class RagSession {
     private UserMessage() {
     }
 
+    /**
+     * Concatenates hit texts (capped) and wraps them with the RAG user-turn templates; empty
+     * context uses the no-passage prompt.
+     */
     static String format(
       final List<RagHit> hits,
       final String question,
@@ -419,6 +585,10 @@ public final class RagSession {
       return RagPrompts.withContext(q, context);
     }
 
+    /**
+     * Joins passage bullets until {@code maxContextChars}; the first block may be sliced if it
+     * alone exceeds the cap.
+     */
     private static String truncateContext(final List<RagHit> hits, final int maxContextChars) {
       if (hits.isEmpty()) {
         return "";
@@ -457,6 +627,10 @@ public final class RagSession {
     private QueryRewrite() {
     }
 
+    /**
+     * Prompt for the isolated rewrite generate: standalone keywords when there is no prior, else
+     * a follow-up rewrite against {@code priorContext}.
+     */
     static String userMessage(final String priorContext, final String followUp) {
       requireNonNull(followUp, "followUp");
       String follow = followUp.strip();
@@ -470,14 +644,22 @@ public final class RagSession {
       return RagPrompts.rewriteFollowUp(prior, follow);
     }
 
+    /**
+     * {@link #parse(String, ThinkTags, ChatSpecials)} with library default markers.
+     */
     static Optional<String> parse(final String rawModelText) {
       return parse(rawModelText, ThinkTags.DEFAULT, ChatSpecials.DEFAULT);
     }
 
+    /** {@link #parse(String, ThinkTags, ChatSpecials)} with {@link ChatSpecials#DEFAULT}. */
     static Optional<String> parse(final String rawModelText, final ThinkTags tags) {
       return parse(rawModelText, tags, ChatSpecials.DEFAULT);
     }
 
+    /**
+     * First non-blank answer line, minus a leading {@code Search:} and wrapping quotes.
+     * {@code NONE} / blank / over-long leftovers become empty.
+     */
     static Optional<String> parse(
       final String rawModelText,
       final ThinkTags tags,
@@ -515,6 +697,10 @@ public final class RagSession {
       return Optional.of(cleaned);
     }
 
+    /**
+     * One isolated generate that turns a short follow-up into standalone search keywords (low
+     * temperature, small token budget).
+     */
     static Optional<String> rewrite(
       final LLM llm,
       final String priorContext,
@@ -548,10 +734,15 @@ public final class RagSession {
     private Retrieval() {
     }
 
+    /**
+     * {@code true} when {@code question} tokenizes to fewer than {@link #SHORT_FOLLOW_UP_MAX_TOKENS}
+     * pieces (pronoun follow-ups, not standalone questions).
+     */
     static boolean shortFollowUp(final String question) {
       return PreparedRag.tokenize(question).size() < SHORT_FOLLOW_UP_MAX_TOKENS;
     }
 
+    /** {@code true} when {@link RagIndex#retrieve(String, int)} returns at least one hit. */
     static boolean hasHits(final RagIndex index, final String query) {
       requireNonNull(index, "index");
       requireNonNull(query, "query");
@@ -563,7 +754,11 @@ public final class RagSession {
      * Prefer a usable rewrite; otherwise expand with Prior. Caller must already reject
      * off-topic follow-ups via {@link RagIndex#isOutsideCorpus(String)}.
      *
+     * @param question  the short follow-up as typed
+     * @param anchor    prior standalone retrieval keywords
      * @param rewritten rewritten query, or {@code null} when rewrite yielded nothing usable
+     * @param index     used to reject an off-topic rewrite
+     * @return a present query string (never empty for this path)
      */
     static Optional<String> queryAfterRewrite(
       final String question,
@@ -579,10 +774,14 @@ public final class RagSession {
       return Optional.of(anchorExpandedQuery(question, anchor));
     }
 
+    /** {@code true} when {@code question} is long enough to replace the conversation anchor. */
     static boolean updatesAnchorFromQuestion(final String question) {
       return !shortFollowUp(question);
     }
 
+    /**
+     * Prior keywords plus the short follow-up, used when rewrite is empty or off-topic.
+     */
     static String anchorExpandedQuery(final String question, final String anchor) {
       if (anchor == null || anchor.isBlank() || !shortFollowUp(question)) {
         return question;
@@ -590,6 +789,10 @@ public final class RagSession {
       return anchor + '\n' + question;
     }
 
+    /**
+     * On a short follow-up, keep hits from {@code priorSource} when their top score is within
+     * {@value #PRIOR_SOURCE_COMPETITIVE} of the global best; otherwise clip the mixed pool.
+     */
     static List<RagHit> preferPriorSource(
       final List<RagHit> candidates,
       final String priorSource,

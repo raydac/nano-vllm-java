@@ -22,6 +22,11 @@ public final class StreamPrinter {
   private boolean thinkClosed;
   private boolean answerStarted;
 
+  /**
+   * @param thinkOut  thinking / advisor / debug sink
+   * @param answerOut visible assistant answer sink
+   * @param color     when {@code true}, dim cyan ANSI styling on the thinking stream
+   */
   public StreamPrinter(final PrintStream thinkOut, final PrintStream answerOut,
                        final boolean color) {
     this.thinkOut = requireNonNull(thinkOut, "thinkOut");
@@ -29,6 +34,9 @@ public final class StreamPrinter {
     this.color = color;
   }
 
+  /**
+   * Clears shown thinking/answer so the next {@link #update(ChatReply)} starts a new turn.
+   */
   public void reset() {
     this.shownThink = "";
     this.shownAnswer = "";
@@ -37,6 +45,9 @@ public final class StreamPrinter {
     this.answerStarted = false;
   }
 
+  /**
+   * Prints newly arrived thinking, then the answer once the think block is closed.
+   */
   public void update(final ChatReply parts) {
     this.emitThink(parts.thinking());
     if (!parts.thinkOpen() && this.thinkStarted && !this.thinkClosed) {
@@ -47,6 +58,9 @@ public final class StreamPrinter {
     }
   }
 
+  /**
+   * Ends the current turn (closes an open think line, prints {@code assistant>} if needed, newline).
+   */
   public void closeTurn() {
     if (this.thinkStarted && !this.thinkClosed) {
       this.closeThinkLine();
@@ -75,6 +89,9 @@ public final class StreamPrinter {
     this.answerStarted = false;
   }
 
+  /**
+   * Prints one advisor note on the thinking stream as {@code thinking> [name] note}.
+   */
   public void emitAdvisorNote(final String advisorName, final String note) {
     String name = requireNonNull(advisorName, "advisorName").strip();
     if (name.isEmpty()) {
@@ -93,6 +110,9 @@ public final class StreamPrinter {
     this.thinkOut.flush();
   }
 
+  /**
+   * Prints a prepared-prompt dump on the thinking stream ({@code debug>} lines).
+   */
   public void emitDebug(final String text) {
     String body = text == null ? "" : text;
     this.thinkOut.println("debug> --- prepared model user ---");

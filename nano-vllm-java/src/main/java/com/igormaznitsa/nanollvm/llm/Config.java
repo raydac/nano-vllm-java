@@ -117,27 +117,45 @@ public final class Config {
     return resolved;
   }
 
+  /**
+   * Starts a builder from an HF/GGUF/ONNX model path (config is read at {@link Builder#build()}).
+   */
   public static Builder builder(final Path model) {
     return new Builder(model);
   }
 
+  /**
+   * Starts a builder from a loaded checkpoint (path + {@link LlmModel#hfConfig()}).
+   */
   public static Builder builder(final LlmModel model) {
     requireNonNull(model, "model");
     return new Builder(model.path(), model.hfConfig());
   }
 
+  /**
+   * Normalized filesystem path of the checkpoint folder or GGUF file.
+   */
   public Path model() {
     return this.model;
   }
 
+  /**
+   * Prefill batch cap (tokens across sequences in one step).
+   */
   public int maxNumBatchedTokens() {
     return this.maxNumBatchedTokens;
   }
 
+  /**
+   * Maximum concurrent sequences in the scheduler.
+   */
   public int maxNumSeqs() {
     return this.maxNumSeqs;
   }
 
+  /**
+   * Context length cap used for KV and chat truncation.
+   */
   public int maxModelLen() {
     return this.maxModelLen;
   }
@@ -157,22 +175,37 @@ public final class Config {
     return this.cpuThreads;
   }
 
+  /**
+   * Hugging Face / GGUF-mapped architecture config used to size the graph.
+   */
   public HfConfig hfConfig() {
     return this.hfConfig;
   }
 
+  /**
+   * Primary end-of-sequence token id (first of {@link #stopTokenIds()}).
+   */
   public int eos() {
     return this.eos;
   }
 
+  /**
+   * Token ids that end a generate (immutable).
+   */
   public List<Integer> stopTokenIds() {
     return this.stopTokenIds;
   }
 
+  /**
+   * Tokens per paged-KV block.
+   */
   public int kvcacheBlockSize() {
     return this.kvcacheBlockSize;
   }
 
+  /**
+   * Number of KV blocks allocated for this engine.
+   */
   public int numKvcacheBlocks() {
     return this.numKvcacheBlocks;
   }
@@ -199,31 +232,49 @@ public final class Config {
       this.hfConfig = hfConfig;
     }
 
+    /**
+     * Prefill batch cap (tokens across sequences in one step).
+     */
     public Builder maxNumBatchedTokens(final int v) {
       this.maxNumBatchedTokens = v;
       return this;
     }
 
+    /**
+     * Maximum concurrent sequences in the scheduler.
+     */
     public Builder maxNumSeqs(final int v) {
       this.maxNumSeqs = v;
       return this;
     }
 
+    /**
+     * Context length cap used for KV and chat truncation.
+     */
     public Builder maxModelLen(final int v) {
       this.maxModelLen = v;
       return this;
     }
 
+    /**
+     * Fraction of {@link Runtime#maxMemory()} used when auto-sizing KV blocks. Default {@code 0.25}.
+     */
     public Builder kvHeapFraction(final float v) {
       this.kvHeapFraction = v;
       return this;
     }
 
+    /**
+     * CPU workers for dense matmul ({@code 1} = sequential).
+     */
     public Builder cpuThreads(final int v) {
       this.cpuThreads = v;
       return this;
     }
 
+    /**
+     * Primary EOS id; also becomes the sole stop id when {@link #stopTokenIds(List)} is still empty.
+     */
     public Builder eos(final int v) {
       this.eos = v;
       if (this.stopTokenIds.isEmpty()) {
@@ -270,16 +321,25 @@ public final class Config {
       return this;
     }
 
+    /**
+     * Tokens per paged-KV block.
+     */
     public Builder kvcacheBlockSize(final int v) {
       this.kvcacheBlockSize = v;
       return this;
     }
 
+    /**
+     * Explicit KV-block count; {@code -1} (default) auto-sizes from heap at {@link #build()}.
+     */
     public Builder numKvcacheBlocks(final int v) {
       this.numKvcacheBlocks = v;
       return this;
     }
 
+    /**
+     * Seals EOS / stop ids and KV-block count, then returns an immutable {@link Config}.
+     */
     public Config build() {
       return new Config(this);
     }

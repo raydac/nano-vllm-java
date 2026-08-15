@@ -96,6 +96,13 @@ public final class PdfTextExtractor {
     return extract(in, ResourceLimits.current());
   }
 
+  /**
+   * Consumes {@code in} fully and returns extractable text in stream order.
+   *
+   * @param in     PDF bytes; must not be {@code null}
+   * @param limits parser caps ({@link ResourceLimits#maxFileBytes()})
+   * @throws UncheckedIOException if the stream cannot be read or is not a PDF
+   */
   public static String extract(final InputStream in, final ResourceLimits limits) {
     requireNonNull(in, "in");
     requireNonNull(limits, "limits");
@@ -115,6 +122,14 @@ public final class PdfTextExtractor {
     return extract(pdfBytes, ResourceLimits.current());
   }
 
+  /**
+   * Parses {@code pdfBytes} and returns extractable text in stream order.
+   *
+   * @param pdfBytes PDF payload; must not be {@code null}
+   * @param limits   parser caps ({@link ResourceLimits#maxFileBytes()})
+   * @throws UncheckedIOException     if the bytes are not a PDF or cannot be decoded
+   * @throws IllegalArgumentException if {@code pdfBytes} exceeds {@code limits.maxFileBytes()}
+   */
   public static String extract(final byte[] pdfBytes, final ResourceLimits limits) {
     requireNonNull(pdfBytes, "pdfBytes");
     requireNonNull(limits, "limits");
