@@ -151,6 +151,13 @@ mvn -pl nano-vllm-java-samples -q exec:java \
   -Dexec.mainClass=com.igormaznitsa.nanollvm.samples.HelloWorld
 ```
 
+Custom advisor **Alex** plus lexical **BM25** RAG over `rag/` (Grimm names and father; Gemma3-270M):
+
+```bash
+mvn -pl nano-vllm-java-samples -q exec:java \
+  -Dexec.mainClass=com.igormaznitsa.nanollvm.samples.AdvisorRagHelloWorld
+```
+
 More API samples (streaming, RAG, GGUF, advisors) are in [Library quick start](#library-quick-start).
 
 ## Key features
@@ -220,8 +227,9 @@ requires com.igormaznitsa.nanollvm;
 Public API packages: `models`, `llm`, `chat`, `rag`, `tokenizer`, `utils`, `exceptions`.
 (`prompts` and `models.internal` are module-private.)
 `engine`, `layers`, `tensor`, and `internal` are **not** exported — use `LlmModelFactory` / `LLM` /
-`RagFactory` from application code. Runnable demos (`HelloWorld`, `LogTriageHelloWorld`, `Example`,
-`Bench`, `samples.utils`) live in the separate `nano-vllm-java-samples` module.
+`RagFactory` from application code. Runnable demos (`HelloWorld`, `LogTriageHelloWorld`,
+`AdvisorRagHelloWorld`, `Example`, `Bench`, `samples.utils`) live in the separate
+`nano-vllm-java-samples` module.
 
 The packaged library JAR has no `Main-Class`. In-repo demos:
 
@@ -720,8 +728,8 @@ ResourceLimits.setCurrent(ResourceLimits.builder().maxFileBytes(128L << 20).buil
 ```
 
 Chat history length defaults to `ResourceLimits.maxHistoryMessages()`; override with
-`chat.maxHistoryMessages(n)`. Optional `chat.emitDebugPrompts(false)` suppresses prepared-prompt
-`TEXT_DEBUG` events.
+`chat.maxHistoryMessages(n)`. Prepared-prompt `TEXT_DEBUG` events are off unless you call
+`chat.emitDebugPrompts(true)`.
 
 **Trust boundary:** corpus text and advisor notes are concatenated into the model prompt (facts then
 question). Treat RAG directories and listener sinks as trusted. Untrusted uploads into `RagFactory`

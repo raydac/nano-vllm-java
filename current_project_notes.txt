@@ -52,7 +52,7 @@
 
 - **RAG:** `RagFactory` → `PreparedRag` (BM25); `addResource` / `makeResource` for classpath docs; optional `withEmbeddings` → `HybridRagIndex` (`DenseRagIndex` + RRF); package-private `CorpusLoader`; public API ~12 types (+ `PdfTextExtractor`)
 - **RAG off-topic:** `isOutsideCorpus` ignores conversational glue (`what`/`think`/`about`/…); source stems use `/`+`\` basename (Windows-safe)
-- **Samples** (`nano-vllm-java-samples`): linear `main` flows (`HelloWorld`, `EmbedHelloWorld`, `LogTriageHelloWorld`, `Bench`, `Example`); `Example` is a terminal app (model menu → RAG mode → advisor count → chat/embed); Enter = first menu item; downloaded models listed first (Qwen3-0.6B preferred); empty disk exits with download help; `--debug` enables prepared-prompt dumps; SmolLM2 Instruct ONNX (compact chat demo) + Tiny-LLM (base); gte-small embeddings; `BundledModels` / `BundledRag` / `OrderedConsole` in `samples.utils`
+- **Samples** (`nano-vllm-java-samples`): linear `main` flows (`HelloWorld`, `EmbedHelloWorld`, `LogTriageHelloWorld`, `AdvisorRagHelloWorld`, `Bench`, `Example`); `AdvisorRagHelloWorld` is one `main` (Alex advisor + BM25 over `rag/`, Grimm names/father, Gemma3-270M); `Example` is a terminal app (model menu → RAG mode → advisor count → chat/embed); Enter = first menu item; downloaded models listed first (Qwen3-0.6B preferred); empty disk exits with download help; `--debug` enables prepared-prompt dumps; SmolLM2 Instruct ONNX (compact chat demo) + Tiny-LLM (base); gte-small embeddings; `BundledModels` / `BundledRag` / `OrderedConsole` in `samples.utils`
 
 
 ## 2. Architecture & Technical Discoveries
@@ -68,7 +68,7 @@
 - base SmolLM2-135M-ONNX / Tiny-LLM-ONNX = completion-only
 - GGUF packed by default; late unpack does not release bytes still bound by other engines
 - GGUF dequant covers current llama.cpp **weight** `ggml_type`s (K/IQ/TQ/MX/NV/legacy `Q*_0`); file tags `K_M`/`K_S` are mixes. GGUF chat graphs: `qwen3` (unfused `blk.N.*`, `head_dim` from `attention.key_length`) and `lfm2`; embeddings `bert`. Gemma/Llama GGUF still rejected.
-- `TEXT_DEBUG`: optional via `emitDebugPrompts`; RAG corpus/advisor notes are trusted prompt input by design
+- `TEXT_DEBUG`: off unless `ChatSession.emitDebugPrompts(true)` (Example `--debug`); RAG corpus/advisor notes are trusted prompt input by design
 - Dense RAG: index-time `LlmModel.embed` of all chunks; query cosine (dot); hybrid = BM25 + dense RRF; off-topic = both indexes agree
 - Lexical off-topic uses salient query terms only (skips conversational glue); file-name stems split on `/` and `\`
 - Gemma 4 text (QAT mobile): flatten nested `text_config`; skip `vision_tower`/`audio_tower`; packed int2/4/8 + SRQ (`GemmaQat`); PLE after MLP; KV share from last same-type non-shared layer; RMS `onePlusWeight=false`; attn scale 1.0; chat `<|turn>`/`<turn|>`. Weightless `RMSNorm` residual uses `Ops.addRmsNorm(x, residual, eps)` (identity scale; `weight == null` is valid).
@@ -127,11 +127,12 @@
 - `security_audit.txt` — 1.0.0 threat-model summary
 - `CHANGELOG.md` — 1.0.0 released; active line 1.1.0-SNAPSHOT
 - `README.md` — Hello World, CLI, library samples; ONNX + Tiny-LLM section
-- Build: `mvn22 -q test` / `MAVEN_OPTS="-Xmx8g" mvn22 -pl nano-vllm-java-samples -q exec:java` (document as `mvn` in README); SpotBugs: `mvn22 -pl nano-vllm-java -am compile spotbugs:check` (also on `verify`)
+- Build: `mvn22 -q test` / `MAVEN_OPTS="-Xmx8g" mvn22 -pl nano-vllm-java-samples -q exec:java` (document as `mvn` in README); other mains: `-Dexec.mainClass=…` (samples POM default `exec.mainClass` is `Example`); SpotBugs: `mvn22 -pl nano-vllm-java -am compile spotbugs:check` (also on `verify`)
 - Library: `LlmModelFactory.make(path)` / `open(path).make()` — engines close before model
 - Embeddings: `LlmModelFactory.make(gteGguf); model.embed(text)` — sample `EmbedHelloWorld`
 - ONNX demo: `./models/download-smollm2-135m-instruct-onnx.sh` (chat) or `./models/download-tiny-llm-onnx.sh` (base toy)
 - Dense RAG: `RagFactory.withEmbeddings(preparedRag, embedModel)` → `HybridRagIndex`; keep BM25 via `PreparedRag` alone
+- Advisor+BM25 demo: `AdvisorRagHelloWorld` (Gemma3-270M, advisor Alex, Grimm names/father)
 - Classpath RAG: `RagFactory.makeResource("docs/a.md")` / `.addResource(loader, path)` / `.addResource(Class, "/abs.md")`
 - Props: `nanollvm.*` / `NANOLLVM_*` only (`NanoLlvmProps`)
 - Heap/vector: `.mvn/jvm.config`; surefire uses `jvm.module.args`

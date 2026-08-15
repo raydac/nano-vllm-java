@@ -16,6 +16,7 @@
 
     <properties>
         <maven.deploy.skip>true</maven.deploy.skip>
+        <exec.mainClass>com.igormaznitsa.nanollvm.samples.Example</exec.mainClass>
     </properties>
 
     <dependencies>
@@ -41,7 +42,7 @@
                 <artifactId>exec-maven-plugin</artifactId>
                 <configuration>
                     <workingDirectory>${maven.multiModuleProjectDirectory}</workingDirectory>
-                    <mainClass>com.igormaznitsa.nanollvm.samples.Example</mainClass>
+                    <mainClass>${exec.mainClass}</mainClass>
                 </configuration>
             </plugin>
         </plugins>

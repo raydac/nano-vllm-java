@@ -2993,7 +2993,7 @@ packages.
 | `layers/` — `Attention`, `BidirectionalAttention`, `Sampler`, `Linear`, `Norms`, …     | Attention, sampling, projections, norms/RoPE         | **no** |
 | `tensor/` — `Tensor`, `Ops`, `MatmulRuntime`, `LinearKernel`, `EmbeddingKernel`, …     | Arrays, float ops, parallel GEMM                     | **no** |
 | `prompts/` — `ChatPrompts`, `RagPrompts`, `AdvisorPrompts`                             | Default system / RAG / advisor wording               | **no** |
-| *(Maven module `nano-vllm-java-samples`)* `Example`, `HelloWorld`, `Bench`, `EmbedHelloWorld`, `LogTriageHelloWorld`, `utils/Bundled*` | Runnable demos (not in the library JAR) | n/a |
+| *(Maven module `nano-vllm-java-samples`)* `Example`, `HelloWorld`, `Bench`, `EmbedHelloWorld`, `LogTriageHelloWorld`, `AdvisorRagHelloWorld`, `utils/Bundled*` | Runnable demos (not in the library JAR) | n/a |
 
 `Config.HfConfig` (in `llm/Config`) holds the blueprint plus per-LLM engine knobs (`maxModelLen`, `kvHeapFraction`, …).
 
@@ -3081,7 +3081,8 @@ Interactive CLI wiring lives in `nano-vllm-java-samples` → `samples.Example.ma
 **RAG-mode menu** (none / BM25 / dense / hybrid — dense needs gte-small; **since 1.1.0**; Enter =
 none), **advisor-count menu** (`0`–`3`; Enter = none), then `llm.chat(…).streamTo(…)` or
 `llm.rag(index).streamTo(…)`. Prepared-prompt
-`TEXT_DEBUG` lines are off unless `--debug` is passed to `Example.main` (chapter 17). Embedding
+`TEXT_DEBUG` lines are off by default (`ChatSession.emitDebugPrompts(true)` to enable; `Example`
+opts in with `--debug`, chapter 17). Embedding
 checkpoints skip RAG/advisors and open an embed REPL. Each mode is a named method in `Example`.
 
 ### Sample A1 — classpath / stream sources (**since 1.1.0**)
@@ -3329,7 +3330,7 @@ nano-vllm-java/src/main/java/com/igormaznitsa/nanollvm/
   exceptions/…
 
 nano-vllm-java-samples/src/main/java/com/igormaznitsa/nanollvm/samples/
-  Example.java / HelloWorld.java / Bench.java / EmbedHelloWorld.java / LogTriageHelloWorld.java
+  Example.java / HelloWorld.java / Bench.java / EmbedHelloWorld.java / LogTriageHelloWorld.java / AdvisorRagHelloWorld.java
   utils/BundledModels.java / BundledRag.java / OrderedConsole.java
 ```
 
@@ -3386,7 +3387,8 @@ unused.
 
 **In the code (organization):** package `com.igormaznitsa.nanollvm.rag`; entry `RagFactory` → `PreparedRag` (and
 optionally `withEmbeddings`); session `LLM.rag(index)` → `RagSession`; demo corpus folder `rag/` via
-`samples.utils.BundledRag` in `samples.Example` (model → RAG-mode → advisor-count menus **since 1.1.0**).
+`samples.utils.BundledRag` in `samples.Example` (model → RAG-mode → advisor-count menus **since 1.1.0**)
+and the linear `samples.AdvisorRagHelloWorld` (one custom advisor + BM25 over `rag/`).
 
 ### Load path — preparing documents
 
@@ -3544,6 +3546,8 @@ The repository folder `rag/` holds sample Markdown (fairy-tale / Grimm demos). `
 the sample asks for a **RAG mode** after you pick a chat model: none (plain chat; **Enter**), BM25, dense, or hybrid
 (dense and hybrid need `models/gte-small.Q2_K.gguf`), then **how many advisors** (`0`–`3`; **Enter** = none). Choosing
 gte-small alone still opens the embedding REPL (`samples.EmbedHelloWorld` is the minimal embed demo).
+`samples.AdvisorRagHelloWorld` is the non-interactive BM25 + custom-advisor path (Gemma3-270M, advisor Alex,
+Grimm names and father).
 
 ### What this RAG is *not*
 

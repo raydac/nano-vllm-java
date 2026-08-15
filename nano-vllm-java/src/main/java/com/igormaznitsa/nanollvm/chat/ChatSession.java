@@ -23,7 +23,8 @@ import java.util.function.Predicate;
  * <p>Not thread-safe; use one session per conversation thread. Text and status events compose
  * {@link LLM#listener()} with any session {@link #listen(LlmListener)} / {@link #streamTo} sink.
  * Streaming chat emits {@link LlmTextKind#TEXT_RAW} (full tokenizer decode, specials kept) plus
- * parsed {@link LlmTextKind#TEXT_THINKING} / {@link LlmTextKind#TEXT_ASSISTANT}.
+ * parsed {@link LlmTextKind#TEXT_THINKING} / {@link LlmTextKind#TEXT_ASSISTANT}. Prepared-prompt
+ * {@link LlmTextKind#TEXT_DEBUG} is off until {@link #emitDebugPrompts(boolean) emitDebugPrompts(true)}.
  */
 public final class ChatSession {
 
@@ -39,7 +40,7 @@ public final class ChatSession {
   private long lastAdvisorNanos;
   private GenerationStats lastGenerateStats = GenerationStats.NONE;
   private int maxHistoryMessages = ResourceLimits.current().maxHistoryMessages();
-  private boolean emitDebugPrompts = true;
+  private boolean emitDebugPrompts;
   private boolean recoverUnusableAnswers;
   private Predicate<String> unusableAnswer = body -> body == null || body.isBlank();
   private String unusableAnswerFallback = "Sorry — I couldn't form a reply. Please try again.";
@@ -298,8 +299,8 @@ public final class ChatSession {
   }
 
   /**
-   * When {@code true} (default), emits {@link LlmTextKind#TEXT_DEBUG} with the prepared model-user
-   * text after advisors. Set {@code false} to avoid leaking full prompts to listeners.
+   * When {@code true}, emits {@link LlmTextKind#TEXT_DEBUG} with the prepared model-user text after
+   * advisors. Off by default so full prompts are not sent to listeners; turn on only when debugging.
    */
   public ChatSession emitDebugPrompts(final boolean emitDebugPrompts) {
     this.emitDebugPrompts = emitDebugPrompts;

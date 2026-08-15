@@ -31,7 +31,8 @@ public enum LlmTextKind {
    */
   TEXT_DIAGNOSTICS,
   /**
-   * Debug payload (e.g. prepared model user text after advisor mix).
+   * Debug payload (e.g. prepared model user text after advisor mix). Emitted only when
+   * {@link ChatSession#emitDebugPrompts(boolean)} is {@code true}.
    */
   TEXT_DEBUG,
   /**
