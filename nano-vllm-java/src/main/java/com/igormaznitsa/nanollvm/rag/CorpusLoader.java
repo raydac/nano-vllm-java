@@ -417,7 +417,11 @@ final class CorpusLoader {
     }
 
     private boolean isIndexedFile(final Path file) {
-      String name = file.getFileName().toString().toLowerCase(Locale.ROOT);
+      Path fileName = file.getFileName();
+      if (fileName == null) {
+        return false;
+      }
+      String name = fileName.toString().toLowerCase(Locale.ROOT);
       if (name.equals("readme.md") || name.equals("readme.txt") || name.equals("readme.markdown")) {
         return false;
       }

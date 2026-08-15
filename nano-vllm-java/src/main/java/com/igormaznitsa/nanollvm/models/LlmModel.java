@@ -254,6 +254,11 @@ public final class LlmModel implements AutoCloseable {
     return bag.hasPacked() ? "packed" : "dense";
   }
 
+  /**
+   * Kind, architecture, container, sizes, packed/dense/qat, and chat format (safe after close).
+   *
+   * @since 1.1.0
+   */
   @Override
   public String toString() {
     Config.HfConfig cfg = this.hfConfig;
@@ -297,7 +302,8 @@ public final class LlmModel implements AutoCloseable {
   }
 
   private String containerLabel() {
-    String name = this.path.getFileName().toString().toLowerCase(ROOT);
+    Path fileName = this.path.getFileName();
+    String name = (fileName == null ? this.path.toString() : fileName.toString()).toLowerCase(ROOT);
     if (name.endsWith(".gguf")) {
       return "gguf";
     }

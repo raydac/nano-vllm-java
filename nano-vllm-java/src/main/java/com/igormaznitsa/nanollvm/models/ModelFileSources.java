@@ -29,8 +29,7 @@ public final class ModelFileSources {
    */
   public static ModelFileSource fromPath(final Path modelPath) {
     Path path = requireNonNull(modelPath, "modelPath").toAbsolutePath().normalize();
-    if (Files.isRegularFile(path)
-      && path.getFileName().toString().toLowerCase(Locale.ROOT).endsWith(".gguf")) {
+    if (isGgufFile(path)) {
       return new GgufFileSource(path);
     }
     if (!Files.isDirectory(path)) {
@@ -70,6 +69,13 @@ public final class ModelFileSources {
     requireNonNull(loader, "loader");
     String file = normalizeResourcePath(ggufResourceFile, "ggufResourceFile");
     return new ClasspathGgufFileSource(loader, file);
+  }
+
+  private static boolean isGgufFile(final Path path) {
+    Path name = path.getFileName();
+    return Files.isRegularFile(path)
+      && name != null
+      && name.toString().toLowerCase(Locale.ROOT).endsWith(".gguf");
   }
 
   private static String normalizeResourcePath(final String resourcePath, final String paramName) {

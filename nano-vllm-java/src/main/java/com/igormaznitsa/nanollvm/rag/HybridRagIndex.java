@@ -30,12 +30,19 @@ public final class HybridRagIndex implements RagIndex {
     }
   }
 
+  /**
+   * Wraps an existing BM25 index and a dense index over the same passages.
+   *
+   * @since 1.1.0
+   */
   public static HybridRagIndex of(final PreparedRag lexical, final DenseRagIndex dense) {
     return new HybridRagIndex(lexical, dense);
   }
 
   /**
    * Builds a dense index over {@code lexical} passages, then wraps both in hybrid retrieval.
+   *
+   * @since 1.1.0
    */
   public static HybridRagIndex of(final PreparedRag lexical, final LlmModel embeddingModel) {
     return of(lexical, DenseRagIndex.of(lexical, embeddingModel));
@@ -76,10 +83,20 @@ public final class HybridRagIndex implements RagIndex {
     }
   }
 
+  /**
+   * BM25 half of this hybrid index.
+   *
+   * @since 1.1.0
+   */
   public PreparedRag lexical() {
     return this.lexical;
   }
 
+  /**
+   * Dense half of this hybrid index.
+   *
+   * @since 1.1.0
+   */
   public DenseRagIndex dense() {
     return this.dense;
   }

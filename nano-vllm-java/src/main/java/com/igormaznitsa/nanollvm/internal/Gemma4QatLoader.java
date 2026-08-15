@@ -45,8 +45,7 @@ public final class Gemma4QatLoader {
     LlmListeners.infof(streams, null, "Loading Gemma 4 QAT language weights from %s (%.2f GiB)%n",
       modelDir, fileBytes / (1024.0 * 1024.0 * 1024.0));
     List<WeightSource> sources = files.stream()
-      .map(
-        file -> new WeightSource(file.getFileName().toString(), () -> SafetensorsReader.open(file)))
+      .map(file -> new WeightSource(PathNames.of(file), () -> SafetensorsReader.open(file)))
       .toList();
     return assemble(sources, modelDir.toString(), hfConfig, schema, streams);
   }

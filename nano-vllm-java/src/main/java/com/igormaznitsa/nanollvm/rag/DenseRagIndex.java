@@ -51,6 +51,8 @@ public final class DenseRagIndex implements RagIndex {
 
   /**
    * Embeds every passage in {@code lexical} with {@code embeddingModel}.
+   *
+   * @since 1.1.0
    */
   public static DenseRagIndex of(final PreparedRag lexical, final LlmModel embeddingModel) {
     requireNonNull(lexical, "lexical");
@@ -59,6 +61,8 @@ public final class DenseRagIndex implements RagIndex {
 
   /**
    * Embeds each chunk text with {@code embeddingModel} (must be an embedding encoder).
+   *
+   * @since 1.1.0
    */
   public static DenseRagIndex of(final List<TextChunk> chunks, final LlmModel embeddingModel) {
     requireNonNull(chunks, "chunks");
@@ -114,10 +118,20 @@ public final class DenseRagIndex implements RagIndex {
     return this.chunks.size();
   }
 
+  /**
+   * Embedding vector length of every stored passage.
+   *
+   * @since 1.1.0
+   */
   public int dimensions() {
     return this.dimensions;
   }
 
+  /**
+   * Embedding model used at index time (not owned; close it after this index is unused).
+   *
+   * @since 1.1.0
+   */
   public LlmModel encoder() {
     return this.encoder;
   }

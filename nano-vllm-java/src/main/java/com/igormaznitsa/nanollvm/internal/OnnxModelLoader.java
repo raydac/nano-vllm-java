@@ -21,7 +21,6 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.stream.Stream;
 
@@ -77,8 +76,7 @@ public final class OnnxModelLoader {
       try (Stream<Path> stream = Files.list(dir)) {
         List<Path> others = stream
           .filter(Files::isRegularFile)
-          .filter(p -> p.getFileName().toString().toLowerCase(ROOT).endsWith(".onnx"))
-          .filter(p -> isAllowedOnnxName(p.getFileName().toString()))
+          .filter(OnnxModelLoader::isCandidateOnnx)
           .sorted()
           .toList();
         if (!others.isEmpty()) {
@@ -211,6 +209,11 @@ public final class OnnxModelLoader {
     return true;
   }
 
+  private static boolean isCandidateOnnx(final Path path) {
+    String name = PathNames.of(path);
+    return name.toLowerCase(ROOT).endsWith(".onnx") && isAllowedOnnxName(name);
+  }
+
   /**
    * Filename gate for Tier A: must end with {@code .onnx} and must not look like a community quant
    * or KV-{@code with_past} export ({@code _q4}, {@code _int8}, {@code _uint8}, {@code _bnb4},
@@ -219,7 +222,7 @@ public final class OnnxModelLoader {
    * @since 1.1.0
    */
   public static boolean isAllowedOnnxName(final String fileName) {
-    String lower = fileName.toLowerCase(Locale.ROOT);
+    String lower = fileName.toLowerCase(ROOT);
     if (!lower.endsWith(".onnx")) {
       return false;
     }
@@ -244,8 +247,7 @@ public final class OnnxModelLoader {
       }
       try (Stream<Path> stream = Files.list(dir)) {
         stream.filter(Files::isRegularFile)
-          .filter(p -> p.getFileName().toString().toLowerCase(ROOT).endsWith(".onnx"))
-          .filter(p -> isAllowedOnnxName(p.getFileName().toString()))
+          .filter(OnnxModelLoader::isCandidateOnnx)
           .sorted()
           .forEach(found::add);
       }

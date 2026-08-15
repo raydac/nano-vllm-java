@@ -35,6 +35,11 @@ public enum ModelFileId {
     this.fileName = requireNonNull(fileName, "fileName");
   }
 
+  /**
+   * Conventional on-disk / resource file name for this role.
+   *
+   * @since 1.1.0
+   */
   public String fileName() {
     return this.fileName;
   }

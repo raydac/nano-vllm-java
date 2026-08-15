@@ -257,6 +257,8 @@ public final class Config {
     /**
      * Replaces EOS / stop ids. First id is {@link Config#eos()}. Must be non-empty.
      * Apply after {@link #applyTokenizer(Tokenizer)} so the caller wins over vocab stops.
+     *
+     * @since 1.1.0
      */
     public Builder stopTokenIds(final List<Integer> ids) {
       requireNonNull(ids, "stopTokenIds");
@@ -569,10 +571,20 @@ public final class Config {
       return this.hiddenAct == null ? "silu" : this.hiddenAct;
     }
 
+    /**
+     * {@code true} when this blueprint includes {@link Gemma4Text} extras.
+     *
+     * @since 1.1.0
+     */
     public boolean isGemma4() {
       return this.gemma4 != null;
     }
 
+    /**
+     * Attention head dim at {@code layerIndex} (Gemma 4 global layers may differ).
+     *
+     * @since 1.1.0
+     */
     public int layerHeadDim(final int layerIndex) {
       if (this.gemma4 == null) {
         return this.headDim;
@@ -580,6 +592,11 @@ public final class Config {
       return this.isSlidingLayer(layerIndex) ? this.headDim : this.gemma4.globalHeadDim();
     }
 
+    /**
+     * MLP intermediate size at {@code layerIndex} (Gemma 4 shared-KV layers may double).
+     *
+     * @since 1.1.0
+     */
     public int mlpIntermediateSize(final int layerIndex) {
       if (this.gemma4 == null) {
         return this.intermediateSize;
@@ -589,6 +606,11 @@ public final class Config {
         : this.intermediateSize;
     }
 
+    /**
+     * First layer index that reuses KV from an earlier producer ({@link #numHiddenLayers()} when none).
+     *
+     * @since 1.1.0
+     */
     public int firstKvSharedLayer() {
       if (this.gemma4 == null || this.gemma4.numKvSharedLayers() <= 0) {
         return this.numHiddenLayers;
@@ -596,11 +618,21 @@ public final class Config {
       return this.numHiddenLayers - this.gemma4.numKvSharedLayers();
     }
 
+    /**
+     * {@code true} when layer {@code layerIndex} reuses KV from {@link #kvProducerLayer(int)}.
+     *
+     * @since 1.1.0
+     */
     public boolean isKvSharedLayer(final int layerIndex) {
       int first = this.firstKvSharedLayer();
       return first > 0 && layerIndex >= first;
     }
 
+    /**
+     * Layer that owns the KV cache for {@code layerIndex} (self when not shared).
+     *
+     * @since 1.1.0
+     */
     public int kvProducerLayer(final int layerIndex) {
       if (!this.isKvSharedLayer(layerIndex)) {
         return layerIndex;

@@ -24,8 +24,8 @@ public final class StreamPrinter {
 
   public StreamPrinter(final PrintStream thinkOut, final PrintStream answerOut,
                        final boolean color) {
-    this.thinkOut = thinkOut;
-    this.answerOut = answerOut;
+    this.thinkOut = requireNonNull(thinkOut, "thinkOut");
+    this.answerOut = requireNonNull(answerOut, "answerOut");
     this.color = color;
   }
 

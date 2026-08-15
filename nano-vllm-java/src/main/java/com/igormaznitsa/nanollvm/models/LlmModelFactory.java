@@ -491,8 +491,7 @@ public final class LlmModelFactory {
     LlmListener streams = io == null ? LlmListeners.silent() : io;
     Path path = modelPath.toAbsolutePath().normalize();
     try {
-      if (Files.isRegularFile(path) && path.getFileName().toString().toLowerCase(Locale.ROOT)
-        .endsWith(".gguf")) {
+      if (isGgufFile(path)) {
         return loadGgufFile(path, streams, allowUnpackParameters, frozen);
       }
       if (!Files.isDirectory(path)) {
@@ -715,66 +714,11 @@ public final class LlmModelFactory {
     }
   }
 
-  /**
-   * Fluent load configurator. Terminal {@link #make()} performs blocking I/O.
-   *
-   * @since 1.1.0
-   */
-  public static final class Builder {
-
-    private final Path modelPath;
-    private final ModelFileSource source;
-    private LlmListener io = LlmListeners.silent();
-    private boolean allowUnpackParameters;
-    private Map<String, ?> options = Map.of();
-
-    private Builder(final Path modelPath, final ModelFileSource source) {
-      this.modelPath = modelPath;
-      this.source = source;
-    }
-
-    public Builder listen(final LlmListener listener) {
-      this.io = listener == null ? LlmListeners.silent() : listener;
-      return this;
-    }
-
-    public Builder unpackParameters() {
-      return this.unpackParameters(true);
-    }
-
-    public Builder unpackParameters(final boolean value) {
-      this.allowUnpackParameters = value;
-      return this;
-    }
-
-    public Builder thinkTags(final ThinkTags thinkTags) {
-      requireNonNull(thinkTags, "thinkTags");
-      return this.withOption(LlmModel.OPTION_THINK_TAGS, thinkTags);
-    }
-
-    public Builder chatSpecials(final ChatSpecials chatSpecials) {
-      requireNonNull(chatSpecials, "chatSpecials");
-      return this.withOption(LlmModel.OPTION_CHAT_SPECIALS, chatSpecials);
-    }
-
-    public Builder options(final Map<String, ?> options) {
-      this.options = requireNonNull(options, "options");
-      return this;
-    }
-
-    private Builder withOption(final String key, final Object value) {
-      Map<String, Object> merged = new LinkedHashMap<>(this.options);
-      merged.put(key, value);
-      this.options = merged;
-      return this;
-    }
-
-    public LlmModel make() {
-      if (this.source != null) {
-        return loadSource(this.source, this.io, this.allowUnpackParameters, this.options);
-      }
-      return loadPath(this.modelPath, this.io, this.allowUnpackParameters, this.options);
-    }
+  private static boolean isGgufFile(final Path path) {
+    Path name = path.getFileName();
+    return Files.isRegularFile(path)
+      && name != null
+      && name.toString().toLowerCase(Locale.ROOT).endsWith(".gguf");
   }
 
   private static LlmModel loadGgufCausal(
@@ -817,5 +761,102 @@ public final class LlmModelFactory {
     LlmListeners.infof(io, null, "Model loaded in %.1fs%n",
       (System.nanoTime() - startedAtNanos) / 1e9);
     return new LlmModel(modelPath, loaded.config(), loaded.weights(), encoder, tokenizer, options);
+  }
+
+  /**
+   * Fluent load configurator. Terminal {@link #make()} performs blocking I/O.
+   *
+   * @since 1.1.0
+   */
+  public static final class Builder {
+
+    private final Path modelPath;
+    private final ModelFileSource source;
+    private LlmListener io = LlmListeners.silent();
+    private boolean allowUnpackParameters;
+    private Map<String, ?> options = Map.of();
+
+    private Builder(final Path modelPath, final ModelFileSource source) {
+      this.modelPath = modelPath;
+      this.source = source;
+    }
+
+    /**
+     * Replaces the load listener ({@code null} → silent).
+     *
+     * @since 1.1.0
+     */
+    public Builder listen(final LlmListener listener) {
+      this.io = listener == null ? LlmListeners.silent() : listener;
+      return this;
+    }
+
+    /**
+     * Unpacks GGUF weights to float32 during load.
+     *
+     * @since 1.1.0
+     */
+    public Builder unpackParameters() {
+      return this.unpackParameters(true);
+    }
+
+    /**
+     * When {@code true}, unpacks GGUF weights to float32 during load.
+     *
+     * @since 1.1.0
+     */
+    public Builder unpackParameters(final boolean value) {
+      this.allowUnpackParameters = value;
+      return this;
+    }
+
+    /**
+     * Sets {@link LlmModel#OPTION_THINK_TAGS} for this load.
+     *
+     * @since 1.1.0
+     */
+    public Builder thinkTags(final ThinkTags thinkTags) {
+      requireNonNull(thinkTags, "thinkTags");
+      return this.withOption(LlmModel.OPTION_THINK_TAGS, thinkTags);
+    }
+
+    /**
+     * Sets {@link LlmModel#OPTION_CHAT_SPECIALS} for this load.
+     *
+     * @since 1.1.0
+     */
+    public Builder chatSpecials(final ChatSpecials chatSpecials) {
+      requireNonNull(chatSpecials, "chatSpecials");
+      return this.withOption(LlmModel.OPTION_CHAT_SPECIALS, chatSpecials);
+    }
+
+    /**
+     * Replaces the load-time options map (omitted known keys receive library defaults).
+     *
+     * @since 1.1.0
+     */
+    public Builder options(final Map<String, ?> options) {
+      this.options = requireNonNull(options, "options");
+      return this;
+    }
+
+    private Builder withOption(final String key, final Object value) {
+      Map<String, Object> merged = new LinkedHashMap<>(this.options);
+      merged.put(key, value);
+      this.options = merged;
+      return this;
+    }
+
+    /**
+     * Loads the checkpoint (blocking I/O).
+     *
+     * @since 1.1.0
+     */
+    public LlmModel make() {
+      if (this.source != null) {
+        return loadSource(this.source, this.io, this.allowUnpackParameters, this.options);
+      }
+      return loadPath(this.modelPath, this.io, this.allowUnpackParameters, this.options);
+    }
   }
 }

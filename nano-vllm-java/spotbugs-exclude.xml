@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<FindBugsFilter>
+    <!--
+      Shared buffers, frozen collections, and engine-owned objects. Copying tensors, KV
+      tables, or weight bytes would double RAM; returning the LLM/session handle is the API.
+    -->
+    <Match>
+        <Or>
+            <Package name="com.igormaznitsa.nanollvm.engine"/>
+            <Package name="com.igormaznitsa.nanollvm.layers"/>
+            <Package name="com.igormaznitsa.nanollvm.tensor"/>
+            <Package name="com.igormaznitsa.nanollvm.internal"/>
+            <Package name="com.igormaznitsa.nanollvm.models.internal"/>
+        </Or>
+        <Bug pattern="EI_EXPOSE_REP,EI_EXPOSE_REP2"/>
+    </Match>
+    <Match>
+        <Or>
+            <Class name="com.igormaznitsa.nanollvm.chat.ChatHistory"/>
+            <Class name="com.igormaznitsa.nanollvm.chat.ChatSession"/>
+            <Class name="com.igormaznitsa.nanollvm.chat.StreamPrinter"/>
+            <Class name="com.igormaznitsa.nanollvm.llm.Config$HfConfig"/>
+            <Class name="com.igormaznitsa.nanollvm.models.LlmModel"/>
+            <Class name="com.igormaznitsa.nanollvm.rag.PreparedRag"/>
+            <Class name="com.igormaznitsa.nanollvm.rag.RagSession"/>
+        </Or>
+        <Bug pattern="EI_EXPOSE_REP,EI_EXPOSE_REP2"/>
+    </Match>
+
+    <!-- Java 21: no finalize; requireNonNull in constructors is not a finalizer attack. -->
+    <Match>
+        <Bug pattern="CT_CONSTRUCTOR_THROW"/>
+    </Match>
+
+    <!-- Sequence lives under LLM.generate's ReentrantLock; CorpusLoader.Builder is single-threaded. -->
+    <Match>
+        <Or>
+            <Class name="com.igormaznitsa.nanollvm.engine.Sequence"/>
+            <Class name="com.igormaznitsa.nanollvm.rag.CorpusLoader$Builder"/>
+        </Or>
+        <Bug pattern="AT_NONATOMIC_OPERATIONS_ON_SHARED_VARIABLE,AT_STALE_THREAD_WRITE_OF_PRIMITIVE"/>
+    </Match>
+
+    <!-- Synthetic labels, not filesystem opens: /nanollvm-memory/… and in-memory ONNX dummy base. -->
+    <Match>
+        <Class name="com.igormaznitsa.nanollvm.internal.ModelFileBundle"/>
+        <Method name="virtualPath"/>
+        <Bug pattern="DMI_HARDCODED_ABSOLUTE_FILENAME"/>
+    </Match>
+    <Match>
+        <Class name="com.igormaznitsa.nanollvm.internal.OnnxModelLoader"/>
+        <Method name="loadWeightsFromBytes"/>
+        <Bug pattern="DMI_HARDCODED_ABSOLUTE_FILENAME"/>
+    </Match>
+</FindBugsFilter>

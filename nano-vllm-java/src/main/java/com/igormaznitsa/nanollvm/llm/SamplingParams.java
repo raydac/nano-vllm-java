@@ -75,26 +75,56 @@ public record SamplingParams(
     this(temperature, maxTokens, ignoreEos, 0, 0.9f);
   }
 
+  /**
+   * Fluent configurator. Defaults match {@link SamplingDefaults#neutral()}.
+   *
+   * @since 1.1.0
+   */
   public static Builder builder() {
     return new Builder();
   }
 
+  /**
+   * Copy with a new temperature ({@code > 1e-10}).
+   *
+   * @since 1.1.0
+   */
   public SamplingParams withTemperature(final float temperature) {
     return new SamplingParams(temperature, this.maxTokens, this.ignoreEos, this.topK, this.topP);
   }
 
+  /**
+   * Copy with a new {@code maxTokens} ({@code >= 1}).
+   *
+   * @since 1.1.0
+   */
   public SamplingParams withMaxTokens(final int maxTokens) {
     return new SamplingParams(this.temperature, maxTokens, this.ignoreEos, this.topK, this.topP);
   }
 
+  /**
+   * Copy that honors or ignores end-of-sequence.
+   *
+   * @since 1.1.0
+   */
   public SamplingParams withIgnoreEos(final boolean ignoreEos) {
     return new SamplingParams(this.temperature, this.maxTokens, ignoreEos, this.topK, this.topP);
   }
 
+  /**
+   * Copy with a new top-k ({@code 0} disables).
+   *
+   * @since 1.1.0
+   */
   public SamplingParams withTopK(final int topK) {
     return new SamplingParams(this.temperature, this.maxTokens, this.ignoreEos, topK, this.topP);
   }
 
+  /**
+   * Copy with a new nucleus probability in {@code (0, 1]}.
+   *
+   * @since 1.1.0
+   */
   public SamplingParams withTopP(final float topP) {
     return new SamplingParams(this.temperature, this.maxTokens, this.ignoreEos, this.topK, topP);
   }
@@ -115,31 +145,61 @@ public record SamplingParams(
     private Builder() {
     }
 
+    /**
+     * Softmax temperature; must be {@code > 1e-10}.
+     *
+     * @since 1.1.0
+     */
     public Builder temperature(final float temperature) {
       this.temperature = temperature;
       return this;
     }
 
+    /**
+     * Maximum newly generated tokens; must be {@code >= 1}.
+     *
+     * @since 1.1.0
+     */
     public Builder maxTokens(final int maxTokens) {
       this.maxTokens = maxTokens;
       return this;
     }
 
+    /**
+     * When {@code true}, end-of-sequence does not finish the sequence.
+     *
+     * @since 1.1.0
+     */
     public Builder ignoreEos(final boolean ignoreEos) {
       this.ignoreEos = ignoreEos;
       return this;
     }
 
+    /**
+     * Keep only the top-{@code k} logits; {@code 0} disables top-k.
+     *
+     * @since 1.1.0
+     */
     public Builder topK(final int topK) {
       this.topK = topK;
       return this;
     }
 
+    /**
+     * Nucleus sampling cumulative probability in {@code (0, 1]}.
+     *
+     * @since 1.1.0
+     */
     public Builder topP(final float topP) {
       this.topP = topP;
       return this;
     }
 
+    /**
+     * Seals this configurator into an immutable {@link SamplingParams}.
+     *
+     * @since 1.1.0
+     */
     public SamplingParams build() {
       return new SamplingParams(
         this.temperature, this.maxTokens, this.ignoreEos, this.topK, this.topP);

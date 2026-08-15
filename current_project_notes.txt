@@ -25,9 +25,11 @@
 - **API ergonomics (1.1.0):** `LlmModelFactory.open(…).make()`, `SamplingParams.builder()` / withers,
   `LLM.Builder.sampling`, chatOnce/complete max-token shortcuts, `generate(…, Duration)`, public `LLM.TokenEvent`,
   `ChatSession.seed`. Existing `make` / `generate` overloads remain. No-arg `SamplingParams()` matches `SamplingDefaults.neutral()`.
-- **`@since 1.1.0`:** new types (ModelSupport, ModelFileSource, DenseRagIndex, …) and new methods
-  on 1.0 types (`LlmModel.embed`, `RagFactory.withEmbeddings`, `HfConfig.parse` /
-  `hasLinearAttentionLayers`, `Tokenizer.ChatFormat`, …). `ResourceLimits` is 1.0 — no class `@since`
+- **`@since 1.1.0`:** new exported types (`ModelSupport`, `ModelFileSource`, `ThinkTags`,
+  `ChatSpecials`, `DenseRagIndex`, …) and new public members on 1.0 types (`LlmModel.embed`,
+  `SamplingParams.builder` / withers, `LLM.generate(…, Duration)` / `TokenEvent`,
+  `LlmTextKind.TEXT_RAW`, `Config.HfConfig` Gemma 4 helpers, `SamplingDefaults.neutral()`, …).
+  `ResourceLimits` is 1.0 — no class `@since`
 
 - Advisors: `advisors(LlmAdvisorMixer, LlmAdvisor…)`; unique non-blank names; one batched `generate`; library ships no default advisor names/prompts (samples own `SampleAdvisorPrompts`); optional `advisorNoteFilter`
 - Chat universality: `Tokenizer.ChatFormat` (CHATML/TURN_BASED/PLAIN); product chat aliases removed;
@@ -70,7 +72,7 @@
 - Lexical off-topic uses salient query terms only (skips conversational glue); file-name stems split on `/` and `\`
 - Gemma 4 text (QAT mobile): flatten nested `text_config`; skip `vision_tower`/`audio_tower`; packed int2/4/8 + SRQ (`GemmaQat`); PLE after MLP; KV share from last same-type non-shared layer; RMS `onePlusWeight=false`; attn scale 1.0; chat `<|turn>`/`<turn|>`. Weightless `RMSNorm` residual uses `Ops.addRmsNorm(x, residual, eps)` (identity scale; `weight == null` is valid).
 - Safetensors shards **> 2 GiB** (Gemma 4 QAT `model.safetensors` is ~2.29 GiB) use `FileChannel` positioned reads; files ≤ 2 GiB still mmap
-- Weight/tensor/PDF records hold `byte[]`/`float[]`/`int[]` on purpose (no List boxing); Error Prone `ArrayRecordComponent` is suppressed at those records. Packed QAT/GGUF release is `packed.length == 0`, not identity with a sentinel array.
+- Weight/tensor/PDF records hold `byte[]`/`float[]`/`int[]` on purpose (no List boxing); Error Prone `ArrayRecordComponent` is suppressed at those records. Packed QAT/GGUF release is `packed.length == 0`, not identity with a sentinel array. SpotBugs `EI_EXPOSE_REP*` on those types (and `Tensor.data()`, `Context` tables, `Sequence.blockTable()`) is by design — copies would double RAM or break KV mutation.
 
 
 ## 3. Technical Debt & Refactoring
@@ -91,6 +93,7 @@
 - Windows download scripts audited/hardened (parity with `.sh` URLs/files OK)
 - `description.md` usage snippets added (API-facing chapters)
 - Error Prone / IDE compiler inspections cleaned: locale on `toLowerCase`, explicit charset, `@Override` on GGUF tokenizer meta, Javadoc summaries on `@since`-only APIs, packed-weight release via empty payload (not `==` sentinel), unused `Attention.layerIndex` / `Tokenizer.chatTemplate` dropped. Tensor/PDF `record`s keep primitive arrays (`@SuppressWarnings("ArrayRecordComponent")`).
+- **SpotBugs** (`spotbugs-maven-plugin` on library `verify`): real `Path.getFileName()` nulls guarded; `spotbugs-exclude.xml` documents by-design remainder (shared tensors/arrays, frozen maps/lists, `CT_CONSTRUCTOR_THROW` on Java 21, Sequence/Builder thread confinement, virtual `/nanollvm-memory` paths).
 
 
 ## 5. Known Issues & Limitations
@@ -121,7 +124,7 @@
 - `security_audit.txt` — 1.0.0 threat-model summary
 - `CHANGELOG.md` — 1.0.0 released; active line 1.1.0-SNAPSHOT
 - `README.md` — Hello World, CLI, library samples; ONNX + Tiny-LLM section
-- Build: `mvn22 -q test` / `MAVEN_OPTS="-Xmx8g" mvn22 -pl nano-vllm-java-samples -q exec:java` (document as `mvn` in README)
+- Build: `mvn22 -q test` / `MAVEN_OPTS="-Xmx8g" mvn22 -pl nano-vllm-java-samples -q exec:java` (document as `mvn` in README); SpotBugs: `mvn22 -pl nano-vllm-java -am compile spotbugs:check` (also on `verify`)
 - Library: `LlmModelFactory.make(path)` / `open(path).make()` — engines close before model
 - Embeddings: `LlmModelFactory.make(gteGguf); model.embed(text)` — sample `EmbedHelloWorld`
 - ONNX demo: `./models/download-smollm2-135m-instruct-onnx.sh` (chat) or `./models/download-tiny-llm-onnx.sh` (base toy)

@@ -51,8 +51,7 @@ public final class ModelLoader {
       files.size() == 1 ? "" : "s");
 
     List<WeightSource> sources = files.stream()
-      .map(
-        file -> new WeightSource(file.getFileName().toString(), () -> SafetensorsReader.open(file)))
+      .map(file -> new WeightSource(PathNames.of(file), () -> SafetensorsReader.open(file)))
       .toList();
     return assembleWeights(sources, modelDir.toString(), hfConfig, schema, streams);
   }

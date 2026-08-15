@@ -60,10 +60,20 @@ public record ChatSpecials(List<String> markers) {
       .toList()));
   }
 
+  /**
+   * Distinct non-blank search strings (sorted longest first at construction).
+   *
+   * @since 1.1.0
+   */
   public static ChatSpecials of(final String... markers) {
     return new ChatSpecials(List.of(requireNonNull(markers, "markers")));
   }
 
+  /**
+   * Distinct non-blank search strings (sorted longest first at construction).
+   *
+   * @since 1.1.0
+   */
   public static ChatSpecials of(final List<String> markers) {
     return new ChatSpecials(requireNonNull(markers, "markers"));
   }

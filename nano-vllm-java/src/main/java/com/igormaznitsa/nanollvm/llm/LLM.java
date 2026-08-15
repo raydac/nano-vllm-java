@@ -330,6 +330,7 @@ public final class LLM implements AutoCloseable {
    * Text-prompt generate with a wall-clock limit and no token callback.
    *
    * @param timeout {@code null} / zero / negative = no limit
+   * @since 1.1.0
    */
   public List<GenerationOutput> generate(
     final List<String> prompts,
@@ -341,6 +342,8 @@ public final class LLM implements AutoCloseable {
 
   /**
    * Text-prompt generate with a per-token id callback and no timeout.
+   *
+   * @since 1.1.0
    */
   public List<GenerationOutput> generate(
     final List<String> prompts,
@@ -352,6 +355,8 @@ public final class LLM implements AutoCloseable {
 
   /**
    * Text-prompt generate with a seq-aware token callback and no timeout.
+   *
+   * @since 1.1.0
    */
   public List<GenerationOutput> generate(
     final List<String> prompts,
@@ -365,6 +370,8 @@ public final class LLM implements AutoCloseable {
 
   /**
    * Text-prompt generate with a wall-clock limit and a seq-aware token callback.
+   *
+   * @since 1.1.0
    */
   public List<GenerationOutput> generate(
     final List<String> prompts,
@@ -396,6 +403,8 @@ public final class LLM implements AutoCloseable {
 
   /**
    * Text-prompt generate with per-prompt sampling (no progress, no timeout, no callback).
+   *
+   * @since 1.1.0
    */
   public List<GenerationOutput> generate(
     final List<String> prompts,
@@ -499,6 +508,8 @@ public final class LLM implements AutoCloseable {
 
   /**
    * Token-id generate with a wall-clock limit and no token callback.
+   *
+   * @since 1.1.0
    */
   public List<GenerationOutput> generateTokenIds(
     final List<List<Integer>> prompts,
@@ -510,6 +521,8 @@ public final class LLM implements AutoCloseable {
 
   /**
    * Token-id generate with a per-token id callback and no timeout.
+   *
+   * @since 1.1.0
    */
   public List<GenerationOutput> generateTokenIds(
     final List<List<Integer>> prompts,
@@ -521,6 +534,8 @@ public final class LLM implements AutoCloseable {
 
   /**
    * Token-id generate with a seq-aware token callback and no timeout.
+   *
+   * @since 1.1.0
    */
   public List<GenerationOutput> generateTokenIds(
     final List<List<Integer>> prompts,
@@ -534,6 +549,8 @@ public final class LLM implements AutoCloseable {
 
   /**
    * Token-id generate with a wall-clock limit and a seq-aware token callback.
+   *
+   * @since 1.1.0
    */
   public List<GenerationOutput> generateTokenIds(
     final List<List<Integer>> prompts,
@@ -548,6 +565,8 @@ public final class LLM implements AutoCloseable {
 
   /**
    * Token-id generate with per-prompt sampling (no progress, no timeout, no callback).
+   *
+   * @since 1.1.0
    */
   public List<GenerationOutput> generateTokenIds(
     final List<List<Integer>> prompts,
@@ -965,6 +984,8 @@ public final class LLM implements AutoCloseable {
 
   /**
    * Raw text completion with engine sampling limited to {@code maxTokens}.
+   *
+   * @since 1.1.0
    */
   public String complete(final String prompt, final int maxTokens) {
     return this.complete(prompt, this.defaultSampling(maxTokens));
@@ -1001,6 +1022,8 @@ public final class LLM implements AutoCloseable {
 
   /**
    * Single-turn chat with engine sampling limited to {@code maxTokens}. History is not retained.
+   *
+   * @since 1.1.0
    */
   public String chatOnce(final String userMessage, final int maxTokens) {
     return this.chatOnce(userMessage, this.defaultSampling(maxTokens));

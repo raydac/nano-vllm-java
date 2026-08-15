@@ -18,6 +18,8 @@ public enum LlmTextKind {
   /**
    * Unparsed tokenizer decode of completion tokens so far (think tags and chat specials kept).
    * Deltas follow the same suffix/snapshot rules as {@link #TEXT_THINKING} / {@link #TEXT_ASSISTANT}.
+   *
+   * @since 1.1.0
    */
   TEXT_RAW,
   /**

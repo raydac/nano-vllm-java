@@ -26,6 +26,11 @@ import java.util.regex.Pattern;
  */
 public final class ModelSupport {
 
+  /**
+   * User-facing list of architectures this library can run (and common look-alikes it rejects).
+   *
+   * @since 1.1.0
+   */
   public static final String CATALOG = """
     Supported by this library:
       Chat from a Hugging Face folder (config.json + *.safetensors or *.onnx): qwen3, gemma3 / gemma3_text, \
@@ -49,6 +54,7 @@ public final class ModelSupport {
    * @return selected backend id and {@link Kind}
    * @throws com.igormaznitsa.nanollvm.exceptions.UnsupportedModelException if the family is
    *                                                                        unknown or the source is incompatible
+   * @since 1.1.0
    */
   public static Selection require(final Config.HfConfig config, final Source source) {
     Selection selected = resolve(requireNonNull(config, "config"));
@@ -64,6 +70,7 @@ public final class ModelSupport {
    * @return selected backend id and {@link Kind}
    * @throws com.igormaznitsa.nanollvm.exceptions.UnsupportedModelException if unrecognized or
    *                                                                        unsupported
+   * @since 1.1.0
    */
   public static Selection requireGguf(final String generalArchitecture) {
     String raw = generalArchitecture == null ? "" : generalArchitecture;
@@ -88,6 +95,7 @@ public final class ModelSupport {
    * @return selected backend id and {@link Kind}
    * @throws com.igormaznitsa.nanollvm.exceptions.UnsupportedModelException if the family is
    *                                                                        unknown or structurally unsupported
+   * @since 1.1.0
    */
   public static Selection resolve(final Config.HfConfig config) {
     requireNonNull(config, "config");
@@ -101,17 +109,29 @@ public final class ModelSupport {
   /**
    * {@code true} when {@code config} is a supported embedding encoder ({@code bert}).
    * Unknown or chat families return {@code false} (they do not throw).
+   *
+   * @since 1.1.0
    */
   public static boolean isEmbedding(final Config.HfConfig config) {
     Verdict verdict = inspect(requireNonNull(config, "config"));
     return verdict.supported() && verdict.selection().isEmbedding();
   }
 
+  /**
+   * Message when {@link com.igormaznitsa.nanollvm.llm.LLM#builder} is used on an embedding checkpoint.
+   *
+   * @since 1.1.0
+   */
   public static String chatMisuseMessage(final String architectureName) {
     return ("This checkpoint is a %s embedding encoder, not a chat model. Call LlmModel.embed(...) "
       + "instead of LLM.builder / generate.%n%n%s").formatted(blank(architectureName), CATALOG);
   }
 
+  /**
+   * Message when {@link LlmModel#embed} is used on a chat checkpoint.
+   *
+   * @since 1.1.0
+   */
   public static String embedMisuseMessage(final String architectureName) {
     return ("This checkpoint is a %s chat model, not an embedding encoder. Use LLM.builder(model) "
       + "for generate / chat.%n%n%s").formatted(blank(architectureName), CATALOG);
@@ -525,6 +545,8 @@ public final class ModelSupport {
 
     /**
      * {@code true} when this checkpoint is an embedding encoder, not a chat model.
+     *
+     * @since 1.1.0
      */
     public boolean isEmbedding() {
       return this.kind == Kind.EMBEDDING;
