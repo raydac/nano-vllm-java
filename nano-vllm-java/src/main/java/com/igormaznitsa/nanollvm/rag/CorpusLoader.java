@@ -20,7 +20,6 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -80,7 +79,7 @@ final class CorpusLoader {
   static final class Builder {
 
     private final List<TextChunk> pending = new ArrayList<>();
-    private final AtomicInteger anon = new AtomicInteger();
+    private int anon;
     private int maxChunkChars = 1200;
     private int chunkOverlap = 150;
     private boolean preprocess = true;
@@ -164,7 +163,7 @@ final class CorpusLoader {
     }
 
     public Builder add(final String text) {
-      return this.add("text-" + this.anon.incrementAndGet(), text);
+      return this.add("text-" + ++this.anon, text);
     }
 
     public Builder add(final String id, final String text) {

@@ -190,13 +190,14 @@ class CoreUnitTest {
     assertThrows(IllegalStateException.class, llm::newConversation);
     llm.close();
 
+    String architecture = model.architectureName();
     model.close();
     assertTrue(model.isClosed());
     String closed = model.toString();
     assertTrue(closed.contains("kind=chat"), closed);
     assertTrue(closed.contains("closed"), closed);
     assertTrue(closed.contains("weights=released"), closed);
-    assertThrows(IllegalStateException.class, model::architectureName);
+    assertEquals(architecture, model.architectureName());
     assertThrows(IllegalStateException.class, model::thinkTags);
     assertThrows(IllegalStateException.class, model::chatSpecials);
     assertThrows(IllegalStateException.class, model::options);

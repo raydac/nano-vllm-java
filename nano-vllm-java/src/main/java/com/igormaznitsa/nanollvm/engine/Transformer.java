@@ -67,7 +67,7 @@ public final class Transformer implements AutoCloseable {
   private CausalLM network;
   private KvCacheArena kvCache;
   private ConvStateArena convCache;
-  private volatile boolean closed;
+  private boolean closed;
 
   /**
    * Builds a transformer with silent engine I/O (no load-progress lines).

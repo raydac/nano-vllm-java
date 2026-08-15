@@ -52,7 +52,7 @@
   `ChatSession` streaming emits `TEXT_RAW` (unparsed decode, specials kept) plus parsed thinking/answer.
 - Weight-load status: shared in-place bar (`LoadProgress`) for safetensors, GGUF, and ONNX
 - Engine: `Transformer` owns per-LLM arenas + explicit step `Context`; `MatmulRuntime` per `LLM`; `kvHeapFraction` (default 0.25) for KV auto-size
-- `LLM.generate` / `close` use `ReentrantLock`; `assertNotClosed` on infrequent entry points; props = **`nanollvm.*` / `NANOLLVM_*` only**
+- `LLM.generate` / `close` use `ReentrantLock`; `assertNotClosed` on infrequent entry points and again after the generate lock (close can finish between the outer check and lock). `Transformer.closed` / `MatmulRuntime.closed` are plain generate-thread guards (lock supplies visibility). `CorpusLoader.Builder` anon ids are a plain `int`. `LlmModel.architectureName()` stays readable after close (falls back to HF `model_type`). Props = **`nanollvm.*` / `NANOLLVM_*` only**
 - JPMS exports (`models` / `llm` / `chat` / `rag` / `tokenizer` / `utils` / `exceptions`) cover the
   application surface; `engine` / `layers` / `tensor` / `internal` / `prompts` /
   `models.internal` / `models.llmcontainer` / `models.llmarch`
@@ -108,7 +108,7 @@
 - Windows download scripts audited/hardened (parity with `.sh` URLs/files OK)
 - `description.md` usage snippets added (API-facing chapters)
 - Error Prone / IDE compiler inspections cleaned: locale on `toLowerCase`, explicit charset, `@Override` on GGUF tokenizer meta, Javadoc summaries on `@since`-only APIs, packed-weight release via empty payload (not `==` sentinel), unused `Attention.layerIndex` / `Tokenizer.chatTemplate` dropped. Tensor/PDF `record`s keep primitive arrays (`@SuppressWarnings("ArrayRecordComponent")`). Public methods on exported types have JavaDoc (`RagSession` plus `RagFactory`/`PreparedRag`/`ChatHistory`/`LlmListeners`/`Config`/`LlmModel`/exceptions/…).
-- **SpotBugs** (`spotbugs-maven-plugin` on library `verify`): real `Path.getFileName()` nulls guarded; `spotbugs-exclude.xml` documents by-design remainder (shared tensors/arrays, frozen maps/lists, `CT_CONSTRUCTOR_THROW` on Java 21, Sequence/Builder thread confinement, virtual `/nanollvm-memory` paths).
+- **SpotBugs** (`spotbugs-maven-plugin` on library `verify`): real `Path.getFileName()` nulls guarded; `spotbugs-exclude.xml` documents by-design remainder (shared tensors/arrays, frozen maps/lists, `CT_CONSTRUCTOR_THROW` on Java 21, Sequence/Transformer/MatmulRuntime/Builder thread confinement, virtual `/nanollvm-memory` paths).
 - IDE inspections: ModelSupport gemma4 multimodal branch dropped a redundant `supported()` (always true after the reject-return); Linear SRQ helper renamed so output `y` is not passed as parameter `x`.
 - Builder contract: `LLM` / `Config` / `LlmAdvisor` / `SamplingParams` / `MatmulRuntime` construct
   only via nested `Builder` (private target ctor). `SamplingParams` is no longer a record with

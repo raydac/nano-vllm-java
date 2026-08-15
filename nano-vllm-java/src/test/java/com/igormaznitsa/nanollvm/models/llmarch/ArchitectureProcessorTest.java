@@ -2,6 +2,7 @@ package com.igormaznitsa.nanollvm.models.llmarch;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -40,12 +41,12 @@ final class ArchitectureProcessorTest {
 
   @Test
   void chatFamiliesShareCausalTemplateAndBertIsEmbedding() {
-    assertTrue(Qwen3Processor.INSTANCE instanceof CausalArchitecture);
-    assertTrue(Gemma3Processor.INSTANCE instanceof CausalArchitecture);
-    assertTrue(Gemma4Processor.INSTANCE instanceof CausalArchitecture);
-    assertTrue(LlamaProcessor.INSTANCE instanceof CausalArchitecture);
-    assertTrue(Lfm2Processor.INSTANCE instanceof CausalArchitecture);
-    assertTrue(BertProcessor.INSTANCE instanceof EmbeddingArchitecture);
+    assertInstanceOf(CausalArchitecture.class, ArchitectureProcessors.of(WeightNames.ARCH_QWEN3));
+    assertInstanceOf(CausalArchitecture.class, ArchitectureProcessors.of(WeightNames.ARCH_GEMMA3));
+    assertInstanceOf(CausalArchitecture.class, ArchitectureProcessors.of(WeightNames.ARCH_GEMMA4));
+    assertInstanceOf(CausalArchitecture.class, ArchitectureProcessors.of(WeightNames.ARCH_LLAMA));
+    assertInstanceOf(CausalArchitecture.class, ArchitectureProcessors.of(WeightNames.ARCH_LFM2));
+    assertInstanceOf(EmbeddingArchitecture.class, ArchitectureProcessors.of(WeightNames.ARCH_BERT));
   }
 
   @Test

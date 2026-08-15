@@ -72,6 +72,8 @@ public final class LlmAdvisor {
     }
 
     /**
+     * Validates name and prompt, then constructs an immutable advisor.
+     *
      * @throws IllegalArgumentException if name or prompt is missing or blank
      */
     public LlmAdvisor build() {

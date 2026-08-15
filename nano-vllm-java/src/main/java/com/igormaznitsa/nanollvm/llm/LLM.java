@@ -644,6 +644,7 @@ public final class LLM implements AutoCloseable {
     this.assertNotClosed();
     this.generateLock.lock();
     try {
+      this.assertNotClosed();
       // Reset cancel flag for this exclusive generate session
       this.beginGeneration();
 

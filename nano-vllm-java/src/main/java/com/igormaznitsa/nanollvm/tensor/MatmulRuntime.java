@@ -11,7 +11,6 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.ThreadFactory;
-import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -37,7 +36,7 @@ public final class MatmulRuntime implements AutoCloseable {
   private final int cpuThreads;
   private final ExecutorService pool;
   private final boolean markClosedOnClose;
-  private final AtomicBoolean closed = new AtomicBoolean();
+  private boolean closed;
 
   private MatmulRuntime(
     final int cpuThreads,
@@ -258,12 +257,12 @@ public final class MatmulRuntime implements AutoCloseable {
   @Override
   public void close() {
     if (this.markClosedOnClose) {
-      this.closed.set(true);
+      this.closed = true;
     }
   }
 
   private void requireOpen() {
-    if (this.markClosedOnClose && this.closed.get()) {
+    if (this.closed) {
       throw new IllegalStateException("MatmulRuntime is closed");
     }
   }

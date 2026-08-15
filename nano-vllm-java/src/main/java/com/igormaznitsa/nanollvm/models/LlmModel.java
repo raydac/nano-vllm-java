@@ -223,10 +223,15 @@ public final class LlmModel implements AutoCloseable {
    * {@link #close()}.
    */
   public String architectureName() {
-    if (this.isEmbeddingModel()) {
-      return this.requireEncoder().architectureName();
+    EmbeddingEncoder encoder = this.encoder.get();
+    if (encoder != null) {
+      return encoder.architectureName();
     }
-    return this.requireNetwork().architectureName();
+    CausalLM network = this.network.get();
+    if (network != null) {
+      return network.architectureName();
+    }
+    return this.hfConfig.modelType();
   }
 
   /**
@@ -286,7 +291,7 @@ public final class LlmModel implements AutoCloseable {
       + "intermediate=%d, heads=%d/%d, headDim=%d, context=%d, vocab=%d, tensors=%s, weights=%s, "
       + "chatFormat=%s%s%s}").formatted(
       this.kindLabel(),
-      this.architectureId(),
+      this.architectureName(),
       this.containerLabel(),
       this.path,
       cfg.numHiddenLayers(),
@@ -306,18 +311,6 @@ public final class LlmModel implements AutoCloseable {
 
   private String kindLabel() {
     return this.embeddingModel ? "embedding" : "chat";
-  }
-
-  private String architectureId() {
-    EmbeddingEncoder encoder = this.encoder.get();
-    if (encoder != null) {
-      return encoder.architectureName();
-    }
-    CausalLM network = this.network.get();
-    if (network != null) {
-      return network.architectureName();
-    }
-    return this.hfConfig.modelType();
   }
 
   private String containerLabel() {
