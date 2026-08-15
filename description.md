@@ -71,7 +71,8 @@ In one sentence:
 The rest of this guide unpacks that sentence without assuming prior ML coursework.
 
 **In the code:** front door is `LLM` / `LLM.Builder`; interactive demo is `samples.Example`; linear mains include
-`HelloWorld`, `LogTriageHelloWorld`, `AdvisorRagHelloWorld`, `EmbedHelloWorld` (chapter 16).
+`HelloWorld`, `NextTokenHelloWorld`, `LogTriageHelloWorld`, `AdvisorRagHelloWorld`,
+`EmbedHelloWorld` (chapter 16).
 
 ---
 
@@ -127,7 +128,8 @@ The same Qwen3 graph also loads from a **GGUF** file (**since 1.1.0**). A furthe
 `Gemma3ForCausalLM`, `Gemma4ForCausalLM`, `LlamaForCausalLM`, or `Lfm2ForCausalLM`; GGUF entry is `LlmModelFactory` →
 `models.llmcontainer.GgufTransport` (container catalog) → `models.llmarch.ArchitectureProcessor.bind` / `fill` / `create`;
 ONNX folders use `models.llmcontainer.OnnxTransport` → the same architecture processor (chapter **7c**); one next-token
-step is `Transformer.step` → `CausalLM.forward` / `computeLogits` → `Sampler.forward` (chapter 16).
+step is `Transformer.step` → `CausalLM.forward` / `computeLogits` → `Sampler.forward` (chapter 16). Linear demo:
+`samples.NextTokenHelloWorld` (Tiny-LLM-ONNX) encodes a seed and prints the next sampled tokens.
 
 ---
 
@@ -1473,11 +1475,12 @@ try (LlmModel model = LlmModelFactory.make(Path.of("models/SmolLM2-135M-Instruct
   String answer = llm.chat(256).send("What is 2+2?").answer();
 }
 
-// Tiny-LLM-ONNX is a base / completion toy — use complete, not chat templates:
+// Tiny-LLM-ONNX is a base / completion toy — use complete / generateTokenIds, not chat templates:
 // try (LlmModel toy = LlmModelFactory.make(Path.of("models/Tiny-LLM-ONNX"));
 //      LLM llm = LLM.builder(toy).build()) {
 //   String cont = llm.complete("Once upon a time");
 // }
+// Linear demo: samples.NextTokenHelloWorld
 ```
 
 ### Summary
@@ -3114,7 +3117,7 @@ packages. Demos live in the separate Maven module `nano-vllm-java-samples`.
 | `layers/` — `Attention`, `BidirectionalAttention`, `Sampler`, `Linear`, `Norms`, …     | Attention, sampling, projections, norms/RoPE         | **no** |
 | `tensor/` — `Tensor`, `Ops`, `MatmulRuntime`, `LinearKernel`, `EmbeddingKernel`, …     | Arrays, float ops, parallel GEMM                     | **no** |
 | `prompts/` — `ChatPrompts`, `RagPrompts`, `AdvisorPrompts`                             | Default system / RAG / advisor wording               | **no** |
-| *(Maven module `nano-vllm-java-samples`)* `Example`, `HelloWorld`, `Bench`, `EmbedHelloWorld`, `LogTriageHelloWorld`, `AdvisorRagHelloWorld`, `utils/Bundled*` | Runnable demos (not in the library JAR) | n/a |
+| *(Maven module `nano-vllm-java-samples`)* `Example`, `HelloWorld`, `NextTokenHelloWorld`, `Bench`, `EmbedHelloWorld`, `LogTriageHelloWorld`, `AdvisorRagHelloWorld`, `utils/Bundled*` | Runnable demos (not in the library JAR) | n/a |
 
 `Config.HfConfig` (in `llm/Config`) holds the blueprint plus per-LLM engine knobs (`maxModelLen`, `kvHeapFraction`, …).
 
@@ -3128,7 +3131,7 @@ packages. Demos live in the separate Maven module `nano-vllm-java-samples`.
 | Named advisors                   | `LlmAdvisor`, `LlmAdvisorMixer`, `AdvisorEnrichment`, `ChatHistory`        | `Builder.advisors(mixer, …)` — unique non-blank names; `LLM#runAdvisors` → `AdvisorEnrichment`; one batched `generate` |
 | Chat turn                        | `ChatSession`                                                        | `llm.chat(maxTokens)`, `.listen(…)`, `.streamTo(…)` (`TEXT_THINKING` / `TEXT_ASSISTANT`; ignores `TEXT_RAW`), `.send(user)`, `.clear()`; `emitDebugPrompts(true)` opts in `TEXT_DEBUG` (off by default); `recoverUnusableAnswers` / `unusableAnswer` opt-in |
 | Stream unparsed decode           | `LlmTextKind.TEXT_RAW`, `LlmListener`                                  | `ChatSession.listen`; deltas of tokenizer decode with think tags / chat specials kept (**since 1.1.0**) |
-| One-shot / raw text              | `LLM`                                                                | `chatOnce(…)`, `complete(…)`, `generate(…)` → `GenerationOutput.stats()`                                      |
+| One-shot / raw text              | `LLM`                                                                | `chatOnce(…)`, `complete(…)`, `generate(…)`, `generateTokenIds(…)` → `GenerationOutput` (`tokenIds`, `text`, `stats`) |
 | Token / timing stats             | `GenerationStats` / `ChatReply`                                      | `promptTokens`, `completionTokens`, `elapsedNanos`, `completionTokensPerSecond()`                             |
 | Cancel / timeout                 | `LLM`                                                                | `cancel()`; `generate(…, timeout, onToken)`                                                                   |
 | Tokenize                         | `Tokenizer` (on `LlmModel`)                                             | `LlmModel.tokenizer()`; `encode`, `decode`, `applyChatTemplate(…, enableThinking)`                               |
@@ -3278,6 +3281,39 @@ try (LlmModel model = LlmModelFactory.make(Path.of("models/Qwen3-0.6B"));
 }
 // Builder cpuThreads wins over -Dnanollvm.cpu.threads
 ```
+
+### Sample A4 — next tokens / raw continuation (**since 1.1.0**)
+
+```java
+import com.igormaznitsa.nanollvm.llm.LLM;
+import com.igormaznitsa.nanollvm.llm.SamplingParams;
+import com.igormaznitsa.nanollvm.models.LlmModel;
+import com.igormaznitsa.nanollvm.models.LlmModelFactory;
+import com.igormaznitsa.nanollvm.tokenizer.Tokenizer;
+
+import java.nio.file.Path;
+import java.util.List;
+
+try (LlmModel model = LlmModelFactory.make(Path.of("models/Tiny-LLM-ONNX"));
+     LLM llm = LLM.builder(model).disableMultiCpu().maxModelLen(256).build()) {
+  Tokenizer tokenizer = llm.tokenizer();
+  List<Integer> promptIds = tokenizer.encode("The capital of France is");
+  SamplingParams sampling = SamplingParams.builder().temperature(0.2f).maxTokens(8).build();
+
+  LLM.GenerationOutput out = llm.generateTokenIds(
+      List.of(promptIds),
+      sampling,
+      (LLM.TokenEvent event) -> System.out.println(
+          event.tokenId() + "\t" + tokenizer.decode(List.of(event.tokenId()))))
+    .getFirst();
+
+  System.out.println(out.text());           // newly sampled tokens only
+  // String same = llm.complete("The capital of France is", 8);
+}
+```
+
+Demo: `samples.NextTokenHelloWorld`. `complete` is the string shortcut; `generateTokenIds` is the token-id path
+(optional per-token callback). Neither applies a chat template.
 
 ### Sample B — one generate tick (Sense A loop)
 
@@ -3456,7 +3492,7 @@ nano-vllm-java/src/main/java/com/igormaznitsa/nanollvm/
   exceptions/…
 
 nano-vllm-java-samples/src/main/java/com/igormaznitsa/nanollvm/samples/
-  Example.java / HelloWorld.java / Bench.java / EmbedHelloWorld.java / LogTriageHelloWorld.java / AdvisorRagHelloWorld.java
+  Example.java / HelloWorld.java / NextTokenHelloWorld.java / Bench.java / EmbedHelloWorld.java / LogTriageHelloWorld.java / AdvisorRagHelloWorld.java
   utils/BundledModels.java / BundledRag.java / OrderedConsole.java
 ```
 
@@ -3772,7 +3808,8 @@ This project is a **teaching instrument**, not a production cloud service.
   right passage (BM25 and, since **1.1.0**, dense/hybrid embeddings) and the generator may still garble it.
 - **ONNX demos** (**since 1.1.0**, ch. **7c**): SmolLM2 Instruct is a tiny ChatML chat model; Tiny-LLM-ONNX is a
   **base** completion toy — do not expect solid Q&A from either. Decode may stop early on degenerate loops or at a
-  demo `maxTokens` cap so answers can look cut off.
+  demo `maxTokens` cap so answers can look cut off. `samples.NextTokenHelloWorld` is the linear next-token demo
+  for Tiny-LLM.
 - **Gemma 4:** text-only QAT mobile loads (**since 1.1.0**). Vision/audio generation, Gemma 4 GGUF, and MoE
   (`enable_moe_block`) are out of scope.
 - **Weight formats are curated, not universal:** safetensors float dtypes plus packed Gemma 4 QAT (ch. 7); GGUF = `qwen3|lfm2|bert` + listed

@@ -83,6 +83,10 @@ Windows: `.\models\download-tiny-llm-onnx.ps1` or `models\download-tiny-llm-onnx
 
 Creates `models/Tiny-LLM-ONNX/`.
 
+Sample: `nano-vllm-java-samples` → `com.igormaznitsa.nanollvm.samples.NextTokenHelloWorld`
+(encode a seed, print the next tokens, continue the text). Use `complete` / `generateTokenIds`,
+not chat templates.
+
 ## SmolLM2-135M-Instruct-ONNX (optional, Llama ChatML ONNX)
 
 [onnx-community/SmolLM2-135M-Instruct-ONNX](https://huggingface.co/onnx-community/SmolLM2-135M-Instruct-ONNX) —

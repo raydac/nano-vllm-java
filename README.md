@@ -151,6 +151,15 @@ mvn -pl nano-vllm-java-samples -q exec:java \
   -Dexec.mainClass=com.igormaznitsa.nanollvm.samples.HelloWorld
 ```
 
+Raw next-token continuation (encode a seed, print the next few token ids and the continued text;
+defaults to Tiny-LLM-ONNX — download with `./models/download-tiny-llm-onnx.sh`):
+
+```bash
+mvn -pl nano-vllm-java-samples -q exec:java \
+  -Dexec.mainClass=com.igormaznitsa.nanollvm.samples.NextTokenHelloWorld
+# optional: … -Dexec.args="models/Tiny-LLM-ONNX Once upon a time"
+```
+
 Custom advisor **Alex** plus lexical **BM25** RAG over `rag/` (Grimm names and father; Gemma3-270M):
 
 ```bash
@@ -228,8 +237,9 @@ Public API packages: `models`, `llm`, `chat`, `rag`, `tokenizer`, `utils`, `exce
 Weight-load internals (`models.llmcontainer`, `models.llmarch`, `models.internal`),
 `prompts`, `engine`, `layers`, `tensor`, and `internal` are **not** exported — use
 `LlmModelFactory` / `LLM` / `RagFactory` from application code. Runnable demos
-(`HelloWorld`, `LogTriageHelloWorld`, `AdvisorRagHelloWorld`, `Example`, `Bench`,
-`samples.utils`) live in the separate `nano-vllm-java-samples` module.
+(`HelloWorld`, `NextTokenHelloWorld`, `LogTriageHelloWorld`, `AdvisorRagHelloWorld`,
+`EmbedHelloWorld`, `Example`, `Bench`, `samples.utils`) live in the separate
+`nano-vllm-java-samples` module.
 
 The packaged library JAR has no `Main-Class`. In-repo demos:
 
@@ -272,7 +282,8 @@ A folder may use ONNX weights instead of safetensors (same `config.json` + token
 engine (Qwen3 / Gemma3 / Llama chat, or BERT embeddings).
 
 Tiny Llama demo ([onnx-community/Tiny-LLM-ONNX](https://huggingface.co/onnx-community/Tiny-LLM-ONNX)) —
-base/completion toy (~10M), not chat-tuned; useful to smoke-test ONNX load, not for Q&A quality:
+base/completion toy (~10M), not chat-tuned; useful to smoke-test ONNX load and next-token
+continuation (`NextTokenHelloWorld`), not for Q&A quality:
 
 ```bash
 # Linux / macOS
@@ -283,8 +294,7 @@ base/completion toy (~10M), not chat-tuned; useful to smoke-test ONNX load, not 
 # or: models\download-tiny-llm-onnx.cmd
 
 mvn -pl nano-vllm-java-samples -q exec:java \
-  -Dexec.mainClass=com.igormaznitsa.nanollvm.samples.Example \
-  -Dexec.args=models/Tiny-LLM-ONNX
+  -Dexec.mainClass=com.igormaznitsa.nanollvm.samples.NextTokenHelloWorld
 ```
 
 Chat-capable ONNX demo ([onnx-community/SmolLM2-135M-Instruct-ONNX](https://huggingface.co/onnx-community/SmolLM2-135M-Instruct-ONNX)) —
