@@ -12,7 +12,8 @@
 
     <artifactId>nano-vllm-java</artifactId>
     <name>nano-vllm-java</name>
-    <description>Pure Java 21+ CPU LLM inference library (continuous batching, paged KV cache), inspired by
+    <description>Pure Java 21+ CPU LLM inference (continuous batching, paged KV cache, safetensors / GGUF / ONNX, chat
+        and BERT embeddings), inspired by
         GeeeekExplorer/nano-vllm
     </description>
 

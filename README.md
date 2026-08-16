@@ -2,7 +2,7 @@
 
 [![License Apache 2.0](https://img.shields.io/badge/license-Apache%20License%202.0-green.svg)](http://www.apache.org/licenses/LICENSE-2.0)
 [![Java 21+](https://img.shields.io/badge/java-21.0%2b-green.svg)](https://bell-sw.com/pages/downloads/)
-[![Maven 3.9+](https://img.shields.io/badge/maven-3.9%2b-green.svg)](https://maven.apache.org/)
+[![Maven 3.8+](https://img.shields.io/badge/maven-3.8%2b-green.svg)](https://maven.apache.org/)
 [![Maven central](https://img.shields.io/badge/Maven%20central-1.0.0-green.svg)](http://search.maven.org/#artifactdetails|com.igormaznitsa|nano-vllm-java|1.0.0|jar)   
 [![Arthur's acres sanctuary donation](assets/arthur_sanctuary_banner.png)](https://www.arthursacresanimalsanctuary.org/donate)
 
@@ -11,6 +11,11 @@
 Pure **Java 21+** LLM inference library: continuous batching, paged KV cache, and Hugging Face–compatible weight
 loading on **CPU only** — no CUDA, PyTorch, or native runtime bindings. Add it to a Maven or Gradle app and call it
 from ordinary Java.
+
+This repository is **1.1.0-SNAPSHOT**. Maven Central currently publishes **[1.0.0](http://search.maven.org/#artifactdetails|com.igormaznitsa|nano-vllm-java|1.0.0|jar)**
+(Qwen3 / Gemma3 / LFM2 chat from safetensors or GGUF). Features marked **since 1.1.0** — ONNX, Llama, Gemma 4 text QAT,
+BERT embeddings, Qwen3 GGUF, dense/hybrid RAG, stream/classpath load — live in this snapshot (`mvn install`, then depend
+on `1.1.0-SNAPSHOT`) until 1.1.0 is released.
 
 Ideas in this project were inspired by the Python [nano-vllm](https://github.com/GeeeekExplorer/nano-vllm) educational
 engine.
@@ -26,7 +31,7 @@ depends on the **container** and the **architecture** — this is a curated subs
 
 | Format | Since | What you point at | Role |
 |--------|-------|-------------------|------|
-| **Safetensors** | **1.0.0** | HF folder: `config.json` + tokenizer + `*.safetensors` | Dense float weights (`F32` / `F16` / `BF16` / `F64` → float32). If both safetensors and ONNX are present, **safetensors wins**. |
+| **Safetensors** | **1.0.0** | HF folder: `config.json` + tokenizer + `*.safetensors` | Dense float weights (`F32` / `F16` / `BF16` / `F64` → float32). **Since 1.1.0:** Gemma 4 text **QAT** stays packed (int2/4/8). If both safetensors and ONNX are present, **safetensors wins**. |
 | **GGUF** | **1.0.0** | Single `.gguf` file | Packed GGML blocks; dequant on matmul / embed. Mmap ≤ ~2 GiB. Architectures: **`qwen3`** / **`lfm2`** (chat) and **`bert`** (embeddings **since 1.1.0**). |
 | **ONNX** (Tier A) | **1.1.0** | HF folder: same sidecars + `model.onnx` / `model_fp16.onnx` (root or `onnx/`) | **Initializers only** — no ONNX Runtime, no graph execution. Preferred float exports; community `*_q4*` / `*_int8*` / `*_quantized*` / `with_past` names are skipped. |
 
@@ -38,6 +43,7 @@ Stream / classpath loads (`ModelFileSource`, `fromClasspath*`) are **since 1.1.0
 | Kind | Since | Typical crate | Public use |
 |------|-------|---------------|------------|
 | **Qwen3** / **Gemma3** causal chat | **1.0.0** | HF safetensors (also ONNX **1.1.0**; Qwen3 GGUF **1.1.0**) | `LLM.builder(model)` → chat / generate |
+| **Gemma 4 text** (QAT mobile) | **1.1.0** | HF safetensors only (packed int2/4/8; **not** GGUF / ONNX) | Same `LLM` path; vision/audio towers in the crate are skipped |
 | **LFM2** hybrid causal chat | **1.0.0** | GGUF only (`lfm2`) | Same `LLM` path; not from HF safetensors / ONNX |
 | **Llama** causal (incl. Tiny-LLM / SmolLM2 Instruct demos) | **1.1.0** | HF safetensors or ONNX | Same `LLM` path |
 | **BERT** sentence embeddings | **1.1.0** | GGUF `bert` (e.g. gte-small); ONNX BERT when names map | `LlmModel.embed(…)` — **not** `LLM.builder` |
@@ -60,7 +66,7 @@ choose), ask a short business question, print the answer.
 
 ### 1. Add the dependency
 
-**Maven**
+**Maven** (Central **1.0.0**; this tree: `1.1.0-SNAPSHOT` after `mvn install`)
 
 ```xml
 <dependency>
@@ -130,8 +136,8 @@ public final class LogTriageHelloWorld {
 ```
 
 What this shows: **pure Java** in / out, **your** model directory, one `LlmModelFactory.make` + `LLM.builder` +
-`chat(…).send(…).answer()` — no Python sidecar. Swap the path for another Gemma3 layout or use Qwen3 the same way
-(with `.systemPrompt(…)` if you want a fixed role).
+`chat(…).send(…).answer()` — no Python sidecar. Swap the path for another Gemma3 layout, Gemma 4 text QAT, Llama, or
+Qwen3 the same way (with `.systemPrompt(…)` if you want a fixed role).
 
 In this repository the same program lives in the `nano-vllm-java-samples` module as
 `com.igormaznitsa.nanollvm.samples.LogTriageHelloWorld` (defaults to `models/Gemma3-270M` via
@@ -181,7 +187,7 @@ More API samples (streaming, RAG, GGUF, advisors) are in [Library quick start](#
 ## Key features
 
 - Continuous batching scheduler with paged KV cache and prefix caching
-- **Qwen3** (default; HF safetensors, ONNX **1.1.0**, or GGUF **1.1.0**), **Gemma3**, **Llama** (**since 1.1.0**), and **LFM2** (hybrid short-conv + GQA, GGUF) causal LMs
+- **Qwen3** (HF safetensors, ONNX **1.1.0**, or GGUF **1.1.0**), **Gemma3**, **Gemma 4 text** QAT mobile (**since 1.1.0**, packed safetensors), **Llama** (**since 1.1.0**), and **LFM2** (hybrid short-conv + GQA, GGUF) causal LMs
 - Weight crates: HF **safetensors**, **GGUF**, and (**since 1.1.0**) ONNX Tier A — see [Supported formats and variants](#supported-formats-and-variants)
 - Optional multi-thread CPU matmul (`cpuThreads` / `matmulExecutor` / `disableMultiCpu`); default = all processors on a lazily shared pool
 - GPT-2 byte BPE, Gemma Metaspace BPE, GGUF-embedded, and BERT WordPiece tokenizers
@@ -195,9 +201,9 @@ More API samples (streaming, RAG, GGUF, advisors) are in [Library quick start](#
 | Requirement                          | Notes                                                                      |
 |--------------------------------------|----------------------------------------------------------------------------|
 | **JDK 21+**                          | Language and runtime                                                       |
-| **Maven 3.9+**                       | Build and `exec:java` (`mvn` on `PATH`)                                    |
+| **Maven 3.8+**                       | Build and `exec:java` (`mvn` on `PATH`)                                    |
 | **~2–8 GB heap**                     | Enough for Qwen3-0.6B / Gemma3-270M                                         |
-| **~16 GB heap**                      | Default in [`.mvn/jvm.config`](.mvn/jvm.config) (`-Xmx16g`) for LFM2 GGUF    |
+| **~16 GB heap**                      | Default in [`.mvn/jvm.config`](.mvn/jvm.config) (`-Xmx16g`) for LFM2 GGUF and Gemma 4 E2B QAT |
 | **Optional:** `jdk.incubator.vector` | Faster kernels; enabled via [`.mvn/jvm.config`](.mvn/jvm.config) for Maven |
 
 ## Build
@@ -227,7 +233,7 @@ Tests use the Vector incubator module (`jvm.module.args` in the POM). Production
 ### Use as a dependency
 
 See [Hello World](#hello-world--gemma3-log-triage-in-your-app) for Maven / Gradle coordinates and a complete Gemma3
-example.
+example. Central publishes **1.0.0**; this reactor builds **1.1.0-SNAPSHOT**.
 
 ```xml
 <dependency>
@@ -276,11 +282,12 @@ models/Qwen3-0.6B/
 ```
 
 At load time, `LlmModelFactory` reads `config.json`, checks the architecture against `ModelSupport` (exact family
-names — `qwen3_5` is not `qwen3`), builds the graph (Qwen3, Gemma3, or Llama), merges packed weights from
-safetensors **or** ONNX initializers, and constructs the tokenizer. `-Dnanollvm.arch=qwen3|gemma3|llama|lfm2|bert`
-may only confirm a matching checkpoint, not override a different family. Unsupported models throw
-`UnsupportedModelException` with the support catalog. If both `*.safetensors` and `*.onnx` are present, safetensors
-wins (BERT folders prefer ONNX because HF BERT safetensors is not supported).
+names — `qwen3_5` is not `qwen3`), builds the matching graph (Qwen3, Gemma3, Gemma 4 text, Llama, …), loads
+weights from safetensors (including packed Gemma 4 QAT) **or** ONNX initializers (Qwen3 / Gemma3 / Llama / BERT — not
+Gemma 4), and constructs the tokenizer. `-Dnanollvm.arch=qwen3|gemma3|gemma4|llama|lfm2|bert` may only confirm a
+matching checkpoint, not override a different family. Unsupported models throw `UnsupportedModelException` with the
+support catalog. If both `*.safetensors` and `*.onnx` are present, safetensors wins (BERT folders prefer ONNX because
+HF BERT safetensors is not supported).
 
 <a id="onnx-weight-import"></a>
 ### ONNX (weight import) — since 1.1.0
@@ -289,7 +296,7 @@ A folder may use ONNX weights instead of safetensors (same `config.json` + token
 [Supported formats and variants](#supported-formats-and-variants) for filters and TensorProto limits. Supported files
 (root or `onnx/`): `model.onnx`, `model_fp16.onnx`, Optimum decoder names; quantized community variants (`*_q4*`,
 `*_int8*`, …) are skipped. The computation graph is ignored — only initializers are loaded into the existing Java
-engine (Qwen3 / Gemma3 / Llama chat, or BERT embeddings).
+engine (Qwen3 / Gemma3 / Llama chat, or BERT embeddings). Gemma 4 text is **safetensors only**, not ONNX.
 
 Tiny Llama demo ([onnx-community/Tiny-LLM-ONNX](https://huggingface.co/onnx-community/Tiny-LLM-ONNX)) —
 base/completion toy (~10M), not chat-tuned; useful to smoke-test ONNX load and next-token
@@ -415,12 +422,12 @@ The models root itself defaults to `./models`, overridable with `-Dnanollvm.mode
 | Property           | `-Dnanollvm.model=/data/hf/Qwen3-0.6B`                              |
 | Environment        | `NANOLLVM_MODEL=models/Gemma3-270M`                                 |
 | Models root        | `-Dnanollvm.models.dir=/opt/models`                                 |
-| Force architecture | `-Dnanollvm.arch=gemma3` (must match the checkpoint; cannot force Qwen2 → Qwen3) |
+| Force architecture | `-Dnanollvm.arch=gemma3` or `gemma4` (must match the checkpoint; cannot force Qwen2 → Qwen3) |
 | RAG corpus dir     | `-Dnanollvm.rag.dir=./docs` or `NANOLLVM_RAG_DIR` (default `./rag`) |
 | CPU matmul threads | `.cpuThreads(N)` / `.allCpuThreads()` / `.disableMultiCpu()` (builder wins); else `-Dnanollvm.cpu.threads=N`; else all processors. `.disableMultiCpu()` = calling thread only, no executor. Optional `.matmulExecutor(…)` only when workers &gt; 1 |
 
 If you start **without** any of (1)–(3), the Example model menu lists **downloaded** checkpoints
-first (Qwen3-0.6B preferred for chat quality, then Gemma3, LFM2, compact ONNX demos, …). Press
+first (Qwen3-0.6B preferred for chat quality, then Gemma3, Gemma 4 QAT, LFM2, compact ONNX demos, …). Press
 **Enter** to take item 1. If nothing is on disk, the demo exits with download instructions
 (`./models/download-qwen3-0.6b.sh` is the recommended chat start).
 
@@ -569,8 +576,8 @@ try (LlmModel model = LlmModelFactory.make(modelDir);  // or open(dir).listen(Ll
 }
 ```
 
-Load weights once with {@code LlmModelFactory.make} or {@code open(path).make()}, then bind engines with
-{@code LLM.builder(model)} so one model can be shared (close engines first, then the model):
+Load weights once with `LlmModelFactory.make` or `open(path).make()`, then bind engines with
+`LLM.builder(model)` so one model can be shared (close engines first, then the model):
 
 ```java
 try (LlmModel model = LlmModelFactory.make(Path.of("models/Qwen3-0.6B"));
@@ -740,6 +747,20 @@ PreparedRag rag = RagFactory.of(
     "Berlin is the capital of Germany.");
 ```
 
+Classpath documents (**since 1.1.0**): `RagFactory.makeResource("docs/a.md")` / `.addResource(loader, path)`.
+
+**Dense / hybrid** (**since 1.1.0**) need an embedding `LlmModel` (for example gte-small GGUF):
+
+```java
+import com.igormaznitsa.nanollvm.models.LlmModel;
+import com.igormaznitsa.nanollvm.models.LlmModelFactory;
+
+try (LlmModel embed = LlmModelFactory.make(Path.of("models/gte-small.Q2_K.gguf"))) {
+  var hybrid = RagFactory.withEmbeddings(rag, embed); // BM25 + cosine, fused by RRF
+  System.out.println(llm.rag(hybrid).ask("Who are the Grimm brothers?"));
+}
+```
+
 Load budgets (file size, corpus total, PDF inflate, JSON depth, …) default via
 `ResourceLimits` and can be raised per process or per corpus:
 
@@ -758,9 +779,10 @@ Chat history length defaults to `ResourceLimits.maxHistoryMessages()`; override 
 question). Treat RAG directories and listener sinks as trusted. Untrusted uploads into `RagFactory`
 need app-level sanitization; the library does not fence or redact retrieved passages.
 
-Retrieval is **lexical BM25** (no embedding model). Short anaphoric follow-ups may rewrite to keywords; if the rewrite
-returns `NONE`, the session falls back to Prior + follow-up instead of aborting. Off-topic queries with contentful
-out-of-vocabulary terms tend to yield no hits.
+Retrieval defaults to **lexical BM25**. **Since 1.1.0**, `RagFactory.withEmbeddings(prepared, embedModel)` builds a
+dense cosine index or a hybrid BM25+dense RRF index (`DenseRagIndex` / `HybridRagIndex`). Short anaphoric follow-ups
+may rewrite to keywords; if the rewrite returns `NONE`, the session falls back to Prior + follow-up instead of
+aborting. Off-topic queries with contentful out-of-vocabulary terms tend to yield no hits.
 
 See [`description.md`](description.md) §17 and package `com.igormaznitsa.nanollvm.rag`.
 Prompt wording is module-private (`prompts`); `RagSession.formatUserMessage` builds the model-facing turn.
@@ -769,7 +791,7 @@ Prompt wording is module-private (`prompts`); `RagSession.formatUserMessage` bui
 
 | Doc | Contents |
 |-----|----------|
-| [`description.md`](description.md) | Design tour: attention, tensors, scheduler, GGUF, call chain, RAG |
+| [`description.md`](description.md) | Design tour: attention, tensors, scheduler, GGUF, ONNX, embeddings, call chain, RAG |
 | [`models/README.md`](models/README.md) | Download scripts and model layout |
 | [`rag/`](rag/) | Demo corpus (fairy tales + fact cards) |
 

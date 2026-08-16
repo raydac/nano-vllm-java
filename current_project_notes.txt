@@ -1,5 +1,5 @@
 ## 1. Implementation Progress
-- Maven multi-module **`1.1.0-SNAPSHOT`**: parent `nano-vllm-java-pom`, library `nano-vllm-java`, demos `nano-vllm-java-samples` (released **1.0.0** 2026-08-09); enforcer Java `[21,)`, Maven `[3.9,)`; JPMS module `com.igormaznitsa.nanollvm` (library only)
+- Maven multi-module **`1.1.0-SNAPSHOT`**: parent `nano-vllm-java-pom`, library `nano-vllm-java`, demos `nano-vllm-java-samples` (released **1.0.0** 2026-08-09); enforcer Java `[21,)`, Maven `[3.8,)`; JPMS module `com.igormaznitsa.nanollvm` (library only)
 - CPU kernels: panel GEMV for dense linear, Vector-API 4-acc dots, SIMD elementwise/RMSNorm/MLP/attention axpy; paged KV attend in place
 - **ResourceLimits** (exported utils): process-wide defaults + builder; RAG/PDF/JSON/GGUF/safetensors/corpus/history budgets
 - CausalLM: Qwen3 + Gemma3 + **Gemma 4 text (QAT mobile)** + **Llama** + LFM2 (GGUF); tokenizers GPT-2 BPE / Metaspace / GGUF-embedded / BERT WordPiece
@@ -10,22 +10,7 @@
 - **GGUF:** packed by default; dequant catalog matches current llama.cpp weight types (K/IQ/TQ/MX/NV/legacy); `LlmModelFactory.make(path, io, true)` unpacks at load; `LLM.Builder.allowUnpackParameters()` late-unpacks packed models. Chat GGUF: **qwen3** + **lfm2**; embeddings **bert**. Load = `models.llmcontainer` transport → `models.llmarch` ArchitectureProcessor bind/fill/create
 - Library: `LlmModelFactory.open(path).make()` or `make` → shared `LlmModel` (`AutoCloseable`); also `make(ModelFileSource)` / `fromClasspath*` / `openClasspath*` (stream → heap; no disk cache); `LLM.Builder` only (warmup **off** by default); `.sampling(SamplingParams)` seals chat/complete defaults; close **LLM first**, then **model**. `LlmModel.toString()` prints kind, architecture, container, sizes, packed/dense/qat, chat format (safe after close). Builder-built types (`LLM`, `Config`, `LlmAdvisor`, `SamplingParams`, `MatmulRuntime`, `RagFactory`/`CorpusLoader` corpus) keep constructors private; `ResourceLimits` is a public record so its canonical constructor cannot be hidden.
 - **Concurrent use test:** `ConcurrentLibraryUseTest` (`@Tag("concurrent_test")`) loads SmolLM2-135M-Instruct-ONNX + gte-small, shares chat `LlmModel` + BM25/hybrid RAG over 12 depots + filler docs, races 6 generate workers against 8 retrieve hammers (start barrier only; KV kept modest to avoid OOM); excluded from the default Surefire run, enabled with `-Pconcurrent_test`
-- **`description.md`:** re-checked against 1.1.0 — Gemma 4 text QAT (packed, not F32 widen), panel GEMV / SIMD
-  `Ops` / in-place paged KV, `TEXT_DEBUG` off unless `emitDebugPrompts(true)`, `AdvisorRagHelloWorld`; ONNX Tier A
-  (**§7c**), Llama, SmolLM2/Tiny demos; ChatFormat / vocab-gated think / neutral `SamplingDefaults` / fail-unknown-arch;
-  educational Qwen/Gemma tables kept as examples;
-  **format restriction** tables in ch. 7 / 7a / 7c; **usage Java snippets** in ch. 4 / 7a / 7c / 14 / 16 / 17
-  (load+chat, GGUF/ONNX, stream/cancel, classpath, advisors, BM25+classpath RAG);
-  ch. **7a** covers **Qwen3 GGUF** (bring-your-own; transport + architecture processor) as well as LFM2;
-  ch. **12** KV cache: what is stored (post-RoPE K/V per layer/head/position), what is not, prefill vs decode,
-  paged blocks / `blockTable` / `kvHeapFraction`, GQA + Gemma 4 shared-KV, lifetime vs chat history;
-  **ThinkTags** / `OPTION_THINK_TAGS` and **ChatSpecials** / `OPTION_CHAT_SPECIALS` in ch. 4, 7a, 9, 16;
-  **`TEXT_RAW`** streaming decode in ch. 9, 14, 15, 16 and the glossary; shared `LoadProgress` bar in ch. 4 / 7 / 7a / 7c / 16;
-  **`ChatReply`** and other exported records: JavaDoc covers fields (`@param`) and how to
-  use helpers — `ChatReply`, `ThinkTags`, `ChatSpecials`, `ChatMessage`, `LlmTextEvent`, `AdvisorResponse`,
-  `AdvisorEnrichment`, `GenerationStats`, `LLM.GenerationOutput`,
-  `Config.HfConfig`, `RagHit`, `TextChunk`, `RagLoadOptions`, `ResourceLimits`,
-  `ModelSupport.Selection`
+- **`description.md`:** re-checked vs 1.1.0-SNAPSHOT (2026-08-16) — Gemma 4 text QAT in ch. 2 / 7 / 7c (safetensors only, not ONNX), family list includes Llama / LFM2 / BERT; `ResourceLimits` tagged **1.0.0** (not 1.1.0); panel GEMV / SIMD `Ops` / in-place paged KV; `TEXT_DEBUG` off unless `emitDebugPrompts(true)`; ONNX Tier A (**§7c**); Qwen3 GGUF in **§7a**; KV cache ch. **12**; ThinkTags / ChatSpecials / `TEXT_RAW`; usage snippets in ch. 4 / 7a / 7c / 14 / 16 / 17
 - Optional download scripts: Qwen3 / Gemma3 / **Gemma4 E2B QAT mobile** / LFM2 GGUF / gte-small / **Tiny-LLM-ONNX** / **SmolLM2-135M-Instruct-ONNX** (`.sh` + Windows `.ps1`/`.cmd`; PS1 ASCII-only + `$PSScriptRoot` + absolute outs)
 - ONNX JavaDoc: Tier A contracts + {@code @since 1.1.0} on public Onnx* APIs / ModelFileId ONNX roles / LlmModelFactory note
 - **API ergonomics (1.1.0):** `LlmModelFactory.open(…).make()`, `SamplingParams.builder()` / withers,
@@ -102,6 +87,7 @@
 
 ## 4. Current Work In Progress
 - Development line **`1.1.0-SNAPSHOT`** (post-1.0.0); multi-module Maven layout
+- README / `description.md` / library POM description aligned with snapshot (Gemma 4 as a first-class chat graph, Central 1.0.0 vs this tree, Maven enforcer `[3.8,)`)
 - **Gemma 4 E2B QAT mobile** — text-only `LlmModel` load for `models/Gemma4-E2B-IT-QAT-Mobile/` (`google/gemma-4-E2B-it-qat-mobile-transformers`). Vision/audio unused. Packed QAT (int2/4/8 + SRQ), PLE, KV sharing, `<|turn>` chat.
 - Library de-productized (chat format markers / sample-owned demo policy); ONNX Tier A + Llama + SmolLM2 Instruct demo
 - `Example` terminal demo: downloaded models first (Qwen3-0.6B preferred); Enter = first item; empty disk exits with download help; `--debug` for prepared prompts
@@ -144,7 +130,7 @@
 ## 7. Useful References
 - `security_audit.txt` — 1.0.0 threat-model summary
 - `CHANGELOG.md` — 1.0.0 released; active line 1.1.0-SNAPSHOT
-- `README.md` — Hello World, CLI, library samples; ONNX + Tiny-LLM section
+- `README.md` — Hello World, CLI, library samples; 1.1.0-SNAPSHOT vs Central 1.0.0; Gemma 4 text in architecture table; ONNX + Tiny-LLM; dense/hybrid RAG
 - Build: `mvn22 -q test` / `MAVEN_OPTS="-Xmx8g" mvn22 -pl nano-vllm-java-samples -q exec:java` (document as `mvn` in README); other mains: `-Dexec.mainClass=…` (samples POM default `exec.mainClass` is `Example`); SpotBugs: `mvn22 -pl nano-vllm-java -am compile spotbugs:check` (also on `verify`); concurrent RAG test: `mvn22 -pl nano-vllm-java -Pconcurrent_test test`
 - Library: `LlmModelFactory.make(path)` / `open(path).make()` — engines close before model
 - Embeddings: `LlmModelFactory.make(gteGguf); model.embed(text)` — sample `EmbeddingsHelloWorld`
