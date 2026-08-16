@@ -213,7 +213,8 @@ mvn package
 This is a multi-module reactor: parent `nano-vllm-java-pom`, library `nano-vllm-java`, demos
 `nano-vllm-java-samples`. Run Maven from the **repository root**. Unit tests do not need a Qwen3
 GGUF file. Optional local checkpoints (HF Qwen3 / Gemma, LFM2 GGUF, gte-small, …) skip their
-integration tests when those files are absent.
+integration tests when those files are absent. The concurrent model+RAG race
+(`ConcurrentLibraryUseTest`) is off by default; run it with `mvn test -Pconcurrent_test`.
 
 Artifacts:
 

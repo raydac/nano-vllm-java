@@ -27,6 +27,7 @@ public final class OptionalModelAssumptions {
   private static final String GEMMA4_E2B_IT_QAT_MOBILE = "Gemma4-E2B-IT-QAT-Mobile";
   private static final String LFM2_5_2_6B_GGUF = "LFM2.5-2.6B-Q4_K_M.gguf";
   private static final String GTE_SMALL_GGUF = "gte-small.Q2_K.gguf";
+  private static final String SMOLLM2_135M_INSTRUCT_ONNX = "SmolLM2-135M-Instruct-ONNX";
 
   private OptionalModelAssumptions() {
   }
@@ -64,6 +65,13 @@ public final class OptionalModelAssumptions {
       findModel(GTE_SMALL_GGUF),
       "gte-small GGUF",
       "models/download-gte-small-gguf.sh");
+  }
+
+  public static Path requireSmolLm2InstructOnnx() {
+    return require(
+      findModel(SMOLLM2_135M_INSTRUCT_ONNX),
+      "SmolLM2-135M-Instruct-ONNX",
+      "models/download-smollm2-135m-instruct-onnx.sh");
   }
 
   public static Path requireLocalRag() {

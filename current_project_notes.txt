@@ -9,6 +9,7 @@
 - **ModelFileSource**: `ModelFileId` → `InputStream` (+ weight shards); load into heap only (no disk cache); `make(Path)` stays direct disk I/O; ONNX ids `MODEL_ONNX` / `MODEL_ONNX_FP16`
 - **GGUF:** packed by default; dequant catalog matches current llama.cpp weight types (K/IQ/TQ/MX/NV/legacy); `LlmModelFactory.make(path, io, true)` unpacks at load; `LLM.Builder.allowUnpackParameters()` late-unpacks packed models. Chat GGUF: **qwen3** + **lfm2**; embeddings **bert**. Load = `models.llmcontainer` transport → `models.llmarch` ArchitectureProcessor bind/fill/create
 - Library: `LlmModelFactory.open(path).make()` or `make` → shared `LlmModel` (`AutoCloseable`); also `make(ModelFileSource)` / `fromClasspath*` / `openClasspath*` (stream → heap; no disk cache); `LLM.Builder` only (warmup **off** by default); `.sampling(SamplingParams)` seals chat/complete defaults; close **LLM first**, then **model**. `LlmModel.toString()` prints kind, architecture, container, sizes, packed/dense/qat, chat format (safe after close). Builder-built types (`LLM`, `Config`, `LlmAdvisor`, `SamplingParams`, `MatmulRuntime`, `RagFactory`/`CorpusLoader` corpus) keep constructors private; `ResourceLimits` is a public record so its canonical constructor cannot be hidden.
+- **Concurrent use test:** `ConcurrentLibraryUseTest` (`@Tag("concurrent_test")`) loads SmolLM2-135M-Instruct-ONNX + gte-small, shares chat `LlmModel` + BM25/hybrid RAG over 12 depots + filler docs, races 6 generate workers against 8 retrieve hammers (start barrier only; KV kept modest to avoid OOM); excluded from the default Surefire run, enabled with `-Pconcurrent_test`
 - **`description.md`:** re-checked against 1.1.0 — Gemma 4 text QAT (packed, not F32 widen), panel GEMV / SIMD
   `Ops` / in-place paged KV, `TEXT_DEBUG` off unless `emitDebugPrompts(true)`, `AdvisorRagHelloWorld`; ONNX Tier A
   (**§7c**), Llama, SmolLM2/Tiny demos; ChatFormat / vocab-gated think / neutral `SamplingDefaults` / fail-unknown-arch;
@@ -125,7 +126,8 @@
 - Gemma 4 **text** (QAT mobile) loads; vision/audio towers in the same checkpoint are skipped. Gemma 4 GGUF / MoE (`enable_moe_block`) / other Gemma 4 variants are still unsupported. Gemma 3 remains `gemma3` / `gemma3_text`.
 - Model/RAG-dependent unit tests skip via test-only `OptionalModelAssumptions` /
   samples `SampleModelAssumptions` (stderr WARNING + JUnit abort) when local weights or `./rag`
-  are absent — not shipped with the library JAR
+  are absent — not shipped with the library JAR. Concurrent RAG+generate test (`-Pconcurrent_test`) needs
+  `SmolLM2-135M-Instruct-ONNX` and `gte-small.Q2_K.gguf`
 - Tiny-LLM-ONNX (~10M) is a toy checkpoint — expect incoherent text; context is only 1024 tokens
 - Lexical `isOutsideCorpus` ignores conversational glue words; still BM25/heuristic (no LLM judge)
 
@@ -143,7 +145,7 @@
 - `security_audit.txt` — 1.0.0 threat-model summary
 - `CHANGELOG.md` — 1.0.0 released; active line 1.1.0-SNAPSHOT
 - `README.md` — Hello World, CLI, library samples; ONNX + Tiny-LLM section
-- Build: `mvn22 -q test` / `MAVEN_OPTS="-Xmx8g" mvn22 -pl nano-vllm-java-samples -q exec:java` (document as `mvn` in README); other mains: `-Dexec.mainClass=…` (samples POM default `exec.mainClass` is `Example`); SpotBugs: `mvn22 -pl nano-vllm-java -am compile spotbugs:check` (also on `verify`)
+- Build: `mvn22 -q test` / `MAVEN_OPTS="-Xmx8g" mvn22 -pl nano-vllm-java-samples -q exec:java` (document as `mvn` in README); other mains: `-Dexec.mainClass=…` (samples POM default `exec.mainClass` is `Example`); SpotBugs: `mvn22 -pl nano-vllm-java -am compile spotbugs:check` (also on `verify`); concurrent RAG test: `mvn22 -pl nano-vllm-java -Pconcurrent_test test`
 - Library: `LlmModelFactory.make(path)` / `open(path).make()` — engines close before model
 - Embeddings: `LlmModelFactory.make(gteGguf); model.embed(text)` — sample `EmbeddingsHelloWorld`
 - Next tokens: `tokenizer.encode` → `LLM.generateTokenIds(…, maxTokens, onToken)` — sample `NextTokenHelloWorld` (Tiny-LLM-ONNX)
