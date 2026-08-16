@@ -11,7 +11,7 @@ term is defined on first use. Occasional metaphors remain only as scaffolding, n
 The subject is a small program that **loads a pretrained model** and runs **inference** on an ordinary CPU, without
 CUDA or other native backends: continuing text or short chat with a **causal** language model, and (**since 1.1.0**)
 encoding sentences to vectors with a **BERT-family embedding** GGUF. Java package / JPMS module:
-`com.igormaznitsa.nanollvm`.
+`com.igormaznitsa.nanollvm`. This guide matches library **1.1.0**.
 
 Where a topic has a standard paper or format specification, a short **Further reading** note lists links. Those are
 optional depth; the exposition here is self-contained. A curated **learning path** (what to read in which order) is

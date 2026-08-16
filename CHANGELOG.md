@@ -5,7 +5,12 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased] — 1.1.0-SNAPSHOT
+## [Unreleased]
+
+## [1.1.0] — 2026-08-16
+
+Public release of **nano-vllm-java** `1.1.0` (Maven coordinates `com.igormaznitsa:nano-vllm-java:1.1.0`).
+ONNX weight import, Llama and Gemma 4 text chat, BERT embeddings, Qwen3 GGUF, dense/hybrid RAG, and related API cleanup.
 
 ### Changed
 - Prepared-prompt `TEXT_DEBUG` events are off unless you call `ChatSession.emitDebugPrompts(true)`
@@ -45,7 +50,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `SampleChatPrompts` in `nano-vllm-java-samples`. 1.0 boolean chat shims
   (`ChatMessages.newConversation(boolean)`, `scrubSetupBoilerplateTurns`,
   `ChatPrompts.systemFor(boolean)` / `systemFor(Tokenizer, boolean)`) are removed in this
-  unreleased line rather than kept as `@Deprecated` — use `newConversation(String)`,
+  release rather than kept as `@Deprecated` — use `newConversation(String)`,
   `scrubMatchingAssistantTurns`, and `systemFor(Tokenizer)` / `LLM.Builder.systemPrompt`.
 - Maven layout is now multi-module: parent `nano-vllm-java-pom`, library `nano-vllm-java`, demos
   `nano-vllm-java-samples`. Sample mains are no longer packaged in the library JAR; run demos with
