@@ -222,7 +222,7 @@ integration tests when those files are absent. The concurrent model+RAG race
 
 Artifacts:
 
-- `nano-vllm-java/target/nano-vllm-java-1.1.0.jar` — library JAR (JPMS module `com.igormaznitsa.nanollvm`; no `Main-Class`)
+- `nano-vllm-java/target/nano-vllm-java-1.1.1-SNAPSHOT.jar` — library JAR (JPMS module `com.igormaznitsa.nanollvm`; no `Main-Class`)
 - `nano-vllm-java-samples/target/…` — demo classes (not published to Maven Central)
 
 Tests use the Vector incubator module (`jvm.module.args` in the POM). Production runs should use the same flags
@@ -525,7 +525,7 @@ After `mvn package` (prefer `mvn -pl nano-vllm-java-samples exec:java` when poss
 ```bash
 java --add-modules jdk.incubator.vector \
   -Xmx16g \
-  -cp nano-vllm-java/target/nano-vllm-java-1.1.0.jar:nano-vllm-java-samples/target/nano-vllm-java-samples-1.1.0.jar \
+  -cp nano-vllm-java/target/nano-vllm-java-1.1.1-SNAPSHOT.jar:nano-vllm-java-samples/target/nano-vllm-java-samples-1.1.1-SNAPSHOT.jar \
   com.igormaznitsa.nanollvm.samples.Example \
   models/Qwen3-0.6B
 ```
