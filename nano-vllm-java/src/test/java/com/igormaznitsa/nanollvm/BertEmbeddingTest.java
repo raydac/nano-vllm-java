@@ -67,4 +67,41 @@ final class BertEmbeddingTest {
       assertThrows(IllegalArgumentException.class, () -> model.embed(new int[0]));
     }
   }
+
+  @Test
+  void multilingualE5SmallEmbedsAndRejectsLlmBuilder() {
+    Path path = OptionalModelAssumptions.requireMultilingualE5Small();
+
+    try (LlmModel model = LlmModelFactory.make(path)) {
+      assertTrue(model.isEmbeddingModel());
+      assertFalse(model.isCausalModel());
+      assertEquals("bert", model.architectureName());
+      String text = model.toString();
+      assertTrue(text.contains("kind=embedding"), text);
+      assertTrue(text.contains("architecture=bert"), text);
+      assertTrue(text.contains("container=folder"), text);
+
+      float[] a = model.embed("query: hello world");
+      float[] b = model.embed("query: hello world");
+      float[] c = model.embed("query: totally unrelated astronomy text");
+
+      assertEquals(384, a.length);
+      assertEquals(1.0, l2(a), 1e-4);
+      assertEquals(1.0f, cosine(a, b), 1e-5f);
+      assertTrue(cosine(a, c) < 0.99f);
+
+      assertThrows(IllegalStateException.class, () -> LLM.builder(model).build());
+
+      int cls = model.tokenizer().tokenId("<s>").orElseThrow();
+      int sep = model.tokenizer().tokenId("</s>").orElseThrow();
+      var pieces = model.tokenizer().encode("query: hello world");
+      int[] ids = new int[pieces.size() + 2];
+      ids[0] = cls;
+      for (int i = 0; i < pieces.size(); i++) {
+        ids[i + 1] = pieces.get(i);
+      }
+      ids[ids.length - 1] = sep;
+      assertEquals(1.0f, cosine(a, model.embed(ids)), 1e-5f);
+    }
+  }
 }

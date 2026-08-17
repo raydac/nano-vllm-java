@@ -13,13 +13,15 @@ import java.util.Optional;
 import java.util.stream.IntStream;
 
 /**
- * Minimal sentence-embedding demo (default gte-small GGUF): encode text to an L2-normalized
- * vector, print dim / preview, then cosine vs the same text and an unrelated sentence.
+ * Minimal sentence-embedding demo (default multilingual-e5-small ONNX): encode text to an
+ * L2-normalized vector, print dim / preview, then cosine vs the same text and an unrelated
+ * sentence.
  *
  * <p>This is a BERT embedding checkpoint — call {@link LlmModel#embed(CharSequence)}, not
- * {@code LLM.builder}. Do not use a chat/completion model here.
+ * {@code LLM.builder}. Do not use a chat/completion model here. Non-retrieval E5 inputs use the
+ * {@code query: } prefix.
  *
- * <p>Args: optional {@code .gguf} path (default {@code models/gte-small.Q2_K.gguf}), optional text
+ * <p>Args: optional model folder (default {@code models/multilingual-e5-small}), optional text
  * (default {@code The capital of France is Paris.}). From the repository root:
  * {@code mvn -pl nano-vllm-java-samples -q exec:java -Dexec.mainClass=com.igormaznitsa.nanollvm.samples.EmbeddingsHelloWorld}
  *
@@ -28,6 +30,7 @@ import java.util.stream.IntStream;
 public final class EmbeddingsHelloWorld {
 
   private static final int PREVIEW = 8;
+  private static final String QUERY_PREFIX = "query: ";
   private static final String DEFAULT_TEXT = "The capital of France is Paris.";
   private static final String RELATED_TEXT = "Paris is the capital city of France.";
   private static final String UNRELATED_TEXT = "A completely different sentence about astronomy.";
@@ -42,25 +45,29 @@ public final class EmbeddingsHelloWorld {
     System.out.println("Loading embedding model from " + path);
     long started = System.currentTimeMillis();
     try (LlmModel model = LlmModelFactory.make(path)) {
-      embedTexts(model, text);
+      embedTexts(model, text, usesE5Prefix(path));
     } finally {
       System.out.println("Time taken: " + (System.currentTimeMillis() - started) + "ms");
     }
   }
 
-  private static void embedTexts(final LlmModel model, final String text) {
+  private static void embedTexts(
+    final LlmModel model,
+    final String text,
+    final boolean e5Prefix
+  ) {
     System.out.println("architecture=" + model.architectureName()
       + " embedding=" + model.isEmbeddingModel());
 
-    float[] vector = model.embed(text);
-    float[] same = model.embed(text);
-    float[] other = model.embed(UNRELATED_TEXT);
+    float[] vector = model.embed(embedInput(text, e5Prefix));
+    float[] same = model.embed(embedInput(text, e5Prefix));
+    float[] other = model.embed(embedInput(UNRELATED_TEXT, e5Prefix));
 
     printVector(text, vector);
     System.out.printf(Locale.ROOT, "cos(same)=%.4f%n", cosine(vector, same));
 
     if (DEFAULT_TEXT.equals(text)) {
-      float[] related = model.embed(RELATED_TEXT);
+      float[] related = model.embed(embedInput(RELATED_TEXT, e5Prefix));
       System.out.printf(Locale.ROOT, "cos(related)=%.4f  %s%n", cosine(vector, related),
         RELATED_TEXT);
     }
@@ -102,7 +109,15 @@ public final class EmbeddingsHelloWorld {
   private static Path modelPath(final String[] args) {
     return cliArg(args, 0)
       .map(path -> Path.of(path).toAbsolutePath().normalize())
-      .orElseGet(() -> BundledModels.require(BundledModels.GTE_SMALL_GGUF));
+      .orElseGet(() -> BundledModels.require(BundledModels.MULTILINGUAL_E5_SMALL));
+  }
+
+  private static boolean usesE5Prefix(final Path path) {
+    return path.getFileName().toString().toLowerCase(Locale.ROOT).contains("e5");
+  }
+
+  private static String embedInput(final String text, final boolean e5Prefix) {
+    return e5Prefix ? QUERY_PREFIX + text : text;
   }
 
   private static String seedText(final String[] args) {

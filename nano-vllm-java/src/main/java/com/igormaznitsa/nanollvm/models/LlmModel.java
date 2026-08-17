@@ -340,7 +340,8 @@ public final class LlmModel implements AutoCloseable {
 
   /**
    * Encodes {@code text} to a single L2-normalized embedding vector (embedding models only).
-   * Tokenizes and wraps with {@code [CLS]} / {@code [SEP]} when present in the vocab.
+   * Tokenizes and wraps with {@code [CLS]} / {@code [SEP]} (or XLM-R {@code <s>} / {@code </s>})
+   * when present in the vocab.
    *
    * @since 1.1.0
    */
@@ -361,7 +362,8 @@ public final class LlmModel implements AutoCloseable {
 
   /**
    * Encodes already-tokenized ids to a single L2-normalized embedding (embedding models only).
-   * Ids are used as-is — include special tokens such as {@code [CLS]} / {@code [SEP]} when required.
+   * Ids are used as-is — include special tokens such as {@code [CLS]} / {@code [SEP]}
+   * (or {@code <s>} / {@code </s>}) when required.
    *
    * @since 1.1.0
    */
@@ -388,10 +390,8 @@ public final class LlmModel implements AutoCloseable {
   }
 
   private int[] wrapClsSep(final List<Integer> pieces) {
-    int cls = this.tokenizer.tokenId("[CLS]").orElseThrow(
-      () -> new IllegalStateException("embedding tokenizer missing [CLS]"));
-    int sep = this.tokenizer.tokenId("[SEP]").orElseThrow(
-      () -> new IllegalStateException("embedding tokenizer missing [SEP]"));
+    int cls = this.embeddingBosId();
+    int sep = this.embeddingEosId();
     int[] ids = new int[pieces.size() + 2];
     ids[0] = cls;
     for (int i = 0; i < pieces.size(); i++) {
@@ -399,6 +399,21 @@ public final class LlmModel implements AutoCloseable {
     }
     ids[ids.length - 1] = sep;
     return ids;
+  }
+
+  private int embeddingBosId() {
+    return this.embeddingSpecialId("[CLS]", "<s>");
+  }
+
+  private int embeddingEosId() {
+    return this.embeddingSpecialId("[SEP]", "</s>");
+  }
+
+  private int embeddingSpecialId(final String bertToken, final String xlmToken) {
+    return this.tokenizer.tokenId(bertToken)
+      .or(() -> this.tokenizer.tokenId(xlmToken))
+      .orElseThrow(() -> new IllegalStateException(
+        "embedding tokenizer missing %s or %s".formatted(bertToken, xlmToken)));
   }
 
   /**

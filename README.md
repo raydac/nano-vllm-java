@@ -164,13 +164,13 @@ mvn -pl nano-vllm-java-samples -q exec:java \
 # optional: … -Dexec.args="models/Tiny-LLM-ONNX Once upon a time"
 ```
 
-Sentence embeddings (encode text to an L2-normalized vector; defaults to gte-small GGUF —
-download with `./models/download-gte-small-gguf.sh`):
+Sentence embeddings (encode text to an L2-normalized vector; defaults to multilingual-e5-small ONNX —
+download with `./models/download-multilingual-e5-small.sh`):
 
 ```bash
 mvn -pl nano-vllm-java-samples -q exec:java \
   -Dexec.mainClass=com.igormaznitsa.nanollvm.samples.EmbeddingsHelloWorld
-# optional: … -Dexec.args="models/gte-small.Q2_K.gguf hello world"
+# optional: … -Dexec.args="models/multilingual-e5-small hello world"
 ```
 
 Custom advisor **Alex** plus lexical **BM25** RAG over `rag/` (Grimm names and father; Gemma3-270M):
@@ -188,7 +188,7 @@ More API samples (streaming, RAG, GGUF, advisors) are in [Library quick start](#
 - **Qwen3** (HF safetensors, ONNX **1.1.0**, or GGUF **1.1.0**), **Gemma3**, **Gemma 4 text** QAT mobile (**since 1.1.0**, packed safetensors), **Llama** (**since 1.1.0**), and **LFM2** (hybrid short-conv + GQA, GGUF) causal LMs
 - Weight crates: HF **safetensors**, **GGUF**, and (**since 1.1.0**) ONNX Tier A — see [Supported formats and variants](#supported-formats-and-variants)
 - Optional multi-thread CPU matmul (`cpuThreads` / `matmulExecutor` / `disableMultiCpu`); default = all processors on a lazily shared pool
-- GPT-2 byte BPE, Gemma Metaspace BPE, GGUF-embedded, and BERT WordPiece tokenizers
+- GPT-2 byte BPE, Gemma Metaspace BPE, GGUF-embedded, BERT WordPiece, and Unigram SentencePiece tokenizers
 - Optional **BM25 text RAG** over a local `rag/` corpus (Example demo menu: none / BM25 / dense / hybrid); dense / hybrid embeddings **since 1.1.0**
 - **ResourceLimits** — default caps for corpus/PDF/JSON/GGUF/safetensors (overridable)
 - Optional **advisors** before each chat/RAG turn: `LLM.Builder.advisors(LlmAdvisorMixer, LlmAdvisor…)`
@@ -394,11 +394,14 @@ Creates `models/Gemma4-E2B-IT-QAT-Mobile/`. Text-only chat load (vision/audio un
 
 **SmolLM2-135M-Instruct-ONNX (Llama ChatML ~135M)** — `./models/download-smollm2-135m-instruct-onnx.sh`.
 
-**gte-small GGUF (BERT embeddings, ~25 MB)** — `./models/download-gte-small-gguf.sh`. Linear demo:
-`EmbeddingsHelloWorld`.
+**gte-small GGUF (BERT embeddings, ~25 MB)** — `./models/download-gte-small-gguf.sh`. Dense/hybrid RAG in `Example`.
+
+**multilingual-e5-small ONNX (multilingual BERT embeddings, ~470 MB)** —
+`./models/download-multilingual-e5-small.sh` → `models/multilingual-e5-small/`. Linear demo:
+`EmbeddingsHelloWorld` (non-retrieval texts use the `query: ` prefix).
 
 **Windows:** `.\models\download-qwen3-0.6b.ps1` / `.cmd` and the matching Gemma 3 / Gemma 4 / LFM / Tiny-LLM-ONNX /
-SmolLM2 Instruct ONNX / gte-small scripts under `models/`.
+SmolLM2 Instruct ONNX / gte-small / multilingual-e5-small scripts under `models/`.
 
 You can also point the engine at **any** local HF-style directory (your own path or another download).
 

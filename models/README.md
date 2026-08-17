@@ -124,7 +124,34 @@ try (LlmModel model = LlmModelFactory.make(Path.of("models/gte-small.Q2_K.gguf")
 }
 ```
 
-Sample: `nano-vllm-java-samples` → `com.igormaznitsa.nanollvm.samples.EmbeddingsHelloWorld`. Do not use with `LLM.builder` / chat.
+Sample: pass this GGUF to `EmbeddingsHelloWorld` if you want a tiny English checkpoint instead of E5.
+Do not use with `LLM.builder` / chat.
+
+## multilingual-e5-small ONNX (optional, embeddings)
+
+[intfloat/multilingual-e5-small](https://huggingface.co/intfloat/multilingual-e5-small) — multilingual E5
+(BERT encoder, XLM-RoBERTa Unigram tokenizer, 94 languages). Hugging Face **safetensors BERT is not
+loaded** by this library; the scripts fetch `onnx/model.onnx` (fp32, ~470 MB) plus tokenizer sidecars.
+MIT license; no HF gate. Skip quantized `*_qint8*` / OpenVINO files.
+
+```bash
+./models/download-multilingual-e5-small.sh
+```
+
+Windows: `.\models\download-multilingual-e5-small.ps1` or `models\download-multilingual-e5-small.cmd`.
+
+Creates `models/multilingual-e5-small/`. Context length up to 512 tokens. E5 expects prefixes
+`query: …` and `passage: …`.
+
+```java
+try (LlmModel model = LlmModelFactory.make(Path.of("models/multilingual-e5-small"))) {
+  float[] v = model.embed("query: hello world");
+}
+```
+
+Do not use with `LLM.builder` / chat. Sample: `nano-vllm-java-samples` →
+`com.igormaznitsa.nanollvm.samples.EmbeddingsHelloWorld` (default folder; non-retrieval texts get
+`query: `).
 
 ## Selecting a model
 

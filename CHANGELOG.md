@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased] — 1.1.1-SNAPSHOT
 
+### Added
+- Optional download scripts for [intfloat/multilingual-e5-small](https://huggingface.co/intfloat/multilingual-e5-small)
+  (`models/download-multilingual-e5-small.sh` / `.ps1` / `.cmd` → `models/multilingual-e5-small/`, ONNX fp32 ~470 MB).
+  Hugging Face Unigram SentencePiece tokenizers load from `tokenizer.json`; embedding wrap accepts XLM-R
+  `<s>` / `</s>` as well as BERT `[CLS]` / `[SEP]`. Optimum-style BERT ONNX (anonymous `onnx::MatMul_*`
+  weights) remaps those MatMul aliases through the BERT schema, same as named HF tensors.
+  `EmbeddingsHelloWorld` defaults to this folder and prefixes non-retrieval text with `query: `.
+
 ## [1.1.0] — 2026-08-16
 
 Public release of **nano-vllm-java** `1.1.0` (Maven coordinates `com.igormaznitsa:nano-vllm-java:1.1.0`).

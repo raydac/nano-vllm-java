@@ -83,6 +83,15 @@ class ExampleModelMenuTest {
   }
 
   @Test
+  void modelMenuSelectsMultilingualE5WhenPresent() throws Exception {
+    Path e5 = SampleModelAssumptions.requireMultilingualE5Small();
+    Path chosen = Example.resolveModel(
+      new String[0],
+      new BufferedReader(new StringReader((menuIndexOf(e5) + 1) + "\n")));
+    assertEquals(e5, chosen);
+  }
+
+  @Test
   void missingExplicitPathExits() throws Exception {
     assertTrue(
       Example.resolveModel(

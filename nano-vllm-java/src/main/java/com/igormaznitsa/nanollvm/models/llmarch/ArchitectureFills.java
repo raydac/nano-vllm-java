@@ -53,14 +53,11 @@ final class ArchitectureFills {
     for (var entry : containerTensors.entrySet()) {
       Tensor tensor = entry.getValue();
       String alias = aliases.get(entry.getKey());
-      if (alias != null) {
-        named.put(OnnxWeightNames.normalizeChatName(alias), transposeIfMatrix(tensor));
-        continue;
-      }
+      String sourceName = alias != null ? alias : entry.getKey();
       String mapped = embedding
-        ? OnnxWeightNames.normalizeBertName(entry.getKey())
-        : OnnxWeightNames.normalizeChatName(entry.getKey());
-      named.put(mapped, tensor);
+        ? OnnxWeightNames.normalizeBertName(sourceName)
+        : OnnxWeightNames.normalizeChatName(sourceName);
+      named.put(mapped, alias != null ? transposeIfMatrix(tensor) : tensor);
     }
     return ModelLoader.assembleFromNamedTensors(
       named, transport.label(), bound.config(), bound.schema(), streams);

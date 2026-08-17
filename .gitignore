@@ -16,6 +16,7 @@ models/Gemma4-E2B-IT-QAT-Mobile/
 models/*.gguf
 models/SmolLM2-135M-Instruct-ONNX/
 models/Tiny-LLM-ONNX/
+models/multilingual-e5-small/
 
 # Local-only / temporary RAG PDFs — demo corpus is .md/.txt only
 rag/*.pdf

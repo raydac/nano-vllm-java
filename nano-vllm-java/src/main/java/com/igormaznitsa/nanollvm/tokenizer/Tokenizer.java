@@ -11,6 +11,8 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -32,12 +34,13 @@ import java.util.regex.Pattern;
  * {@code tokenizer.ggml.*} metadata via {@link #fromGguf(GgufTokenizerSource)}.
  * Applications normally get an instance from {@link com.igormaznitsa.nanollvm.models.LlmModel#tokenizer()}.
  *
- * <h2>BPE / WordPiece styles</h2>
+ * <h2>BPE / WordPiece / Unigram styles</h2>
  * <ul>
  *   <li>GPT-2 byte-level BPE (common with ChatML exports): UTF-8 bytes map through a printable-char
  *       encoder, then merge ranks from {@code merges}.</li>
  *   <li>SentencePiece-style BPE with {@code ▁} word boundaries.</li>
  *   <li>BERT WordPiece (embedding models).</li>
+ *   <li>Unigram SentencePiece (XLM-RoBERTa / multilingual E5 {@code tokenizer.json}).</li>
  * </ul>
  * Chat prompt layout is {@link ChatFormat} detected from template/vocab markers, not product names.
  *
@@ -146,6 +149,10 @@ public final class Tokenizer {
    * When {@code true}, ChatML generation prompt may open an empty {@code <think>} block unless disabled.
    */
   private final boolean inviteThinking;
+  /**
+   * Unigram scores / unk id (empty table when {@link Style} is not {@link Style#UNIGRAM}).
+   */
+  private final UnigramTable unigram;
 
   private Tokenizer(
     final Map<String, Integer> vocab,
@@ -160,7 +167,8 @@ public final class Tokenizer {
     final ChatFormat chatFormat,
     final boolean prependMetaSpace,
     final boolean lowercase,
-    final boolean inviteThinking
+    final boolean inviteThinking,
+    final UnigramTable unigram
   ) {
     this.vocab = vocab;
     this.idToToken = new HashMap<>();
@@ -187,6 +195,10 @@ public final class Tokenizer {
     this.prependMetaSpace = prependMetaSpace;
     this.lowercase = lowercase;
     this.inviteThinking = inviteThinking;
+    this.unigram = requireNonNull(unigram, "unigram");
+    if (style == Style.UNIGRAM && !unigram.isPresent()) {
+      throw new ModelLoadException("Unigram tokenizer is missing piece scores");
+    }
   }
 
   /**
@@ -247,11 +259,11 @@ public final class Tokenizer {
     try {
       Map<String, Object> root = Json.parseObject(tokenizerJson);
       Map<String, Object> model = Json.asObject(root.get("model"));
-      Map<String, Object> vocabObj = Json.asObject(model.get("vocab"));
-      Map<String, Integer> vocab = new LinkedHashMap<>();
-      for (var e : vocabObj.entrySet()) {
-        vocab.put(e.getKey(), Json.asInt(e.getValue(), 0));
+      if (model == null) {
+        throw new ModelLoadException("tokenizer.json missing model object");
       }
+      HfVocab hfVocab = readHfVocab(model);
+      Map<String, Integer> vocab = hfVocab.ids();
 
       Set<String> addedTexts = new HashSet<>();
       Set<String> specialTexts = new HashSet<>();
@@ -311,9 +323,13 @@ public final class Tokenizer {
 
       ChatFormat chatFormat = detectChatFormat(vocab, chatTemplate, root);
       boolean turnBased = chatFormat == ChatFormat.TURN_BASED;
-      Style style =
-          turnBased || usesMetaspace(root, vocab) ? Style.METASPACE_BPE : Style.GPT2_BYTE_BPE;
+      Style style = hfVocab.unigram()
+        ? Style.UNIGRAM
+        : (turnBased || usesMetaspace(root, vocab) ? Style.METASPACE_BPE : Style.GPT2_BYTE_BPE);
       boolean prependMetaSpace = shouldPrependMetaSpace(root);
+      UnigramTable unigram = hfVocab.unigram()
+        ? UnigramTable.of(vocab, hfVocab.scoresById(), Json.asInt(model.get("unk_id"), -1))
+        : UnigramTable.none();
 
       int eos = resolveEos(vocab, eosToken);
       int pad = resolvePad(vocab, padToken, eos);
@@ -348,7 +364,7 @@ public final class Tokenizer {
       boolean inviteThinking = vocab.containsKey("<think>") && vocab.containsKey("</think>");
       return new Tokenizer(
         vocab, merges, addedTexts, specialTexts, eos, stopIds, pad,
-        byteFallback, style, chatFormat, prependMetaSpace, false, inviteThinking
+        byteFallback, style, chatFormat, prependMetaSpace, false, inviteThinking, unigram
       );
     } catch (RuntimeException e) {
       throw new ModelLoadException("failed to load tokenizer from JSON documents", e);
@@ -438,7 +454,7 @@ public final class Tokenizer {
     return new Tokenizer(
       vocab, merges, addedTexts, specialTexts, eos, stopIds, pad,
       byteFallback, style, chatFormat, prependMetaSpace, bertWordPiece,
-        inviteThinking
+      inviteThinking, UnigramTable.none()
     );
   }
 
@@ -610,6 +626,40 @@ public final class Tokenizer {
     }
   }
 
+  private static HfVocab readHfVocab(final Map<String, Object> model) {
+    Object vocabNode = model.get("vocab");
+    List<Object> rows = Json.asArray(vocabNode);
+    if (rows != null) {
+      Map<String, Integer> ids = new LinkedHashMap<>(rows.size() * 2);
+      Map<Integer, Float> scores = new HashMap<>(rows.size() * 2);
+      for (int i = 0; i < rows.size(); i++) {
+        List<Object> row = Json.asArray(rows.get(i));
+        if (row == null || row.isEmpty()) {
+          continue;
+        }
+        String piece = Json.asString(row.getFirst());
+        if (piece == null) {
+          continue;
+        }
+        ids.put(piece, i);
+        if (row.size() > 1) {
+          scores.put(i, Json.asFloat(row.get(1), 0f));
+        }
+      }
+      return new HfVocab(ids, scores, true);
+    }
+    Map<String, Object> map = Json.asObject(vocabNode);
+    if (map == null) {
+      throw new ModelLoadException("tokenizer.json model.vocab is missing");
+    }
+    Map<String, Integer> ids = new LinkedHashMap<>(map.size() * 2);
+    for (var e : map.entrySet()) {
+      ids.put(e.getKey(), Json.asInt(e.getValue(), 0));
+    }
+    boolean unigram = "Unigram".equalsIgnoreCase(Json.asString(model.get("type")));
+    return new HfVocab(ids, Map.of(), unigram);
+  }
+
   // Last-resort tokenizer when tokenizer.json is missing (tiny identity map over first 256 chars)
   private static Tokenizer bare(final String modelConfigJson) {
     if (modelConfigJson == null || modelConfigJson.isBlank()) {
@@ -627,7 +677,7 @@ public final class Tokenizer {
     return new Tokenizer(
       vocab, Map.of(), Set.of(), Set.of(),
         eos, List.of(eos), eos,
-      true, Style.GPT2_BYTE_BPE, ChatFormat.PLAIN, false, false, false
+      true, Style.GPT2_BYTE_BPE, ChatFormat.PLAIN, false, false, false, UnigramTable.none()
     );
   }
 
@@ -788,20 +838,28 @@ public final class Tokenizer {
     return this.chatFormat == ChatFormat.TURN_BASED;
   }
 
-  /**
-   * Encodes plain text to vocabulary ids (detected BPE or WordPiece).
-   *
-   * @param text input text; non-{@code null} (may be empty)
-   * @return immutable token-id list
-   */
-  public List<Integer> encode(final String text) {
-    requireNonNull(text, "text");
-    String prepared = this.lowercase ? text.toLowerCase(Locale.ROOT) : text;
-    return switch (this.style) {
-      case WORDPIECE -> this.encodeWordPiece(prepared);
-      case METASPACE_BPE -> this.encodeMetaspace(prepared);
-      case GPT2_BYTE_BPE -> this.encodeGpt2(prepared);
-    };
+  private static void emitUnigramUnk(
+    final String text,
+    final int end,
+    final int unkId,
+    final float[] scores,
+    final double[] best,
+    final int[] prev,
+    final int[] tokenAt
+  ) {
+    if (unkId < 0 || unkId >= scores.length) {
+      return;
+    }
+    int start = end - 1;
+    if (end >= 2 && Character.isSurrogatePair(text.charAt(end - 2), text.charAt(end - 1))) {
+      start = end - 2;
+    }
+    if (best[start] == Double.NEGATIVE_INFINITY) {
+      return;
+    }
+    best[end] = best[start] + scores[unkId];
+    prev[end] = start;
+    tokenAt[end] = unkId;
   }
 
   private List<Integer> encodeWordPiece(final String text) {
@@ -911,6 +969,95 @@ public final class Tokenizer {
     return ids;
   }
 
+  /**
+   * Encodes plain text to vocabulary ids (detected BPE, WordPiece, or Unigram).
+   *
+   * @param text input text; non-{@code null} (may be empty)
+   * @return immutable token-id list
+   */
+  public List<Integer> encode(final String text) {
+    requireNonNull(text, "text");
+    String prepared = this.lowercase ? text.toLowerCase(Locale.ROOT) : text;
+    return switch (this.style) {
+      case WORDPIECE -> this.encodeWordPiece(prepared);
+      case METASPACE_BPE -> this.encodeMetaspace(prepared);
+      case GPT2_BYTE_BPE -> this.encodeGpt2(prepared);
+      case UNIGRAM -> this.encodeUnigram(prepared);
+    };
+  }
+
+  private List<Integer> encodeUnigram(final String text) {
+    List<Integer> ids = new ArrayList<>();
+    int i = 0;
+    while (i < text.length()) {
+      String special = this.matchAdded(text, i);
+      if (special != null) {
+        ids.add(this.vocab.get(special));
+        i += special.length();
+        continue;
+      }
+      int nextSpecial = this.findNextAdded(text, i);
+      String chunk = text.substring(i, nextSpecial);
+      if (!chunk.isEmpty()) {
+        String prepared = chunk.replace(" ", META_SPACE);
+        if (this.prependMetaSpace) {
+          prepared = META_SPACE + prepared;
+        }
+        ids.addAll(this.unigramViterbi(prepared));
+      }
+      i = nextSpecial;
+    }
+    return ids;
+  }
+
+  private List<Integer> unigramViterbi(final String text) {
+    if (text.isEmpty()) {
+      return List.of();
+    }
+    int n = text.length();
+    int maxPiece = this.unigram.maxPieceChars();
+    float[] scores = this.unigram.scores();
+    int unkId = this.unigram.unkId();
+    double[] best = new double[n + 1];
+    int[] prev = new int[n + 1];
+    int[] tokenAt = new int[n + 1];
+    Arrays.fill(best, Double.NEGATIVE_INFINITY);
+    Arrays.fill(prev, -1);
+    best[0] = 0.0;
+
+    for (int end = 1; end <= n; end++) {
+      int startMin = Math.max(0, end - maxPiece);
+      for (int start = startMin; start < end; start++) {
+        if (best[start] == Double.NEGATIVE_INFINITY) {
+          continue;
+        }
+        Integer id = this.vocab.get(text.substring(start, end));
+        if (id == null || id < 0 || id >= scores.length) {
+          continue;
+        }
+        double score = best[start] + scores[id];
+        if (score > best[end]) {
+          best[end] = score;
+          prev[end] = start;
+          tokenAt[end] = id;
+        }
+      }
+      if (best[end] == Double.NEGATIVE_INFINITY) {
+        Tokenizer.emitUnigramUnk(text, end, unkId, scores, best, prev, tokenAt);
+      }
+    }
+
+    if (best[n] == Double.NEGATIVE_INFINITY) {
+      throw new IllegalStateException("Unigram tokenizer could not segment text");
+    }
+    List<Integer> ids = new ArrayList<>();
+    for (int pos = n; pos > 0; pos = prev[pos]) {
+      ids.add(tokenAt[pos]);
+    }
+    Collections.reverse(ids);
+    return ids;
+  }
+
   // Index of the next added/special token after {@code from}, or text.length()
   private int findNextAdded(final String text, final int from) {
     int best = text.length();
@@ -953,7 +1100,8 @@ public final class Tokenizer {
       }
       sb.append(tok);
     }
-    if (this.style == Style.METASPACE_BPE || this.style == Style.WORDPIECE) {
+    if (this.style == Style.METASPACE_BPE || this.style == Style.WORDPIECE
+      || this.style == Style.UNIGRAM) {
       return this.decodeMetaspace(sb.toString());
     }
     return this.tokensToUtf8(sb.toString());
@@ -1313,6 +1461,49 @@ public final class Tokenizer {
     /** SentencePiece-style BPE with {@code ▁} word boundaries. */
     METASPACE_BPE,
     /** BERT WordPiece / greedy longest-match. */
-    WORDPIECE
+    WORDPIECE,
+    /**
+     * SentencePiece Unigram (XLM-RoBERTa / multilingual E5).
+     */
+    UNIGRAM
+  }
+
+  private record HfVocab(
+    Map<String, Integer> ids,
+    Map<Integer, Float> scoresById,
+    boolean unigram
+  ) {
+  }
+
+  private record UnigramTable(float[] scores, int unkId, int maxPieceChars) {
+    static UnigramTable none() {
+      return new UnigramTable(new float[0], -1, 0);
+    }
+
+    static UnigramTable of(
+      final Map<String, Integer> vocab,
+      final Map<Integer, Float> scoresById,
+      final int unkId
+    ) {
+      int maxId = -1;
+      int maxPiece = 1;
+      for (var e : vocab.entrySet()) {
+        maxId = Math.max(maxId, e.getValue());
+        maxPiece = Math.max(maxPiece, e.getKey().length());
+      }
+      float[] scores = new float[maxId + 1];
+      for (var e : scoresById.entrySet()) {
+        int id = e.getKey();
+        if (id >= 0 && id < scores.length) {
+          scores[id] = e.getValue();
+        }
+      }
+      int resolvedUnk = unkId >= 0 ? unkId : vocab.getOrDefault("<unk>", -1);
+      return new UnigramTable(scores, resolvedUnk, maxPiece);
+    }
+
+    boolean isPresent() {
+      return this.scores.length > 0;
+    }
   }
 }

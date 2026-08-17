@@ -1305,7 +1305,10 @@ Chapter 7a showed how **causal** chat models can live in a `.gguf` file. **Since
 accepts a different kind of network: a **BERT-family encoder** whose job is not to write the next token, but to turn a
 finished sentence into one **dense vector** (an embedding) you can compare with other sentences.
 
-The demo weight people usually try is **gte-small** (`models/gte-small.Q2_K.gguf`, via `models/download-gte-small-gguf.sh`).
+The demo weight people usually try for a **tiny English GGUF** is **gte-small** (`models/gte-small.Q2_K.gguf`, via
+`models/download-gte-small-gguf.sh`). The linear sample `EmbeddingsHelloWorld` defaults to **multilingual-e5-small**
+ONNX (`models/download-multilingual-e5-small.sh`) — same `LlmModel.embed` API, different tokenizer and **task prefixes**
+(below).
 
 ### What “BERT” means here (without the training lore)
 
@@ -1344,13 +1347,35 @@ try (LlmModel model = LlmModelFactory.make(Path.of("models/gte-small.Q2_K.gguf")
 ```
 
 **In the code:** `LlmModelFactory` → `ArchitectureProcessor.createEmbedding` → `BertForEmbedding`; public surface `LlmModel.embed`;
-samples `EmbeddingsHelloWorld`, `Example` menu item “gte-small (embeddings)”.
+samples `EmbeddingsHelloWorld` (default multilingual-e5-small ONNX), `Example` menu items for gte-small and E5.
+
+### Task prefixes (`query:` / `passage:`) — library vs checkpoint
+
+`LlmModel.embed` does **not** add any task tag. It tokenizes the string you pass (and wraps BERT `[CLS]` / `[SEP]`, or
+XLM-RoBERTa `<s>` / `</s>` when those are the specials). Prefixes such as `query: ` are **not** a requirement of the
+BERT graph or of this engine.
+
+Some embedding checkpoints were **trained** with those tags inside the text. The **E5** family
+([intfloat/multilingual-e5-small](https://huggingface.co/intfloat/multilingual-e5-small)) expects:
+
+| Prefix | When to use it |
+|--------|----------------|
+| `query: …` | A search question, **or** any non-retrieval sentence (similarity, clustering, classification) |
+| `passage: …` | A document you want to retrieve against a query |
+
+Without them the encoder still runs; the vectors sit off the space E5 learned, so cosine scores are weaker and less
+comparable to published E5 numbers. **gte-small** (and most BERT GGUF demos here) do **not** use this convention —
+pass the raw sentence.
+
+`samples.EmbeddingsHelloWorld` prepends `query: ` when the model path looks like E5. Pass
+`models/gte-small.Q2_K.gguf` as the first argument if you want the tiny English GGUF without a prefix.
 
 ### Inside one `embed` call (pipeline)
 
 ```text
 text
-  → WordPiece tokenize (+ [CLS] / [SEP] when present in the vocab)
+  → tokenize (WordPiece, or Unigram SentencePiece for XLM-R / E5)
+  → wrap [CLS] / [SEP] when present, else <s> / </s>
   → token + position + token-type embeddings
   → LayerNorm
   → N × bidirectional transformer block
@@ -1385,17 +1410,20 @@ There is **no** chat template, KV cache, or next-token sampler on this path. Lif
   BERT directory load yet.
 - GGUF embedding files still need a **supported** GGML dtype (ch. 7a table); exotic quants fail at load.
 - Dense retrieval is an **in-process linear scan**, not an ANN index.
-- Embedding quality depends on the checkpoint (gte-small is small and English-oriented).
+- Embedding quality depends on the checkpoint (gte-small is small and English-oriented; E5 is multilingual but wants
+  the `query:` / `passage:` prefixes above).
 
 ### Summary
 
 > **Since 1.1.0, load a BERT-family embedding GGUF with `LlmModelFactory.make`, call `LlmModel.embed` for an
 > L2-normalized sentence vector (bidirectional encoder + mean pool), and optionally plug that encoder into dense or
-> hybrid RAG. Never attach an embedding model to `LLM.builder`.**
+> hybrid RAG. Never attach an embedding model to `LLM.builder`. E5-style checkpoints still need their `query:` /
+> `passage:` text prefixes; the library does not insert them.**
 
 **Further reading:** original BERT — [Devlin et al. (arXiv)](https://arxiv.org/abs/1810.04805); sentence embeddings /
-GTE family on Hugging Face (search “thenlper/gte-small”); this guide **chapter 8** (bidirectional vs causal attention),
-**chapter 17** (dense / hybrid RAG).
+GTE family on Hugging Face (search “thenlper/gte-small”); E5 prefixes —
+[intfloat/multilingual-e5-small](https://huggingface.co/intfloat/multilingual-e5-small); this guide **chapter 8**
+(bidirectional vs causal attention), **chapter 17** (dense / hybrid RAG).
 
 
 ---
@@ -1441,7 +1469,7 @@ tensors). See the TensorProto table below.
 | Checkpoint family | Graph | Typical demo |
 |-------------------|-------|--------------|
 | Qwen3 / Gemma3 / **Llama** | Causal chat (`LLM.builder`) | [SmolLM2-135M-Instruct-ONNX](https://huggingface.co/onnx-community/SmolLM2-135M-Instruct-ONNX) (ChatML), [Tiny-LLM-ONNX](https://huggingface.co/onnx-community/Tiny-LLM-ONNX) (base / completion toy) |
-| BERT-style | Embeddings (`LlmModel.embed`) | ONNX BERT folders when named for the embedding schema |
+| BERT-style | Embeddings (`LlmModel.embed`) | [multilingual-e5-small](https://huggingface.co/intfloat/multilingual-e5-small) ONNX (`models/download-multilingual-e5-small.sh`; prepend `query:` / `passage:` — ch. **7b**) |
 
 **Llama** here means the Llama-style stack assembled by `LlamaForCausalLM`: RMSNorm, RoPE, GQA, SiLU MLP, **without**
 Qwen’s extra Q/K head norms. Tiny-LLM and SmolLM2 Instruct ONNX both declare `LlamaForCausalLM` in `config.json`.
@@ -3423,8 +3451,8 @@ LlmModelFactory.make(gte-small.Q2_K.gguf)
     → GgufModelLoader (arch bert) → BertForEmbedding
     → LlmModel (isEmbeddingModel == true)
 
-model.embed(text)
-    → WordPiece + [CLS]/[SEP]
+model.embed(text)   // E5: pass "query: …" or "passage: …" yourself; the library does not add it
+    → tokenize + [CLS]/[SEP] or <s>/</s>
     → token+pos+type emb → LayerNorm → bidirectional blocks
     → mean pool → L2 normalize → float[]
 
@@ -3432,7 +3460,8 @@ model.embed(text)
 // Dense RAG: DenseRagIndex.of(prepared, model) / RagFactory.withEmbeddings (ch. 17)
 ```
 
-Narrative: **chapter 7b**. Demo: `samples.EmbeddingsHelloWorld`, `Example` menu “gte-small (embeddings)”.
+Narrative: **chapter 7b**. Demo: `samples.EmbeddingsHelloWorld` (default multilingual-e5-small ONNX), `Example` menu
+embeddings items.
 
 ### Sample G — text RAG (prepare once, ask many times)
 
@@ -3710,7 +3739,8 @@ The repository folder `rag/` holds sample Markdown (fairy-tale / Grimm demos). `
 `samples.utils.BundledRag` when present (`-Dnanollvm.rag.dir` / `NANOLLVM_RAG_DIR` override the path). **Since 1.1.0**
 the sample asks for a **RAG mode** after you pick a chat model: none (plain chat; **Enter**), BM25, dense, or hybrid
 (dense and hybrid need `models/gte-small.Q2_K.gguf`), then **how many advisors** (`0`–`3`; **Enter** = none). Choosing
-gte-small alone still opens the embedding REPL (`samples.EmbeddingsHelloWorld` is the minimal embed demo).
+gte-small alone still opens the embedding REPL (`samples.EmbeddingsHelloWorld` defaults to multilingual-e5-small
+ONNX and adds `query: ` for that family).
 `samples.AdvisorRagHelloWorld` is the non-interactive BM25 + custom-advisor path (Gemma3-270M, advisor Alex,
 Grimm names and father).
 

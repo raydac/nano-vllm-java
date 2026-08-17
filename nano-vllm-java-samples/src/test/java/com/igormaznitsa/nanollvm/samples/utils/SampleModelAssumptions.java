@@ -35,6 +35,12 @@ public final class SampleModelAssumptions {
       "models/download-gte-small-gguf.sh");
   }
 
+  public static Path requireMultilingualE5Small() {
+    return require(BundledModels.find(BundledModels.MULTILINGUAL_E5_SMALL),
+      "multilingual-e5-small ONNX",
+      "models/download-multilingual-e5-small.sh");
+  }
+
   public static Path requireRag() {
     return require(BundledRag.find(), "local RAG corpus at " + BundledRag.ragRoot(),
       "create ./rag with corpus files or set -Dnanollvm.rag.dir=…");

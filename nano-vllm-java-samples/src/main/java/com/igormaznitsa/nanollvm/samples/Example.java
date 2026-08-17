@@ -774,7 +774,11 @@ public final class Example {
       choice(
         "gte-small Q2_K (embeddings, gguf)",
         BundledModels.GTE_SMALL_GGUF,
-        "Run models/download-gte-small-gguf.sh")
+        "Run models/download-gte-small-gguf.sh"),
+      choice(
+        "multilingual-e5-small (embeddings, onnx)",
+        BundledModels.MULTILINGUAL_E5_SMALL,
+        "Run models/download-multilingual-e5-small.sh")
     );
   }
 
@@ -845,6 +849,7 @@ public final class Example {
     console.println("  ./models/download-smollm2-135m-instruct-onnx.sh  (compact onnx demo)");
     console.println("  ./models/download-tiny-llm-onnx.sh");
     console.println("  ./models/download-gte-small-gguf.sh    (embeddings)");
+    console.println("  ./models/download-multilingual-e5-small.sh  (multilingual embeddings)");
     console.println();
     console.println("Windows: matching .ps1 / .cmd scripts in models/.");
     console.println(
@@ -945,10 +950,15 @@ public final class Example {
 
   private static boolean isBundledEmbeddingModel(final Path path) {
     Path normalized = path.toAbsolutePath().normalize();
+    String name = path.getFileName().toString().toLowerCase(Locale.ROOT);
     return BundledModels.find(BundledModels.GTE_SMALL_GGUF)
       .map(gte -> gte.equals(normalized))
       .orElse(false)
-      || path.getFileName().toString().toLowerCase(Locale.ROOT).contains("gte-small");
+      || BundledModels.find(BundledModels.MULTILINGUAL_E5_SMALL)
+      .map(e5 -> e5.equals(normalized))
+      .orElse(false)
+      || name.contains("gte-small")
+      || name.contains("multilingual-e5");
   }
 
   private static boolean isQuitCommand(final String user) {

@@ -146,6 +146,17 @@ class OnnxSupportUnitTest {
     assertEquals(
       "blk.0.attn_q.weight",
       OnnxWeightNames.normalizeBertName("encoder.layer.0.attention.self.query.weight"));
+    assertEquals(
+      "blk.7.attn_output.weight",
+      OnnxWeightNames.normalizeBertName("encoder.layer.7.attention.output.dense.weight"));
+    assertEquals(
+      "blk.0.attn_output.weight",
+      OnnxWeightNames.normalizeBertName(
+        OnnxProtoReader.matMulNodeToWeightName("/encoder/layer.0/attention/output/dense/MatMul")));
+    assertEquals(
+      "blk.0.attn_q.weight",
+      OnnxWeightNames.normalizeBertName(
+        OnnxProtoReader.matMulNodeToWeightName("/encoder/layer.0/attention/self/query/MatMul")));
   }
 
   @Test

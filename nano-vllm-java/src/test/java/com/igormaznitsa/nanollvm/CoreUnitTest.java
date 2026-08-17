@@ -1157,6 +1157,39 @@ class CoreUnitTest {
   }
 
   @Test
+  void unigramTokenizerSegmentsMetaspaceText() {
+    var tok = com.igormaznitsa.nanollvm.tokenizer.Tokenizer.fromJsonDocuments("""
+        {
+          "model": {
+            "type": "Unigram",
+            "unk_id": 0,
+            "vocab": [
+              ["<unk>", 0.0],
+              ["<s>", 0.0],
+              ["</s>", 0.0],
+              ["▁Hello", -1.0],
+              ["▁world", -1.2],
+              ["▁", -3.0],
+              ["H", -5.0]
+            ]
+          },
+          "pre_tokenizer": {"type": "Metaspace", "replacement": "▁", "add_prefix_space": true},
+          "added_tokens": [
+            {"id": 1, "content": "<s>", "special": true},
+            {"id": 2, "content": "</s>", "special": true}
+          ]
+        }
+        """,
+      "{\"cls_token\":\"<s>\",\"sep_token\":\"</s>\"}",
+      null,
+      "{\"model_type\":\"bert\",\"vocab_size\":7}");
+    assertEquals(List.of(3, 4), tok.encode("Hello world"));
+    assertEquals(" Hello world", tok.decode(List.of(3, 4)));
+    assertEquals(Optional.of(1), tok.tokenId("<s>"));
+    assertEquals(Optional.of(2), tok.tokenId("</s>"));
+  }
+
+  @Test
   void stripChatMarkupRemovesGemmaTurnTokens() {
     assertEquals("", ChatReply.stripChatMarkup("<end_of_turn>"));
     assertEquals("Hi", ChatReply.stripChatMarkup("Hi<end_of_turn>"));
