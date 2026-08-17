@@ -1475,6 +1475,7 @@ public final class Tokenizer {
   ) {
   }
 
+  @SuppressWarnings("ArrayRecordComponent")
   private record UnigramTable(float[] scores, int unkId, int maxPieceChars) {
     static UnigramTable none() {
       return new UnigramTable(new float[0], -1, 0);

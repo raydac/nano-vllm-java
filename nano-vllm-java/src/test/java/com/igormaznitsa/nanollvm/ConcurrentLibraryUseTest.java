@@ -65,7 +65,7 @@ class ConcurrentLibraryUseTest {
   private static final int SESSION_TOP_K = 4;
   private static final int RETRIEVE_BURST = 8;
   private static final int MAX_NEW_TOKENS = 32;
-  private static final Duration SEND_TIMEOUT = Duration.ofSeconds(120);
+  private static final Duration SEND_TIMEOUT = Duration.ofMinutes(2);
   private static final Duration GATE_TIMEOUT = Duration.ofMinutes(3);
   private static final Duration JOIN_TIMEOUT = Duration.ofMinutes(8);
   private static final String SHARED_FACT = "Paris is the capital of France.";
