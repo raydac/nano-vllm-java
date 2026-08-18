@@ -5,6 +5,11 @@ import static java.util.Objects.requireNonNull;
 import java.util.ArrayList;
 import java.util.List;
 
+/**
+ * One token per character.
+ *
+ * @since 1.1.1
+ */
 final class CharCodec implements TokenCodec {
 
   private final TokenVocab vocab;

@@ -7,6 +7,11 @@ import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+/**
+ * GPT-2 byte-level BPE.
+ *
+ * @since 1.1.1
+ */
 final class Gpt2ByteBpeCodec implements TokenCodec {
 
   private static final Pattern GPT2_PATTERN = Pattern.compile(

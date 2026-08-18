@@ -6,6 +6,11 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
+/**
+ * SentencePiece-style BPE with {@code ▁} word boundaries.
+ *
+ * @since 1.1.1
+ */
 final class MetaspaceBpeCodec implements TokenCodec {
 
   private final TokenVocab vocab;

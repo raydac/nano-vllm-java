@@ -9,6 +9,11 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 
+/**
+ * Unigram SentencePiece (Viterbi).
+ *
+ * @since 1.1.1
+ */
 final class UnigramCodec implements TokenCodec {
 
   private final TokenVocab vocab;
@@ -126,6 +131,11 @@ final class UnigramCodec implements TokenCodec {
     return ids;
   }
 
+  /**
+   * Piece scores for Unigram Viterbi.
+   *
+   * @since 1.1.1
+   */
   @SuppressWarnings("ArrayRecordComponent")
   record UnigramScores(float[] scores, int unkId, int maxPieceChars) {
 

@@ -7,6 +7,11 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
+/**
+ * BPE merge ranks.
+ *
+ * @since 1.1.1
+ */
 final class BpeMerges {
 
   private final Map<String, Integer> ranks;

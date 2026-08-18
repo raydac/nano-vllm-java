@@ -2,6 +2,11 @@ package com.igormaznitsa.nanollvm.tokenizer;
 
 import static java.nio.charset.StandardCharsets.UTF_8;
 
+/**
+ * UTF-8 decode that replaces incomplete sequences.
+ *
+ * @since 1.1.1
+ */
 final class Utf8Complete {
 
   private Utf8Complete() {

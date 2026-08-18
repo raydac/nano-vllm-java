@@ -15,6 +15,11 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
+/**
+ * SentencePiece {@code tokenizer.model} protobuf reader.
+ *
+ * @since 1.1.1
+ */
 final class SentencePieceModel {
 
   static final int UNIGRAM = 1;
@@ -221,6 +226,11 @@ final class SentencePieceModel {
     }
   }
 
+  /**
+   * Decoded {@code tokenizer.model} fields.
+   *
+   * @since 1.1.1
+   */
   @SuppressWarnings("ArrayRecordComponent")
   record Parsed(
     int modelType,

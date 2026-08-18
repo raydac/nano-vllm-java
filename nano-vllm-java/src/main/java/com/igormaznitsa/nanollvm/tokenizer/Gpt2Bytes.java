@@ -7,6 +7,11 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+/**
+ * GPT-2 printable-byte mapping.
+ *
+ * @since 1.1.1
+ */
 final class Gpt2Bytes {
 
   private static final String[] ENCODER = new String[256];

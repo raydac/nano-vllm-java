@@ -25,6 +25,9 @@
   `SamplingParams.builder` / withers, `LLM.generate(…, Duration)` / `TokenEvent`,
   `LlmTextKind.TEXT_RAW`, `Config.HfConfig` Gemma 4 helpers, `SamplingDefaults.neutral()`, …).
   `ResourceLimits` is 1.0 — no class `@since`
+- **`@since 1.1.1`:** new types and new public members on older types (`Tokenizer.fromSentencePiece`,
+  `ModelFileId.TOKENIZER_MODEL`, `ModelFileBundle.sentencePieceModel()`, tokenizer codec/load
+  classes). Do not retag 1.0/1.1.0 members when only their behavior expands.
 
 - Advisors: `advisors(LlmAdvisorMixer, LlmAdvisor…)`; unique non-blank names; one batched `generate`; library ships no default advisor names/prompts (samples own `SampleAdvisorPrompts`); optional `advisorNoteFilter`
 - Chat universality: `Tokenizer.ChatFormat` (CHATML/TURN_BASED/PLAIN); product chat aliases removed;
@@ -95,6 +98,7 @@
 - Tokenizer codecs are package-private (`Gpt2ByteBpeCodec`, `MetaspaceBpeCodec`, `WordPieceCodec`,
   `UnigramCodec`, `WordLevelCodec`, `CharCodec`) behind public `Tokenizer`. Load is `TokenizerLoader`
   (`tokenizer.json` → `tokenizer.model` → bare `config.json`). `Tokenizer.fromSentencePiece` is public.
+  New tokenizer types and that factory carry `@since 1.1.1`.
 - `Example` terminal demo: downloaded models first (Qwen3-0.6B preferred); Enter = first item; empty disk exits with download help; `--debug` for prepared prompts
 - **Qwen3 GGUF** — `LlmModelFactory.make(qwen3.gguf)` via transport + `ArchitectureProcessor`; unfused packed Q/K/V (no qkv_proj concat). HF safetensors Qwen3 folder unchanged. Live `Qwen3-0.6B-Q8_0.gguf` load test removed (file not kept in `models/`); `ModelBindingTest` uses a synthetic catalog only. README / `description.md` §7a / `models/README.md` document bring-your-own Qwen3 GGUF (no download script).
 - Windows download scripts audited/hardened (parity with `.sh` URLs/files OK)
@@ -154,7 +158,9 @@
 - Prefer `ChatSession` for dialog; raw `generate` / `generateTokenIds` / `complete` for continuations
   (`samples.NextTokenHelloWorld`)
 - Hugging Face folders load `tokenizer.json`, else SentencePiece `tokenizer.model`, else a tiny
-  `config.json` fallback. `Tokenizer.fromSentencePiece` is for in-memory protobuf bytes.
+  `config.json` fallback. `Tokenizer.fromSentencePiece` is for in-memory protobuf bytes (`@since 1.1.1`).
+- New types and new public members in **1.1.1-SNAPSHOT** get `@since 1.1.1`; keep existing `@since`
+  on older methods when load paths or codecs grow
 - Custom think/scratchpad markers: `LlmModelFactory.open(path).thinkTags(ThinkTags.of(open, close)).make()`;
   `ChatReply.parse(raw, llm)` uses the model pair; `ChatReply.parse(raw)` still defaults to `<think>`/`</think>`
 - Chat markup searched in answers: `open(path).chatSpecials(ChatSpecials.of(…)).make()`; omitted options

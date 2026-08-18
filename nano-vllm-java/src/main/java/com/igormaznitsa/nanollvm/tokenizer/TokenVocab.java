@@ -9,6 +9,11 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
+/**
+ * Token string ↔ id maps plus special and added sets.
+ *
+ * @since 1.1.1
+ */
 final class TokenVocab {
 
   private final Map<String, Integer> tokenToId;

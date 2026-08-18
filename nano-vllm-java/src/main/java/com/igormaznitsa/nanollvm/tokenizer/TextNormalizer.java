@@ -18,6 +18,11 @@ import java.util.Map;
 import java.util.function.UnaryOperator;
 import java.util.regex.Pattern;
 
+/**
+ * Hugging Face / SentencePiece normalizer chain.
+ *
+ * @since 1.1.1
+ */
 final class TextNormalizer {
 
   private static final TextNormalizer IDENTITY = new TextNormalizer(List.of());

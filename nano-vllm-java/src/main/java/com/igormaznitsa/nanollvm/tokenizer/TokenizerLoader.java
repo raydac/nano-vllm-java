@@ -19,6 +19,11 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
+/**
+ * Constructs {@link Tokenizer} from JSON, SentencePiece, or GGUF sidecars.
+ *
+ * @since 1.1.1
+ */
 final class TokenizerLoader {
 
   private static final String TOKENIZER_MODEL = "tokenizer.model";
@@ -172,6 +177,11 @@ final class TokenizerLoader {
       tokenVocab, codec, normalizer, chatFormat, eos, stopIds, pad, inviteThinking);
   }
 
+  /**
+   * Builds a tokenizer from a SentencePiece {@code tokenizer.model} protobuf.
+   *
+   * @since 1.1.1
+   */
   static Tokenizer fromSentencePiece(
     final byte[] modelBytes,
     final String tokenizerConfigJson,

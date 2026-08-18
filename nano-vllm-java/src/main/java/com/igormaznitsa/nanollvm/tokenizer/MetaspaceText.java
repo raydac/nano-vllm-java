@@ -3,6 +3,11 @@ package com.igormaznitsa.nanollvm.tokenizer;
 import java.util.ArrayList;
 import java.util.List;
 
+/**
+ * SentencePiece {@code ▁} word-boundary helpers.
+ *
+ * @since 1.1.1
+ */
 final class MetaspaceText {
 
   static final String MARK = "▁";

@@ -8,6 +8,8 @@ import static java.util.Objects.requireNonNull;
  * <p>{@link #fileName()} is the conventional on-disk / resource name adapters should use.
  * {@link #MODEL_ONNX} and {@link #MODEL_ONNX_FP16} are Tier A weight imports (<strong>since
  * 1.1.0</strong>); adapters may also resolve the same names under an {@code onnx/} subfolder.
+ * {@link #TOKENIZER_MODEL} is the SentencePiece sidecar when {@link #TOKENIZER} is absent
+ * (<strong>since 1.1.1</strong>).
  *
  * @since 1.1.0
  */

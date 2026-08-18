@@ -5,6 +5,11 @@ import static java.util.Objects.requireNonNull;
 import java.util.ArrayList;
 import java.util.List;
 
+/**
+ * Whole-word vocab lookup.
+ *
+ * @since 1.1.1
+ */
 final class WordLevelCodec implements TokenCodec {
 
   private final TokenVocab vocab;

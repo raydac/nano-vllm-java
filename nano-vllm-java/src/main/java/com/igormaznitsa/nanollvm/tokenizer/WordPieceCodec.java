@@ -5,6 +5,11 @@ import static java.util.Objects.requireNonNull;
 import java.util.ArrayList;
 import java.util.List;
 
+/**
+ * BERT WordPiece ({@code ##} or metaspace).
+ *
+ * @since 1.1.1
+ */
 final class WordPieceCodec implements TokenCodec {
 
   private final TokenVocab vocab;

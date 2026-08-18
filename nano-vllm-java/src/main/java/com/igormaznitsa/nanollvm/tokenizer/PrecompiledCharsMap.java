@@ -11,6 +11,11 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 
+/**
+ * SentencePiece precompiled charsmap.
+ *
+ * @since 1.1.1
+ */
 final class PrecompiledCharsMap {
 
   private final int[] trie;
