@@ -2,11 +2,14 @@
 - Maven multi-module **`1.1.1-SNAPSHOT`** (post **1.1.0** 2026-08-16; previous **1.0.0** 2026-08-09): parent `nano-vllm-java-pom`, library `nano-vllm-java`, demos `nano-vllm-java-samples`; enforcer Java `[21,)`, Maven `[3.8,)`; JPMS module `com.igormaznitsa.nanollvm` (library only)
 - CPU kernels: panel GEMV for dense linear, Vector-API 4-acc dots, SIMD elementwise/RMSNorm/MLP/attention axpy; paged KV attend in place
 - **ResourceLimits** (exported utils): process-wide defaults + builder; RAG/PDF/JSON/GGUF/safetensors/corpus/history budgets
-- CausalLM: Qwen3 + Gemma3 + **Gemma 4 text (QAT mobile)** + **Llama** + LFM2 (GGUF); tokenizers GPT-2 BPE / Metaspace / GGUF-embedded / BERT WordPiece / **Unigram SentencePiece** (XLM-R / multilingual E5)
+- CausalLM: Qwen3 + Gemma3 + **Gemma 4 text (QAT mobile)** + **Llama** + LFM2 (GGUF); tokenizers are
+  package-private codecs behind public `Tokenizer`: GPT-2 BPE / Metaspace BPE / GGUF-embedded /
+  BERT WordPiece (HF `##` or GGUF metaspace) / Unigram SentencePiece (charsmap) / WordLevel / Char /
+  SentencePiece `tokenizer.model` when `tokenizer.json` is absent
 - **`ModelSupport`**: exact family detection + `UnsupportedModelException` with a support catalog at load; look-alikes (Qwen2, Qwen3.5/Fara, Gemma2, Gemma 4 vision/audio-only, VLMs, GGUF Llama/Gemma, HF BERT safetensors) fail before weight mmap; `-Dnanollvm.arch` must match the checkpoint; `gemma4` / `gemma4_text` load as text chat
 - **ONNX Tier A:** folder load via `LlmModelFactory.make` — initializers only (no ORT); root or `onnx/`; safetensors preferred if both present; chat Qwen3/Gemma3/Llama + BERT embeddings (HF→GGUF name remap)
 - **GGUF BERT embeddings** (e.g. gte-small): same `LlmModelFactory.make` → `LlmModel.embed`; `LLM.builder` rejects embedding models; Q3_K + IQ4_NL dequant
-- **ModelFileSource**: `ModelFileId` → `InputStream` (+ weight shards); load into heap only (no disk cache); `make(Path)` stays direct disk I/O; ONNX ids `MODEL_ONNX` / `MODEL_ONNX_FP16`
+- **ModelFileSource**: `ModelFileId` → `InputStream` (+ weight shards); load into heap only (no disk cache); `make(Path)` stays direct disk I/O; ONNX ids `MODEL_ONNX` / `MODEL_ONNX_FP16`; tokenizer sidecar `TOKENIZER_MODEL` (`tokenizer.model`)
 - **GGUF:** packed by default; dequant catalog matches current llama.cpp weight types (K/IQ/TQ/MX/NV/legacy); `LlmModelFactory.make(path, io, true)` unpacks at load; `LLM.Builder.allowUnpackParameters()` late-unpacks packed models. Chat GGUF: **qwen3** + **lfm2**; embeddings **bert**. Load = `models.llmcontainer` transport → `models.llmarch` ArchitectureProcessor bind/fill/create
 - Library: `LlmModelFactory.open(path).make()` or `make` → shared `LlmModel` (`AutoCloseable`); also `make(ModelFileSource)` / `fromClasspath*` / `openClasspath*` (stream → heap; no disk cache); `LLM.Builder` only (warmup **off** by default); `.sampling(SamplingParams)` seals chat/complete defaults; close **LLM first**, then **model**. `LlmModel.toString()` prints kind, architecture, container, sizes, packed/dense/qat, chat format (safe after close). Builder-built types (`LLM`, `Config`, `LlmAdvisor`, `SamplingParams`, `MatmulRuntime`, `RagFactory`/`CorpusLoader` corpus) keep constructors private; `ResourceLimits` is a public record so its canonical constructor cannot be hidden.
 - **Concurrent use test:** `ConcurrentLibraryUseTest` (`@Tag("concurrent_test")`) loads SmolLM2-135M-Instruct-ONNX + gte-small, shares chat `LlmModel` + BM25/hybrid RAG over 12 depots + filler docs, races 6 generate workers against 8 retrieve hammers (start barrier only; KV kept modest to avoid OOM); excluded from the default Surefire run, enabled with `-Pconcurrent_test`
@@ -60,7 +63,7 @@
 - Lifecycle: `LLM.close()` frees scheduler + KV/conv arenas + matmul mark (drops network ref); `LlmModel.close()` releases packed payloads / clears weight+network/encoder refs — close engines before model
 - `.disableMultiCpu()` / `cpuThreads(1)` → `MatmulRuntime.sequential()` (pool=null, calling thread only); builder thread count wins over `-Dnanollvm.cpu.threads`
 - Engine obtains `CausalLM` via `LlmModelAccess.resolveNetwork` (no public `network()`); embedding models hold `EmbeddingEncoder` instead
-- HF Unigram SentencePiece `tokenizer.json` (XLM-RoBERTa / multilingual E5) encodes via Viterbi; embedding wrap accepts `<s>`/`</s>` as well as `[CLS]`/`[SEP]`. Precompiled Unigram normalizer charsmap is not applied (ASCII / most BMP text is fine).
+- HF Unigram SentencePiece `tokenizer.json` (XLM-RoBERTa / multilingual E5) encodes via Viterbi; embedding wrap accepts `<s>`/`</s>` as well as `[CLS]`/`[SEP]`. Precompiled Unigram charsmap is applied from HF `normalizer` (base64 blob) and from SentencePiece `tokenizer.model`.
 - ONNX: `OnnxProtoReader` reads initializers only; `OnnxWeightNames` maps chat HF names and BERT HF→GGUF schema keys (including MatMul aliases such as `/encoder/layer.N/attention/output/dense/MatMul`); external_data for `make(Path)` only (not ModelFileSource yet)
 - transformers.js / onnx-community: raw payload may be protobuf field **9** (legacy) or **13**; MatMul B is `[in,out]` → transpose to Linear `[out,in]`; anonymous `onnx::MatMul_*` remapped via MatMul node path; `OnnxDataTypes` catalogs TensorProto types — load FLOAT/FP16/BF16/DOUBLE, skip int/bool/string/complex (+ scalars), fail loudly on float8/nibble/unknown
 - SmolLM2-135M-Instruct-ONNX = Llama ChatML chat demo; `inviteThinking` is vocab-gated (`<think>`+`</think>`); library `ChatPrompts.systemFor` is always empty — Example uses `SampleChatPrompts` / `SampleAdvisorPrompts` (turn-based demos set sampling/recovery/isolate + advisor note filter)
@@ -89,7 +92,9 @@
 - Development line **`1.1.1-SNAPSHOT`** (after **1.1.0** 2026-08-16); Maven Central still **1.1.0**
 - README Hello World / Central badge stay **1.1.0**; in-repo `mvn package` JARs are `1.1.1-SNAPSHOT`
 - **Gemma 4 E2B QAT mobile** — text-only `LlmModel` load for `models/Gemma4-E2B-IT-QAT-Mobile/` (`google/gemma-4-E2B-it-qat-mobile-transformers`). Vision/audio unused. Packed QAT (int2/4/8 + SRQ), PLE, KV sharing, `<|turn>` chat.
-- Library de-productized (chat format markers / sample-owned demo policy); ONNX Tier A + Llama + SmolLM2 Instruct demo
+- Tokenizer codecs are package-private (`Gpt2ByteBpeCodec`, `MetaspaceBpeCodec`, `WordPieceCodec`,
+  `UnigramCodec`, `WordLevelCodec`, `CharCodec`) behind public `Tokenizer`. Load is `TokenizerLoader`
+  (`tokenizer.json` → `tokenizer.model` → bare `config.json`). `Tokenizer.fromSentencePiece` is public.
 - `Example` terminal demo: downloaded models first (Qwen3-0.6B preferred); Enter = first item; empty disk exits with download help; `--debug` for prepared prompts
 - **Qwen3 GGUF** — `LlmModelFactory.make(qwen3.gguf)` via transport + `ArchitectureProcessor`; unfused packed Q/K/V (no qkv_proj concat). HF safetensors Qwen3 folder unchanged. Live `Qwen3-0.6B-Q8_0.gguf` load test removed (file not kept in `models/`); `ModelBindingTest` uses a synthetic catalog only. README / `description.md` §7a / `models/README.md` document bring-your-own Qwen3 GGUF (no download script).
 - Windows download scripts audited/hardened (parity with `.sh` URLs/files OK)
@@ -148,6 +153,8 @@
 - Document Maven as `mvn` (portable); agent on this machine may use `mvn22`
 - Prefer `ChatSession` for dialog; raw `generate` / `generateTokenIds` / `complete` for continuations
   (`samples.NextTokenHelloWorld`)
+- Hugging Face folders load `tokenizer.json`, else SentencePiece `tokenizer.model`, else a tiny
+  `config.json` fallback. `Tokenizer.fromSentencePiece` is for in-memory protobuf bytes.
 - Custom think/scratchpad markers: `LlmModelFactory.open(path).thinkTags(ThinkTags.of(open, close)).make()`;
   `ChatReply.parse(raw, llm)` uses the model pair; `ChatReply.parse(raw)` still defaults to `<think>`/`</think>`
 - Chat markup searched in answers: `open(path).chatSpecials(ChatSpecials.of(…)).make()`; omitted options

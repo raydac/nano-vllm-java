@@ -45,6 +45,7 @@ public final class ModelFileBundle {
   private final byte[] gguf;
   private final String configJson;
   private final Map<String, String> textFiles;
+  private final byte[] sentencePieceModel;
   private final List<NamedBytes> safetensors;
   private final List<NamedBytes> onnx;
 
@@ -54,6 +55,7 @@ public final class ModelFileBundle {
     final byte[] gguf,
     final String configJson,
     final Map<String, String> textFiles,
+    final byte[] sentencePieceModel,
     final List<NamedBytes> safetensors,
     final List<NamedBytes> onnx
   ) {
@@ -62,6 +64,7 @@ public final class ModelFileBundle {
     this.gguf = gguf;
     this.configJson = configJson;
     this.textFiles = textFiles;
+    this.sentencePieceModel = sentencePieceModel;
     this.safetensors = safetensors;
     this.onnx = onnx;
   }
@@ -88,6 +91,7 @@ public final class ModelFileBundle {
           bytes,
           null,
           Map.of(),
+          null,
           List.of(),
           List.of());
       }
@@ -102,6 +106,7 @@ public final class ModelFileBundle {
         textFiles.put(id.fileName(), new String(bytes, UTF_8));
       }
     }
+    byte[] sentencePiece = readOptional(source, ModelFileId.TOKENIZER_MODEL, limits);
 
     List<NamedBytes> safetensors = readSafetensors(source, textFiles, limits);
     List<NamedBytes> onnx = List.of();
@@ -126,6 +131,7 @@ public final class ModelFileBundle {
       null,
       configJson,
       Map.copyOf(textFiles),
+      sentencePiece,
       List.copyOf(safetensors),
       List.copyOf(onnx));
   }
@@ -273,6 +279,17 @@ public final class ModelFileBundle {
 
   public Optional<String> textFile(final String fileName) {
     return Optional.ofNullable(this.textFiles.get(fileName));
+  }
+
+  /**
+   * SentencePiece {@code tokenizer.model} bytes when present.
+   *
+   * @since 1.1.1
+   */
+  public Optional<byte[]> sentencePieceModel() {
+    return this.sentencePieceModel == null
+      ? Optional.empty()
+      : Optional.of(this.sentencePieceModel.clone());
   }
 
   public List<NamedBytes> safetensors() {

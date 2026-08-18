@@ -16,6 +16,12 @@ public enum ModelFileId {
   CONFIG("config.json"),
   TOKENIZER("tokenizer.json"),
   TOKENIZER_CONFIG("tokenizer_config.json"),
+  /**
+   * SentencePiece protobuf vocab used when {@link #TOKENIZER} is absent.
+   *
+   * @since 1.1.1
+   */
+  TOKENIZER_MODEL("tokenizer.model"),
   GENERATION_CONFIG("generation_config.json"),
   ADDED_TOKENS("added_tokens.json"),
   SPECIAL_TOKENS_MAP("special_tokens_map.json"),

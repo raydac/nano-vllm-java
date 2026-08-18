@@ -14,6 +14,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `<s>` / `</s>` as well as BERT `[CLS]` / `[SEP]`. Optimum-style BERT ONNX (anonymous `onnx::MatMul_*`
   weights) remaps those MatMul aliases through the BERT schema, same as named HF tensors.
   `EmbeddingsHelloWorld` defaults to this folder and prefixes non-retrieval text with `query: `.
+  Unigram now applies the Hugging Face precompiled charsmap (needed for many non-ASCII XLM-R / E5
+  strings). Folders without `tokenizer.json` load SentencePiece `tokenizer.model`. WordPiece,
+  WordLevel, and character models are recognized from `tokenizer.json` `model.type`.
+  `Tokenizer.fromSentencePiece` builds a tokenizer from protobuf bytes.
 
 ## [1.1.0] — 2026-08-16
 

@@ -1,6 +1,7 @@
 /**
  * Tokenizers for loaded models ({@link Tokenizer}) and the GGUF metadata bridge
- * ({@link GgufTokenizerSource}).
+ * ({@link GgufTokenizerSource}). Encode/decode algorithms live in package-private codec
+ * classes behind {@link Tokenizer}.
  *
  * <p>Application code normally obtains a tokenizer via
  * {@link com.igormaznitsa.nanollvm.models.LlmModel#tokenizer()} after

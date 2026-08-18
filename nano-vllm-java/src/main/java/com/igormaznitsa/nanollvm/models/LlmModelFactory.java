@@ -596,14 +596,26 @@ public final class LlmModelFactory {
       ModelBinding.BoundModel bound = ModelBinding.bind(transport.catalog());
       LlmListeners.info(io, null, "Loading " + bound.selection().architectureId() + " weights…");
       WeightBag weights = ModelFill.fill(transport, bound, io, false);
-      Tokenizer tokenizer = Tokenizer.fromJsonDocuments(
-        bundle.textFile(ModelFileId.TOKENIZER).orElse(null),
-        bundle.textFile(ModelFileId.TOKENIZER_CONFIG).orElse(null),
-        bundle.textFile(ModelFileId.GENERATION_CONFIG).orElse(null),
-        bundle.configJson());
+      Tokenizer tokenizer = loadHfTokenizer(bundle);
       return finishLoadedModel(
         bundle.virtualPath(), bound, weights, tokenizer, io, t0, options);
     }
+  }
+
+  private static Tokenizer loadHfTokenizer(final ModelFileBundle bundle) {
+    String tokenizerJson = bundle.textFile(ModelFileId.TOKENIZER).orElse(null);
+    String tokenizerConfig = bundle.textFile(ModelFileId.TOKENIZER_CONFIG).orElse(null);
+    String generationConfig = bundle.textFile(ModelFileId.GENERATION_CONFIG).orElse(null);
+    String modelConfig = bundle.configJson();
+    if (tokenizerJson != null && !tokenizerJson.isBlank()) {
+      return Tokenizer.fromJsonDocuments(
+        tokenizerJson, tokenizerConfig, generationConfig, modelConfig);
+    }
+    return bundle.sentencePieceModel()
+      .map(bytes -> Tokenizer.fromSentencePiece(
+        bytes, tokenizerConfig, generationConfig))
+      .orElseGet(() -> Tokenizer.fromJsonDocuments(
+        null, tokenizerConfig, generationConfig, modelConfig));
   }
 
   private static ContainerTransport openHfTransport(

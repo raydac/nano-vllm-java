@@ -188,7 +188,8 @@ More API samples (streaming, RAG, GGUF, advisors) are in [Library quick start](#
 - **Qwen3** (HF safetensors, ONNX **1.1.0**, or GGUF **1.1.0**), **Gemma3**, **Gemma 4 text** QAT mobile (**since 1.1.0**, packed safetensors), **Llama** (**since 1.1.0**), and **LFM2** (hybrid short-conv + GQA, GGUF) causal LMs
 - Weight crates: HF **safetensors**, **GGUF**, and (**since 1.1.0**) ONNX Tier A — see [Supported formats and variants](#supported-formats-and-variants)
 - Optional multi-thread CPU matmul (`cpuThreads` / `matmulExecutor` / `disableMultiCpu`); default = all processors on a lazily shared pool
-- GPT-2 byte BPE, Gemma Metaspace BPE, GGUF-embedded, BERT WordPiece, and Unigram SentencePiece tokenizers
+- GPT-2 byte BPE, Gemma Metaspace BPE, GGUF-embedded, BERT WordPiece, Unigram SentencePiece
+  (including precompiled charsmap), WordLevel, character, and SentencePiece `tokenizer.model` tokenizers
 - Optional **BM25 text RAG** over a local `rag/` corpus (Example demo menu: none / BM25 / dense / hybrid); dense / hybrid embeddings **since 1.1.0**
 - **ResourceLimits** — default caps for corpus/PDF/JSON/GGUF/safetensors (overridable)
 - Optional **advisors** before each chat/RAG turn: `LLM.Builder.advisors(LlmAdvisorMixer, LlmAdvisor…)`
