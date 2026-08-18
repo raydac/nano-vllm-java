@@ -12,6 +12,7 @@ import com.igormaznitsa.nanollvm.layers.Attention;
 import com.igormaznitsa.nanollvm.layers.Linear;
 import com.igormaznitsa.nanollvm.layers.Norms.RMSNorm;
 import com.igormaznitsa.nanollvm.layers.Norms.RotaryEmbedding;
+import com.igormaznitsa.nanollvm.layers.Norms.RotaryEmbedding.Tables;
 import com.igormaznitsa.nanollvm.layers.ShortConv;
 import com.igormaznitsa.nanollvm.layers.VocabParallelEmbedding;
 import com.igormaznitsa.nanollvm.layers.VocabParallelEmbedding.ParallelLMHead;
@@ -128,8 +129,9 @@ public record Lfm2ForCausalLM(Lfm2Model model, ParallelLMHead lmHead) implements
     int numKvHeads,
     int headDim
   ) {
-    Lfm2Attention(final Config.HfConfig config, final WeightBag weights, final int layerIndex) {
-      this(assemble(config, weights, layerIndex));
+    Lfm2Attention(final Config.HfConfig config, final WeightBag weights, final int layerIndex,
+                  final Tables ropes) {
+      this(assemble(config, weights, layerIndex, ropes));
     }
 
     private Lfm2Attention(final Lfm2Attention assembled) {
@@ -142,7 +144,8 @@ public record Lfm2ForCausalLM(Lfm2Model model, ParallelLMHead lmHead) implements
     private static Lfm2Attention assemble(
       final Config.HfConfig config,
       final WeightBag weights,
-      final int layerIndex
+      final int layerIndex,
+      final Tables ropes
     ) {
       int numHeads = config.numAttentionHeads();
       int numKvHeads = config.numKeyValueHeads();
@@ -154,7 +157,7 @@ public record Lfm2ForCausalLM(Lfm2Model model, ParallelLMHead lmHead) implements
         linearRow(weights, blk + "attn_k.weight"),
         linearRow(weights, blk + "attn_v.weight"),
         linearRow(weights, blk + "attn_output.weight"),
-        RotaryEmbedding.get(headDim, headDim, config.maxPositionEmbeddings(), config.ropeTheta()),
+        ropes.get(headDim, headDim, config.maxPositionEmbeddings(), config.ropeTheta()),
         new Attention(numHeads, headDim, scaling, numKvHeads, layerIndex),
         new RMSNorm(weights.require(blk + "attn_q_norm.weight"), config.rmsNormEps()),
         new RMSNorm(weights.require(blk + "attn_k_norm.weight"), config.rmsNormEps()),
@@ -224,8 +227,9 @@ public record Lfm2ForCausalLM(Lfm2Model model, ParallelLMHead lmHead) implements
     RMSNorm operatorNorm,
     RMSNorm ffnNorm
   ) {
-    Lfm2DecoderLayer(final Config.HfConfig config, final WeightBag weights, final int layerIndex) {
-      this(assemble(config, weights, layerIndex));
+    Lfm2DecoderLayer(final Config.HfConfig config, final WeightBag weights, final int layerIndex,
+                     final Tables ropes) {
+      this(assemble(config, weights, layerIndex, ropes));
     }
 
     private Lfm2DecoderLayer(final Lfm2DecoderLayer assembled) {
@@ -237,7 +241,8 @@ public record Lfm2ForCausalLM(Lfm2Model model, ParallelLMHead lmHead) implements
     private static Lfm2DecoderLayer assemble(
       final Config.HfConfig config,
       final WeightBag weights,
-      final int layerIndex
+      final int layerIndex,
+      final Tables ropes
     ) {
       String blk = ggufBlk(layerIndex);
       Lfm2Attention attention = null;
@@ -245,7 +250,7 @@ public record Lfm2ForCausalLM(Lfm2Model model, ParallelLMHead lmHead) implements
       if (config.isConvLayer(layerIndex)) {
         shortConv = buildShortConv(weights, blk, layerIndex);
       } else {
-        attention = new Lfm2Attention(config, weights, layerIndex);
+        attention = new Lfm2Attention(config, weights, layerIndex, ropes);
       }
       return new Lfm2DecoderLayer(
         attention,
@@ -279,8 +284,9 @@ public record Lfm2ForCausalLM(Lfm2Model model, ParallelLMHead lmHead) implements
     }
 
     private static Lfm2Model assemble(final Config.HfConfig config, final WeightBag weights) {
+      Tables ropes = new Tables();
       List<Lfm2DecoderLayer> built = IntStream.range(0, config.numHiddenLayers())
-        .mapToObj(i -> new Lfm2DecoderLayer(config, weights, i))
+        .mapToObj(i -> new Lfm2DecoderLayer(config, weights, i, ropes))
         .toList();
       return new Lfm2Model(
         embedding(weights, GGUF_TOKEN_EMBD),

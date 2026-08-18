@@ -85,9 +85,18 @@ public final class GgufTransport implements ContainerTransport, GgufTokenizerSou
             "%s (%.0f MiB float32)".formatted(name, accountedBytes / (1024.0 * 1024.0)));
         } else {
           PackedWeight weight = this.reader.getPackedWeight(name);
-          payloads.put(name, weight);
-          accountedBytes += weight.packedBytes();
-          progress.step("%s (%.0f MiB packed)".formatted(name, accountedBytes / (1024.0 * 1024.0)));
+          if (weight.isFloat32()) {
+            payloads.put(name, weight.materialize());
+            weight.releasePackedBytes();
+            accountedBytes += (long) weight.numel() * Float.BYTES;
+            progress.step(
+              "%s (%.0f MiB float32)".formatted(name, accountedBytes / (1024.0 * 1024.0)));
+          } else {
+            payloads.put(name, weight);
+            accountedBytes += weight.packedBytes();
+            progress.step(
+              "%s (%.0f MiB packed)".formatted(name, accountedBytes / (1024.0 * 1024.0)));
+          }
         }
       }
       progress.finish(allowUnpackParameters

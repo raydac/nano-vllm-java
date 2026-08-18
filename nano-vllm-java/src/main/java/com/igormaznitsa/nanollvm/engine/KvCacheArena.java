@@ -7,7 +7,7 @@ import java.util.Arrays;
  * Per-{@link com.igormaznitsa.nanollvm.llm.LLM} KV page storage. Bound into {@link
  * com.igormaznitsa.nanollvm.internal.Context} for the duration of a forward pass.
  */
-public final class KvCacheArena {
+public final class KvCacheArena implements AutoCloseable {
 
   private final Tensor[] kCaches;
   private final Tensor[] vCaches;
@@ -71,6 +71,12 @@ public final class KvCacheArena {
     return this.vCaches[this.requireLayer(layerIndex)];
   }
 
+  @Override
+  public void close() {
+    Arrays.fill(this.kCaches, null);
+    Arrays.fill(this.vCaches, null);
+  }
+
   private int requireLayer(final int layerIndex) {
     if (layerIndex < 0 || layerIndex >= this.kCaches.length) {
       throw new IllegalArgumentException(
@@ -81,8 +87,9 @@ public final class KvCacheArena {
 
   @Override
   public String toString() {
+    Tensor first = this.kCaches.length == 0 ? null : this.kCaches[0];
     return "KvCacheArena[layers=%d, blocks=%d]".formatted(
       this.kCaches.length,
-      this.kCaches[0].ndim() >= 2 ? this.kCaches[0].size(0) : 0);
+      first != null && first.ndim() >= 2 ? first.size(0) : 0);
   }
 }

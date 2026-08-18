@@ -42,7 +42,7 @@ public final class OnnxTransport implements ContainerTransport {
 
   private final String label;
   private final String configJson;
-  private final OnnxGraphBundle graph;
+  private OnnxGraphBundle graph;
   private final Path externalBase;
   private final ContainerCatalog catalog;
 
@@ -200,22 +200,23 @@ public final class OnnxTransport implements ContainerTransport {
   }
 
   public OnnxGraphBundle graph() {
-    return this.graph;
+    return this.requireGraph();
   }
 
   public Map<String, String> matMulAliases() {
-    return this.graph.matMulWeightAliases();
+    return this.requireGraph().matMulWeightAliases();
   }
 
   public Map<String, Tensor> readFloatingTensors(final LlmListener io) throws IOException {
+    OnnxGraphBundle graph = this.requireGraph();
     LlmListener streams = io == null ? LlmListeners.silent() : io;
     Map<String, Tensor> named = new LinkedHashMap<>();
-    int total = (int) this.graph.initializers().stream()
+    int total = (int) graph.initializers().stream()
       .filter(OnnxDataTypes::shouldLoadAsWeight)
       .count();
     LoadProgress progress = new LoadProgress("ONNX weights", total, streams);
     try {
-      for (OnnxTensorProto proto : this.graph.initializers()) {
+      for (OnnxTensorProto proto : graph.initializers()) {
         if (!OnnxDataTypes.shouldLoadAsWeight(proto)) {
           OnnxDataTypes.requireHandledOrSkip(proto);
           continue;
@@ -254,6 +255,15 @@ public final class OnnxTransport implements ContainerTransport {
   }
 
   @Override
-  public void close() throws IOException {
+  public void close() {
+    this.graph = null;
+  }
+
+  private OnnxGraphBundle requireGraph() {
+    OnnxGraphBundle graph = this.graph;
+    if (graph == null) {
+      throw new IllegalStateException("OnnxTransport is closed: " + this.label);
+    }
+    return graph;
   }
 }

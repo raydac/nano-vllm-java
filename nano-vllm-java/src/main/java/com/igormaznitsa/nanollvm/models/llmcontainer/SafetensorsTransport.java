@@ -27,10 +27,11 @@ public final class SafetensorsTransport implements ContainerTransport {
 
   private final String label;
   private final String configJson;
-  private final List<Shard> shards;
-  private final Map<String, Shard> shardsByLabel;
+  private List<Shard> shards;
+  private Map<String, Shard> shardsByLabel;
   private final List<TensorRef> tensorIndex;
   private final ContainerCatalog catalog;
+  private boolean closed;
 
   private SafetensorsTransport(
     final String label,
@@ -149,6 +150,7 @@ public final class SafetensorsTransport implements ContainerTransport {
   }
 
   public SafetensorsReader openShard(final String shardLabel) throws IOException {
+    this.requireOpen();
     Shard shard = this.shardsByLabel.get(requireNonNull(shardLabel, "shardLabel"));
     if (shard == null) {
       throw new IllegalArgumentException("unknown safetensors shard: " + shardLabel);
@@ -162,7 +164,16 @@ public final class SafetensorsTransport implements ContainerTransport {
   }
 
   @Override
-  public void close() throws IOException {
+  public void close() {
+    this.closed = true;
+    this.shards = List.of();
+    this.shardsByLabel = Map.of();
+  }
+
+  private void requireOpen() {
+    if (this.closed) {
+      throw new IllegalStateException("SafetensorsTransport is closed: " + this.label);
+    }
   }
 
   @FunctionalInterface

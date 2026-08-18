@@ -3,11 +3,17 @@ package com.igormaznitsa.nanollvm;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotSame;
+import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.igormaznitsa.nanollvm.internal.Context;
 import com.igormaznitsa.nanollvm.internal.GgufDequant;
+import com.igormaznitsa.nanollvm.layers.Linear;
+import com.igormaznitsa.nanollvm.layers.Norms.RotaryEmbedding;
 import com.igormaznitsa.nanollvm.layers.ShortConv;
+import com.igormaznitsa.nanollvm.layers.VocabParallelEmbedding;
 import com.igormaznitsa.nanollvm.models.internal.PackedWeight;
 import com.igormaznitsa.nanollvm.models.internal.WeightBag;
 import com.igormaznitsa.nanollvm.models.llmcontainer.GgufReader;
@@ -18,8 +24,10 @@ import com.igormaznitsa.nanollvm.tensor.MatmulRuntime;
 import com.igormaznitsa.nanollvm.tensor.Tensor;
 import com.igormaznitsa.nanollvm.testsupport.OptionalModelAssumptions;
 import com.igormaznitsa.nanollvm.tokenizer.Tokenizer;
+import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
@@ -525,5 +533,50 @@ final class GgufUnitTest {
         assertFalse(chat.contains("<think>"), chat);
       }
     }
+  }
+
+  private static PackedWeight float32Matrix() {
+    ByteBuffer buf = ByteBuffer.allocate(16).order(ByteOrder.LITTLE_ENDIAN);
+    buf.putFloat(1f);
+    buf.putFloat(0f);
+    buf.putFloat(0f);
+    buf.putFloat(1f);
+    return new PackedWeight(buf.array(), GgufDequant.TYPE_F32, new int[] {2, 2}, 4);
+  }
+
+  @Test
+  void ggufReaderConstructorFailureReleasesFile() throws Exception {
+    Path file = Files.createTempFile("nanollvm-bad-gguf", ".gguf");
+    try {
+      Files.write(file, new byte[] {0, 1, 2, 3, 4, 5, 6, 7});
+      IOException thrown = assertThrows(IOException.class, () -> GgufReader.open(file));
+      assertTrue(thrown.getMessage().contains("bad magic"));
+      Files.delete(file);
+      assertFalse(Files.exists(file));
+    } finally {
+      Files.deleteIfExists(file);
+    }
+  }
+
+  @Test
+  void rotaryTablesArePerInstance() {
+    RotaryEmbedding.Tables first = new RotaryEmbedding.Tables();
+    RotaryEmbedding.Tables second = new RotaryEmbedding.Tables();
+    RotaryEmbedding shared = first.get(4, 4, 8, 10_000f);
+    assertSame(shared, first.get(4, 4, 8, 10_000f));
+    assertNotSame(shared, second.get(4, 4, 8, 10_000f));
+  }
+
+  @Test
+  void float32PackedLayersDropPackedCopy() {
+    PackedWeight linearWeight = float32Matrix();
+    Linear linear = new Linear(linearWeight);
+    assertFalse(linear.isPacked());
+    assertTrue(linearWeight.isReleased());
+
+    PackedWeight embedWeight = float32Matrix();
+    VocabParallelEmbedding embed = new VocabParallelEmbedding(embedWeight);
+    assertFalse(embed.isPacked());
+    assertTrue(embedWeight.isReleased());
   }
 }

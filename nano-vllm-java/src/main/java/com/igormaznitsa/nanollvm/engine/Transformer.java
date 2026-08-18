@@ -247,16 +247,20 @@ public final class Transformer implements AutoCloseable {
   }
 
   /**
-   * Clears the step {@link Context} and drops arena / network references so KV / conv heap and
-   * this engine's hold on the shared graph can be GC'd. Does not {@link LlmModel#close()}.
+   * Clears the step {@link Context} and {@link AutoCloseable#close() closes} KV / conv arenas so
+   * their heap can be reclaimed. Drops this engine's hold on the shared graph. Does not
+   * {@link LlmModel#close()}.
    */
   @Override
   public void close() {
     this.closed = true;
     this.stepContext.clear();
-    this.kvCache = null;
+    if (this.kvCache != null) {
+      this.kvCache.close();
+      this.kvCache = null;
+    }
     if (this.convCache != null) {
-      this.convCache.clearAll();
+      this.convCache.close();
       this.convCache = null;
     }
     this.network = null;

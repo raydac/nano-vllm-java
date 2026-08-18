@@ -21,6 +21,7 @@ import com.igormaznitsa.nanollvm.layers.Attention;
 import com.igormaznitsa.nanollvm.layers.Linear;
 import com.igormaznitsa.nanollvm.layers.Norms.RMSNorm;
 import com.igormaznitsa.nanollvm.layers.Norms.RotaryEmbedding;
+import com.igormaznitsa.nanollvm.layers.Norms.RotaryEmbedding.Tables;
 import com.igormaznitsa.nanollvm.layers.VocabParallelEmbedding;
 import com.igormaznitsa.nanollvm.layers.VocabParallelEmbedding.ParallelLMHead;
 import com.igormaznitsa.nanollvm.llm.Config;
@@ -94,8 +95,9 @@ public record LlamaForCausalLM(LlamaModel model, ParallelLMHead lmHead) implemen
     int qSize,
     int kvSize
   ) {
-    LlamaAttention(final Config.HfConfig config, final WeightBag weights, final int layerIndex) {
-      this(assemble(config, weights, layerIndex));
+    LlamaAttention(final Config.HfConfig config, final WeightBag weights, final int layerIndex,
+                   final Tables ropes) {
+      this(assemble(config, weights, layerIndex, ropes));
     }
 
     private LlamaAttention(final LlamaAttention assembled) {
@@ -108,7 +110,8 @@ public record LlamaForCausalLM(LlamaModel model, ParallelLMHead lmHead) implemen
     private static LlamaAttention assemble(
       final Config.HfConfig config,
       final WeightBag weights,
-      final int layerIndex
+      final int layerIndex,
+      final Tables ropes
     ) {
       int numHeads = config.numAttentionHeads();
       int numKvHeads = config.numKeyValueHeads();
@@ -128,7 +131,7 @@ public record LlamaForCausalLM(LlamaModel model, ParallelLMHead lmHead) implemen
       return new LlamaAttention(
         qkvProj,
         new Linear.Row(weights.require(p + O_PROJ_WEIGHT)),
-        RotaryEmbedding.get(headDim, headDim, config.maxPositionEmbeddings(), ropeTheta),
+        ropes.get(headDim, headDim, config.maxPositionEmbeddings(), ropeTheta),
         new Attention(numHeads, headDim, scaling, numKvHeads, layerIndex),
         numHeads,
         numKvHeads,
@@ -184,8 +187,9 @@ public record LlamaForCausalLM(LlamaModel model, ParallelLMHead lmHead) implemen
     RMSNorm inputLayernorm,
     RMSNorm postAttentionLayernorm
   ) {
-    LlamaDecoderLayer(final Config.HfConfig config, final WeightBag weights, final int layerIndex) {
-      this(assemble(config, weights, layerIndex));
+    LlamaDecoderLayer(final Config.HfConfig config, final WeightBag weights, final int layerIndex,
+                      final Tables ropes) {
+      this(assemble(config, weights, layerIndex, ropes));
     }
 
     private LlamaDecoderLayer(final LlamaDecoderLayer assembled) {
@@ -197,11 +201,12 @@ public record LlamaForCausalLM(LlamaModel model, ParallelLMHead lmHead) implemen
     private static LlamaDecoderLayer assemble(
       final Config.HfConfig config,
       final WeightBag weights,
-      final int layerIndex
+      final int layerIndex,
+      final Tables ropes
     ) {
       String p = layer(layerIndex);
       return new LlamaDecoderLayer(
-        new LlamaAttention(config, weights, layerIndex),
+        new LlamaAttention(config, weights, layerIndex, ropes),
         new LlamaMLP(config, weights, layerIndex),
         new RMSNorm(weights.require(p + INPUT_LAYERNORM), config.rmsNormEps()),
         new RMSNorm(weights.require(p + POST_ATTENTION_LAYERNORM), config.rmsNormEps()));
@@ -244,9 +249,10 @@ public record LlamaForCausalLM(LlamaModel model, ParallelLMHead lmHead) implemen
     }
 
     private static LlamaModel assemble(final Config.HfConfig config, final WeightBag weights) {
+      Tables ropes = new Tables();
       List<LlamaDecoderLayer> built = new ArrayList<>(config.numHiddenLayers());
       for (int i = 0; i < config.numHiddenLayers(); i++) {
-        built.add(new LlamaDecoderLayer(config, weights, i));
+        built.add(new LlamaDecoderLayer(config, weights, i, ropes));
       }
       return new LlamaModel(
         new VocabParallelEmbedding(weights.require(EMBED_TOKENS)),

@@ -11,6 +11,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -18,8 +19,8 @@ import java.util.concurrent.atomic.AtomicReference;
  * Dense matmul runtime for one {@code LLM}: parallelism cap plus an {@link ExecutorService}.
  *
  * <p>Build with {@link #builder()}, pass via step {@link com.igormaznitsa.nanollvm.internal.Context},
- * and {@link #close()} with the owning {@code LLM} (marks this runtime closed; does not shut down a
- * shared or caller-provided executor). Stateless float primitives stay on {@link VectorMath}.
+ * and {@link #close()} with the owning {@code LLM} (marks this runtime closed; shuts down the
+ * shared pool when this was the last checkout; does not shut down a caller-provided executor).
  *
  * @see Ops#linear(Tensor, Tensor, Tensor)
  * @see VectorMath
@@ -30,22 +31,48 @@ public final class MatmulRuntime implements AutoCloseable {
   private static final int TILE_K = 256;
   private static final int MIN_PARALLEL_OUT = TILE_N * 2;
   private static final FloatKernels KERNELS = FloatKernels.get();
-  private static final MatmulRuntime SEQUENTIAL = new MatmulRuntime(1, null, false);
-  private static final AtomicReference<ExecutorService> SHARED_POOL = new AtomicReference<>();
+  private static final MatmulRuntime SEQUENTIAL = new MatmulRuntime(1, null, false, false);
+  private static final AtomicReference<SharedPool> SHARED = new AtomicReference<>();
+  private final AtomicBoolean checkoutReleased = new AtomicBoolean();
 
   private final int cpuThreads;
   private final ExecutorService pool;
   private final boolean markClosedOnClose;
+  private final boolean sharedCheckout;
+
+  /**
+   * Process-wide matmul pool, created on first parallel use ({@code availableProcessors} daemons).
+   * Shut down when the last runtime that checked it out is {@link #close() closed}.
+   */
+  private static ExecutorService checkoutSharedPool() {
+    while (true) {
+      SharedPool current = SHARED.get();
+      if (current == null) {
+        ExecutorService created = newSharedExecutor();
+        if (SHARED.compareAndSet(null, new SharedPool(created, 1))) {
+          return created;
+        }
+        created.shutdownNow();
+        continue;
+      }
+      SharedPool leased = new SharedPool(current.executor(), current.checkouts() + 1);
+      if (SHARED.compareAndSet(current, leased)) {
+        return current.executor();
+      }
+    }
+  }
   private boolean closed;
 
   private MatmulRuntime(
     final int cpuThreads,
     final ExecutorService pool,
-    final boolean markClosedOnClose
+    final boolean markClosedOnClose,
+    final boolean sharedCheckout
   ) {
     this.cpuThreads = cpuThreads;
     this.pool = pool;
     this.markClosedOnClose = markClosedOnClose;
+    this.sharedCheckout = sharedCheckout;
   }
 
   public static Builder builder() {
@@ -59,22 +86,43 @@ public final class MatmulRuntime implements AutoCloseable {
     return SEQUENTIAL;
   }
 
-  /**
-   * Process-wide matmul pool, created on first parallel use ({@code availableProcessors} daemons).
-   * Never shut down by the library.
-   */
-  static ExecutorService sharedExecutor() {
-    ExecutorService existing = SHARED_POOL.get();
-    if (existing != null) {
-      return existing;
+  private static void releaseSharedCheckout() {
+    while (true) {
+      SharedPool current = SHARED.get();
+      if (current == null) {
+        return;
+      }
+      if (current.checkouts() <= 1) {
+        if (SHARED.compareAndSet(current, null)) {
+          current.executor().shutdownNow();
+          return;
+        }
+        continue;
+      }
+      SharedPool remaining = new SharedPool(current.executor(), current.checkouts() - 1);
+      if (SHARED.compareAndSet(current, remaining)) {
+        return;
+      }
     }
-    int threads = Math.max(2, Runtime.getRuntime().availableProcessors());
-    ExecutorService created = Executors.newFixedThreadPool(threads, namedDaemonFactory());
-    if (SHARED_POOL.compareAndSet(null, created)) {
-      return created;
+  }
+
+  private static ExecutorService newSharedExecutor() {
+    return Executors.newFixedThreadPool(
+      Math.max(2, Runtime.getRuntime().availableProcessors()), namedDaemonFactory());
+  }
+
+  @Override
+  public void close() {
+    if (this.markClosedOnClose) {
+      this.closed = true;
     }
-    created.shutdownNow();
-    return SHARED_POOL.get();
+    if (!this.sharedCheckout) {
+      return;
+    }
+    if (!this.checkoutReleased.compareAndSet(false, true)) {
+      return;
+    }
+    releaseSharedCheckout();
   }
 
   private static ThreadFactory namedDaemonFactory() {
@@ -99,8 +147,7 @@ public final class MatmulRuntime implements AutoCloseable {
   }
 
   private boolean usesSharedPool() {
-    ExecutorService shared = SHARED_POOL.get();
-    return this.pool.equals(shared);
+    return this.sharedCheckout;
   }
 
   /**
@@ -254,11 +301,7 @@ public final class MatmulRuntime implements AutoCloseable {
     }
   }
 
-  @Override
-  public void close() {
-    if (this.markClosedOnClose) {
-      this.closed = true;
-    }
+  private record SharedPool(ExecutorService executor, int checkouts) {
   }
 
   private void requireOpen() {
@@ -351,8 +394,9 @@ public final class MatmulRuntime implements AutoCloseable {
 
     /**
      * Executor for parallel matmul chunks. Not shut down by {@link MatmulRuntime#close()}.
-     * When omitted and {@code cpuThreads > 1}, the lazily created shared pool is used.
-     * Ignored when {@code cpuThreads == 1} ({@link #disableMultiCpu()} / sequential).
+     * When omitted and {@code cpuThreads > 1}, the lazily created shared pool is used and is
+     * shut down when the last runtime using it closes. Ignored when {@code cpuThreads == 1}
+     * ({@link #disableMultiCpu()} / sequential).
      */
     public Builder executor(final ExecutorService executor) {
       this.executor = requireNonNull(executor, "executor");
@@ -363,8 +407,10 @@ public final class MatmulRuntime implements AutoCloseable {
       if (this.cpuThreads == 1) {
         return sequential();
       }
-      ExecutorService pool = this.executor != null ? this.executor : sharedExecutor();
-      return new MatmulRuntime(this.cpuThreads, pool, true);
+      if (this.executor != null) {
+        return new MatmulRuntime(this.cpuThreads, this.executor, true, false);
+      }
+      return new MatmulRuntime(this.cpuThreads, checkoutSharedPool(), true, true);
     }
   }
 }

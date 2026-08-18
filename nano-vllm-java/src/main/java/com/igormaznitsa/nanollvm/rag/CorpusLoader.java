@@ -533,7 +533,7 @@ final class CorpusLoader {
         if (!units.isEmpty()) {
           return atomicSentences
             ? atomicSplit(baseId, source, units, maxChunkChars)
-            : packUnits(baseId, source, units, maxChunkChars);
+            : packUnits(baseId, source, units, maxChunkChars, overlap);
         }
       }
       return windowSplit(baseId, source, text.strip(), maxChunkChars, overlap);
@@ -570,7 +570,8 @@ final class CorpusLoader {
       final String baseId,
       final String source,
       final List<String> units,
-      final int maxChunkChars
+      final int maxChunkChars,
+      final int overlap
     ) {
       List<TextChunk> chunks = new ArrayList<>();
       StringBuilder buf = new StringBuilder();
@@ -578,7 +579,7 @@ final class CorpusLoader {
         if (unit.length() > maxChunkChars) {
           emitPacked(buf, baseId, source, chunks);
           chunks.addAll(
-            windowSplit(baseId + "#w" + (chunks.size() + 1), source, unit, maxChunkChars, 40));
+            windowSplit(baseId + "#w" + (chunks.size() + 1), source, unit, maxChunkChars, overlap));
           continue;
         }
         if (buf.isEmpty()) {

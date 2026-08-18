@@ -6,7 +6,7 @@ import java.util.concurrent.ConcurrentHashMap;
 /**
  * Per-LLM rolling short-convolution state for hybrid short-conv models, keyed by sequence id.
  */
-public final class ConvStateArena {
+public final class ConvStateArena implements AutoCloseable {
 
   private final Map<Integer, float[][]> bySeqId = new ConcurrentHashMap<>();
   private final int numLayers;
@@ -39,6 +39,11 @@ public final class ConvStateArena {
 
   public void clearAll() {
     this.bySeqId.clear();
+  }
+
+  @Override
+  public void close() {
+    this.clearAll();
   }
 
   private float[][] newSeqStates() {

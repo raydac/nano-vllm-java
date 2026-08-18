@@ -34,12 +34,14 @@
         <Bug pattern="CT_CONSTRUCTOR_THROW"/>
     </Match>
 
-    <!-- Sequence / Transformer / MatmulRuntime live under LLM.generate's ReentrantLock; CorpusLoader.Builder is single-threaded. -->
+    <!-- Sequence / Transformer / MatmulRuntime live under LLM.generate's ReentrantLock;
+         fluent builders are single-threaded until build(). -->
     <Match>
         <Or>
             <Class name="com.igormaznitsa.nanollvm.engine.Sequence"/>
             <Class name="com.igormaznitsa.nanollvm.engine.Transformer"/>
             <Class name="com.igormaznitsa.nanollvm.tensor.MatmulRuntime"/>
+            <Class name="com.igormaznitsa.nanollvm.tensor.MatmulRuntime$Builder"/>
             <Class name="com.igormaznitsa.nanollvm.rag.CorpusLoader$Builder"/>
         </Or>
         <Bug pattern="AT_NONATOMIC_OPERATIONS_ON_SHARED_VARIABLE,AT_STALE_THREAD_WRITE_OF_PRIMITIVE"/>

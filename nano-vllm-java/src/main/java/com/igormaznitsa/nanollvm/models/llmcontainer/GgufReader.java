@@ -20,7 +20,8 @@ import java.util.Map;
 import java.util.stream.LongStream;
 
 /**
- * Memory-mapped GGUF v2/v3 reader: metadata KV map + named tensors (packed or float32).
+ * GGUF v2/v3 reader: metadata KV map + named tensors (packed or float32). File payloads are
+ * copied into a heap buffer so {@link #close()} can drop them without a native mmap.
  *
  * @since 1.1.0
  */
@@ -28,34 +29,34 @@ public final class GgufReader implements AutoCloseable, GgufTokenizerSource {
 
   private static final int GGUF_MAGIC = 0x46554747;
   private static final int DEFAULT_ALIGNMENT = 32;
+  private static final ByteBuffer CLOSED_MAP = ByteBuffer.allocate(0).asReadOnlyBuffer();
 
   private final Path path;
-  private final FileChannel channel;
-  private final ByteBuffer map;
   private final Map<String, Object> metadata;
   private final Map<String, TensorInfo> tensors;
   private final long tensorDataBase;
   private final ResourceLimits limits;
+  private ByteBuffer map;
+  private boolean closed;
 
   public GgufReader(final Path path) throws IOException {
     this.path = requireNonNull(path, "path").toAbsolutePath().normalize();
     this.limits = ResourceLimits.current();
-    this.channel = FileChannel.open(this.path);
-    long size = this.channel.size();
-    if (size > Integer.MAX_VALUE) {
-      throw new IOException("GGUF larger than 2GiB mmap limit: " + this.path);
-    }
-    this.map =
-      this.channel.map(FileChannel.MapMode.READ_ONLY, 0, size).order(ByteOrder.LITTLE_ENDIAN);
     this.metadata = new LinkedHashMap<>();
     this.tensors = new LinkedHashMap<>();
-    this.tensorDataBase = this.parseContainer(this.map, size);
+    try (FileChannel channel = FileChannel.open(this.path)) {
+      long size = channel.size();
+      if (size > Integer.MAX_VALUE) {
+        throw new IOException("GGUF larger than 2GiB heap read limit: " + this.path);
+      }
+      this.map = ChannelBytes.readHeap(channel, size);
+    }
+    this.tensorDataBase = this.parseContainer(this.map, this.map.capacity());
   }
 
   private GgufReader(final Path virtualPath, final ByteBuffer data) throws IOException {
     this.path = requireNonNull(virtualPath, "virtualPath").toAbsolutePath().normalize();
     this.limits = ResourceLimits.current();
-    this.channel = null;
     ByteBuffer map = data.duplicate().order(ByteOrder.LITTLE_ENDIAN);
     map.clear();
     this.map = map;
@@ -249,14 +250,15 @@ public final class GgufReader implements AutoCloseable, GgufTokenizerSource {
   }
 
   /**
-   * Loads and dequantizes a tensor to float32 from the mmap view (no owned packed {@code byte[]}
+   * Loads and dequantizes a tensor to float32 from the file buffer (no owned packed {@code byte[]}
    * copy). 2D shapes are reversed to HF {@code [out, in]} / embedding {@code [vocab, dim]} layout.
    */
   public Tensor getTensor(final String name) {
+    this.requireOpen();
     TensorInfo info = this.info(name);
     long abs = this.tensorDataBase + info.relativeOffset;
     if (abs > Integer.MAX_VALUE) {
-      throw new IllegalStateException("tensor offset exceeds mmap range: " + name);
+      throw new IllegalStateException("tensor offset exceeds payload range: " + name);
     }
     long byteLen = GgufDequant.packedByteLength(info.ggmlType, info.numel);
     if (byteLen > Integer.MAX_VALUE) {
@@ -274,10 +276,11 @@ public final class GgufReader implements AutoCloseable, GgufTokenizerSource {
    * Loads a tensor keeping GGML blocks packed (owned byte copy). Shape uses HF layout for 2D.
    */
   public PackedWeight getPackedWeight(final String name) {
+    this.requireOpen();
     TensorInfo info = this.info(name);
     long abs = this.tensorDataBase + info.relativeOffset;
     if (abs > Integer.MAX_VALUE) {
-      throw new IllegalStateException("tensor offset exceeds mmap range: " + name);
+      throw new IllegalStateException("tensor offset exceeds payload range: " + name);
     }
     long byteLen = GgufDequant.packedByteLength(info.ggmlType, info.numel);
     if (byteLen > Integer.MAX_VALUE) {
@@ -290,9 +293,14 @@ public final class GgufReader implements AutoCloseable, GgufTokenizerSource {
   }
 
   @Override
-  public void close() throws IOException {
-    if (this.channel != null) {
-      this.channel.close();
+  public void close() {
+    this.closed = true;
+    this.map = CLOSED_MAP;
+  }
+
+  private void requireOpen() {
+    if (this.closed) {
+      throw new IllegalStateException("GgufReader is closed: " + this.path);
     }
   }
 

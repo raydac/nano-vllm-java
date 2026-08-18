@@ -34,6 +34,19 @@ class RagUnitTest {
   }
 
   @Test
+  void maxChunkCharsIsACeiling() {
+    String text =
+      "The capital of France is Paris. The capital of Germany is Berlin. The capital of Japan is Tokyo.";
+    PreparedRag coarse = RagFactory.of(RagLoadOptions.defaults().withMaxChunkChars(500), text);
+    PreparedRag fine = RagFactory.of(
+      RagLoadOptions.defaults().withMaxChunkChars(64).withChunkOverlap(0),
+      text);
+    assertEquals(1, coarse.size());
+    assertTrue(fine.size() > coarse.size());
+    assertTrue(fine.chunks().stream().allMatch(chunk -> chunk.text().length() <= 64));
+  }
+
+  @Test
   void corpusFromFileAndFolder() throws Exception {
     Path dir = createTempDirectory("nanollvm-rag");
     Path a = dir.resolve("a.txt");

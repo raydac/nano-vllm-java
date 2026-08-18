@@ -332,7 +332,7 @@ A single `.gguf` file is also valid. Weights **stay packed** in RAM by default; 
 `LinearKernel` / `EmbeddingKernel` at construction (GGML type fixed in a dequant lambda). Block quants
 (`Q4_K`, `Q6_K`, …) decode **in place** into a float row during matmul / gather — no per-row full-tensor scratch.
 For float32 speed without a packed+dense peak, unpack **at load**:
-`LlmModelFactory.make(path, io, true)` (mmap → float tensors). Late unpack via
+`LlmModelFactory.make(path, io, true)` (file bytes → float tensors). Late unpack via
 `LLM.Builder.allowUnpackParameters()` still works on an already-packed model (releases packed bytes).
 Activations and KV remain float32 either way. Engine warmup is **off** by default (`.warmup()` to enable).
 
@@ -724,9 +724,10 @@ import com.igormaznitsa.nanollvm.rag.RagLoadOptions;
 
 import java.nio.file.Path;
 
-PreparedRag rag = RagFactory.make(Path.of("rag")); // silent
+PreparedRag rag = RagFactory.make(Path.of("rag")); // silent; 500-char packed sentences
 // progress: RagFactory.make(Path.of("rag"), RagLoadOptions.defaults(), LlmListeners.toSystem());
 // tiny models: RagFactory.make(Path.of("rag"), RagLoadOptions.forTinyModels());
+// custom ceiling: RagFactory.make(Path.of("rag"), RagLoadOptions.defaults().withMaxChunkChars(800));
 
 try (LLM llm = LLM.builder(model).build()) {
   String answer = llm.rag(rag)

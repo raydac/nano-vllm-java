@@ -8,7 +8,8 @@ import static java.util.Objects.requireNonNull;
  * <p>{@link #id()} must be unique within a corpus (chunker uses {@code file#n} style ids).
  * {@link #source()} is a path, classpath URI, or tag shown in RAG citations; {@link #of} copies
  * {@code id} into {@code source} when you have no separate label. {@link #text()} is the model-
- * facing chunk body (null becomes {@code ""}). Immutable; safe to share.
+ * facing chunk body (null becomes {@code ""}). Length is bounded at load by
+ * {@link RagLoadOptions#maxChunkChars()}. Immutable; safe to share.
  *
  * @param id     non-blank stable identifier; never {@code null}
  * @param source origin label (file path, {@code classpath:…}, tag); never {@code null}

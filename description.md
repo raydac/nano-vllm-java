@@ -1012,7 +1012,7 @@ Byte length of one tensor ≈ `end - start`. For BF16, that is roughly `2 × pro
 **Important:** after load, **float** safetensors compute as **float32** in this teaching engine. A BF16 file still
 becomes a large F32 resident image in RAM. **Exception (since 1.1.0):** Gemma 4 **text QAT mobile** keeps packed
 int2/4/8 (+ SRQ) weights in heap and dequantizes during matmul — same idea as GGUF packed mode, not a full F32 expand.
-Shards larger than 2 GiB are read with `FileChannel` (Java mmap stays limited to 2 GiB). Gemma 4 **GGUF**, **MoE**
+Shards larger than 2 GiB are read with `FileChannel` (files ≤ 2 GiB are copied into a heap buffer so `close()` can drop them). Gemma 4 **GGUF**, **MoE**
 (`enable_moe_block`), and vision/audio generation are still unsupported; towers in the QAT-mobile crate are skipped.
 
 **Samples:** both Qwen3-0.6B and Gemma3-270M ship **all** listed tensors as `BF16` in the inspected files.
@@ -1050,7 +1050,7 @@ collide across shards for the same parameter.
 ```text
   1. Read header → names, dtypes, shapes, byte ranges
   2. Match name → canonical param (rewrite q_proj/k_proj/v_proj → fused qkv_proj, etc.)
-  3. mmap / read payload slice → convert to float32 Tensor
+  3. read payload slice → convert to float32 Tensor
   4. Assemble into WeightBag (merge packed shards), then ArchitectureProcessor.createCausal builds the graph
 ```
 
@@ -1122,8 +1122,8 @@ only when a range starts mid-block).
 | Mode | How you ask | What happens to weight RAM |
 |------|-------------|----------------------------|
 | **Packed (default)** | `LlmModelFactory.make(path)` | Quant blocks stay in heap; dequant on each matmul/embed use |
-| **Unpack at load** | `make(path, io, true)` | mmap → float32 while loading; **no** packed heap copy of those tensors |
-| **Late unpack** | `LLM.Builder.allowUnpackParameters()` on a packed model | Materializes float32 via `WeightBag.asDense()`; **packed payloads may remain** until no other engine still needs them (peak RAM can hold both) |
+| **Unpack at load** | `make(path, io, true)` | file bytes → float32 while loading; **no** packed heap copy of those tensors |
+| **Late unpack** | `LLM.Builder.allowUnpackParameters()` on a packed model | Materializes float32; **releases packed payloads** when no other engine still holds them |
 
 ```java
 // Qwen3 chat GGUF (since 1.1.0) — bring your own file; no models/download-qwen3-*.gguf script
@@ -1212,7 +1212,7 @@ Weights stay packed; activations use float32 after per-row dequant inside the bo
 
 | Allowed | Not in this port |
 |---------|------------------|
-| GGUF **v2 / v3**; mmap payload **≤ ~2 GiB** | Larger maps / other GGUF major versions |
+| GGUF **v2 / v3**; heap payload **≤ ~2 GiB** | Larger files / other GGUF major versions |
 | Architectures **`qwen3`** / **`lfm2`** (chat) and **`bert`** (embeddings **since 1.1.0**) | **Qwen2**, **Gemma / Llama** GGUF, MoE / VL, or other exports |
 | GGML weight types in the table above | Removed ggml layouts (`Q4_2`/`Q4_3`, SIMD-repack `Q4_0_4_4` / `IQ4_NL_4_4`, …) |
 | Packed default; optional unpack at load / late unpack | ONNX or safetensors wrapped *inside* a `.gguf` |
@@ -3613,6 +3613,11 @@ punctuation). It does **not** maintain dictionaries of user replies like “yes�
 
 With `atomicSentences` (see `RagLoadOptions.forTinyModels()`), each sentence stays its own chunk — better for tiny
 generators that drown in long context. Optional **dedupe** drops identical normalized passages.
+
+The character ceiling is `RagLoadOptions.maxChunkChars` (defaults **500**, tiny preset **220**). Change it with
+`RagLoadOptions.defaults().withMaxChunkChars(n)` (or `withChunkOverlap`) and pass the options into
+`RagFactory.make(path, options)` / `RagFactory.Builder.options`. Units are Java `char`s, not tokens; packing may
+emit shorter chunks. Prompt concatenation is a separate cap (`RagSession.maxContextChars`, default 3500).
 
 #### Preparsing and BM25 (inside `PreparedRag`)
 

@@ -22,6 +22,7 @@ import com.igormaznitsa.nanollvm.layers.Attention;
 import com.igormaznitsa.nanollvm.layers.Linear;
 import com.igormaznitsa.nanollvm.layers.Norms.RMSNorm;
 import com.igormaznitsa.nanollvm.layers.Norms.RotaryEmbedding;
+import com.igormaznitsa.nanollvm.layers.Norms.RotaryEmbedding.Tables;
 import com.igormaznitsa.nanollvm.layers.VocabParallelEmbedding;
 import com.igormaznitsa.nanollvm.layers.VocabParallelEmbedding.ParallelLMHead;
 import com.igormaznitsa.nanollvm.llm.Config;
@@ -108,8 +109,8 @@ public record Gemma4ForCausalLM(Gemma4Model model, ParallelLMHead lmHead, float 
     int numKvHeads,
     int headDim
   ) {
-    Gemma4Attention(Config.HfConfig config, WeightBag weights, int layerIndex) {
-      this(assemble(config, weights, layerIndex));
+    Gemma4Attention(Config.HfConfig config, WeightBag weights, int layerIndex, Tables ropes) {
+      this(assemble(config, weights, layerIndex, ropes));
     }
 
     private Gemma4Attention(final Gemma4Attention assembled) {
@@ -122,7 +123,8 @@ public record Gemma4ForCausalLM(Gemma4Model model, ParallelLMHead lmHead, float 
     private static Gemma4Attention assemble(
       final Config.HfConfig config,
       final WeightBag weights,
-      final int layerIndex
+      final int layerIndex,
+      final Tables ropes
     ) {
       int headDim = config.layerHeadDim(layerIndex);
       boolean sliding = config.isSlidingLayer(layerIndex);
@@ -130,9 +132,9 @@ public record Gemma4ForCausalLM(Gemma4Model model, ParallelLMHead lmHead, float 
       int window = sliding ? config.slidingWindow() : 0;
       String p = selfAttn(layerIndex);
       RotaryEmbedding rope = sliding
-        ? RotaryEmbedding.get(headDim, headDim, config.maxPositionEmbeddings(),
+        ? ropes.get(headDim, headDim, config.maxPositionEmbeddings(),
         config.ropeLocalBaseFreq())
-        : RotaryEmbedding.proportional(
+        : ropes.proportional(
         headDim,
         config.maxPositionEmbeddings(),
         config.ropeTheta(),
@@ -241,8 +243,8 @@ public record Gemma4ForCausalLM(Gemma4Model model, ParallelLMHead lmHead, float 
     RMSNorm postPerLayerInputNorm,
     float layerScalar
   ) {
-    Gemma4DecoderLayer(Config.HfConfig config, WeightBag weights, int layerIndex) {
-      this(assemble(config, weights, layerIndex));
+    Gemma4DecoderLayer(Config.HfConfig config, WeightBag weights, int layerIndex, Tables ropes) {
+      this(assemble(config, weights, layerIndex, ropes));
     }
 
     private Gemma4DecoderLayer(final Gemma4DecoderLayer assembled) {
@@ -257,12 +259,13 @@ public record Gemma4ForCausalLM(Gemma4Model model, ParallelLMHead lmHead, float 
     private static Gemma4DecoderLayer assemble(
       final Config.HfConfig config,
       final WeightBag weights,
-      final int layerIndex
+      final int layerIndex,
+      final Tables ropes
     ) {
       String p = layer(layerIndex);
       Tensor scalar = weights.require(p + "layer_scalar");
       return new Gemma4DecoderLayer(
-        new Gemma4Attention(config, weights, layerIndex),
+        new Gemma4Attention(config, weights, layerIndex, ropes),
         new Gemma4Mlp(config, weights, layerIndex),
         new RMSNorm(weights.require(p + INPUT_LAYERNORM), config.rmsNormEps(), false),
         new RMSNorm(weights.require(p + POST_ATTENTION_LAYERNORM), config.rmsNormEps(), false),
@@ -324,11 +327,12 @@ public record Gemma4ForCausalLM(Gemma4Model model, ParallelLMHead lmHead, float 
     }
 
     private static Gemma4Model assemble(final Config.HfConfig config, final WeightBag weights) {
+      Tables ropes = new Tables();
       int layers = config.numHiddenLayers();
       int ple = config.gemma4().hiddenSizePerLayerInput();
       List<Gemma4DecoderLayer> built = new ArrayList<>(layers);
       for (int i = 0; i < layers; i++) {
-        built.add(new Gemma4DecoderLayer(config, weights, i));
+        built.add(new Gemma4DecoderLayer(config, weights, i, ropes));
       }
       GemmaQatWeight tokens = weights.requireQat(EMBED_TOKENS);
       GemmaQatWeight perLayer = weights.requireQat("model.embed_tokens_per_layer.weight");

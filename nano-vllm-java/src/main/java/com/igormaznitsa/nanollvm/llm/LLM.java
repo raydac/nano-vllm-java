@@ -19,6 +19,7 @@ import com.igormaznitsa.nanollvm.exceptions.ModelLoadException;
 import com.igormaznitsa.nanollvm.models.LlmModel;
 import com.igormaznitsa.nanollvm.models.LlmModelFactory;
 import com.igormaznitsa.nanollvm.models.ModelSupport;
+import com.igormaznitsa.nanollvm.models.internal.LlmModelAccess;
 import com.igormaznitsa.nanollvm.rag.PreparedRag;
 import com.igormaznitsa.nanollvm.rag.RagFactory;
 import com.igormaznitsa.nanollvm.rag.RagIndex;
@@ -144,8 +145,10 @@ public final class LLM implements AutoCloseable {
   private LLM(final Builder builder) {
     requireNonNull(builder, "builder");
     MatmulRuntime createdMatmul = null;
+    Transformer createdTransformer = null;
+    LlmModel boundModel = null;
+    boolean acquired = false;
     try {
-      // Business load path: resolve LlmModel → matmul runtime → engine config → KV/scheduler
       int cpuThreads = builder.resolveCpuThreads();
       MatmulRuntime.Builder matmulBuilder = MatmulRuntime.builder().cpuThreads(cpuThreads);
       if (cpuThreads > 1 && builder.matmulExecutor != null) {
@@ -153,7 +156,8 @@ public final class LLM implements AutoCloseable {
       }
       createdMatmul = matmulBuilder.build();
       this.matmul = createdMatmul;
-      this.model = builder.resolveModel();
+      boundModel = builder.resolveModel();
+      this.model = boundModel;
       this.tokenizer = this.model.tokenizer();
       this.config = builder.toConfig(this.model, this.tokenizer, cpuThreads);
       this.listener = builder.listener;
@@ -164,22 +168,45 @@ public final class LLM implements AutoCloseable {
       this.defaultSampling = builder.samplingParams == null
         ? SamplingDefaults.neutral()
         : builder.samplingParams;
-      this.transformer = new Transformer(
+      createdTransformer = new Transformer(
         this.model, this.config, this.matmul, this.listener, builder.allowUnpackParameters);
+      this.transformer = createdTransformer;
       this.scheduler = new Scheduler(this.config, this.transformer::clearConvState);
+      if (builder.warmup) {
+        this.warmup();
+      }
+      LlmModelAccess.acquireEngine(this.model);
+      acquired = true;
       LlmListeners.info(this.listener, this, "CPU matmul: " + this.matmul.backendInfo());
       LlmListeners.info(this.listener, this, this.model.hasPackedWeights()
         ? "Weights: GGUF packed (specialized LinearKernel / EmbeddingKernel per tensor)"
         : "Weights: float32 dense (decode-1 + parallel MatmulRuntime)");
     } catch (ModelLoadException e) {
-      this.releaseOwnedRuntime(createdMatmul);
+      abortConstruction(createdMatmul, createdTransformer, boundModel, acquired);
       throw e;
     } catch (RuntimeException e) {
-      this.releaseOwnedRuntime(createdMatmul);
+      abortConstruction(createdMatmul, createdTransformer, boundModel, acquired);
       throw new ModelLoadException("failed to load model from " + builder.modelPath(), e);
     }
-    if (builder.warmup) {
-      this.warmup();
+  }
+
+  private static void abortConstruction(
+    final MatmulRuntime createdMatmul,
+    final Transformer createdTransformer,
+    final LlmModel boundModel,
+    final boolean acquired
+  ) {
+    try {
+      if (createdTransformer != null) {
+        createdTransformer.close();
+      }
+    } finally {
+      if (createdMatmul != null) {
+        createdMatmul.close();
+      }
+      if (acquired && boundModel != null) {
+        LlmModelAccess.releaseEngine(boundModel);
+      }
     }
   }
 
@@ -192,12 +219,6 @@ public final class LLM implements AutoCloseable {
    */
   public static Builder builder(final LlmModel model) {
     return new Builder(requireNonNull(model, "model"));
-  }
-
-  private void releaseOwnedRuntime(final MatmulRuntime createdMatmul) {
-    if (createdMatmul != null) {
-      createdMatmul.close();
-    }
   }
 
   /**
@@ -950,11 +971,14 @@ public final class LLM implements AutoCloseable {
   /**
    * Opens a retrieval-augmented session over {@code index}
    * (typically a {@link PreparedRag} from {@link RagFactory}).
+   * Chunk size is chosen at index load via {@link com.igormaznitsa.nanollvm.rag.RagLoadOptions},
+   * not on this session.
    *
    * @param index corpus index; non-{@code null}; may be shared across sessions/engines
    * @return a new {@link RagSession} using {@link #defaultSampling()}
    * @throws NullPointerException if {@code index} is {@code null}
    * @apiNote Session turns call {@link #generate}; exclusive on this {@code LLM} while active.
+   * @see com.igormaznitsa.nanollvm.rag.RagLoadOptions#withMaxChunkChars(int)
    */
   public RagSession rag(final RagIndex index) {
     this.assertNotClosed();
@@ -1191,7 +1215,8 @@ public final class LLM implements AutoCloseable {
 
   /**
    * Cancels any in-flight generate and releases per-engine resources (scheduler, KV/conv arenas,
-   * matmul runtime mark). Idempotent; does not {@link LlmModel#close() close} the shared model.
+   * matmul runtime, engine lease on the shared model). Idempotent; does not
+   * {@link LlmModel#close() close} the shared model.
    *
    * @apiNote Blocks until any in-flight {@link #generate} can be interrupted and the transformer
    * / matmul runtime are closed under the generate lock.
@@ -1203,8 +1228,12 @@ public final class LLM implements AutoCloseable {
     try {
       if (this.closed.compareAndSet(false, true)) {
         this.scheduler.clear();
-        this.transformer.close();
-        this.matmul.close();
+        try {
+          this.transformer.close();
+        } finally {
+          this.matmul.close();
+          LlmModelAccess.releaseEngine(this.model);
+        }
       }
     } finally {
       this.generateLock.unlock();
@@ -1541,7 +1570,7 @@ public final class LLM implements AutoCloseable {
     /**
      * Expands GGUF packed weights to float32 for denser/faster matmul (higher heap).
      * Prefer {@link LlmModelFactory#open(Path)} {@code .unpackParameters()} so unpack
-     * happens <em>during load</em> (mmap → float32, no packed heap copy). For an already-loaded
+     * happens <em>during load</em> (file bytes → float32, no packed heap copy). For an already-loaded
      * packed {@link LlmModel}, unpacks at engine build and releases packed bytes.
      * No-op for already-dense HF safetensors. Default is packed (size-first).
      *

@@ -9,6 +9,7 @@ import static java.nio.file.Files.writeString;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -24,6 +25,8 @@ import com.igormaznitsa.nanollvm.chat.LlmListeners;
 import com.igormaznitsa.nanollvm.chat.LlmTextKind;
 import com.igormaznitsa.nanollvm.chat.ThinkTags;
 import com.igormaznitsa.nanollvm.engine.BlockManager;
+import com.igormaznitsa.nanollvm.engine.ConvStateArena;
+import com.igormaznitsa.nanollvm.engine.KvCacheArena;
 import com.igormaznitsa.nanollvm.engine.Sequence;
 import com.igormaznitsa.nanollvm.internal.Json;
 import com.igormaznitsa.nanollvm.layers.Norms.RMSNorm;
@@ -49,7 +52,12 @@ import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.Callable;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.stream.IntStream;
+import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
 
 class CoreUnitTest {
@@ -485,7 +493,7 @@ class CoreUnitTest {
       assertTrue(withDisable.backendInfo().contains("sequential"));
     }
 
-    var ignored = java.util.concurrent.Executors.newSingleThreadExecutor();
+    var ignored = Executors.newSingleThreadExecutor();
     try (MatmulRuntime runtime = MatmulRuntime.builder()
       .disableMultiCpu()
       .executor(ignored)
@@ -494,6 +502,64 @@ class CoreUnitTest {
       assertTrue(runtime.backendInfo().contains("sequential"));
     } finally {
       ignored.shutdownNow();
+    }
+  }
+
+  @Test
+  void sharedPoolRuntimeCloseIsIdempotent() {
+    try (MatmulRuntime first = MatmulRuntime.builder().cpuThreads(2).build();
+         MatmulRuntime second = MatmulRuntime.builder().cpuThreads(2).build()) {
+      assertTrue(first.backendInfo().contains("shared-pool"));
+      first.close();
+      first.close();
+    }
+    try (MatmulRuntime again = MatmulRuntime.builder().cpuThreads(2).build()) {
+      float[] y = new float[2];
+      again.linear(
+        new float[] {1f, 0f}, 0,
+        new float[] {1f, 0f, 0f, 1f}, 0,
+        null, y, 0, 1, 2, 2);
+      assertEquals(1f, y[0], 1e-5f);
+      assertEquals(0f, y[1], 1e-5f);
+    }
+  }
+
+  @Test
+  void sharedPoolSurvivesConcurrentCheckoutAndClose() throws Exception {
+    ExecutorService hammer = Executors.newFixedThreadPool(8);
+    try {
+      List<Callable<Void>> jobs = Stream.<Callable<Void>>generate(() -> () -> {
+          try (MatmulRuntime runtime = MatmulRuntime.builder().cpuThreads(2).build()) {
+            float[] y = new float[2];
+            runtime.linear(
+              new float[] {1f, 0f}, 0,
+              new float[] {1f, 0f, 0f, 1f}, 0,
+              null, y, 0, 1, 2, 2);
+            assertEquals(1f, y[0], 1e-5f);
+            assertEquals(0f, y[1], 1e-5f);
+          }
+          return null;
+        })
+        .limit(32)
+        .toList();
+      for (Future<Void> future : hammer.invokeAll(jobs)) {
+        future.get();
+      }
+    } finally {
+      hammer.shutdownNow();
+    }
+  }
+
+  @Test
+  void kvAndConvArenasCloseDropState() {
+    try (KvCacheArena kv = new KvCacheArena(1, 2, 256, 1, 8);
+         ConvStateArena conv = new ConvStateArena(1, 4, 3)) {
+      assertNotNull(kv.k(0));
+      conv.state(7, 0)[0] = 1.5f;
+      kv.close();
+      conv.close();
+      assertNull(kv.k(0));
+      assertTrue(conv.toString().contains("seqs=0"));
     }
   }
 

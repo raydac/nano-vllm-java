@@ -44,7 +44,7 @@ import java.util.Map;
  * expose {@link LlmModel#embed(CharSequence)}.
  *
  * <p>GGUF stays packed by default. Pass {@code allowUnpackParameters=true} to dequantize to float32
- * during load (mmap or in-memory buffer → float tensors; no packed heap residency).
+ * during load (file bytes or in-memory buffer → float tensors; no packed heap residency).
  *
  * <p>ONNX folders (<strong>since 1.1.0</strong>) use Tier A initializer import only (no ORT). When
  * both {@code *.safetensors} and {@code *.onnx} are present, safetensors wins (BERT embeddings use
@@ -538,7 +538,7 @@ public final class LlmModelFactory {
     LlmListeners.info(io, null, "CPU backend: " + MatmulRuntime.sequential().backendInfo());
     if (allowUnpackParameters) {
       LlmListeners.info(io, null,
-        "GGUF: unpacking to float32 during load (mmap → dense; no packed heap copy).");
+        "GGUF: unpacking to float32 during load (file bytes → dense; no packed heap copy).");
     } else {
       LlmListeners.info(io, null,
         "GGUF weights stay packed; use LlmModelFactory.open(path).unpackParameters() or "

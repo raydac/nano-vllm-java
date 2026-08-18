@@ -12,8 +12,8 @@ import java.util.List;
  * query-time cosine (dot product on L2-normalized vectors).
  *
  * <p>Does not own {@code encoder} — close the model after this index is unused. Index-time vectors
- * are immutable; query embeds synchronize on this instance. Prefer {@link HybridRagIndex} or
- * {@link RagFactory#withEmbeddings} when a BM25 corpus is also available.
+ * are immutable; query embeds are concurrent (each encoder call uses a fresh step context). Prefer
+ * {@link HybridRagIndex} or {@link RagFactory#withEmbeddings} when a BM25 corpus is also available.
  *
  * @since 1.1.0
  */
@@ -193,9 +193,6 @@ public final class DenseRagIndex implements RagIndex {
   }
 
   private float[] embedQuery(final String query) {
-    String text = query.isBlank() ? "_" : query;
-    synchronized (this) {
-      return this.encoder.embed(text);
-    }
+    return this.encoder.embed(query.isBlank() ? "_" : query);
   }
 }

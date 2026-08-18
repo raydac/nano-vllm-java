@@ -25,6 +25,7 @@ import com.igormaznitsa.nanollvm.layers.Attention;
 import com.igormaznitsa.nanollvm.layers.Linear;
 import com.igormaznitsa.nanollvm.layers.Norms.RMSNorm;
 import com.igormaznitsa.nanollvm.layers.Norms.RotaryEmbedding;
+import com.igormaznitsa.nanollvm.layers.Norms.RotaryEmbedding.Tables;
 import com.igormaznitsa.nanollvm.layers.VocabParallelEmbedding;
 import com.igormaznitsa.nanollvm.layers.VocabParallelEmbedding.ParallelLMHead;
 import com.igormaznitsa.nanollvm.llm.Config;
@@ -100,8 +101,8 @@ public record Gemma3ForCausalLM(Gemma3Model model, ParallelLMHead lmHead) implem
     int qSize,
     int kvSize
   ) {
-    Gemma3Attention(Config.HfConfig config, WeightBag weights, int layerIndex) {
-      this(assemble(config, weights, layerIndex));
+    Gemma3Attention(Config.HfConfig config, WeightBag weights, int layerIndex, Tables ropes) {
+      this(assemble(config, weights, layerIndex, ropes));
     }
 
     private Gemma3Attention(final Gemma3Attention assembled) {
@@ -115,7 +116,8 @@ public record Gemma3ForCausalLM(Gemma3Model model, ParallelLMHead lmHead) implem
     private static Gemma3Attention assemble(
       final Config.HfConfig config,
       final WeightBag weights,
-      final int layerIndex
+      final int layerIndex,
+      final Tables ropes
     ) {
       int numHeads = config.numAttentionHeads();
       int numKvHeads = config.numKeyValueHeads();
@@ -127,7 +129,7 @@ public record Gemma3ForCausalLM(Gemma3Model model, ParallelLMHead lmHead) implem
       return new Gemma3Attention(
         new Linear.Qkv(weights.require(p + QKV_PROJ_WEIGHT)),
         new Linear.Row(weights.require(p + O_PROJ_WEIGHT)),
-        RotaryEmbedding.get(headDim, headDim, config.maxPositionEmbeddings(), ropeBase),
+        ropes.get(headDim, headDim, config.maxPositionEmbeddings(), ropeBase),
         new Attention(numHeads, headDim, config.attentionScale(), numKvHeads, window, layerIndex),
         new RMSNorm(weights.require(p + Q_NORM_WEIGHT), config.rmsNormEps(), true),
         new RMSNorm(weights.require(p + K_NORM_WEIGHT), config.rmsNormEps(), true),
@@ -193,8 +195,8 @@ public record Gemma3ForCausalLM(Gemma3Model model, ParallelLMHead lmHead) implem
     RMSNorm preFeedforwardLayernorm,
     RMSNorm postFeedforwardLayernorm
   ) {
-    Gemma3DecoderLayer(Config.HfConfig config, WeightBag weights, int layerIndex) {
-      this(assemble(config, weights, layerIndex));
+    Gemma3DecoderLayer(Config.HfConfig config, WeightBag weights, int layerIndex, Tables ropes) {
+      this(assemble(config, weights, layerIndex, ropes));
     }
 
     private Gemma3DecoderLayer(final Gemma3DecoderLayer assembled) {
@@ -207,11 +209,12 @@ public record Gemma3ForCausalLM(Gemma3Model model, ParallelLMHead lmHead) implem
     private static Gemma3DecoderLayer assemble(
       final Config.HfConfig config,
       final WeightBag weights,
-      final int layerIndex
+      final int layerIndex,
+      final Tables ropes
     ) {
       String p = layer(layerIndex);
       return new Gemma3DecoderLayer(
-        new Gemma3Attention(config, weights, layerIndex),
+        new Gemma3Attention(config, weights, layerIndex, ropes),
         new Gemma3MLP(config, weights, layerIndex),
         new RMSNorm(weights.require(p + INPUT_LAYERNORM), config.rmsNormEps(), true),
         new RMSNorm(weights.require(p + POST_ATTENTION_LAYERNORM), config.rmsNormEps(), true),
@@ -260,9 +263,10 @@ public record Gemma3ForCausalLM(Gemma3Model model, ParallelLMHead lmHead) implem
     }
 
     private static Gemma3Model assemble(final Config.HfConfig config, final WeightBag weights) {
+      Tables ropes = new Tables();
       List<Gemma3DecoderLayer> built = new ArrayList<>(config.numHiddenLayers());
       for (int i = 0; i < config.numHiddenLayers(); i++) {
-        built.add(new Gemma3DecoderLayer(config, weights, i));
+        built.add(new Gemma3DecoderLayer(config, weights, i, ropes));
       }
       return new Gemma3Model(
         new VocabParallelEmbedding(weights.require(EMBED_TOKENS)),

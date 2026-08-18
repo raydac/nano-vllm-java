@@ -4,6 +4,11 @@
  * {@link RagFactory#withEmbeddings} for hybrid dense retrieval, then {@link RagSession} for
  * retrieval-augmented chat.
  *
+ * <p>Index chunk size is chosen at load via {@link RagLoadOptions}
+ * ({@link RagLoadOptions#defaults()} or {@link RagLoadOptions#forTinyModels()}, then
+ * {@link RagLoadOptions#withMaxChunkChars(int)} / {@link RagLoadOptions#withChunkOverlap(int)}).
+ * Prompt concatenation is a separate cap: {@link RagSession#maxContextChars(int)}.
+ *
  * <p>{@link PreparedRag} is immutable and safe to share across threads; {@link RagSession} is not
  * thread-safe (one conversation thread). Dense indexes keep a live embedding model reference.
  */

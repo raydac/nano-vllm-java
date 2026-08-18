@@ -16,7 +16,10 @@ import java.util.Set;
  * Loads and preprocesses documents into a shareable {@link PreparedRag}.
  * Analogous to {@link com.igormaznitsa.nanollvm.models.LlmModelFactory} for weights.
  *
- * <p>Preprocessing is document-side only: section titles, sentence passages, load-time
+ * <p>Chunk size and sentence packing live on {@link RagLoadOptions}: pass them to
+ * {@link #make(Path, RagLoadOptions)} or {@link Builder#options(RagLoadOptions)} before adding
+ * documents. Path-only {@link #make(Path)} uses {@link RagLoadOptions#defaults()} (500-char
+ * ceiling). Preprocessing is document-side only: section titles, sentence passages, load-time
  * preparsing (model vs search text, term frequencies), inverted BM25 — not user-reply rules.
  * Pass {@link LlmListeners#toSystem()} to print per-file extraction stats while loading.
  * Optional embedding models produce a {@link HybridRagIndex} via {@link #withEmbeddings}.
@@ -31,8 +34,11 @@ public final class RagFactory {
   }
 
   /**
-   * Indexes a file or folder with {@link RagLoadOptions#defaults()}.
+   * Indexes a file or folder with {@link RagLoadOptions#defaults()} (500-char packed sentences).
+   * Override with {@link #make(Path, RagLoadOptions)}.
    *
+   * @param folderOrFile file or directory to index; must exist
+   * @return immutable BM25 index
    * @throws ModelLoadException if the path yields no indexable chunks
    */
   public static PreparedRag make(final Path folderOrFile) {
@@ -40,8 +46,12 @@ public final class RagFactory {
   }
 
   /**
-   * Indexes a file or folder with explicit chunk/preprocess options.
+   * Indexes a file or folder with explicit {@link RagLoadOptions} (chunk ceiling, overlap,
+   * sentence packing).
    *
+   * @param folderOrFile file or directory to index; must exist
+   * @param options      load-time chunk/preprocess knobs; must not be {@code null}
+   * @return immutable BM25 index
    * @throws ModelLoadException if the path yields no indexable chunks
    */
   public static PreparedRag make(final Path folderOrFile, final RagLoadOptions options) {
@@ -51,6 +61,10 @@ public final class RagFactory {
   /**
    * Indexes a file or folder, emitting per-file load lines to {@code io}.
    *
+   * @param folderOrFile file or directory to index; must exist
+   * @param options      load-time chunk/preprocess knobs; must not be {@code null}
+   * @param io           progress sink; {@code null} is treated as silent
+   * @return immutable BM25 index
    * @throws ModelLoadException if the path yields no indexable chunks
    */
   public static PreparedRag make(
@@ -64,15 +78,22 @@ public final class RagFactory {
 
   /**
    * Like {@link #make(Path, RagLoadOptions, LlmListener)} but returns empty when the path exists
-   * yet yields no indexable text (empty folder, only README, blank files).
+   * yet yields no indexable text (empty folder, only README, blank files). Uses
+   * {@link RagLoadOptions#defaults()}.
+   *
+   * @param folderOrFile file or directory to index; must exist
+   * @return the index, or empty when nothing was indexable
    */
   public static Optional<PreparedRag> tryMake(final Path folderOrFile) {
     return tryMake(folderOrFile, RagLoadOptions.defaults(), LlmListeners.silent());
   }
 
   /**
-   * Like {@link #tryMake(Path, RagLoadOptions, LlmListener)} with default options and a silent
-   * listener.
+   * Like {@link #tryMake(Path, RagLoadOptions, LlmListener)} with a silent listener.
+   *
+   * @param folderOrFile file or directory to index; must exist
+   * @param options      load-time chunk/preprocess knobs; must not be {@code null}
+   * @return the index, or empty when nothing was indexable
    */
   public static Optional<PreparedRag> tryMake(final Path folderOrFile,
                                               final RagLoadOptions options) {
@@ -83,6 +104,10 @@ public final class RagFactory {
    * Like {@link #make(Path, RagLoadOptions, LlmListener)} but returns empty when the path exists
    * yet yields no indexable text (empty folder, only README, blank files).
    *
+   * @param folderOrFile file or directory to index; must exist
+   * @param options      load-time chunk/preprocess knobs; must not be {@code null}
+   * @param io           progress sink; {@code null} is treated as silent
+   * @return the index, or empty when nothing was indexable
    * @throws IllegalArgumentException if {@code folderOrFile} is not a file or directory
    */
   public static Optional<PreparedRag> tryMake(
@@ -119,6 +144,8 @@ public final class RagFactory {
   /**
    * Inline documents with {@link RagLoadOptions#defaults()}.
    *
+   * @param texts document bodies; each is chunked independently
+   * @return immutable BM25 index
    * @throws ModelLoadException if every text is blank
    */
   public static PreparedRag of(String... texts) {
@@ -126,8 +153,12 @@ public final class RagFactory {
   }
 
   /**
-   * Inline documents with explicit chunk/preprocess options.
+   * Inline documents with explicit {@link RagLoadOptions} (chunk ceiling, overlap, sentence
+   * packing).
    *
+   * @param options load-time chunk/preprocess knobs; must not be {@code null}
+   * @param texts   document bodies; each is chunked independently
+   * @return immutable BM25 index
    * @throws ModelLoadException if every text is blank
    */
   public static PreparedRag of(final RagLoadOptions options, String... texts) {
@@ -141,22 +172,32 @@ public final class RagFactory {
   }
 
   /**
-   * {@link #of(String...)} from a list.
+   * {@link #of(String...)} from a list ({@link RagLoadOptions#defaults()}).
+   *
+   * @param texts document bodies; each is chunked independently
+   * @return immutable BM25 index
+   * @throws ModelLoadException if every text is blank
    */
   public static PreparedRag of(final List<String> texts) {
     return of(RagLoadOptions.defaults(), texts.toArray(String[]::new));
   }
 
   /**
-   * Fluent corpus builder (inline text, files, folders, classpath resources).
+   * Fluent corpus builder (inline text, files, folders, classpath resources). Set
+   * {@link Builder#options(RagLoadOptions)} before adding documents to change chunk size.
+   *
+   * @return a new builder using {@link RagLoadOptions#defaults()}
    */
   public static Builder builder() {
     return new Builder();
   }
 
   /**
-   * Loads one absolute classpath resource into a BM25 index.
+   * Loads one absolute classpath resource into a BM25 index
+   * ({@link RagLoadOptions#defaults()}). Use {@link #builder()} to pass other options.
    *
+   * @param resourcePath absolute classpath path, no leading {@code /}
+   * @return immutable BM25 index
    * @since 1.1.0
    */
   public static PreparedRag makeResource(final String resourcePath) {
@@ -196,8 +237,12 @@ public final class RagFactory {
   }
 
   /**
-   * Lexical BM25 corpus plus dense embeddings from {@code embeddingModel}.
+   * Lexical BM25 corpus plus dense embeddings from {@code embeddingModel}
+   * ({@link RagLoadOptions#defaults()}).
    *
+   * @param folderOrFile   file or directory to index; must exist
+   * @param embeddingModel encoder kept open for query-time embed; must not be {@code null}
+   * @return hybrid index over the same passages
    * @since 1.1.0
    */
   public static HybridRagIndex make(final Path folderOrFile, final LlmModel embeddingModel) {
@@ -205,8 +250,12 @@ public final class RagFactory {
   }
 
   /**
-   * Lexical BM25 plus dense embeddings, with corpus load options.
+   * Lexical BM25 plus dense embeddings, with corpus {@link RagLoadOptions}.
    *
+   * @param folderOrFile    file or directory to index; must exist
+   * @param options         load-time chunk/preprocess knobs; must not be {@code null}
+   * @param embeddingModel  encoder kept open for query-time embed; must not be {@code null}
+   * @return hybrid index over the same passages
    * @since 1.1.0
    */
   public static HybridRagIndex make(
@@ -220,6 +269,11 @@ public final class RagFactory {
   /**
    * Lexical BM25 plus dense embeddings, with load options and a progress listener.
    *
+   * @param folderOrFile    file or directory to index; must exist
+   * @param options         load-time chunk/preprocess knobs; must not be {@code null}
+   * @param io              progress sink; {@code null} is treated as silent
+   * @param embeddingModel  encoder kept open for query-time embed; must not be {@code null}
+   * @return hybrid index over the same passages
    * @since 1.1.0
    */
   public static HybridRagIndex make(
@@ -235,6 +289,11 @@ public final class RagFactory {
    * Like {@link #tryMake(Path, RagLoadOptions, LlmListener)} then {@link #withEmbeddings} when
    * the corpus is non-empty.
    *
+   * @param folderOrFile    file or directory to index; must exist
+   * @param options         load-time chunk/preprocess knobs; must not be {@code null}
+   * @param io              progress sink; {@code null} is treated as silent
+   * @param embeddingModel  encoder kept open for query-time embed; must not be {@code null}
+   * @return the hybrid index, or empty when nothing was indexable
    * @since 1.1.0
    */
   public static Optional<HybridRagIndex> tryMake(
@@ -263,6 +322,10 @@ public final class RagFactory {
     return prepared;
   }
 
+  /**
+   * Fluent corpus assembler. {@link RagLoadOptions#defaults()} until {@link #options(RagLoadOptions)}
+   * or {@link #forTinyModels()}; those must run before adding documents.
+   */
   public static final class Builder {
 
     private RagLoadOptions options = RagLoadOptions.defaults();
@@ -275,7 +338,12 @@ public final class RagFactory {
     }
 
     /**
-     * Chunk/preprocess knobs. Must be set before adding documents.
+     * Replaces {@link RagLoadOptions#defaults()} for this builder. Call before adding documents.
+     * Use {@link RagLoadOptions#withMaxChunkChars(int)} to change the character ceiling.
+     *
+     * @param options must not be {@code null}
+     * @return {@code this}
+     * @throws IllegalStateException if documents were already added
      */
     public Builder options(final RagLoadOptions options) {
       if (this.hasContent) {
@@ -287,7 +355,11 @@ public final class RagFactory {
     }
 
     /**
-     * {@link RagLoadOptions#forTinyModels()} (shorter chunks for small context windows).
+     * {@link RagLoadOptions#forTinyModels()} (220-char one-sentence chunks). Must run before
+     * adding documents.
+     *
+     * @return {@code this}
+     * @throws IllegalStateException if documents were already added
      */
     public Builder forTinyModels() {
       return this.options(RagLoadOptions.forTinyModels());

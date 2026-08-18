@@ -23,6 +23,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.locks.ReentrantLock;
 
@@ -38,8 +39,9 @@ import java.util.concurrent.locks.ReentrantLock;
  *
  * <p>GGUF models keep quantized weights packed by default. Prefer unpacking at load with
  * {@link LlmModelFactory#make(Path, LlmListener, boolean)} ({@code true}) so float32 is built
- * directly from the mmap with no packed heap copy. {@link LLM.Builder#allowUnpackParameters()}
- * late-unpacks an already-packed causal model by installing a dense graph; packed tensors already
+ * directly from the file with no packed heap copy. {@link LLM.Builder#allowUnpackParameters()}
+ * late-unpacks an already-packed causal model by installing a dense graph. When no engine is
+ * bound yet, packed payloads are released as each tensor is materialized. Packed tensors already
  * bound by existing engines are left intact (peak RAM may briefly hold packed + dense).
  *
  * <p>Construct via {@link LlmModelFactory#make(Path)}. Closing an {@link LLM} does not unload
@@ -69,6 +71,17 @@ public final class LlmModel implements AutoCloseable {
 
   static {
     LlmModelAccess.setResolver(LlmModel::resolveNetwork);
+    LlmModelAccess.setEngineLease(new LlmModelAccess.EngineLease() {
+      @Override
+      public void acquire(final LlmModel model) {
+        model.liveEngines.incrementAndGet();
+      }
+
+      @Override
+      public void release(final LlmModel model) {
+        model.liveEngines.decrementAndGet();
+      }
+    });
   }
 
   private final Path path;
@@ -81,6 +94,7 @@ public final class LlmModel implements AutoCloseable {
   private final AtomicReference<EmbeddingEncoder> encoder;
   private final ReentrantLock unpackLock = new ReentrantLock();
   private final AtomicBoolean closed = new AtomicBoolean();
+  private final AtomicInteger liveEngines = new AtomicInteger();
 
   LlmModel(
     final Path path,
@@ -341,7 +355,8 @@ public final class LlmModel implements AutoCloseable {
   /**
    * Encodes {@code text} to a single L2-normalized embedding vector (embedding models only).
    * Tokenizes and wraps with {@code [CLS]} / {@code [SEP]} (or XLM-R {@code <s>} / {@code </s>})
-   * when present in the vocab.
+   * when present in the vocab. Safe to call concurrently: each encode allocates its own step
+   * context.
    *
    * @since 1.1.0
    */
@@ -352,6 +367,7 @@ public final class LlmModel implements AutoCloseable {
 
   /**
    * Encodes each text to an L2-normalized embedding vector (embedding models only).
+   * Safe to call concurrently.
    *
    * @since 1.1.0
    */
@@ -462,7 +478,9 @@ public final class LlmModel implements AutoCloseable {
 
       LlmListeners.info(io, null, "Unpacking GGUF parameters to float32…");
       long startedAtNanos = System.nanoTime();
-      WeightBag denseWeights = currentWeights.asDense();
+      WeightBag denseWeights = this.liveEngines.get() > 0
+        ? currentWeights.asDense()
+        : currentWeights.asDenseReleasingPacked();
       CausalLM built = CausalLMFactory.create(this.hfConfig, denseWeights);
       this.weights.set(denseWeights);
       this.network.set(built);

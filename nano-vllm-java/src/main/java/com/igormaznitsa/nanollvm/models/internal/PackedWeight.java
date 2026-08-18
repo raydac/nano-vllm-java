@@ -1,5 +1,6 @@
 package com.igormaznitsa.nanollvm.models.internal;
 
+import static com.igormaznitsa.nanollvm.internal.GgufDequant.TYPE_F32;
 import static java.util.Objects.requireNonNull;
 
 import com.igormaznitsa.nanollvm.internal.GgufDequant;
@@ -72,6 +73,10 @@ public final class PackedWeight {
 
   public int packedBytes() {
     return this.packed.length;
+  }
+
+  public boolean isFloat32() {
+    return this.ggmlType == TYPE_F32;
   }
 
   public boolean isReleased() {

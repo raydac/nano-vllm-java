@@ -27,6 +27,7 @@ import com.igormaznitsa.nanollvm.layers.Attention;
 import com.igormaznitsa.nanollvm.layers.Linear;
 import com.igormaznitsa.nanollvm.layers.Norms.RMSNorm;
 import com.igormaznitsa.nanollvm.layers.Norms.RotaryEmbedding;
+import com.igormaznitsa.nanollvm.layers.Norms.RotaryEmbedding.Tables;
 import com.igormaznitsa.nanollvm.layers.VocabParallelEmbedding;
 import com.igormaznitsa.nanollvm.layers.VocabParallelEmbedding.ParallelLMHead;
 import com.igormaznitsa.nanollvm.llm.Config;
@@ -157,8 +158,9 @@ public record Qwen3ForCausalLM(Qwen3Model model, ParallelLMHead lmHead) implemen
     int qSize,
     int kvSize
   ) implements Qwen3Attn {
-    Qwen3Attention(final Config.HfConfig config, final WeightBag weights, final int layerIndex) {
-      this(assemble(config, weights, layerIndex));
+    Qwen3Attention(final Config.HfConfig config, final WeightBag weights, final int layerIndex,
+                   final Tables ropes) {
+      this(assemble(config, weights, layerIndex, ropes));
     }
 
     private Qwen3Attention(final Qwen3Attention assembled) {
@@ -172,7 +174,8 @@ public record Qwen3ForCausalLM(Qwen3Model model, ParallelLMHead lmHead) implemen
     private static Qwen3Attention assemble(
       final Config.HfConfig config,
       final WeightBag weights,
-      final int layerIndex
+      final int layerIndex,
+      final Tables ropes
     ) {
       int numHeads = config.numAttentionHeads();
       int numKvHeads = config.numKeyValueHeads();
@@ -189,7 +192,7 @@ public record Qwen3ForCausalLM(Qwen3Model model, ParallelLMHead lmHead) implemen
       return new Qwen3Attention(
         qkvProj,
         new Linear.Row(weights.require(p + O_PROJ_WEIGHT)),
-        RotaryEmbedding.get(headDim, headDim, config.maxPositionEmbeddings(), ropeTheta(config)),
+        ropes.get(headDim, headDim, config.maxPositionEmbeddings(), ropeTheta(config)),
         new Attention(numHeads, headDim, scaling, numKvHeads, layerIndex),
         qkvBias ? null : new RMSNorm(weights.require(p + Q_NORM_WEIGHT), config.rmsNormEps()),
         qkvBias ? null : new RMSNorm(weights.require(p + K_NORM_WEIGHT), config.rmsNormEps()),
@@ -238,8 +241,8 @@ public record Qwen3ForCausalLM(Qwen3Model model, ParallelLMHead lmHead) implemen
     int headDim
   ) implements Qwen3Attn {
     Qwen3GgufAttention(final Config.HfConfig config, final WeightBag weights,
-                       final int layerIndex) {
-      this(assemble(config, weights, layerIndex));
+                       final int layerIndex, final Tables ropes) {
+      this(assemble(config, weights, layerIndex, ropes));
     }
 
     private Qwen3GgufAttention(final Qwen3GgufAttention assembled) {
@@ -252,7 +255,8 @@ public record Qwen3ForCausalLM(Qwen3Model model, ParallelLMHead lmHead) implemen
     private static Qwen3GgufAttention assemble(
       final Config.HfConfig config,
       final WeightBag weights,
-      final int layerIndex
+      final int layerIndex,
+      final Tables ropes
     ) {
       int numHeads = config.numAttentionHeads();
       int numKvHeads = config.numKeyValueHeads();
@@ -265,7 +269,7 @@ public record Qwen3ForCausalLM(Qwen3Model model, ParallelLMHead lmHead) implemen
         linearRow(weights, blk + "attn_k.weight"),
         linearRow(weights, blk + "attn_v.weight"),
         linearRow(weights, blk + "attn_output.weight"),
-        RotaryEmbedding.get(headDim, headDim, config.maxPositionEmbeddings(), ropeTheta(config)),
+        ropes.get(headDim, headDim, config.maxPositionEmbeddings(), ropeTheta(config)),
         new Attention(numHeads, headDim, scaling, numKvHeads, layerIndex),
         qkvBias ? null :
           new RMSNorm(weights.require(blk + "attn_q_norm.weight"), config.rmsNormEps()),
@@ -367,8 +371,9 @@ public record Qwen3ForCausalLM(Qwen3Model model, ParallelLMHead lmHead) implemen
     RMSNorm inputLayernorm,
     RMSNorm postAttentionLayernorm
   ) {
-    Qwen3DecoderLayer(final Config.HfConfig config, final WeightBag weights, final int layerIndex) {
-      this(assemble(config, weights, layerIndex));
+    Qwen3DecoderLayer(final Config.HfConfig config, final WeightBag weights, final int layerIndex,
+                      final Tables ropes) {
+      this(assemble(config, weights, layerIndex, ropes));
     }
 
     private Qwen3DecoderLayer(final Qwen3DecoderLayer assembled) {
@@ -380,19 +385,20 @@ public record Qwen3ForCausalLM(Qwen3Model model, ParallelLMHead lmHead) implemen
     private static Qwen3DecoderLayer assemble(
       final Config.HfConfig config,
       final WeightBag weights,
-      final int layerIndex
+      final int layerIndex,
+      final Tables ropes
     ) {
       if (isGgufLayout(weights)) {
         String blk = ggufBlk(layerIndex);
         return new Qwen3DecoderLayer(
-          new Qwen3GgufAttention(config, weights, layerIndex),
+          new Qwen3GgufAttention(config, weights, layerIndex, ropes),
           new Qwen3GgufMLP(config, weights, layerIndex),
           new RMSNorm(weights.require(blk + "attn_norm.weight"), config.rmsNormEps()),
           new RMSNorm(weights.require(blk + "ffn_norm.weight"), config.rmsNormEps()));
       }
       String p = layer(layerIndex);
       return new Qwen3DecoderLayer(
-        new Qwen3Attention(config, weights, layerIndex),
+        new Qwen3Attention(config, weights, layerIndex, ropes),
         new Qwen3MLP(config, weights, layerIndex),
         new RMSNorm(weights.require(p + INPUT_LAYERNORM), config.rmsNormEps()),
         new RMSNorm(weights.require(p + POST_ATTENTION_LAYERNORM), config.rmsNormEps()));
@@ -435,9 +441,10 @@ public record Qwen3ForCausalLM(Qwen3Model model, ParallelLMHead lmHead) implemen
     }
 
     private static Qwen3Model assemble(final Config.HfConfig config, final WeightBag weights) {
+      Tables ropes = new Tables();
       List<Qwen3DecoderLayer> built = new ArrayList<>(config.numHiddenLayers());
       for (int i = 0; i < config.numHiddenLayers(); i++) {
-        built.add(new Qwen3DecoderLayer(config, weights, i));
+        built.add(new Qwen3DecoderLayer(config, weights, i, ropes));
       }
       if (isGgufLayout(weights)) {
         return new Qwen3Model(

@@ -19,7 +19,8 @@ import java.util.regex.Pattern;
  * Immutable, shareable RAG corpus: preparsed passages + inverted BM25 index.
  * Load once via {@link RagFactory}; reuse across many LLM sessions.
  *
- * <p>Safe to share across threads after construction. {@link #retrieve} returns an unmodifiable
+ * <p>Chunk size is fixed at load from {@link RagLoadOptions}; inspect {@link #options()}.
+ * Safe to share across threads after construction. {@link #retrieve} returns an unmodifiable
  * list.
  */
 public final class PreparedRag implements RagIndex {
@@ -177,7 +178,11 @@ public final class PreparedRag implements RagIndex {
   }
 
   /**
-   * Chunk/preprocess knobs used when this index was built.
+   * Load-time chunk/preprocess knobs used when this index was built
+   * ({@link RagLoadOptions#maxChunkChars()} ceiling, overlap, sentence packing). Changing them
+   * later does not resize existing passages — rebuild with {@link RagFactory}.
+   *
+   * @return the options snapshot; never {@code null}
    */
   public RagLoadOptions options() {
     return this.options;

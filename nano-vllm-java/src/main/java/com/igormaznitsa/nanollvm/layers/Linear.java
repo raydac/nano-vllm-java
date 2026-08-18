@@ -29,7 +29,22 @@ public class Linear {
   }
 
   public Linear(final PackedWeight weight, final Tensor bias) {
-    this(LinearKernel.of(requireNonNull(weight, "weight")), bias, 0f, 0f, null, weight);
+    this(denseOrPacked(requireNonNull(weight, "weight"), bias));
+  }
+
+  private Linear(final Linear assembled) {
+    this(
+      assembled.kernel, assembled.bias, assembled.inputActivationScale,
+      assembled.outputActivationScale, assembled.weight, assembled.packedWeight);
+  }
+
+  private static Linear denseOrPacked(final PackedWeight weight, final Tensor bias) {
+    if (weight.isFloat32()) {
+      Tensor dense = weight.materialize();
+      weight.releasePackedBytes();
+      return new Linear(LinearKernel.of(dense), bias, 0f, 0f, dense, null);
+    }
+    return new Linear(LinearKernel.of(weight), bias, 0f, 0f, null, weight);
   }
 
   public Linear(final PackedWeight weight) {

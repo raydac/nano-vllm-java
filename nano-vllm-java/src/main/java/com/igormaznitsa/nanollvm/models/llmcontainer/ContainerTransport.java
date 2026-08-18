@@ -20,7 +20,7 @@ public sealed interface ContainerTransport extends AutoCloseable
   ContainerCatalog catalog();
 
   /**
-   * Releases mmap / file handles. Idempotent.
+   * Drops payload buffers and leftover file handles. Idempotent.
    *
    * @since 1.1.0
    */

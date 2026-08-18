@@ -153,6 +153,8 @@ public final class RagSession {
 
   /**
    * Cap on concatenated passage text in the model-facing user turn. Default {@code 3500}.
+   * Independent of the per-chunk ceiling on {@link RagLoadOptions#maxChunkChars()} (set that at
+   * index load).
    *
    * @param maxContextChars must be {@code >= 64}
    * @return {@code this} for fluent configuration

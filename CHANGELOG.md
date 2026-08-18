@@ -19,6 +19,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   WordLevel, and character models are recognized from `tokenizer.json` `model.type`.
   `Tokenizer.fromSentencePiece` builds a tokenizer from protobuf bytes.
 
+### Fixed
+- Closing a model, engine, or weight reader now drops file buffers, KV pages, rotary tables, and
+  the last shared matmul pool instead of pinning them until process exit. GGUF and safetensors files
+  ≤ 2 GiB are copied into heap so `close()` can reclaim them; shards larger than that still use a
+  positioned file channel. Late unpack releases packed bytes when no other engine is using the model.
+
+### Changed
+- Dense and hybrid RAG query embedding is concurrent. Each `LlmModel.embed` uses a fresh step
+  context, so `DenseRagIndex` no longer serializes retrieves on the index instance.
+
 ## [1.1.0] — 2026-08-16
 
 Public release of **nano-vllm-java** `1.1.0` (Maven coordinates `com.igormaznitsa:nano-vllm-java:1.1.0`).

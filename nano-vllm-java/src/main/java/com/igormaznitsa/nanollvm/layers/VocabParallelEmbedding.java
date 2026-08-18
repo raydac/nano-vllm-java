@@ -26,9 +26,28 @@ public class VocabParallelEmbedding {
   }
 
   public VocabParallelEmbedding(final PackedWeight weight) {
+    this(denseOrPacked(requireNonNull(weight, "weight")));
+  }
+
+  private VocabParallelEmbedding(final VocabParallelEmbedding assembled) {
+    this.weight = assembled.weight;
+    this.packedWeight = assembled.packedWeight;
+    this.embeddingKernel = assembled.embeddingKernel;
+  }
+
+  private VocabParallelEmbedding(final EmbeddingKernel kernel, final PackedWeight packed) {
     this.weight = null;
-    this.packedWeight = requireNonNull(weight, "weight");
-    this.embeddingKernel = EmbeddingKernel.of(weight);
+    this.packedWeight = packed;
+    this.embeddingKernel = requireNonNull(kernel, "kernel");
+  }
+
+  private static VocabParallelEmbedding denseOrPacked(final PackedWeight weight) {
+    if (weight.isFloat32()) {
+      Tensor dense = weight.materialize();
+      weight.releasePackedBytes();
+      return new VocabParallelEmbedding(dense);
+    }
+    return new VocabParallelEmbedding(EmbeddingKernel.of(weight), weight);
   }
 
   public VocabParallelEmbedding(final EmbeddingKernel kernel) {
@@ -84,8 +103,10 @@ public class VocabParallelEmbedding {
     }
 
     public ParallelLMHead(final PackedWeight weight) {
-      super(weight);
-      this.linearKernel = LinearKernel.of(weight);
+      super(requireNonNull(weight, "weight"));
+      this.linearKernel = this.weight != null
+        ? LinearKernel.of(this.weight)
+        : LinearKernel.of(weight);
     }
 
     public ParallelLMHead(final EmbeddingKernel embedding, final LinearKernel linear) {

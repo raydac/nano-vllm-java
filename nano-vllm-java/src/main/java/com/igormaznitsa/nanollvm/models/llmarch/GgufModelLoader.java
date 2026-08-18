@@ -18,7 +18,7 @@ import java.nio.file.Path;
  * Orchestrates GGUF load: {@link GgufTransport} reads the container, {@link ModelBinding} selects
  * an {@link ArchitectureProcessor} (Qwen3 / LFM2 chat, BERT embeddings), then that processor fills
  * the weight bag. Default keeps large matrices GGML-packed;
- * {@code allowUnpackParameters} dequantizes each tensor to float32 from the mmap during load.
+ * {@code allowUnpackParameters} dequantizes each tensor to float32 from the file during load.
  *
  * @since 1.1.0
  */
@@ -40,7 +40,7 @@ public final class GgufModelLoader {
   }
 
   /**
-   * Loads a GGUF file, optionally unpacking packed tensors to float32 during mmap.
+   * Loads a GGUF file, optionally unpacking packed tensors to float32 during load.
    *
    * @param ggufPath              path to a {@code .gguf} file
    * @param io                    load progress; {@code null} is treated as silent

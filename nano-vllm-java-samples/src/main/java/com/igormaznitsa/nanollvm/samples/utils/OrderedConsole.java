@@ -12,6 +12,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.locks.ReentrantLock;
 
 /**
  * Demo console with two ordered sinks: stdout for the visible answer / prompts / turn stats, and an
@@ -24,7 +25,7 @@ public final class OrderedConsole {
   private final ConcurrentLinkedQueue<Chunk> outQueue = new ConcurrentLinkedQueue<>();
   private final ConcurrentLinkedQueue<Chunk> infoQueue = new ConcurrentLinkedQueue<>();
   private final AtomicLong seq = new AtomicLong();
-  private final Object drainLock = new Object();
+  private final ReentrantLock drainLock = new ReentrantLock();
   private final PrintStream outStream;
   private final PrintStream infoStream;
 
@@ -88,9 +89,12 @@ public final class OrderedConsole {
   }
 
   private void drain() {
-    synchronized (this.drainLock) {
+    this.drainLock.lock();
+    try {
       this.drainQueue(this.infoQueue, this.info);
       this.drainQueue(this.outQueue, this.out);
+    } finally {
+      this.drainLock.unlock();
     }
   }
 
@@ -115,6 +119,7 @@ public final class OrderedConsole {
   private final class EnqueueStream extends OutputStream {
     private final boolean toInfo;
     private final ByteArrayOutputStream buffer = new ByteArrayOutputStream();
+    private final ReentrantLock bufferLock = new ReentrantLock();
 
     EnqueueStream(final boolean toInfo) {
       this.toInfo = toInfo;
@@ -122,32 +127,42 @@ public final class OrderedConsole {
 
     @Override
     public void write(final int b) {
-      synchronized (this) {
+      this.bufferLock.lock();
+      try {
         this.buffer.write(b);
+      } finally {
+        this.bufferLock.unlock();
       }
     }
 
     @Override
     public void write(final byte[] bytes, final int off, final int len) {
-      synchronized (this) {
+      this.bufferLock.lock();
+      try {
         this.buffer.write(bytes, off, len);
+      } finally {
+        this.bufferLock.unlock();
       }
     }
 
     @Override
     public void flush() {
-      final String text;
-      synchronized (this) {
+      String text;
+      this.bufferLock.lock();
+      try {
         if (this.buffer.size() == 0) {
           return;
         }
         text = this.buffer.toString(StandardCharsets.UTF_8);
         this.buffer.reset();
+      } finally {
+        this.bufferLock.unlock();
       }
-      ConcurrentLinkedQueue<Chunk> queue =
-        this.toInfo ? OrderedConsole.this.infoQueue : OrderedConsole.this.outQueue;
-      OrderedConsole.this.enqueue(queue, text);
-      OrderedConsole.this.drain();
+      if (this.toInfo) {
+        printInfo(text);
+      } else {
+        print(text);
+      }
     }
   }
 }

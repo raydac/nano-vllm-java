@@ -4,7 +4,6 @@ import static java.util.Objects.requireNonNull;
 
 import com.igormaznitsa.nanollvm.tensor.Ops;
 import com.igormaznitsa.nanollvm.tensor.Tensor;
-
 import java.util.HashMap;
 import java.util.Map;
 
@@ -82,8 +81,6 @@ public final class Norms {
   }
 
   public static final class RotaryEmbedding {
-    private static final Map<String, RotaryEmbedding> CACHE = new HashMap<>();
-
     private final int headSize;
     private final Tensor cosSinCache;
 
@@ -123,11 +120,13 @@ public final class Norms {
       return invFreq;
     }
 
-    public static RotaryEmbedding get(final int headSize, final int rotaryDim,
-                                      final int maxPosition, final float base) {
-      String key = headSize + ":" + rotaryDim + ":" + maxPosition + ":" + base;
-      return CACHE.computeIfAbsent(key,
-        k -> new RotaryEmbedding(headSize, rotaryDim, maxPosition, base));
+    public static RotaryEmbedding of(
+      final int headSize,
+      final int rotaryDim,
+      final int maxPosition,
+      final float base
+    ) {
+      return new RotaryEmbedding(headSize, rotaryDim, maxPosition, base);
     }
 
     public static RotaryEmbedding proportional(
@@ -136,16 +135,39 @@ public final class Norms {
       final float base,
       final float partialRotaryFactor
     ) {
-      String key = "p:" + headSize + ":" + maxPosition + ":" + base + ":" + partialRotaryFactor;
-      return CACHE.computeIfAbsent(key, k -> {
-        int half = headSize / 2;
-        int ropeAngles = (int) (partialRotaryFactor * headSize / 2.0);
-        float[] invFreq = new float[half];
-        for (int i = 0; i < ropeAngles; i++) {
-          invFreq[i] = (float) (1.0 / Math.pow(base, (2.0 * i) / headSize));
-        }
-        return new RotaryEmbedding(headSize, maxPosition, invFreq);
-      });
+      int half = headSize / 2;
+      int ropeAngles = (int) (partialRotaryFactor * headSize / 2.0);
+      float[] invFreq = new float[half];
+      for (int i = 0; i < ropeAngles; i++) {
+        invFreq[i] = (float) (1.0 / Math.pow(base, (2.0 * i) / headSize));
+      }
+      return new RotaryEmbedding(headSize, maxPosition, invFreq);
+    }
+
+    public static final class Tables {
+      private final Map<String, RotaryEmbedding> byKey = new HashMap<>();
+
+      public RotaryEmbedding get(
+        final int headSize,
+        final int rotaryDim,
+        final int maxPosition,
+        final float base
+      ) {
+        return this.byKey.computeIfAbsent(
+          headSize + ":" + rotaryDim + ":" + maxPosition + ":" + base,
+          k -> RotaryEmbedding.of(headSize, rotaryDim, maxPosition, base));
+      }
+
+      public RotaryEmbedding proportional(
+        final int headSize,
+        final int maxPosition,
+        final float base,
+        final float partialRotaryFactor
+      ) {
+        return this.byKey.computeIfAbsent(
+          "p:" + headSize + ":" + maxPosition + ":" + base + ":" + partialRotaryFactor,
+          k -> RotaryEmbedding.proportional(headSize, maxPosition, base, partialRotaryFactor));
+      }
     }
 
     public Tensor[] forward(final Tensor positions, final Tensor query, final Tensor key) {

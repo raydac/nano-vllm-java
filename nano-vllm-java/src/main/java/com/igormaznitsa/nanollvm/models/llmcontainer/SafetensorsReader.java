@@ -18,31 +18,48 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Memory-mapped Hugging Face {@code .safetensors} reader: JSON header plus float payloads.
+ * Hugging Face {@code .safetensors} reader: JSON header plus float payloads. Files ≤ 2 GiB are
+ * copied into a heap buffer so {@link #close()} can drop them; larger shards keep a positioned
+ * {@link FileChannel}.
  *
  * @since 1.1.0
  */
 public final class SafetensorsReader implements AutoCloseable {
 
+  private static final ByteBuffer CLOSED_MAP = ByteBuffer.allocate(0).asReadOnlyBuffer();
+
   private final String label;
-  private final FileChannel channel;
-  private final ByteBuffer map;
+  private FileChannel channel;
+  private ByteBuffer map;
   private final Map<String, TensorInfo> tensors;
   private final long dataOffset;
+  private boolean closed;
 
   public SafetensorsReader(final Path path) throws IOException {
     requireNonNull(path, "path");
     this.label = path.toString();
     ResourceLimits limits = ResourceLimits.current();
-    this.channel = FileChannel.open(path);
-    long size = this.channel.size();
-    this.map = size <= Integer.MAX_VALUE
-      ? this.channel.map(FileChannel.MapMode.READ_ONLY, 0, size).order(ByteOrder.LITTLE_ENDIAN)
-      : null;
     this.tensors = new LinkedHashMap<>();
-    this.dataOffset = this.map != null
-      ? parseHeader(this.map, size, limits, this.label, this.tensors)
-      : parseHeader(this.channel, size, limits, this.label, this.tensors);
+    FileChannel opened = FileChannel.open(path);
+    try {
+      long size = opened.size();
+      if (size <= Integer.MAX_VALUE) {
+        this.map = ChannelBytes.readHeap(opened, size);
+        opened.close();
+        opened = null;
+        this.channel = null;
+        this.dataOffset = parseHeader(this.map, size, limits, this.label, this.tensors);
+      } else {
+        this.map = null;
+        this.channel = opened;
+        opened = null;
+        this.dataOffset = parseHeader(this.channel, size, limits, this.label, this.tensors);
+      }
+    } finally {
+      if (opened != null) {
+        opened.close();
+      }
+    }
   }
 
   private SafetensorsReader(final String label, final ByteBuffer data) throws IOException {
@@ -85,11 +102,11 @@ public final class SafetensorsReader implements AutoCloseable {
       throw new IOException("safetensors header truncated: " + label);
     }
     ByteBuffer prefix = ByteBuffer.allocate(8).order(ByteOrder.LITTLE_ENDIAN);
-    readFully(channel, 0, prefix);
+    ChannelBytes.readFully(channel, 0, prefix);
     long headerLen = Integer.toUnsignedLong(prefix.getInt(0));
     requireHeaderFits(headerLen, size, limits, label);
     ByteBuffer header = ByteBuffer.allocate((int) headerLen);
-    readFully(channel, 8, header);
+    ChannelBytes.readFully(channel, 8, header);
     return fillTensors(header.array(), tensors);
   }
 
@@ -132,21 +149,6 @@ public final class SafetensorsReader implements AutoCloseable {
       tensors.put(e.getKey(), new TensorInfo(dtype, shape, start, end));
     }
     return dataOffset;
-  }
-
-  private static void readFully(
-    final FileChannel channel,
-    final long position,
-    final ByteBuffer dest
-  ) throws IOException {
-    long at = position;
-    while (dest.hasRemaining()) {
-      int n = channel.read(dest, at);
-      if (n < 0) {
-        throw new IOException("unexpected EOF at offset " + at);
-      }
-      at += n;
-    }
   }
 
   public static SafetensorsReader open(final Path path) throws IOException {
@@ -202,6 +204,7 @@ public final class SafetensorsReader implements AutoCloseable {
   }
 
   public Tensor getTensor(final String name) {
+    this.requireOpen();
     TensorInfo info = this.requireInfo(name);
     int numel = 1;
     for (int d : info.shape) {
@@ -247,6 +250,7 @@ public final class SafetensorsReader implements AutoCloseable {
   }
 
   public byte[] getRaw(final String name) {
+    this.requireOpen();
     TensorInfo info = this.requireInfo(name);
     long length = info.end - info.start;
     if (length < 0 || length > Integer.MAX_VALUE) {
@@ -264,7 +268,7 @@ public final class SafetensorsReader implements AutoCloseable {
     int len = (int) length;
     if (this.map != null) {
       if (absoluteOffset > Integer.MAX_VALUE) {
-        throw new IllegalArgumentException("tensor offset exceeds mmap range in " + this.label);
+        throw new IllegalArgumentException("tensor offset exceeds payload range in " + this.label);
       }
       int at = (int) absoluteOffset;
       ByteBuffer buf = this.map.duplicate().order(ByteOrder.LITTLE_ENDIAN);
@@ -274,7 +278,7 @@ public final class SafetensorsReader implements AutoCloseable {
     }
     ByteBuffer buf = ByteBuffer.allocate(len).order(ByteOrder.LITTLE_ENDIAN);
     try {
-      readFully(this.channel, absoluteOffset, buf);
+      ChannelBytes.readFully(this.channel, absoluteOffset, buf);
     } catch (IOException e) {
       throw new UncheckedIOException("failed to read tensor slice from " + this.label, e);
     }
@@ -292,8 +296,18 @@ public final class SafetensorsReader implements AutoCloseable {
 
   @Override
   public void close() throws IOException {
-    if (this.channel != null) {
-      this.channel.close();
+    this.closed = true;
+    this.map = CLOSED_MAP;
+    FileChannel opened = this.channel;
+    this.channel = null;
+    if (opened != null) {
+      opened.close();
+    }
+  }
+
+  private void requireOpen() {
+    if (this.closed) {
+      throw new IllegalStateException("SafetensorsReader is closed: " + this.label);
     }
   }
 
