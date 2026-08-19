@@ -182,11 +182,13 @@ mvn -pl nano-vllm-java-samples -q exec:java \
 
 Load-time **RagTuner** over a bundled EPUB (Karel Čapek, *R.U.R.*): filter `.epub`, extract plain
 text with [epub4j](https://github.com/documentnode/epub4j) (Maven Central fork of
-[epublib](https://github.com/psiegman/epublib)), then ask two questions from the play (Gemma3-270M):
+[epublib](https://github.com/psiegman/epublib)), embed chunks with gte-small, then ask the play
+(Qwen3-0.6B chat; download the encoder with `./models/download-gte-small-gguf.sh`):
 
 ```bash
 mvn -pl nano-vllm-java-samples -q exec:java \
   -Dexec.mainClass=com.igormaznitsa.nanollvm.samples.RagTunerHelloWorld
+# optional: … -Dexec.args="models/Qwen3-0.6B models/gte-small.Q2_K.gguf"
 ```
 
 More API samples (streaming, RAG, GGUF, advisors) are in [Library quick start](#library-quick-start).
@@ -765,7 +767,7 @@ Load-time **tuners** (**since 1.1.1**): `builder().addProcessor(RagTuner…)` ca
 (`isRagResourceAllowed`), replace UTF-8/PDF extraction (`extractRagText` → empty Optional keeps
 the default loader), and rewrite text (`preprocessRagText`) before sentence packing. Folder walks
 still use `folderExtensions`; add extra suffixes for custom formats. Linear demo:
-`samples.RagTunerHelloWorld` (bundled *R.U.R.* EPUB).
+`samples.RagTunerHelloWorld` (bundled *R.U.R.* EPUB, dense embeddings).
 
 **Dense / hybrid** (**since 1.1.0**) need an embedding `LlmModel` (for example gte-small GGUF):
 

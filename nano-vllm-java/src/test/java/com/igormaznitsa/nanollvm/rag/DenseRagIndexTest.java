@@ -9,6 +9,8 @@ import com.igormaznitsa.nanollvm.models.LlmModelFactory;
 import com.igormaznitsa.nanollvm.testsupport.OptionalModelAssumptions;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.concurrent.Executor;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
 
 class DenseRagIndexTest {
@@ -40,6 +42,43 @@ class DenseRagIndexTest {
         IllegalArgumentException.class,
         () -> RagFactory.withEmbeddings(lexical, causal));
       assertTrue(ex.getMessage().contains("embedding encoder"));
+    }
+  }
+
+  @Test
+  void ofReportsPassageProgressWhenGtePresent() {
+    Path gte = OptionalModelAssumptions.requireGteSmallGguf();
+    PreparedRag lexical = RagFactory.builder()
+      .add("paris", "Paris is the capital of France.")
+      .add("nile", "The Nile is a long river in Africa.")
+      .add("tokyo", "Tokyo is the capital of Japan.")
+      .build();
+    AtomicInteger completed = new AtomicInteger();
+
+    try (LlmModel embed = LlmModelFactory.make(gte)) {
+      DenseRagIndex index = DenseRagIndex.of(lexical, embed, completed::set);
+      assertEquals(lexical.size(), index.size());
+      assertEquals(lexical.size(), completed.get());
+    }
+  }
+
+  @Test
+  void ofSubmitsPassagesToCallerExecutorWhenGtePresent() {
+    Path gte = OptionalModelAssumptions.requireGteSmallGguf();
+    PreparedRag lexical = RagFactory.builder()
+      .add("paris", "Paris is the capital of France.")
+      .add("nile", "The Nile is a long river in Africa.")
+      .build();
+    AtomicInteger submitted = new AtomicInteger();
+    Executor executor = command -> {
+      submitted.incrementAndGet();
+      command.run();
+    };
+
+    try (LlmModel embed = LlmModelFactory.make(gte)) {
+      DenseRagIndex index = DenseRagIndex.of(lexical, embed, executor);
+      assertEquals(lexical.size(), index.size());
+      assertEquals(lexical.size(), submitted.get());
     }
   }
 

@@ -11,6 +11,7 @@ import java.nio.file.Path;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.Executor;
 
 /**
  * Loads and preprocesses documents into a shareable {@link PreparedRag}.
@@ -226,8 +227,16 @@ public final class RagFactory {
   }
 
   /**
-   * Hybrid BM25 + dense retrieval over an existing lexical index.
+   * Hybrid BM25 + dense retrieval over an existing lexical index. Dense passage embeds run on
+   * the calling thread.
    *
+   * @param lexical         BM25 corpus whose chunks are embedded; must not be {@code null}
+   * @param embeddingModel  embedding encoder kept open for query-time embed; must not be {@code null}
+   * @return hybrid index over the same passages
+   * @throws NullPointerException     if either argument is {@code null}
+   * @throws IllegalArgumentException if {@code lexical} has no chunks or {@code embeddingModel} is
+   *                                  not an embedding encoder
+   * @throws IllegalStateException    if {@code embeddingModel} is closed
    * @since 1.1.0
    */
   public static HybridRagIndex withEmbeddings(
@@ -237,6 +246,30 @@ public final class RagFactory {
     requireNonNull(lexical, "lexical");
     requireNonNull(embeddingModel, "embeddingModel");
     return HybridRagIndex.of(lexical, embeddingModel);
+  }
+
+  /**
+   * {@link #withEmbeddings(PreparedRag, LlmModel)} with dense passage embeds submitted on
+   * {@code executor}. The caller owns the executor; it is not shut down here.
+   *
+   * @param lexical        BM25 corpus whose chunks are embedded; must not be {@code null}
+   * @param embeddingModel embedding encoder kept open for query-time embed; must not be {@code null}
+   * @param executor       runs each dense passage embed; must not be {@code null}
+   * @return hybrid index over the same passages
+   * @throws NullPointerException     if any argument is {@code null}
+   * @throws IllegalArgumentException if {@code lexical} has no chunks or {@code embeddingModel} is
+   *                                  not an embedding encoder
+   * @throws IllegalStateException    if {@code embeddingModel} is closed, or embedding is interrupted
+   * @since 1.1.1
+   */
+  public static HybridRagIndex withEmbeddings(
+    final PreparedRag lexical,
+    final LlmModel embeddingModel,
+    final Executor executor
+  ) {
+    requireNonNull(lexical, "lexical");
+    requireNonNull(embeddingModel, "embeddingModel");
+    return HybridRagIndex.of(lexical, embeddingModel, requireNonNull(executor, "executor"));
   }
 
   /**
@@ -576,6 +609,24 @@ public final class RagFactory {
      */
     public HybridRagIndex build(final LlmModel embeddingModel) {
       return withEmbeddings(this.build(), embeddingModel);
+    }
+
+    /**
+     * {@link #build(LlmModel)} with dense passage embeds submitted on {@code executor}.
+     * The caller owns the executor; it is not shut down here.
+     *
+     * @param embeddingModel encoder kept open for query-time embed; must not be {@code null}
+     * @param executor       runs each dense passage embed; must not be {@code null}
+     * @return hybrid index over the same passages
+     * @throws NullPointerException     if either argument is {@code null}
+     * @throws IllegalArgumentException if the corpus is empty or {@code embeddingModel} is not an
+     *                                  embedding encoder
+     * @throws IllegalStateException    if {@code embeddingModel} is closed, or embedding is interrupted
+     * @throws ModelLoadException       if no non-blank chunks were added
+     * @since 1.1.1
+     */
+    public HybridRagIndex build(final LlmModel embeddingModel, final Executor executor) {
+      return withEmbeddings(this.build(), embeddingModel, executor);
     }
 
     /**

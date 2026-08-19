@@ -21,8 +21,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Load-time RAG tuners on `RagFactory.Builder.addProcessor`: skip files, supply custom document
   text, or rewrite extracted strings before chunking. Several tuners run in order.
-  Sample `RagTunerHelloWorld` indexes a bundled Project Gutenberg EPUB of Karel Čapek's *R.U.R.*
-  and asks two questions from that play.
+  Sample `RagTunerHelloWorld` extracts a bundled Project Gutenberg EPUB of Karel Čapek's *R.U.R.*,
+  unpacks gte-small for faster CPU embedding, prints per-passage index progress, and asks questions
+  from that play. `DenseRagIndex.of` / `HybridRagIndex.of` accept a per-passage embed callback
+  and an optional caller `Executor` for parallel indexing (sequential when omitted).
 
 ### Fixed
 - Closing a model, engine, or weight reader now drops file buffers, KV pages, rotary tables, and
@@ -31,8 +33,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   positioned file channel. Late unpack releases packed bytes when no other engine is using the model.
 
 ### Changed
-- Dense and hybrid RAG query embedding is concurrent. Each `LlmModel.embed` uses a fresh step
-  context, so `DenseRagIndex` no longer serializes retrieves on the index instance.
+- Dense RAG query embedding stays concurrent (each `LlmModel.embed` uses a fresh step context).
+  Index-time passage embedding is sequential unless the caller supplies an `Executor`.
 
 ## [1.1.0] — 2026-08-16
 

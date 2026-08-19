@@ -7,6 +7,8 @@ import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.Executor;
+import java.util.function.IntConsumer;
 
 /**
  * Hybrid retrieval: BM25 ({@link PreparedRag}) plus dense embeddings ({@link DenseRagIndex}),
@@ -33,6 +35,11 @@ public final class HybridRagIndex implements RagIndex {
   /**
    * Wraps an existing BM25 index and a dense index over the same passages.
    *
+   * @param lexical BM25 half; must not be {@code null}
+   * @param dense   dense half over the same passage count; must not be {@code null}
+   * @return hybrid index fusing both halves with RRF
+   * @throws NullPointerException     if either argument is {@code null}
+   * @throws IllegalArgumentException if the two indexes have different passage counts
    * @since 1.1.0
    */
   public static HybridRagIndex of(final PreparedRag lexical, final DenseRagIndex dense) {
@@ -40,12 +47,87 @@ public final class HybridRagIndex implements RagIndex {
   }
 
   /**
-   * Builds a dense index over {@code lexical} passages, then wraps both in hybrid retrieval.
+   * Builds a dense index over {@code lexical} passages on the calling thread, then wraps both
+   * in hybrid retrieval.
    *
+   * @param lexical         BM25 corpus whose chunks are embedded; must not be {@code null}
+   * @param embeddingModel  embedding encoder kept open for query-time embed; must not be {@code null}
+   * @return hybrid index over the same passages
+   * @throws NullPointerException     if either argument is {@code null}
+   * @throws IllegalArgumentException if {@code lexical} has no chunks or {@code embeddingModel} is
+   *                                  not an embedding encoder
+   * @throws IllegalStateException    if {@code embeddingModel} is closed
    * @since 1.1.0
    */
   public static HybridRagIndex of(final PreparedRag lexical, final LlmModel embeddingModel) {
     return of(lexical, DenseRagIndex.of(lexical, embeddingModel));
+  }
+
+  /**
+   * {@link #of(PreparedRag, LlmModel)} and forwards {@code onPassageEmbedded} to dense indexing.
+   *
+   * @param lexical           BM25 corpus whose chunks are embedded; must not be {@code null}
+   * @param embeddingModel    embedding encoder kept open for query-time embed; must not be {@code null}
+   * @param onPassageEmbedded called with {@code 1..N} after each dense vector; must not be {@code null}
+   * @return hybrid index over the same passages
+   * @throws NullPointerException     if any argument is {@code null}
+   * @throws IllegalArgumentException if {@code lexical} has no chunks or {@code embeddingModel} is
+   *                                  not an embedding encoder
+   * @throws IllegalStateException    if {@code embeddingModel} is closed
+   * @since 1.1.1
+   */
+  public static HybridRagIndex of(
+    final PreparedRag lexical,
+    final LlmModel embeddingModel,
+    final IntConsumer onPassageEmbedded
+  ) {
+    return of(lexical, DenseRagIndex.of(lexical, embeddingModel, onPassageEmbedded));
+  }
+
+  /**
+   * {@link #of(PreparedRag, LlmModel)} with dense passage embeds submitted on {@code executor}.
+   * The caller owns the executor; this index does not shut it down.
+   *
+   * @param lexical        BM25 corpus whose chunks are embedded; must not be {@code null}
+   * @param embeddingModel embedding encoder kept open for query-time embed; must not be {@code null}
+   * @param executor       runs each dense passage embed; must not be {@code null}; not shut down here
+   * @return hybrid index over the same passages
+   * @throws NullPointerException     if any argument is {@code null}
+   * @throws IllegalArgumentException if {@code lexical} has no chunks or {@code embeddingModel} is
+   *                                  not an embedding encoder
+   * @throws IllegalStateException    if {@code embeddingModel} is closed, or embedding is interrupted
+   * @since 1.1.1
+   */
+  public static HybridRagIndex of(
+    final PreparedRag lexical,
+    final LlmModel embeddingModel,
+    final Executor executor
+  ) {
+    return of(lexical,
+      DenseRagIndex.of(lexical, embeddingModel, requireNonNull(executor, "executor")));
+  }
+
+  /**
+   * {@link #of(PreparedRag, LlmModel, Executor)} and forwards {@code onPassageEmbedded}.
+   *
+   * @param lexical           BM25 corpus whose chunks are embedded; must not be {@code null}
+   * @param embeddingModel    embedding encoder kept open for query-time embed; must not be {@code null}
+   * @param executor          runs each dense passage embed; must not be {@code null}; not shut down here
+   * @param onPassageEmbedded called with {@code 1..N} after each dense vector; must not be {@code null}
+   * @return hybrid index over the same passages
+   * @throws NullPointerException     if any argument is {@code null}
+   * @throws IllegalArgumentException if {@code lexical} has no chunks or {@code embeddingModel} is
+   *                                  not an embedding encoder
+   * @throws IllegalStateException    if {@code embeddingModel} is closed, or embedding is interrupted
+   * @since 1.1.1
+   */
+  public static HybridRagIndex of(
+    final PreparedRag lexical,
+    final LlmModel embeddingModel,
+    final Executor executor,
+    final IntConsumer onPassageEmbedded
+  ) {
+    return of(lexical, DenseRagIndex.of(lexical, embeddingModel, executor, onPassageEmbedded));
   }
 
   static List<RagHit> fuse(

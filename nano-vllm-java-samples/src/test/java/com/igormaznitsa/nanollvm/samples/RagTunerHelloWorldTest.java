@@ -4,21 +4,27 @@ import static java.util.stream.Collectors.joining;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.igormaznitsa.nanollvm.models.LlmModel;
+import com.igormaznitsa.nanollvm.models.LlmModelFactory;
+import com.igormaznitsa.nanollvm.rag.DenseRagIndex;
 import com.igormaznitsa.nanollvm.rag.PreparedRag;
+import com.igormaznitsa.nanollvm.rag.RagFactory;
 import com.igormaznitsa.nanollvm.rag.RagHit;
 import com.igormaznitsa.nanollvm.rag.RagResource;
 import com.igormaznitsa.nanollvm.rag.TextChunk;
 import com.igormaznitsa.nanollvm.samples.utils.EpubText;
+import com.igormaznitsa.nanollvm.samples.utils.SampleModelAssumptions;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.UncheckedIOException;
+import java.nio.file.Path;
 import java.util.Locale;
 import org.junit.jupiter.api.Test;
 
 class RagTunerHelloWorldTest {
 
-  private static String joinedHits(final PreparedRag corpus, final String query) {
-    return corpus.retrieve(query, 5).stream()
+  private static String joinedHits(final DenseRagIndex index, final String query) {
+    return index.retrieve(query, 5).stream()
       .map(RagHit::chunk)
       .map(TextChunk::text)
       .collect(joining(" "));
@@ -48,16 +54,35 @@ class RagTunerHelloWorldTest {
     assertFalse(folded.contains("<html"));
   }
 
-  @Test
-  void ragTunerIndexesEpubAndRetrievesBookFacts() {
-    PreparedRag corpus = RagTunerHelloWorld.indexBundledEpub();
-    assertTrue(corpus.size() > 10);
+  private static String bookExcerpt() {
+    String text = EpubText.extract(loadedEpub()).orElseThrow();
+    return text.substring(0, Math.min(text.length(), 8_000));
+  }
 
-    assertTrue(joinedHits(corpus, "Czech word robot meaning worker")
-      .toLowerCase(Locale.ROOT)
-      .contains("worker"));
-    assertTrue(joinedHits(corpus, "Helena Glory Humanitarian League")
-      .toLowerCase(Locale.ROOT)
-      .contains("helena"));
+  @Test
+  void ragTunerChunksBundledEpub() {
+    PreparedRag documents = RagTunerHelloWorld.loadBundledEpub();
+    assertTrue(documents.size() > 10);
+  }
+
+  @Test
+  void denseIndexRetrievesBookFactsWhenGtePresent() {
+    Path gte = SampleModelAssumptions.requireGteSmallGguf();
+    String excerpt = bookExcerpt();
+    PreparedRag documents = RagFactory.builder()
+      .add("rur-excerpt", excerpt)
+      .build();
+
+    try (LlmModel embed = LlmModelFactory.make(gte)) {
+      DenseRagIndex index = DenseRagIndex.of(documents, embed);
+      assertTrue(index.size() > 0);
+
+      assertTrue(joinedHits(index, "What does the Czech word robot mean?")
+        .toLowerCase(Locale.ROOT)
+        .contains("worker"));
+      assertTrue(joinedHits(index, "Who is Helena Glory?")
+        .toLowerCase(Locale.ROOT)
+        .contains("helena"));
+    }
   }
 }

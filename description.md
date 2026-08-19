@@ -3477,7 +3477,8 @@ RagFactory.make(docs|file) / .of(…) / .builder()… / makeResource(…)   // c
 
 optional since 1.1.0:
   LlmModel embed = LlmModelFactory.make(gteGguf)   // embedding encoder, not LLM.builder
-  DenseRagIndex.of(prepared, embed)                // cosine over L2 vectors
+  DenseRagIndex.of(prepared, embed)                // cosine over L2 vectors (sequential)
+  DenseRagIndex.of(prepared, embed, executor)      // same, caller Executor
   HybridRagIndex / RagFactory.withEmbeddings(…)    // BM25 + dense RRF
 
 llm.rag(index).topK(k).send(user)   // any RagIndex: BM25, dense, or hybrid
@@ -3588,7 +3589,7 @@ unused.
 optionally `withEmbeddings`); session `LLM.rag(index)` → `RagSession`; demo corpus folder `rag/` via
 `samples.utils.BundledRag` in `samples.Example` (model → RAG-mode → advisor-count menus **since 1.1.0**)
 and the linear `samples.AdvisorRagHelloWorld` (one custom advisor + BM25 over `rag/`) plus
-`samples.RagTunerHelloWorld` (bundled *R.U.R.* EPUB through `RagTuner` extract).
+`samples.RagTunerHelloWorld` (bundled *R.U.R.* EPUB through `RagTuner` extract + dense embeddings).
 
 ### Load path — preparing documents
 
@@ -3645,7 +3646,7 @@ classpath document is walked **three times**, with a different combine rule each
 `RagResource` is the document handle: disk `Path` or `classpath:…` label, file name, and (at extract time) loaded
 bytes. Folder walks still honor `folderExtensions`; add extra suffixes for custom extractors (`.html`, `.docx`, …).
 Override only the methods you need, or use `RagTuner.allowing` / `extracting` / `preprocessing`.
-Demo: `samples.RagTunerHelloWorld` extracts a classpath EPUB before BM25.
+Demo: `samples.RagTunerHelloWorld` extracts a classpath EPUB, then embeds chunks (`DenseRagIndex`).
 
 **In the code (tuners):** `RagFactory.Builder.addProcessor` → package-private `RagTunerChain` inside `CorpusLoader`
 (filter before read, extract in `readBody`, preprocess in `appendChunks`).
@@ -3706,8 +3707,9 @@ Load an embedding GGUF with the same factory as chat models, then call `embed` �
 ```java
 PreparedRag lexical = RagFactory.make(Path.of("docs"));
 LlmModel embed = LlmModelFactory.make(Path.of("models/gte-small.Q2_K.gguf"));
-RagIndex index = RagFactory.withEmbeddings(lexical, embed); // HybridRagIndex
+RagIndex index = RagFactory.withEmbeddings(lexical, embed); // HybridRagIndex, sequential embed
 // or: DenseRagIndex.of(lexical, embed);
+// or: DenseRagIndex.of(lexical, embed, executor);          // parallel embed; caller owns executor
 
 try (LLM llm = LLM.builder(chatModel).build()) {
   llm.rag(index).topK(3).send("What city is France's capital?");
@@ -3715,7 +3717,7 @@ try (LLM llm = LLM.builder(chatModel).build()) {
 // Keep `embed` open while `index` is in use; close the embedding model only after the index is unused.
 ```
 
-- **`DenseRagIndex`:** at build time embeds every chunk; at query time embeds the question and ranks by cosine (dot
+- **`DenseRagIndex`:** at build time embeds every chunk (calling thread, or a caller `Executor` since 1.1.1); at query time embeds the question and ranks by cosine (dot
   product on L2-normalized vectors). Linear scan — fine for small corpora.
 - **`HybridRagIndex` / `RagFactory.withEmbeddings`:** runs BM25 and dense, fuses ranks with **RRF**. Off-topic gating
   requires **both** indexes to agree (`isOutsideCorpus`), so paraphrases can still retrieve when lexical overlap is
@@ -3795,9 +3797,9 @@ the sample asks for a **RAG mode** after you pick a chat model: none (plain chat
 gte-small alone still opens the embedding REPL (`samples.EmbeddingsHelloWorld` defaults to multilingual-e5-small
 ONNX and adds `query: ` for that family).
 `samples.AdvisorRagHelloWorld` is the non-interactive BM25 + custom-advisor path (Gemma3-270M, advisor Alex,
-Grimm names and father). `samples.RagTunerHelloWorld` indexes a bundled EPUB of Čapek's *R.U.R.* with
-`RagTuner` filter / extract / preprocess (plain text via epub4j, a Maven Central fork of epublib) and asks
-two questions from the play.
+Grimm names and father). `samples.RagTunerHelloWorld` extracts a bundled EPUB of Čapek's *R.U.R.* with
+`RagTuner` filter / extract / preprocess (plain text via epub4j, a Maven Central fork of epublib),
+embeds the passages (`DenseRagIndex`, default gte-small), and asks questions from the play.
 
 ### What this RAG is *not*
 
