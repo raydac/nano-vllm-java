@@ -202,7 +202,7 @@ More API samples (streaming, RAG, GGUF, advisors) are in [Library quick start](#
 - GPT-2 byte BPE, Gemma Metaspace BPE, GGUF-embedded, BERT WordPiece, Unigram SentencePiece
   (including precompiled charsmap), WordLevel, character, and SentencePiece `tokenizer.model` tokenizers
 - Optional **BM25 text RAG** over a local `rag/` corpus (Example demo menu: none / BM25 / dense / hybrid); dense / hybrid embeddings **since 1.1.0**
-- **ResourceLimits** — default caps for corpus/PDF/JSON/GGUF/safetensors (overridable)
+- **ResourceLimits** — default caps for corpus/JSON/GGUF/safetensors (overridable)
 - Optional **advisors** before each chat/RAG turn: `LLM.Builder.advisors(LlmAdvisorMixer, LlmAdvisor…)`
 - Warmup **off** by default (`LLM.Builder.warmup()` to enable)
 
@@ -724,7 +724,7 @@ separate advisor PARALLEL/SEQUENTIAL mode.
 
 ### Text RAG
 
-Index documents once (UTF-8 `.txt` / `.md` / … and `.pdf` via `PdfTextExtractor`), share `PreparedRag` across LLMs:
+Index documents once (UTF-8 `.txt` / `.md` / …), share `PreparedRag` across LLMs:
 
 ```java
 import com.igormaznitsa.nanollvm.chat.LlmListeners;
@@ -764,10 +764,10 @@ PreparedRag rag = RagFactory.of(
 Classpath documents (**since 1.1.0**): `RagFactory.makeResource("docs/a.md")` / `.addResource(loader, path)`.
 
 Load-time **tuners** (**since 1.1.1**): `builder().addProcessor(RagTuner…)` can skip files
-(`isRagResourceAllowed`), replace UTF-8/PDF extraction (`extractRagText` → empty Optional keeps
-the default loader), and rewrite text (`preprocessRagText`) before sentence packing. Folder walks
-still use `folderExtensions`; add extra suffixes for custom formats. Linear demo:
-`samples.RagTunerHelloWorld` (bundled *R.U.R.* EPUB, dense embeddings).
+(`isRagResourceAllowed`), replace UTF-8 extraction (`extractRagText` → empty Optional keeps
+the default loader), and rewrite text (`preprocessRagText`) before sentence packing. The library
+does not parse PDF/EPUB itself — register an extractor and, for folder walks, add the suffix to
+`folderExtensions`. Linear demo: `samples.RagTunerHelloWorld` (bundled *R.U.R.* EPUB, dense embeddings).
 
 **Dense / hybrid** (**since 1.1.0**) need an embedding `LlmModel` (for example gte-small GGUF):
 
@@ -781,7 +781,7 @@ try (LlmModel embed = LlmModelFactory.make(Path.of("models/gte-small.Q2_K.gguf")
 }
 ```
 
-Load budgets (file size, corpus total, PDF inflate, JSON depth, …) default via
+Load budgets (file size, corpus total, JSON depth, …) default via
 `ResourceLimits` and can be raised per process or per corpus:
 
 ```java

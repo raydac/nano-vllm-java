@@ -3175,7 +3175,7 @@ packages. Demos live in the separate Maven module `nano-vllm-java-samples`.
 | Pages / prefix reuse             | `BlockManager`                                                       | `canAllocate`, `allocate`, `hashBlocks`, `mayAppend`                                                          |
 | Split thinking UI                | `ChatReply`                                                          | `ChatReply.parse` / `parse(raw, llm)` / `salvageFromThinking`                                                 |
 | Text RAG (prepare + retrieve)    | `RagFactory`, `PreparedRag`, `DenseRagIndex`, `HybridRagIndex`, `RagSession`, `RagTuner` | `RagFactory.make` / `withEmbeddings` → `llm.rag(index).send(…)`; `Builder.addProcessor` tuners **since 1.1.1** (chapter 17); session knobs match `ChatSession` |
-| Resource caps                    | `ResourceLimits`                                                     | Process-wide defaults + builder for file/PDF/JSON/GGUF/corpus/history budgets (**since 1.0.0**)               |
+| Resource caps                    | `ResourceLimits`                                                     | Process-wide defaults + builder for file/JSON/GGUF/corpus/history budgets (**since 1.0.0**)               |
 | Math bricks                      | `Ops`, `LinearKernel`, `EmbeddingKernel`, `MatmulRuntime`            | norms / MLP gates / softmax; linear & embed via kernels (internal)                                            |
 
 ### Sample A — library use (what most apps call)
@@ -3506,7 +3506,6 @@ nano-vllm-java/src/main/java/com/igormaznitsa/nanollvm/
   rag/HybridRagIndex.java      ← since 1.1.0: BM25 + dense RRF
   rag/RagSession.java          ← retrieve → prompt → chat (UserMessage, QueryRewrite)
   rag/CorpusLoader.java        ← package-private load/chunk pipeline
-  rag/PdfTextExtractor.java
   engine/Transformer.java      ← forward + sample (not exported)
   engine/Scheduler.java        ← prefill/decode batches
   layers/Attention.java        ← QKV cache + attendRange (paged slots in place)
@@ -3615,9 +3614,10 @@ files / strings / folder / classpath resource   (classpath since 1.1.0)
 
 #### Load-time tuners (**since 1.1.1**)
 
-The default loader reads UTF-8 (or PDF via `PdfTextExtractor`), then chunks. **Tuners** are optional hooks on that
-path — skip a file, parse a format the library does not know, or rewrite text before sentence packing. They are
-**load-time only**; they do not change BM25, dense rank, or `RagSession`.
+The default loader reads **UTF-8**, then chunks. There is no built-in PDF (or EPUB) parser — those
+formats need a **`RagTuner` extractor**, same pattern as `samples.RagTunerHelloWorld`. **Tuners** are optional
+hooks on that path — skip a file, parse a format the library does not know, or rewrite text before sentence packing.
+They are **load-time only**; they do not change BM25, dense rank, or `RagSession`.
 
 Register them on the fluent builder (not on `RagFactory.make(path)`):
 
@@ -3640,11 +3640,11 @@ classpath document is walked **three times**, with a different combine rule each
 | Pass | Method | How the list is combined |
 |------|--------|--------------------------|
 | **Filter** | `isRagResourceAllowed(RagResource)` | **AND** — every tuner must return `true`, or the document is skipped (not read). Inline `add(text)` never hits this pass. |
-| **Extract** | `extractRagText(RagResource)` | **First present `Optional`** — that string becomes the body; later extractors are not called. `Optional.empty()` means “not this format.” If every tuner is empty, UTF-8 / PDF runs. |
+| **Extract** | `extractRagText(RagResource)` | **First present `Optional`** — that string becomes the body; later extractors are not called. `Optional.empty()` means “not this format.” If every tuner is empty, UTF-8 runs. |
 | **Preprocess** | `preprocessRagText(String)` | **Pipeline** — `c(b(a(text)))` in registration order, then the usual `RagLoadOptions.preprocess()` packing. Defaults are identity, so a filter-only tuner does not rewrite text. |
 
 `RagResource` is the document handle: disk `Path` or `classpath:…` label, file name, and (at extract time) loaded
-bytes. Folder walks still honor `folderExtensions`; add extra suffixes for custom extractors (`.html`, `.docx`, …).
+bytes. Folder walks still honor `folderExtensions`; add extra suffixes for custom extractors (`.pdf`, `.epub`, `.html`, …).
 Override only the methods you need, or use `RagTuner.allowing` / `extracting` / `preprocessing`.
 Demo: `samples.RagTunerHelloWorld` extracts a classpath EPUB, then embeds chunks (`DenseRagIndex`).
 
@@ -3676,7 +3676,7 @@ At load, each passage gets:
 - **Inverted BM25:** posting lists per term; queries score only candidate docs (Okapi BM25; weak hits dropped).
 
 **In the code (load):** `RagFactory.make` / `of` / `builder` → `CorpusLoader` (UTF-8 text/markup;
-`.pdf` via `PdfTextExtractor`; **since 1.1.0** also `makeResource` / `Builder.addResource` for classpath paths,
+**since 1.1.0** also `makeResource` / `Builder.addResource` for classpath paths,
 source label `classpath:…`; **since 1.1.1** `Builder.addProcessor(RagTuner…)` for filter / extract /
 preprocess) → `PreparedRag.fromChunks`. Options live in `RagLoadOptions`.
 
@@ -3827,7 +3827,7 @@ Short glossary. For the Java home of each idea, prefer the **In the code** notes
 |-----------------------|--------------------------------------------------------------------------------------------------|
 | `LlmModel`            | Pretrained parameters plus tokenizer and blueprint used for inference                            |
 | `ModelFileSource`     | Stream/classpath (or custom) source of model bytes (**since 1.1.0**; no disk cache)              |
-| `ResourceLimits`      | Process-wide caps for parsers, corpus, PDF/JSON/GGUF sizes, history (**since 1.0.0**)            |
+| `ResourceLimits`      | Process-wide caps for parsers, corpus, JSON/GGUF sizes, history (**since 1.0.0**)            |
 | Loading               | Reading blueprint + dictionary + weight tensors into memory and wiring them; weight pour uses one percent/ETA bar for safetensors, GGUF, and ONNX |
 | `config.json`         | Architectural hyperparameters (sizes, norms, RoPE) — not the learned weights                     |
 | `tokenizer.json`      | Vocab, BPE merges, and text pipeline (string ↔ token ids)                                        |

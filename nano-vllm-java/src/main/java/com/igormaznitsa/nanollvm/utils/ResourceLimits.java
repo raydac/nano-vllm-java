@@ -23,12 +23,9 @@ import java.util.concurrent.atomic.AtomicReference;
  * @param maxFileBytes              cap on one document / weight sidecar read
  * @param maxTotalCorpusBytes       cap on summed RAG corpus bytes
  * @param maxCorpusFiles            cap on files accepted into one corpus load
- * @param maxPdfInflateBytes        cap on decompressed PDF stream payload
- * @param maxCmapRangeSpan          cap on one PDF ToUnicode {@code bfRange} span
- * @param maxCmapEntries            cap on PDF cmap entries
  * @param maxSafetensorsHeaderBytes cap on the JSON header of a {@code .safetensors} file
  * @param maxJsonDepth              cap on JSON object/array nesting
- * @param maxJsonChars              cap on JSON document size (config / tokenizer / cmap)
+ * @param maxJsonChars              cap on JSON document size (config / tokenizer)
  * @param maxGgufStringBytes        cap on one GGUF metadata string
  * @param maxGgufDims               cap on GGUF tensor rank
  * @param maxHistoryMessages        cap on {@link com.igormaznitsa.nanollvm.chat.ChatSession}
@@ -38,9 +35,6 @@ public record ResourceLimits(
   long maxFileBytes,
   long maxTotalCorpusBytes,
   int maxCorpusFiles,
-  long maxPdfInflateBytes,
-  int maxCmapRangeSpan,
-  int maxCmapEntries,
   long maxSafetensorsHeaderBytes,
   int maxJsonDepth,
   long maxJsonChars,
@@ -52,9 +46,6 @@ public record ResourceLimits(
   public static final long DEFAULT_MAX_FILE_BYTES = 32L * 1024 * 1024;
   public static final long DEFAULT_MAX_TOTAL_CORPUS_BYTES = 256L * 1024 * 1024;
   public static final int DEFAULT_MAX_CORPUS_FILES = 10_000;
-  public static final long DEFAULT_MAX_PDF_INFLATE_BYTES = 32L * 1024 * 1024;
-  public static final int DEFAULT_MAX_CMAP_RANGE_SPAN = 65_536;
-  public static final int DEFAULT_MAX_CMAP_ENTRIES = 1_000_000;
   public static final long DEFAULT_MAX_SAFETENSORS_HEADER_BYTES = 100L * 1024 * 1024;
   public static final int DEFAULT_MAX_JSON_DEPTH = 64;
   public static final long DEFAULT_MAX_JSON_CHARS = 64L * 1024 * 1024;
@@ -74,15 +65,6 @@ public record ResourceLimits(
     }
     if (maxCorpusFiles < 1) {
       throw new IllegalArgumentException("maxCorpusFiles must be >= 1");
-    }
-    if (maxPdfInflateBytes < 1) {
-      throw new IllegalArgumentException("maxPdfInflateBytes must be >= 1");
-    }
-    if (maxCmapRangeSpan < 1) {
-      throw new IllegalArgumentException("maxCmapRangeSpan must be >= 1");
-    }
-    if (maxCmapEntries < 1) {
-      throw new IllegalArgumentException("maxCmapEntries must be >= 1");
     }
     if (maxSafetensorsHeaderBytes < 1) {
       throw new IllegalArgumentException("maxSafetensorsHeaderBytes must be >= 1");
@@ -112,9 +94,6 @@ public record ResourceLimits(
       DEFAULT_MAX_FILE_BYTES,
       DEFAULT_MAX_TOTAL_CORPUS_BYTES,
       DEFAULT_MAX_CORPUS_FILES,
-      DEFAULT_MAX_PDF_INFLATE_BYTES,
-      DEFAULT_MAX_CMAP_RANGE_SPAN,
-      DEFAULT_MAX_CMAP_ENTRIES,
       DEFAULT_MAX_SAFETENSORS_HEADER_BYTES,
       DEFAULT_MAX_JSON_DEPTH,
       DEFAULT_MAX_JSON_CHARS,
@@ -158,10 +137,9 @@ public record ResourceLimits(
    */
   public ResourceLimits withMaxFileBytes(final long maxFileBytes) {
     return new ResourceLimits(
-      maxFileBytes, this.maxTotalCorpusBytes, this.maxCorpusFiles, this.maxPdfInflateBytes,
-      this.maxCmapRangeSpan, this.maxCmapEntries, this.maxSafetensorsHeaderBytes,
-      this.maxJsonDepth, this.maxJsonChars, this.maxGgufStringBytes, this.maxGgufDims,
-      this.maxHistoryMessages);
+      maxFileBytes, this.maxTotalCorpusBytes, this.maxCorpusFiles,
+      this.maxSafetensorsHeaderBytes, this.maxJsonDepth, this.maxJsonChars,
+      this.maxGgufStringBytes, this.maxGgufDims, this.maxHistoryMessages);
   }
 
   /**
@@ -169,10 +147,9 @@ public record ResourceLimits(
    */
   public ResourceLimits withMaxTotalCorpusBytes(final long maxTotalCorpusBytes) {
     return new ResourceLimits(
-      this.maxFileBytes, maxTotalCorpusBytes, this.maxCorpusFiles, this.maxPdfInflateBytes,
-      this.maxCmapRangeSpan, this.maxCmapEntries, this.maxSafetensorsHeaderBytes,
-      this.maxJsonDepth, this.maxJsonChars, this.maxGgufStringBytes, this.maxGgufDims,
-      this.maxHistoryMessages);
+      this.maxFileBytes, maxTotalCorpusBytes, this.maxCorpusFiles,
+      this.maxSafetensorsHeaderBytes, this.maxJsonDepth, this.maxJsonChars,
+      this.maxGgufStringBytes, this.maxGgufDims, this.maxHistoryMessages);
   }
 
   /**
@@ -180,21 +157,9 @@ public record ResourceLimits(
    */
   public ResourceLimits withMaxCorpusFiles(final int maxCorpusFiles) {
     return new ResourceLimits(
-      this.maxFileBytes, this.maxTotalCorpusBytes, maxCorpusFiles, this.maxPdfInflateBytes,
-      this.maxCmapRangeSpan, this.maxCmapEntries, this.maxSafetensorsHeaderBytes,
-      this.maxJsonDepth, this.maxJsonChars, this.maxGgufStringBytes, this.maxGgufDims,
-      this.maxHistoryMessages);
-  }
-
-  /**
-   * Copy with a new PDF inflate cap ({@code >= 1}).
-   */
-  public ResourceLimits withMaxPdfInflateBytes(final long maxPdfInflateBytes) {
-    return new ResourceLimits(
-      this.maxFileBytes, this.maxTotalCorpusBytes, this.maxCorpusFiles, maxPdfInflateBytes,
-      this.maxCmapRangeSpan, this.maxCmapEntries, this.maxSafetensorsHeaderBytes,
-      this.maxJsonDepth, this.maxJsonChars, this.maxGgufStringBytes, this.maxGgufDims,
-      this.maxHistoryMessages);
+      this.maxFileBytes, this.maxTotalCorpusBytes, maxCorpusFiles,
+      this.maxSafetensorsHeaderBytes, this.maxJsonDepth, this.maxJsonChars,
+      this.maxGgufStringBytes, this.maxGgufDims, this.maxHistoryMessages);
   }
 
   /**
@@ -202,10 +167,9 @@ public record ResourceLimits(
    */
   public ResourceLimits withMaxHistoryMessages(final int maxHistoryMessages) {
     return new ResourceLimits(
-      this.maxFileBytes, this.maxTotalCorpusBytes, this.maxCorpusFiles, this.maxPdfInflateBytes,
-      this.maxCmapRangeSpan, this.maxCmapEntries, this.maxSafetensorsHeaderBytes,
-      this.maxJsonDepth, this.maxJsonChars, this.maxGgufStringBytes, this.maxGgufDims,
-      maxHistoryMessages);
+      this.maxFileBytes, this.maxTotalCorpusBytes, this.maxCorpusFiles,
+      this.maxSafetensorsHeaderBytes, this.maxJsonDepth, this.maxJsonChars,
+      this.maxGgufStringBytes, this.maxGgufDims, maxHistoryMessages);
   }
 
   /**
@@ -216,9 +180,6 @@ public record ResourceLimits(
     private long maxFileBytes;
     private long maxTotalCorpusBytes;
     private int maxCorpusFiles;
-    private long maxPdfInflateBytes;
-    private int maxCmapRangeSpan;
-    private int maxCmapEntries;
     private long maxSafetensorsHeaderBytes;
     private int maxJsonDepth;
     private long maxJsonChars;
@@ -230,9 +191,6 @@ public record ResourceLimits(
       this.maxFileBytes = base.maxFileBytes;
       this.maxTotalCorpusBytes = base.maxTotalCorpusBytes;
       this.maxCorpusFiles = base.maxCorpusFiles;
-      this.maxPdfInflateBytes = base.maxPdfInflateBytes;
-      this.maxCmapRangeSpan = base.maxCmapRangeSpan;
-      this.maxCmapEntries = base.maxCmapEntries;
       this.maxSafetensorsHeaderBytes = base.maxSafetensorsHeaderBytes;
       this.maxJsonDepth = base.maxJsonDepth;
       this.maxJsonChars = base.maxJsonChars;
@@ -258,24 +216,6 @@ public record ResourceLimits(
     /** Max files in one corpus load ({@code >= 1}). */
     public Builder maxCorpusFiles(final int maxCorpusFiles) {
       this.maxCorpusFiles = maxCorpusFiles;
-      return this;
-    }
-
-    /** Decompressed PDF stream cap ({@code >= 1}). */
-    public Builder maxPdfInflateBytes(final long maxPdfInflateBytes) {
-      this.maxPdfInflateBytes = maxPdfInflateBytes;
-      return this;
-    }
-
-    /** Max span of one PDF ToUnicode {@code bfRange} ({@code >= 1}). */
-    public Builder maxCmapRangeSpan(final int maxCmapRangeSpan) {
-      this.maxCmapRangeSpan = maxCmapRangeSpan;
-      return this;
-    }
-
-    /** Max PDF cmap entries ({@code >= 1}). */
-    public Builder maxCmapEntries(final int maxCmapEntries) {
-      this.maxCmapEntries = maxCmapEntries;
       return this;
     }
 
@@ -325,9 +265,6 @@ public record ResourceLimits(
         this.maxFileBytes,
         this.maxTotalCorpusBytes,
         this.maxCorpusFiles,
-        this.maxPdfInflateBytes,
-        this.maxCmapRangeSpan,
-        this.maxCmapEntries,
         this.maxSafetensorsHeaderBytes,
         this.maxJsonDepth,
         this.maxJsonChars,

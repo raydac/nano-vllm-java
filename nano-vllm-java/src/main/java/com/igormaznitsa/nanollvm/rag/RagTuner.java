@@ -17,7 +17,7 @@ import java.util.function.UnaryOperator;
  *       filtered)</li>
  *   <li>{@link #extractRagText(RagResource)} — first non-empty {@link Optional} becomes the
  *       document body; {@link Optional#empty()} leaves extraction to the next tuner, then the
- *       built-in UTF-8 / PDF loader</li>
+ *       built-in UTF-8 loader</li>
  *   <li>{@link #preprocessRagText(String)} — each tuner transforms the body in order, then the
  *       usual {@link RagLoadOptions#preprocess()} sentence packing runs</li>
  * </ul>
@@ -124,7 +124,7 @@ public interface RagTuner {
   }
 
   /**
-   * Custom document text. Empty means the next tuner or the built-in UTF-8 / PDF loader should
+   * Custom document text. Empty means the next tuner or the built-in UTF-8 loader should
    * run. A present value (including blank) is used as-is and later passed through
    * {@link #preprocessRagText(String)}.
    *

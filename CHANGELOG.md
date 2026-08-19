@@ -26,6 +26,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   from that play. `DenseRagIndex.of` / `HybridRagIndex.of` accept a per-passage embed callback
   and an optional caller `Executor` for parallel indexing (sequential when omitted).
 
+### Removed
+- Built-in `PdfTextExtractor`. Folder walks no longer pick up `.pdf` by default. Index PDFs (or
+  other binaries) with `RagTuner.extracting`, same pattern as the EPUB sample. `ResourceLimits`
+  drops PDF inflate / ToUnicode cmap caps (`maxPdfInflateBytes`, `maxCmapRangeSpan`,
+  `maxCmapEntries`).
+
 ### Fixed
 - Closing a model, engine, or weight reader now drops file buffers, KV pages, rotary tables, and
   the last shared matmul pool instead of pinning them until process exit. GGUF and safetensors files

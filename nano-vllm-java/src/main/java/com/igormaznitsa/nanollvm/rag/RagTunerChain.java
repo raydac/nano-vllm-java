@@ -70,7 +70,7 @@ final class RagTunerChain {
    * First non-empty {@link RagTuner#extractRagText(RagResource)} in registration order.
    *
    * @param resource loaded document; must not be {@code null}
-   * @return custom body, or empty to use the built-in UTF-8 / PDF loader
+   * @return custom body, or empty to use the built-in UTF-8 loader
    * @throws NullPointerException if {@code resource} is {@code null}
    */
   Optional<String> extract(final RagResource resource) {

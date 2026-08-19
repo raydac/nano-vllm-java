@@ -483,7 +483,8 @@ public final class RagFactory {
     }
 
     /**
-     * Adds one file (text or PDF) from disk. {@link RagTuner#isRagResourceAllowed} may skip it.
+     * Adds one file from disk (UTF-8 unless a {@link RagTuner} extractor supplies text).
+     * {@link RagTuner#isRagResourceAllowed} may skip it.
      *
      * @param file regular file; must not be {@code null}
      * @return {@code this}

@@ -28,7 +28,7 @@ import com.igormaznitsa.nanollvm.utils.ResourceLimits;
  * }</pre>
  *
  * <p>{@code with*} methods return a copy; this type is immutable.
- * {@link #resourceLimits()} caps file size, corpus totals, and PDF inflate
+ * {@link #resourceLimits()} caps file size and corpus totals
  * (defaults from {@link ResourceLimits#current()}).
  *
  * @param maxChunkChars   maximum characters per chunk ({@code >= 64}); packing may emit shorter
@@ -40,7 +40,7 @@ import com.igormaznitsa.nanollvm.utils.ResourceLimits;
  * @param atomicSentences when {@code true}, one sentence per chunk (better for tiny generators);
  *                        long sentences still window-split
  * @param dedupe          when {@code true}, drop duplicate chunk bodies after load
- * @param resourceLimits  parser / corpus / PDF budgets; never {@code null}
+ * @param resourceLimits  parser / corpus budgets; never {@code null}
  */
 public record RagLoadOptions(
   int maxChunkChars,

@@ -32,8 +32,7 @@ final class CorpusLoader {
 
   private static final Set<String> DEFAULT_EXTENSIONS = Set.of(
     ".txt", ".md", ".markdown", ".rst", ".csv", ".tsv", ".json", ".xml", ".html", ".htm",
-    ".properties", ".yml", ".yaml", ".log", ".java", ".kt", ".py", ".js", ".ts", ".css",
-    ".pdf");
+    ".properties", ".yml", ".yaml", ".log", ".java", ".kt", ".py", ".js", ".ts", ".css");
 
   private CorpusLoader() {
   }
@@ -76,10 +75,6 @@ final class CorpusLoader {
       return relative;
     }
     return pkg.replace('.', '/') + "/" + relative;
-  }
-
-  private static boolean isPdfName(final String path) {
-    return path.toLowerCase(Locale.ROOT).endsWith(".pdf");
   }
 
   /**
@@ -329,7 +324,7 @@ final class CorpusLoader {
     }
 
     /**
-     * Custom tuner extract, or UTF-8 / PDF when every tuner returns empty.
+     * Custom tuner extract, or UTF-8 when every tuner returns empty.
      *
      * @param resource loaded document
      * @return document body before {@link RagTuner#preprocessRagText(String)}
@@ -339,16 +334,13 @@ final class CorpusLoader {
     }
 
     /**
-     * Built-in extract: PDF via {@link PdfTextExtractor}, otherwise UTF-8 text.
+     * Built-in extract: UTF-8 text. Binary formats need a {@link RagTuner} extractor.
      *
      * @param resource loaded document
      * @return extracted text
      */
     private String standardExtract(final RagResource resource) {
-      byte[] bytes = resource.rawContent();
-      return isPdfName(resource.fileName())
-        ? PdfTextExtractor.extract(bytes, this.resourceLimits)
-        : new String(bytes, UTF_8);
+      return new String(resource.rawContent(), UTF_8);
     }
 
     /**

@@ -224,7 +224,7 @@ public final class RagResource {
   }
 
   /**
-   * Internal payload for the built-in UTF-8 / PDF loader (not copied).
+   * Internal payload for the built-in UTF-8 loader (not copied).
    *
    * @return the loaded bytes
    * @throws IllegalStateException if content has not been read yet
