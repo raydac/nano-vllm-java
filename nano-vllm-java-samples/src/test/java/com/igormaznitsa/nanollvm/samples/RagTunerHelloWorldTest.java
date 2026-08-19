@@ -42,7 +42,7 @@ class RagTunerHelloWorldTest {
   }
 
   @Test
-  void epublibExtractsPlainTextFromBundledRur() {
+  void extractsPlainTextFromBundledRur() {
     String text = EpubText.extract(loadedEpub()).orElseThrow();
     String folded = text.toLowerCase(Locale.ROOT);
 

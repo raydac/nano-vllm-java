@@ -181,8 +181,7 @@ mvn -pl nano-vllm-java-samples -q exec:java \
 ```
 
 Load-time **RagTuner** over a bundled EPUB (Karel Čapek, *R.U.R.*): filter `.epub`, extract plain
-text with [epub4j](https://github.com/documentnode/epub4j) (Maven Central fork of
-[epublib](https://github.com/psiegman/epublib)), embed chunks with gte-small, then ask the play
+text with JDK zip + StAX, embed chunks with gte-small, then ask the play
 (Qwen3-0.6B chat; download the encoder with `./models/download-gte-small-gguf.sh`):
 
 ```bash

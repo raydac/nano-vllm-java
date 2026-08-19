@@ -22,8 +22,7 @@ import java.util.concurrent.Executors;
 
 /**
  * Dense embedding RAG over a bundled EPUB: {@link RagTuner} filter / extract / preprocess,
- * <a href="https://github.com/documentnode/epub4j">epub4j</a> for the book text, then cosine
- * retrieval with an embedding {@link LlmModel}.
+ * JDK zip + StAX for the book text, then cosine retrieval with an embedding {@link LlmModel}.
  *
  * <p>Indexes Project Gutenberg {@code pg59112.epub} (Karel Čapek, <em>R.U.R.</em>) from the
  * samples classpath, unpacks gte-small and embeds every chunk (optional caller {@code Executor}
@@ -93,7 +92,7 @@ public final class RagTunerHelloWorld {
 
   static PreparedRag loadBundledEpub() {
     return RagFactory.builder()
-      .options(RagLoadOptions.defaults().withMaxChunkChars(800).withChunkOverlap(0))
+      .options(RagLoadOptions.defaults().withMaxChunkChars(128).withChunkOverlap(0))
       .addProcessor(
         RagTuner.allowing(EpubText::isEpub),
         RagTuner.extracting(EpubText::extract),

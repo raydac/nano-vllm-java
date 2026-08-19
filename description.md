@@ -3798,7 +3798,7 @@ gte-small alone still opens the embedding REPL (`samples.EmbeddingsHelloWorld` d
 ONNX and adds `query: ` for that family).
 `samples.AdvisorRagHelloWorld` is the non-interactive BM25 + custom-advisor path (Gemma3-270M, advisor Alex,
 Grimm names and father). `samples.RagTunerHelloWorld` extracts a bundled EPUB of Čapek's *R.U.R.* with
-`RagTuner` filter / extract / preprocess (plain text via epub4j, a Maven Central fork of epublib),
+`RagTuner` filter / extract / preprocess (plain text via JDK zip + StAX),
 embeds the passages (`DenseRagIndex`, default gte-small), and asks questions from the play.
 
 ### What this RAG is *not*

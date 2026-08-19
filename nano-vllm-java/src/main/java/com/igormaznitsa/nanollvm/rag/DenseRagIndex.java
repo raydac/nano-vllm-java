@@ -27,8 +27,6 @@ public final class DenseRagIndex implements RagIndex {
 
   private static final double HIT_FLOOR_RATIO = 0.45;
   private static final double OUTSIDE_MAX_SIMILARITY = 0.28;
-  private static final IntConsumer NO_PROGRESS = ignored -> {
-  };
 
   private final List<TextChunk> chunks;
   private final float[][] vectors;
@@ -158,7 +156,7 @@ public final class DenseRagIndex implements RagIndex {
    * @since 1.1.0
    */
   public static DenseRagIndex of(final List<TextChunk> chunks, final LlmModel embeddingModel) {
-    return indexChunks(chunks, embeddingModel, NO_PROGRESS, null);
+    return indexChunks(chunks, embeddingModel, DenseRagIndex::ignorePassageProgress, null);
   }
 
   /**
@@ -204,7 +202,11 @@ public final class DenseRagIndex implements RagIndex {
     final LlmModel embeddingModel,
     final Executor executor
   ) {
-    return indexChunks(chunks, embeddingModel, NO_PROGRESS, requireNonNull(executor, "executor"));
+    return indexChunks(
+      chunks,
+      embeddingModel,
+      DenseRagIndex::ignorePassageProgress,
+      requireNonNull(executor, "executor"));
   }
 
   /**
@@ -233,6 +235,9 @@ public final class DenseRagIndex implements RagIndex {
       embeddingModel,
       onPassageEmbedded,
       requireNonNull(executor, "executor"));
+  }
+
+  private static void ignorePassageProgress(final int ignored) {
   }
 
   private static DenseRagIndex indexChunks(

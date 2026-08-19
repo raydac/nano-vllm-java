@@ -3,35 +3,40 @@ package com.igormaznitsa.nanollvm.samples.utils;
 import static java.nio.charset.StandardCharsets.UTF_8;
 import static java.util.Objects.requireNonNull;
 import static java.util.stream.Collectors.joining;
+import static javax.xml.stream.XMLInputFactory.IS_SUPPORTING_EXTERNAL_ENTITIES;
+import static javax.xml.stream.XMLInputFactory.SUPPORT_DTD;
+import static javax.xml.stream.XMLStreamConstants.END_ELEMENT;
+import static javax.xml.stream.XMLStreamConstants.START_ELEMENT;
 
 import com.igormaznitsa.nanollvm.rag.RagResource;
-import io.documentnode.epub4j.domain.Author;
-import io.documentnode.epub4j.domain.Book;
-import io.documentnode.epub4j.domain.MediaType;
-import io.documentnode.epub4j.domain.Metadata;
-import io.documentnode.epub4j.domain.Resource;
-import io.documentnode.epub4j.epub.EpubReader;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.UncheckedIOException;
-import java.nio.charset.Charset;
-import java.nio.charset.IllegalCharsetNameException;
-import java.nio.charset.UnsupportedCharsetException;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.regex.MatchResult;
 import java.util.regex.Pattern;
-import java.util.stream.Stream;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipInputStream;
+import javax.xml.stream.XMLInputFactory;
+import javax.xml.stream.XMLStreamException;
+import javax.xml.stream.XMLStreamReader;
 
 /**
- * Plain text from an EPUB via <a href="https://github.com/documentnode/epub4j">epub4j</a>
- * (Maven Central fork of <a href="https://github.com/psiegman/epublib">epublib</a>), for
+ * Plain text from an EPUB (ZIP + OPF + XHTML) using JDK zip and StAX, for
  * {@link com.igormaznitsa.nanollvm.rag.RagTuner} extract / filter hooks.
  */
 public final class EpubText {
 
   public static final String RUR_EPUB = "pg59112.epub";
+
+  private static final String CONTAINER_PATH = "META-INF/container.xml";
+  private static final XMLInputFactory XML = secureXmlFactory();
 
   private static final Pattern SCRIPT_OR_STYLE = Pattern.compile(
     "(?is)<(script|style)\\b[^>]*>.*?</\\1>");
@@ -39,6 +44,7 @@ public final class EpubText {
   private static final Pattern NAMED_ENTITY = Pattern.compile("&([A-Za-z][A-Za-z0-9]+);");
   private static final Pattern NUMERIC_ENTITY = Pattern.compile("&#(x[0-9A-Fa-f]+|\\d+);");
   private static final Pattern WHITESPACE = Pattern.compile("\\s+");
+  private static final Pattern ZIP_SLASH = Pattern.compile("/");
   private static final Map<String, String> NAMED_ENTITIES = Map.ofEntries(
     Map.entry("amp", "&"),
     Map.entry("apos", "'"),
@@ -72,10 +78,8 @@ public final class EpubText {
     if (!isEpub(resource) || !resource.hasContent()) {
       return Optional.empty();
     }
-    byte[] bytes = resource.content().orElseThrow();
     try {
-      Book book = new EpubReader().readEpub(new ByteArrayInputStream(bytes));
-      return Optional.of(plainText(book));
+      return Optional.of(plainText(unzip(resource.content().orElseThrow())));
     } catch (IOException e) {
       throw new UncheckedIOException("failed to extract EPUB " + resource.source(), e);
     }
@@ -86,25 +90,141 @@ public final class EpubText {
     return WHITESPACE.matcher(text.strip()).replaceAll(" ");
   }
 
-  private static String plainText(final Book book) {
-    String chapters = htmlResources(book)
-      .map(EpubText::htmlBody)
+  private static XMLInputFactory secureXmlFactory() {
+    XMLInputFactory factory = XMLInputFactory.newFactory();
+    factory.setProperty(SUPPORT_DTD, false);
+    factory.setProperty(IS_SUPPORTING_EXTERNAL_ENTITIES, false);
+    return factory;
+  }
+
+  private static Map<String, byte[]> unzip(final byte[] epub) throws IOException {
+    Map<String, byte[]> files = new LinkedHashMap<>();
+    try (ZipInputStream zip = new ZipInputStream(new ByteArrayInputStream(epub), UTF_8)) {
+      ZipEntry entry;
+      while ((entry = zip.getNextEntry()) != null) {
+        if (entry.isDirectory()) {
+          continue;
+        }
+        files.put(normalizeZipPath(entry.getName()), zip.readAllBytes());
+      }
+    }
+    return Map.copyOf(files);
+  }
+
+  private static String plainText(final Map<String, byte[]> files) {
+    String opfPath = rootfilePath(requireEntry(files, CONTAINER_PATH, "EPUB container"));
+    Publication publication = readOpf(requireEntry(files, opfPath, "EPUB package"), opfPath);
+    String chapters = publication.htmlHrefs().stream()
+      .map(href -> htmlBody(files.get(href)))
       .flatMap(Optional::stream)
       .collect(joining("\n"));
-    String preface = metadataPreface(book);
+    String preface = metadataPreface(publication);
     return preface.isEmpty() ? chapters : preface + "\n" + chapters;
   }
 
-  private static String metadataPreface(final Book book) {
-    Metadata metadata = book.getMetadata();
-    String titles = metadata.getTitles().stream()
-      .filter(title -> title != null && !title.isBlank())
-      .map(String::strip)
-      .collect(joining("; "));
-    String authors = metadata.getAuthors().stream()
-      .map(EpubText::formatAuthor)
-      .filter(name -> !name.isBlank())
-      .collect(joining(", "));
+  private static byte[] requireEntry(
+    final Map<String, byte[]> files,
+    final String path,
+    final String label
+  ) {
+    byte[] bytes = files.get(path);
+    if (bytes == null || bytes.length == 0) {
+      throw new IllegalArgumentException(label + " missing: " + path);
+    }
+    return bytes;
+  }
+
+  private static String rootfilePath(final byte[] containerXml) {
+    try {
+      XMLStreamReader reader = openXml(containerXml);
+      try {
+        while (reader.hasNext()) {
+          if (reader.next() == START_ELEMENT && "rootfile".equals(reader.getLocalName())) {
+            String path = attr(reader, "full-path");
+            if (path != null && !path.isBlank()) {
+              return normalizeZipPath(path);
+            }
+          }
+        }
+      } finally {
+        reader.close();
+      }
+    } catch (XMLStreamException e) {
+      throw new UncheckedIOException(new IOException("invalid EPUB container.xml", e));
+    }
+    throw new IllegalArgumentException("EPUB container.xml has no rootfile");
+  }
+
+  private static Publication readOpf(final byte[] opf, final String opfPath) {
+    List<String> titles = new ArrayList<>();
+    List<String> authors = new ArrayList<>();
+    Map<String, ManifestItem> manifest = new LinkedHashMap<>();
+    List<String> spine = new ArrayList<>();
+    String section = "";
+
+    try {
+      XMLStreamReader reader = openXml(opf);
+      try {
+        while (reader.hasNext()) {
+          int event = reader.next();
+          if (event == START_ELEMENT) {
+            String local = reader.getLocalName();
+            if ("metadata".equals(local) || "manifest".equals(local) || "spine".equals(local)) {
+              section = local;
+            } else if ("title".equals(local) && "metadata".equals(section)) {
+              addNonBlank(titles, reader.getElementText());
+            } else if ("creator".equals(local) && "metadata".equals(section)) {
+              addNonBlank(authors, reader.getElementText());
+            } else if ("item".equals(local) && "manifest".equals(section)) {
+              putManifestItem(manifest, reader);
+            } else if ("itemref".equals(local) && "spine".equals(section)) {
+              addNonBlank(spine, attr(reader, "idref"));
+            }
+          } else if (event == END_ELEMENT) {
+            String local = reader.getLocalName();
+            if (local.equals(section)) {
+              section = "";
+            }
+          }
+        }
+      } finally {
+        reader.close();
+      }
+    } catch (XMLStreamException e) {
+      throw new UncheckedIOException(new IOException("invalid EPUB package " + opfPath, e));
+    }
+
+    List<String> htmlHrefs = spine.stream()
+      .map(manifest::get)
+      .filter(Objects::nonNull)
+      .filter(ManifestItem::isHtml)
+      .map(item -> resolveHref(opfPath, item.href()))
+      .toList();
+    return new Publication(List.copyOf(titles), List.copyOf(authors), htmlHrefs);
+  }
+
+  private static void putManifestItem(
+    final Map<String, ManifestItem> manifest,
+    final XMLStreamReader reader
+  ) {
+    String id = attr(reader, "id");
+    String href = attr(reader, "href");
+    if (id == null || id.isBlank() || href == null || href.isBlank()) {
+      return;
+    }
+    String mediaType = Optional.ofNullable(attr(reader, "media-type")).orElse("");
+    manifest.put(id, new ManifestItem(href, mediaType));
+  }
+
+  private static void addNonBlank(final List<String> values, final String value) {
+    if (value != null && !value.isBlank()) {
+      values.add(value.strip());
+    }
+  }
+
+  private static String metadataPreface(final Publication publication) {
+    String titles = String.join("; ", publication.titles());
+    String authors = String.join(", ", publication.authors());
     StringBuilder preface = new StringBuilder();
     if (!titles.isEmpty()) {
       preface.append("Title: ").append(titles).append('\n');
@@ -115,57 +235,12 @@ public final class EpubText {
     return preface.toString();
   }
 
-  private static String formatAuthor(final Author author) {
-    String first = author.getFirstname() == null ? "" : author.getFirstname().strip();
-    String last = author.getLastname() == null ? "" : author.getLastname().strip();
-    return (first + " " + last).strip();
-  }
-
-  private static Stream<Resource> htmlResources(final Book book) {
-    return book.getContents().stream().filter(EpubText::isHtml);
-  }
-
-  private static boolean isHtml(final Resource resource) {
-    if (resource == null) {
-      return false;
+  private static Optional<String> htmlBody(final byte[] data) {
+    if (data == null || data.length == 0) {
+      return Optional.empty();
     }
-    MediaType type = resource.getMediaType();
-    if (type != null && type.getName() != null
-      && type.getName().toLowerCase(Locale.ROOT).contains("html")) {
-      return true;
-    }
-    String href = resource.getHref();
-    if (href == null) {
-      return false;
-    }
-    String lower = href.toLowerCase(Locale.ROOT);
-    return lower.endsWith(".html") || lower.endsWith(".xhtml") || lower.endsWith(".htm");
-  }
-
-  private static Optional<String> htmlBody(final Resource resource) {
-    try {
-      byte[] data = resource.getData();
-      if (data == null || data.length == 0) {
-        return Optional.empty();
-      }
-      String html = new String(data, charsetOf(resource));
-      String text = stripMarkup(html);
-      return text.isBlank() ? Optional.empty() : Optional.of(text);
-    } catch (IOException e) {
-      throw new UncheckedIOException("failed to read EPUB resource " + resource.getHref(), e);
-    }
-  }
-
-  private static Charset charsetOf(final Resource resource) {
-    String encoding = resource.getInputEncoding();
-    if (encoding == null || encoding.isBlank()) {
-      return UTF_8;
-    }
-    try {
-      return Charset.forName(encoding);
-    } catch (IllegalCharsetNameException | UnsupportedCharsetException e) {
-      return UTF_8;
-    }
+    String text = stripMarkup(new String(data, UTF_8));
+    return text.isBlank() ? Optional.empty() : Optional.of(text);
   }
 
   private static String stripMarkup(final String html) {
@@ -189,5 +264,64 @@ public final class EpubText {
       ? Integer.parseInt(body.substring(1), 16)
       : Integer.parseInt(body, 10);
     return code < 0 || code > Character.MAX_CODE_POINT ? match.group() : Character.toString(code);
+  }
+
+  private static XMLStreamReader openXml(final byte[] xml) throws XMLStreamException {
+    return XML.createXMLStreamReader(new ByteArrayInputStream(xml));
+  }
+
+  private static String attr(final XMLStreamReader reader, final String localName) {
+    for (int i = 0; i < reader.getAttributeCount(); i++) {
+      if (localName.equals(reader.getAttributeLocalName(i))) {
+        return reader.getAttributeValue(i);
+      }
+    }
+    return null;
+  }
+
+  private static String resolveHref(final String opfPath, final String href) {
+    String relative = stripFragment(href.strip()).replace('\\', '/');
+    if (relative.startsWith("/")) {
+      return normalizeZipPath(relative.substring(1));
+    }
+    int slash = opfPath.lastIndexOf('/');
+    String dir = slash < 0 ? "" : opfPath.substring(0, slash + 1);
+    return normalizeZipPath(dir + relative);
+  }
+
+  private static String stripFragment(final String href) {
+    int hash = href.indexOf('#');
+    return hash < 0 ? href : href.substring(0, hash);
+  }
+
+  private static String normalizeZipPath(final String path) {
+    List<String> parts = new ArrayList<>();
+    for (String part : ZIP_SLASH.split(path.replace('\\', '/'), -1)) {
+      if (part.isEmpty() || ".".equals(part)) {
+        continue;
+      }
+      if ("..".equals(part)) {
+        if (!parts.isEmpty()) {
+          parts.removeLast();
+        }
+        continue;
+      }
+      parts.add(part);
+    }
+    return String.join("/", parts);
+  }
+
+  private record ManifestItem(String href, String mediaType) {
+
+    boolean isHtml() {
+      if (this.mediaType.toLowerCase(Locale.ROOT).contains("html")) {
+        return true;
+      }
+      String lower = this.href.toLowerCase(Locale.ROOT);
+      return lower.endsWith(".html") || lower.endsWith(".xhtml") || lower.endsWith(".htm");
+    }
+  }
+
+  private record Publication(List<String> titles, List<String> authors, List<String> htmlHrefs) {
   }
 }
