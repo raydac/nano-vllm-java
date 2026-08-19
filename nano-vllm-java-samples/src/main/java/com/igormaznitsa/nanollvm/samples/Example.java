@@ -716,11 +716,19 @@ public final class Example {
       return;
     }
 
-    String sources = hits.stream()
-      .map(hit -> Path.of(hit.chunk().source()).getFileName().toString())
-      .distinct()
-      .collect(joining(", "));
-    console.println("(retrieved " + hits.size() + " chunk(s): " + sources + ")");
+    console.println("(retrieved " + hits.size() + " chunk(s))");
+    int index = 1;
+    for (RagHit hit : hits) {
+      console.printf(Locale.ROOT, "  [%d] %.3f  %s%n",
+        index++, hit.score(), ragHitSourceName(hit));
+      console.println("      " + hit.chunk().text().strip());
+    }
+  }
+
+  private static String ragHitSourceName(final RagHit hit) {
+    String source = hit.chunk().source();
+    Path name = Path.of(source).getFileName();
+    return name == null ? source : name.toString();
   }
 
   private static void applyTurnBasedRecovery(final ChatSession chat, final boolean turnBased) {

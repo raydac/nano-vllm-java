@@ -72,7 +72,7 @@ The rest of this guide unpacks that sentence without assuming prior ML coursewor
 
 **In the code:** front door is `LLM` / `LLM.Builder`; interactive demo is `samples.Example`; linear mains include
 `HelloWorld`, `NextTokenHelloWorld`, `LogTriageHelloWorld`, `AdvisorRagHelloWorld`,
-`EmbeddingsHelloWorld` (chapter 16).
+`RagTunerHelloWorld`, `EmbeddingsHelloWorld` (chapter 16).
 
 ---
 
@@ -3148,7 +3148,7 @@ packages. Demos live in the separate Maven module `nano-vllm-java-samples`.
 | `layers/` — `Attention`, `BidirectionalAttention`, `Sampler`, `Linear`, `Norms`, …     | Attention, sampling, projections, norms/RoPE         | **no** |
 | `tensor/` — `Tensor`, `Ops`, `MatmulRuntime`, `LinearKernel`, `EmbeddingKernel`, …     | Arrays, float ops, parallel GEMM                     | **no** |
 | `prompts/` — `ChatPrompts`, `RagPrompts`, `AdvisorPrompts`                             | Default system / RAG / advisor wording               | **no** |
-| *(Maven module `nano-vllm-java-samples`)* `Example`, `HelloWorld`, `NextTokenHelloWorld`, `Bench`, `EmbeddingsHelloWorld`, `LogTriageHelloWorld`, `AdvisorRagHelloWorld`, `utils/Bundled*` | Runnable demos (not in the library JAR) | n/a |
+| *(Maven module `nano-vllm-java-samples`)* `Example`, `HelloWorld`, `NextTokenHelloWorld`, `Bench`, `EmbeddingsHelloWorld`, `LogTriageHelloWorld`, `AdvisorRagHelloWorld`, `RagTunerHelloWorld`, `utils/Bundled*` | Runnable demos (not in the library JAR) | n/a |
 
 `Config.HfConfig` (in `llm/Config`) holds the blueprint plus per-LLM engine knobs (`maxModelLen`, `kvHeapFraction`, …).
 
@@ -3529,8 +3529,8 @@ nano-vllm-java/src/main/java/com/igormaznitsa/nanollvm/
   exceptions/…
 
 nano-vllm-java-samples/src/main/java/com/igormaznitsa/nanollvm/samples/
-  Example.java / HelloWorld.java / NextTokenHelloWorld.java / Bench.java / EmbeddingsHelloWorld.java / LogTriageHelloWorld.java / AdvisorRagHelloWorld.java
-  utils/BundledModels.java / BundledRag.java / OrderedConsole.java
+  Example.java / HelloWorld.java / NextTokenHelloWorld.java / Bench.java / EmbeddingsHelloWorld.java / LogTriageHelloWorld.java / AdvisorRagHelloWorld.java / RagTunerHelloWorld.java
+  utils/BundledModels.java / BundledRag.java / OrderedConsole.java / EpubText.java
 ```
 
 ### Threading reminder (API contract)
@@ -3587,7 +3587,8 @@ unused.
 **In the code (organization):** package `com.igormaznitsa.nanollvm.rag`; entry `RagFactory` → `PreparedRag` (and
 optionally `withEmbeddings`); session `LLM.rag(index)` → `RagSession`; demo corpus folder `rag/` via
 `samples.utils.BundledRag` in `samples.Example` (model → RAG-mode → advisor-count menus **since 1.1.0**)
-and the linear `samples.AdvisorRagHelloWorld` (one custom advisor + BM25 over `rag/`).
+and the linear `samples.AdvisorRagHelloWorld` (one custom advisor + BM25 over `rag/`) plus
+`samples.RagTunerHelloWorld` (bundled *R.U.R.* EPUB through `RagTuner` extract).
 
 ### Load path — preparing documents
 
@@ -3644,6 +3645,7 @@ classpath document is walked **three times**, with a different combine rule each
 `RagResource` is the document handle: disk `Path` or `classpath:…` label, file name, and (at extract time) loaded
 bytes. Folder walks still honor `folderExtensions`; add extra suffixes for custom extractors (`.html`, `.docx`, …).
 Override only the methods you need, or use `RagTuner.allowing` / `extracting` / `preprocessing`.
+Demo: `samples.RagTunerHelloWorld` extracts a classpath EPUB before BM25.
 
 **In the code (tuners):** `RagFactory.Builder.addProcessor` → package-private `RagTunerChain` inside `CorpusLoader`
 (filter before read, extract in `readBody`, preprocess in `appendChunks`).
@@ -3793,7 +3795,9 @@ the sample asks for a **RAG mode** after you pick a chat model: none (plain chat
 gte-small alone still opens the embedding REPL (`samples.EmbeddingsHelloWorld` defaults to multilingual-e5-small
 ONNX and adds `query: ` for that family).
 `samples.AdvisorRagHelloWorld` is the non-interactive BM25 + custom-advisor path (Gemma3-270M, advisor Alex,
-Grimm names and father).
+Grimm names and father). `samples.RagTunerHelloWorld` indexes a bundled EPUB of Čapek's *R.U.R.* with
+`RagTuner` filter / extract / preprocess (plain text via epub4j, a Maven Central fork of epublib) and asks
+two questions from the play.
 
 ### What this RAG is *not*
 

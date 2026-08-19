@@ -21,6 +21,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Load-time RAG tuners on `RagFactory.Builder.addProcessor`: skip files, supply custom document
   text, or rewrite extracted strings before chunking. Several tuners run in order.
+  Sample `RagTunerHelloWorld` indexes a bundled Project Gutenberg EPUB of Karel Čapek's *R.U.R.*
+  and asks two questions from that play.
 
 ### Fixed
 - Closing a model, engine, or weight reader now drops file buffers, KV pages, rotary tables, and

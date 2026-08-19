@@ -17,12 +17,30 @@
     <properties>
         <maven.deploy.skip>true</maven.deploy.skip>
         <exec.mainClass>com.igormaznitsa.nanollvm.samples.Example</exec.mainClass>
+        <epub4j.version>4.2.3</epub4j.version>
+        <xpp3.version>1.1.4c</xpp3.version>
     </properties>
 
     <dependencies>
         <dependency>
             <groupId>com.igormaznitsa</groupId>
             <artifactId>nano-vllm-java</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.documentnode</groupId>
+            <artifactId>epub4j-core</artifactId>
+            <version>${epub4j.version}</version>
+            <exclusions>
+                <exclusion>
+                    <groupId>xmlpull</groupId>
+                    <artifactId>xmlpull</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+        <dependency>
+            <groupId>xpp3</groupId>
+            <artifactId>xpp3</artifactId>
+            <version>${xpp3.version}</version>
         </dependency>
         <dependency>
             <groupId>org.junit.jupiter</groupId>

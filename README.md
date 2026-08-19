@@ -180,6 +180,15 @@ mvn -pl nano-vllm-java-samples -q exec:java \
   -Dexec.mainClass=com.igormaznitsa.nanollvm.samples.AdvisorRagHelloWorld
 ```
 
+Load-time **RagTuner** over a bundled EPUB (Karel Čapek, *R.U.R.*): filter `.epub`, extract plain
+text with [epub4j](https://github.com/documentnode/epub4j) (Maven Central fork of
+[epublib](https://github.com/psiegman/epublib)), then ask two questions from the play (Gemma3-270M):
+
+```bash
+mvn -pl nano-vllm-java-samples -q exec:java \
+  -Dexec.mainClass=com.igormaznitsa.nanollvm.samples.RagTunerHelloWorld
+```
+
 More API samples (streaming, RAG, GGUF, advisors) are in [Library quick start](#library-quick-start).
 
 ## Key features
@@ -253,8 +262,8 @@ Weight-load internals (`models.llmcontainer`, `models.llmarch`, `models.internal
 `prompts`, `engine`, `layers`, `tensor`, and `internal` are **not** exported — use
 `LlmModelFactory` / `LLM` / `RagFactory` from application code. Runnable demos
 (`HelloWorld`, `NextTokenHelloWorld`, `LogTriageHelloWorld`, `AdvisorRagHelloWorld`,
-`EmbeddingsHelloWorld`, `Example`, `Bench`, `samples.utils`) live in the separate
-`nano-vllm-java-samples` module.
+`RagTunerHelloWorld`, `EmbeddingsHelloWorld`, `Example`, `Bench`, `samples.utils`) live in the
+separate `nano-vllm-java-samples` module.
 
 The packaged library JAR has no `Main-Class`. In-repo demos:
 
@@ -755,7 +764,8 @@ Classpath documents (**since 1.1.0**): `RagFactory.makeResource("docs/a.md")` / 
 Load-time **tuners** (**since 1.1.1**): `builder().addProcessor(RagTuner…)` can skip files
 (`isRagResourceAllowed`), replace UTF-8/PDF extraction (`extractRagText` → empty Optional keeps
 the default loader), and rewrite text (`preprocessRagText`) before sentence packing. Folder walks
-still use `folderExtensions`; add extra suffixes for custom formats.
+still use `folderExtensions`; add extra suffixes for custom formats. Linear demo:
+`samples.RagTunerHelloWorld` (bundled *R.U.R.* EPUB).
 
 **Dense / hybrid** (**since 1.1.0**) need an embedding `LlmModel` (for example gte-small GGUF):
 
