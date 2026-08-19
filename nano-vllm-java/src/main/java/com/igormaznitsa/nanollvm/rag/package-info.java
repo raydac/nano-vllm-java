@@ -8,6 +8,8 @@
  * ({@link RagLoadOptions#defaults()} or {@link RagLoadOptions#forTinyModels()}, then
  * {@link RagLoadOptions#withMaxChunkChars(int)} / {@link RagLoadOptions#withChunkOverlap(int)}).
  * Prompt concatenation is a separate cap: {@link RagSession#maxContextChars(int)}.
+ * {@link RagFactory.Builder#addProcessor(RagTuner...)} can filter files, override extraction, and
+ * rewrite text before chunking.
  *
  * <p>{@link PreparedRag} is immutable and safe to share across threads; {@link RagSession} is not
  * thread-safe (one conversation thread). Dense indexes keep a live embedding model reference.

@@ -24,6 +24,8 @@ import java.util.Set;
  * Pass {@link LlmListeners#toSystem()} to print per-file extraction stats while loading.
  * Optional embedding models produce a {@link HybridRagIndex} via {@link #withEmbeddings}.
  * Classpath documents use {@link Builder#addResource(String)} / {@link #makeResource(String)}.
+ * Optional {@link Builder#addProcessor(RagTuner...)} hooks filter files, override text extraction,
+ * and rewrite loaded text before chunking.
  *
  * <p>Empty corpora throw {@link ModelLoadException}. Lexical indexes are immutable and safe to
  * share across threads; hybrid indexes additionally need a live embedding {@link LlmModel}.
@@ -185,6 +187,7 @@ public final class RagFactory {
   /**
    * Fluent corpus builder (inline text, files, folders, classpath resources). Set
    * {@link Builder#options(RagLoadOptions)} before adding documents to change chunk size.
+   * Optional {@link Builder#addProcessor(RagTuner...)} registers load-time tuners.
    *
    * @return a new builder using {@link RagLoadOptions#defaults()}
    */
@@ -324,7 +327,9 @@ public final class RagFactory {
 
   /**
    * Fluent corpus assembler. {@link RagLoadOptions#defaults()} until {@link #options(RagLoadOptions)}
-   * or {@link #forTinyModels()}; those must run before adding documents.
+   * or {@link #forTinyModels()}; those must run before adding documents. Optional
+   * {@link #addProcessor(RagTuner...)} may be called at any time and applies to documents added
+   * afterwards.
    */
   public static final class Builder {
 
@@ -334,6 +339,9 @@ public final class RagFactory {
     private boolean hasContent;
     private LlmListener io = LlmListeners.silent();
 
+    /**
+     * Defaults: {@link RagLoadOptions#defaults()}, silent listener, no documents.
+     */
     private Builder() {
     }
 
@@ -367,6 +375,9 @@ public final class RagFactory {
 
     /**
      * Progress sink for per-file load lines. {@code null} → {@link LlmListeners#silent()}.
+     *
+     * @param io listener, or {@code null} for silent
+     * @return {@code this}
      */
     public Builder listen(final LlmListener io) {
       this.io = io == null ? LlmListeners.silent() : io;
@@ -375,7 +386,26 @@ public final class RagFactory {
     }
 
     /**
+     * Adds load-time {@link RagTuner}s (filter, extract, preprocess). Applied in order to
+     * documents added after this call. Folder walks still honor {@link #folderExtensions(Set)};
+     * include extra suffixes for custom extractors.
+     *
+     * @param tuners must not contain {@code null}; empty is a no-op
+     * @return {@code this}
+     * @throws NullPointerException if {@code tuners} or an element is {@code null}
+     * @since 1.1.1
+     */
+    public Builder addProcessor(final RagTuner... tuners) {
+      this.corpus.addProcessor(tuners);
+      return this;
+    }
+
+    /**
      * Folder used as the corpus root label in logs and {@link PreparedRag#sourceRoot()}.
+     *
+     * @param sourceRoot directory or file label; must not be {@code null}
+     * @return {@code this}
+     * @throws NullPointerException if {@code sourceRoot} is {@code null}
      */
     public Builder sourceRoot(final Path sourceRoot) {
       this.sourceRoot = requireNonNull(sourceRoot, "sourceRoot").toAbsolutePath().normalize();
@@ -384,6 +414,10 @@ public final class RagFactory {
 
     /**
      * Filename suffixes visited by {@link #addFolder(Path)} (include the dot, e.g. {@code .md}).
+     *
+     * @param extensions suffixes with or without a leading dot; must not be {@code null}
+     * @return {@code this}
+     * @throws NullPointerException if {@code extensions} is {@code null}
      */
     public Builder folderExtensions(final Set<String> extensions) {
       this.corpus.folderExtensions(extensions);
@@ -392,6 +426,9 @@ public final class RagFactory {
 
     /**
      * Adds one inline document (id/source assigned automatically).
+     *
+     * @param text document body
+     * @return {@code this}
      */
     public Builder add(final String text) {
       this.hasContent = true;
@@ -401,6 +438,10 @@ public final class RagFactory {
 
     /**
      * Adds one inline document with an explicit id (source matches id).
+     *
+     * @param id   non-blank document id
+     * @param text document body
+     * @return {@code this}
      */
     public Builder add(final String id, final String text) {
       this.hasContent = true;
@@ -409,7 +450,10 @@ public final class RagFactory {
     }
 
     /**
-     * Adds one file (text or PDF) from disk.
+     * Adds one file (text or PDF) from disk. {@link RagTuner#isRagResourceAllowed} may skip it.
+     *
+     * @param file regular file; must not be {@code null}
+     * @return {@code this}
      */
     public Builder addFile(final Path file) {
       this.hasContent = true;
@@ -420,6 +464,8 @@ public final class RagFactory {
     /**
      * Absolute classpath resource (no leading {@code /}), e.g. {@code rag/facts.md}.
      *
+     * @param resourcePath classpath path; must not be blank
+     * @return {@code this}
      * @since 1.1.0
      */
     public Builder addResource(final String resourcePath) {
@@ -431,6 +477,9 @@ public final class RagFactory {
     /**
      * Absolute classpath resource resolved with {@code loader}.
      *
+     * @param loader       class loader; must not be {@code null}
+     * @param resourcePath classpath path; must not be blank
+     * @return {@code this}
      * @since 1.1.0
      */
     public Builder addResource(final ClassLoader loader, final String resourcePath) {
@@ -442,6 +491,9 @@ public final class RagFactory {
     /**
      * Classpath resource via {@link Class#getResourceAsStream(String)}.
      *
+     * @param anchor       class used to resolve the path; must not be {@code null}
+     * @param resourcePath leading {@code /} = absolute, otherwise package-relative
+     * @return {@code this}
      * @since 1.1.0
      */
     public Builder addResource(final Class<?> anchor, final String resourcePath) {
@@ -453,6 +505,8 @@ public final class RagFactory {
     /**
      * Adds several absolute classpath resources (no leading {@code /}).
      *
+     * @param resourcePaths classpath paths; must not be {@code null}
+     * @return {@code this}
      * @since 1.1.0
      */
     public Builder addResources(final String... resourcePaths) {
@@ -464,6 +518,9 @@ public final class RagFactory {
     /**
      * Adds several classpath resources resolved with {@code loader}.
      *
+     * @param loader         class loader; must not be {@code null}
+     * @param resourcePaths  classpath paths; must not be {@code null}
+     * @return {@code this}
      * @since 1.1.0
      */
     public Builder addResources(final ClassLoader loader, final String... resourcePaths) {
@@ -475,6 +532,9 @@ public final class RagFactory {
     /**
      * Walks {@code folder} for {@link #folderExtensions(Set)} (sets {@link #sourceRoot(Path)} if
      * unset).
+     *
+     * @param folder directory to scan; must not be {@code null}
+     * @return {@code this}
      */
     public Builder addFolder(final Path folder) {
       this.hasContent = true;
@@ -487,6 +547,9 @@ public final class RagFactory {
 
     /**
      * Adds several files from disk.
+     *
+     * @param files regular files; must not be {@code null}
+     * @return {@code this}
      */
     public Builder addFiles(Path... files) {
       this.hasContent = true;
@@ -497,6 +560,7 @@ public final class RagFactory {
     /**
      * Builds an immutable lexical {@link PreparedRag}.
      *
+     * @return BM25 index
      * @throws ModelLoadException if no non-blank chunks were added
      */
     public PreparedRag build() {
@@ -506,6 +570,8 @@ public final class RagFactory {
     /**
      * Lexical index plus dense embeddings.
      *
+     * @param embeddingModel encoder kept open for query-time embed; must not be {@code null}
+     * @return hybrid index over the same passages
      * @since 1.1.0
      */
     public HybridRagIndex build(final LlmModel embeddingModel) {

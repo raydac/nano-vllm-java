@@ -25,7 +25,8 @@ import java.util.regex.Pattern;
 
 /**
  * Loads strings, files, classpath resources, and folder trees into {@link TextChunk}s
- * (preprocess + chunk). Used only from {@link RagFactory}.
+ * (optional {@link RagTuner} filter / extract / preprocess, then chunk). Used only from
+ * {@link RagFactory}.
  */
 final class CorpusLoader {
 
@@ -37,6 +38,11 @@ final class CorpusLoader {
   private CorpusLoader() {
   }
 
+  /**
+   * Starts a corpus assembler (default chunk knobs until {@link Builder#apply(RagLoadOptions)}).
+   *
+   * @return a new builder
+   */
   static Builder builder() {
     return new Builder();
   }
@@ -76,6 +82,9 @@ final class CorpusLoader {
     return path.toLowerCase(Locale.ROOT).endsWith(".pdf");
   }
 
+  /**
+   * Mutable assembler: inline text, files, classpath resources, and folder walks.
+   */
   static final class Builder {
 
     private final List<TextChunk> pending = new ArrayList<>();
@@ -91,7 +100,11 @@ final class CorpusLoader {
     private Set<String> folderExtensions = DEFAULT_EXTENSIONS;
     private LlmListener io = LlmListeners.silent();
     private Path reportRoot;
+    private RagTunerChain tuners = RagTunerChain.empty();
 
+    /**
+     * Default chunk knobs until {@link #apply(RagLoadOptions)}.
+     */
     private Builder() {
     }
 
@@ -162,6 +175,19 @@ final class CorpusLoader {
       return this;
     }
 
+    /**
+     * Appends load-time {@link RagTuner}s (filter, extract, preprocess) for documents added after
+     * this call.
+     *
+     * @param tuners must not contain {@code null}; empty is a no-op
+     * @return {@code this}
+     * @throws NullPointerException if {@code tuners} or an element is {@code null}
+     */
+    Builder addProcessor(final RagTuner... tuners) {
+      this.tuners = this.tuners.plus(tuners);
+      return this;
+    }
+
     public Builder add(final String text) {
       return this.add("text-" + ++this.anon, text);
     }
@@ -173,14 +199,7 @@ final class CorpusLoader {
     public Builder add(final String id, final String source, final String text) {
       requireNonNull(id, "id");
       requireNonNull(source, "source");
-      this.pending.addAll(Chunking.split(
-        id,
-        source,
-        text,
-        this.maxChunkChars,
-        this.chunkOverlap,
-        this.preprocess,
-        this.atomicSentences));
+      this.appendChunks(id, source, text, null);
       return this;
     }
 
@@ -198,22 +217,16 @@ final class CorpusLoader {
       if (!Files.isRegularFile(path)) {
         throw new IllegalArgumentException("not a regular file: " + path);
       }
+      if (!this.tuners.allows(RagResource.file(path))) {
+        this.reportSkipped(this.displayPath(path));
+        return this;
+      }
       try {
         long size = Files.size(path);
         this.requireBudget(path.toString(), size);
-        String body = this.readFileText(path);
+        byte[] bytes = Files.readAllBytes(path);
         this.accountRead(size);
-        String source = path.toString();
-        List<TextChunk> chunks = Chunking.split(
-          source,
-          source,
-          body,
-          this.maxChunkChars,
-          this.chunkOverlap,
-          this.preprocess,
-          this.atomicSentences);
-        this.pending.addAll(chunks);
-        this.reportLoaded(this.displayPath(path), body, chunks.size());
+        this.indexLoaded(RagResource.file(path, bytes), this.displayPath(path));
       } catch (IOException e) {
         throw new UncheckedIOException("failed to read " + path, e);
       }
@@ -236,6 +249,10 @@ final class CorpusLoader {
       try (InputStream in = loader.getResourceAsStream(path)) {
         if (in == null) {
           throw new IllegalArgumentException("classpath resource not found: " + path);
+        }
+        if (!this.tuners.allows(RagResource.classpath(path))) {
+          this.reportSkipped("classpath:" + path);
+          return this;
         }
         return this.addResourceBytes(path, in.readAllBytes());
       } catch (IOException e) {
@@ -263,6 +280,10 @@ final class CorpusLoader {
         String label = raw.startsWith("/")
           ? normalizeClasspathPath(raw, "resourcePath")
           : packageRelativeClasspath(anchor, raw);
+        if (!this.tuners.allows(RagResource.classpath(label))) {
+          this.reportSkipped("classpath:" + label);
+          return this;
+        }
         return this.addResourceBytes(label, in.readAllBytes());
       } catch (IOException e) {
         throw new UncheckedIOException("failed to read classpath resource: " + raw, e);
@@ -291,12 +312,62 @@ final class CorpusLoader {
       requireNonNull(bytes, "bytes");
       String source = "classpath:" + classpathPath;
       this.requireBudget(source, bytes.length);
-      String body = isPdfName(classpathPath)
+      this.accountRead(bytes.length);
+      this.indexLoaded(RagResource.classpath(classpathPath, bytes), source);
+      return this;
+    }
+
+    /**
+     * Extracts, preprocesses, and chunks a loaded file or classpath resource.
+     *
+     * @param resource loaded document ({@link RagResource#hasContent()} is {@code true})
+     * @param display  path shown in load logs
+     */
+    private void indexLoaded(final RagResource resource, final String display) {
+      String source = resource.source();
+      this.appendChunks(source, source, this.readBody(resource), display);
+    }
+
+    /**
+     * Custom tuner extract, or UTF-8 / PDF when every tuner returns empty.
+     *
+     * @param resource loaded document
+     * @return document body before {@link RagTuner#preprocessRagText(String)}
+     */
+    private String readBody(final RagResource resource) {
+      return this.tuners.extract(resource).orElseGet(() -> this.standardExtract(resource));
+    }
+
+    /**
+     * Built-in extract: PDF via {@link PdfTextExtractor}, otherwise UTF-8 text.
+     *
+     * @param resource loaded document
+     * @return extracted text
+     */
+    private String standardExtract(final RagResource resource) {
+      byte[] bytes = resource.rawContent();
+      return isPdfName(resource.fileName())
         ? PdfTextExtractor.extract(bytes, this.resourceLimits)
         : new String(bytes, UTF_8);
-      this.accountRead(bytes.length);
+    }
+
+    /**
+     * Runs the tuner preprocess chain, then packs {@code text} into {@link TextChunk}s.
+     *
+     * @param id      chunk id base
+     * @param source  chunk source label
+     * @param text    body after extract (inline or file); {@code null} treated as empty
+     * @param display load-log path, or {@code null} to skip the per-file line
+     */
+    private void appendChunks(
+      final String id,
+      final String source,
+      final String text,
+      final String display
+    ) {
+      String body = this.tuners.preprocess(text == null ? "" : text);
       List<TextChunk> chunks = Chunking.split(
-        source,
+          id,
         source,
         body,
         this.maxChunkChars,
@@ -304,8 +375,9 @@ final class CorpusLoader {
         this.preprocess,
         this.atomicSentences);
       this.pending.addAll(chunks);
-      this.reportLoaded(source, body, chunks.size());
-      return this;
+      if (display != null) {
+        this.reportLoaded(display, body, chunks.size());
+      }
     }
 
     private void requireBudget(final String label, final long size) {
@@ -327,12 +399,6 @@ final class CorpusLoader {
     private void accountRead(final long size) {
       this.filesRead++;
       this.totalBytesRead += size;
-    }
-
-    private String readFileText(final Path path) throws IOException {
-      return PdfTextExtractor.isPdf(path)
-        ? PdfTextExtractor.extract(path, this.resourceLimits)
-        : Files.readString(path, UTF_8);
     }
 
     public Builder addFiles(Path... files) {
@@ -378,15 +444,27 @@ final class CorpusLoader {
     }
 
     private void reportLoaded(final String display, final String body, final int chunkCount) {
-      if (LlmListeners.isSilent(io)) {
+      if (LlmListeners.isSilent(this.io)) {
         return;
       }
       int chars = body == null ? 0 : body.length();
-      LlmListeners.infof(io, null, "RAG %s: %d char(s) → %d chunk(s)%n",
+      LlmListeners.infof(this.io, null, "RAG %s: %d char(s) → %d chunk(s)%n",
         display, chars, chunkCount);
       if (chars == 0) {
-        LlmListeners.info(io, null, "RAG warning: no text extracted from " + display);
+        LlmListeners.info(this.io, null, "RAG warning: no text extracted from " + display);
       }
+    }
+
+    /**
+     * Per-file skip line when a tuner rejects the resource.
+     *
+     * @param display path shown in the log
+     */
+    private void reportSkipped(final String display) {
+      if (LlmListeners.isSilent(this.io)) {
+        return;
+      }
+      LlmListeners.infof(this.io, null, "RAG skipped: %s%n", display);
     }
 
     private String displayPath(final Path path) {

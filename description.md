@@ -3142,7 +3142,7 @@ packages. Demos live in the separate Maven module `nano-vllm-java-samples`.
 | `tokenizer/Tokenizer`, `GgufTokenizerSource`                                           | HF / GGUF vocab → encode / decode / chat template   | yes |
 | `utils/NanoLlvmProps`, `ResourceLimits`                                                | Property/env knobs; process-wide parser/corpus caps (**since 1.0.0**) | yes |
 | `exceptions/`                                                                          | Typed library failures                               | yes |
-| `rag/` — `RagFactory`, `PreparedRag`, `DenseRagIndex`, `HybridRagIndex`, `RagSession`, `RagIndex`, `RagHit`, `RagLoadOptions`, … | Text RAG: BM25 and (since **1.1.0**) dense/hybrid + classpath docs | yes |
+| `rag/` — `RagFactory`, `PreparedRag`, `DenseRagIndex`, `HybridRagIndex`, `RagSession`, `RagIndex`, `RagHit`, `RagLoadOptions`, `RagTuner`, `RagResource`, … | Text RAG: BM25 and (since **1.1.0**) dense/hybrid + classpath docs; load-time tuners since **1.1.1** | yes |
 | `internal/` — `Json`, `Context`, `GgufDequant`, `ModelFileBundle` | JSON helper, per-step context, GGUF dequant, in-memory file bundle | **no** |
 | `engine/` — `Scheduler`, `Sequence`, `BlockManager`, `Transformer`, `KvCacheArena`     | Prefill/decode loop, pages, one forward+sample       | **no** |
 | `layers/` — `Attention`, `BidirectionalAttention`, `Sampler`, `Linear`, `Norms`, …     | Attention, sampling, projections, norms/RoPE         | **no** |
@@ -3174,7 +3174,7 @@ packages. Demos live in the separate Maven module `nano-vllm-java-samples`.
 | Attention + KV write             | `Attention`, `KvCacheArena`, `internal.Context`                      | `Context.bindKvCache`; `Attention.forward` by `layerIndex`; prefill/decode helpers                            |
 | Pages / prefix reuse             | `BlockManager`                                                       | `canAllocate`, `allocate`, `hashBlocks`, `mayAppend`                                                          |
 | Split thinking UI                | `ChatReply`                                                          | `ChatReply.parse` / `parse(raw, llm)` / `salvageFromThinking`                                                 |
-| Text RAG (prepare + retrieve)    | `RagFactory`, `PreparedRag`, `DenseRagIndex`, `HybridRagIndex`, `RagSession` | `RagFactory.make` / `withEmbeddings` → `llm.rag(index).send(…)` (chapter 17; dense/hybrid **since 1.1.0**); session knobs match `ChatSession` (`recoverUnusableAnswers`, `emitDebugPrompts`, …) |
+| Text RAG (prepare + retrieve)    | `RagFactory`, `PreparedRag`, `DenseRagIndex`, `HybridRagIndex`, `RagSession`, `RagTuner` | `RagFactory.make` / `withEmbeddings` → `llm.rag(index).send(…)`; `Builder.addProcessor` tuners **since 1.1.1** (chapter 17); session knobs match `ChatSession` |
 | Resource caps                    | `ResourceLimits`                                                     | Process-wide defaults + builder for file/PDF/JSON/GGUF/corpus/history budgets (**since 1.0.0**)               |
 | Math bricks                      | `Ops`, `LinearKernel`, `EmbeddingKernel`, `MatmulRuntime`            | norms / MLP gates / softmax; linear & embed via kernels (internal)                                            |
 
@@ -3221,6 +3221,7 @@ try (LlmModel model = LlmModelFactory.open(Path.of("models/Qwen3-0.6B")).make();
   var rag = RagFactory.make(Path.of("docs"));
   // since 1.1.0: classpath — RagFactory.makeResource("docs/a.md") / .builder().addResource(…)
   //             hybrid — RagFactory.withEmbeddings(rag, embedModel)  (chapter 17)
+  // since 1.1.1: builder().addProcessor(RagTuner…) filter / extract / preprocess (chapter 17)
   String grounded = llm.rag(rag).topK(2).send("What is the capital of France?").answer();
 } // close LLM before LlmModel (try-with-resources closes in reverse declaration order)
 
@@ -3467,7 +3468,10 @@ embeddings items.
 
 ```text
 RagFactory.make(docs|file) / .of(…) / .builder()… / makeResource(…)   // classpath since 1.1.0
-    → CorpusLoader (chunk + Markdown cleanup; Path, text, or classpath)
+    → CorpusLoader
+         optional RagTuner (since 1.1.1; Builder.addProcessor):
+           filter AND → first extract Optional → preprocess pipeline
+         then Markdown cleanup, sentence packing
     → PreparedRag.fromChunks          // passage prep + inverted BM25 + IDF
     → PreparedRag                     // shareable like LlmModel
 
@@ -3495,6 +3499,7 @@ nano-vllm-java/src/main/java/com/igormaznitsa/nanollvm/
   llm/LlmAdvisor.java / LlmAdvisorMixer.java / AdvisorResponse.java / AdvisorEnrichment.java
   chat/ChatSession.java / ChatHistory.java / ChatMessage.java / ChatMessages.java
   rag/RagFactory.java          ← prepare documents once (Path, text, classpath)
+  rag/RagTuner.java / RagResource.java  ← since 1.1.1: load-time filter / extract / preprocess
   rag/PreparedRag.java         ← shareable corpus + BM25 index (+ Passage record)
   rag/DenseRagIndex.java       ← since 1.1.0: embedding cosine index
   rag/HybridRagIndex.java      ← since 1.1.0: BM25 + dense RRF
@@ -3570,7 +3575,7 @@ is short, the same model has a much better chance of quoting or paraphrasing the
 
 | When                      | What happens                                                                  | Analogy                           |
 |---------------------------|-------------------------------------------------------------------------------|-----------------------------------|
-| **Load time** (once)      | Read files → clean → chunk → preparsing → inverted BM25 index → `PreparedRag` | Binding the card box              |
+| **Load time** (once)      | Read files → optional tuners → clean → chunk → BM25 index → `PreparedRag` | Binding the card box              |
 | **Optional (1.1.0)**      | Embed each passage with an embedding `LlmModel` → `DenseRagIndex` / hybrid    | Photographing each card once      |
 | **Query time** (each ask) | Score candidate cards (BM25 and/or cosine) → format prompt → chat generate    | Pulling a few cards, then writing |
 
@@ -3591,6 +3596,7 @@ files / strings / folder / classpath resource   (classpath since 1.1.0)
         │
         ▼
   CorpusLoader (package-private)
+        │  optional RagTuner (since 1.1.1): filter files, custom extract, preprocess text
         │  optional Markdown cleanup, section titles, sentence packing
         │  RagLoadOptions: maxChunkChars, atomicSentences, dedupe, …
         ▼
@@ -3604,6 +3610,43 @@ files / strings / folder / classpath resource   (classpath since 1.1.0)
         ▼
   DenseRagIndex / HybridRagIndex   (embed passages; keep encoder open for queries)
 ```
+
+#### Load-time tuners (**since 1.1.1**)
+
+The default loader reads UTF-8 (or PDF via `PdfTextExtractor`), then chunks. **Tuners** are optional hooks on that
+path — skip a file, parse a format the library does not know, or rewrite text before sentence packing. They are
+**load-time only**; they do not change BM25, dense rank, or `RagSession`.
+
+Register them on the fluent builder (not on `RagFactory.make(path)`):
+
+```java
+PreparedRag prepared = RagFactory.builder()
+    .addProcessor(
+        RagTuner.allowing(resource -> !resource.fileName().startsWith("_")),
+        RagTuner.extracting(resource -> resource.fileName().endsWith(".html")
+            ? Optional.of(stripTags(resource))
+            : Optional.empty()),
+        RagTuner.preprocessing(String::strip))
+    .folderExtensions(Set.of(".txt", ".md", ".html"))  // folder walks still use this set
+    .addFolder(Path.of("docs"))
+    .build();
+```
+
+Several `addProcessor` calls **append** in order. The list is not one nested “call the next” object. Each file or
+classpath document is walked **three times**, with a different combine rule each time:
+
+| Pass | Method | How the list is combined |
+|------|--------|--------------------------|
+| **Filter** | `isRagResourceAllowed(RagResource)` | **AND** — every tuner must return `true`, or the document is skipped (not read). Inline `add(text)` never hits this pass. |
+| **Extract** | `extractRagText(RagResource)` | **First present `Optional`** — that string becomes the body; later extractors are not called. `Optional.empty()` means “not this format.” If every tuner is empty, UTF-8 / PDF runs. |
+| **Preprocess** | `preprocessRagText(String)` | **Pipeline** — `c(b(a(text)))` in registration order, then the usual `RagLoadOptions.preprocess()` packing. Defaults are identity, so a filter-only tuner does not rewrite text. |
+
+`RagResource` is the document handle: disk `Path` or `classpath:…` label, file name, and (at extract time) loaded
+bytes. Folder walks still honor `folderExtensions`; add extra suffixes for custom extractors (`.html`, `.docx`, …).
+Override only the methods you need, or use `RagTuner.allowing` / `extracting` / `preprocessing`.
+
+**In the code (tuners):** `RagFactory.Builder.addProcessor` → package-private `RagTunerChain` inside `CorpusLoader`
+(filter before read, extract in `readBody`, preprocess in `appendChunks`).
 
 #### Chunking and cleanup
 
@@ -3631,7 +3674,8 @@ At load, each passage gets:
 
 **In the code (load):** `RagFactory.make` / `of` / `builder` → `CorpusLoader` (UTF-8 text/markup;
 `.pdf` via `PdfTextExtractor`; **since 1.1.0** also `makeResource` / `Builder.addResource` for classpath paths,
-source label `classpath:…`) → `PreparedRag.fromChunks`. Options live in `RagLoadOptions`.
+source label `classpath:…`; **since 1.1.1** `Builder.addProcessor(RagTuner…)` for filter / extract /
+preprocess) → `PreparedRag.fromChunks`. Options live in `RagLoadOptions`.
 
 ```java
 // BM25 only — prepare once, share across many LLM engines
@@ -3639,6 +3683,7 @@ PreparedRag prepared = RagFactory.make(Path.of("rag"), RagLoadOptions.forTinyMod
 // or classpath (since 1.1.0):
 // PreparedRag prepared = RagFactory.makeResource("docs/facts.md");
 // PreparedRag prepared = RagFactory.builder()
+//     .addProcessor(RagTuner.allowing(r -> !r.fileName().startsWith("_")))
 //     .addResource(MyApp.class, "/docs/a.md")
 //     .add("inline.txt", "Paris is the capital of France.")
 //     .build();
@@ -3734,6 +3779,7 @@ Think of the layers again:
 | Layer                         | Role                                              |
 |-------------------------------|---------------------------------------------------|
 | `PreparedRag`                 | Your documents, cut and BM25-indexed              |
+| `RagTuner` / `RagResource`    | Optional load-time filter / extract / preprocess (**since 1.1.1**) |
 | `DenseRagIndex` / hybrid      | Optional embedding rank (**since 1.1.0**)         |
 | `RagSession`                  | Retrieve + format for this turn                   |
 | `LLM` / `ChatSession`         | Same inference engine as plain chat               |
@@ -3752,14 +3798,15 @@ Grimm names and father).
 ### What this RAG is *not*
 
 - Not an ANN / external vector database (dense search is in-process, linear).
+- Not a query-time plugin — `RagTuner` runs only while the index is built.
 - Not a guarantee of factual truth — only a way to **offer** text; the generator may still mis-copy it.
 - Not a classifier of user intents or languages: preparation is about **documents**, not about scripting replies.
 - Dense retrieval is **not** available on `LLM.Builder` — keep the chat model and the embedding `LlmModel` separate.
 
 ### A fair one-sentence summary
 
-> **Prepare documents once into a shareable BM25 index (and optionally, since 1.1.0, dense or hybrid embeddings); each
-> question pulls a few passages into the chat prompt; the model then continues as usual.**
+> **Prepare documents once into a shareable BM25 index (optional tuners at load since 1.1.1; optional dense or hybrid
+> embeddings since 1.1.0); each question pulls a few passages into the chat prompt; the model then continues as usual.**
 
 **In the code (full map):** chapter 16 Sample G; types under `rag/`.
 
@@ -3831,6 +3878,8 @@ Short glossary. For the Java home of each idea, prefer the **In the code** notes
 | BM25                  | Lexical ranking over passages (inverted index; default RAG path)                                     |
 | `DenseRagIndex`       | Embedding cosine index over chunks (**since 1.1.0**; needs embedding `LlmModel`)                     |
 | `HybridRagIndex`      | BM25 + dense fused by RRF (**since 1.1.0**; `RagFactory.withEmbeddings`)                             |
+| `RagTuner`            | Load-time filter / extract / preprocess (**since 1.1.1**; `RagFactory.Builder.addProcessor`)         |
+| `RagResource`         | File or classpath document seen by tuners during load (**since 1.1.1**)                             |
 | `RagSession`          | Retrieve → format prompt → `ChatSession.sendPrepared`                                            |
 
 ---

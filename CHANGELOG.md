@@ -19,6 +19,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   WordLevel, and character models are recognized from `tokenizer.json` `model.type`.
   `Tokenizer.fromSentencePiece` builds a tokenizer from protobuf bytes.
 
+- Load-time RAG tuners on `RagFactory.Builder.addProcessor`: skip files, supply custom document
+  text, or rewrite extracted strings before chunking. Several tuners run in order.
+
 ### Fixed
 - Closing a model, engine, or weight reader now drops file buffers, KV pages, rotary tables, and
   the last shared matmul pool instead of pinning them until process exit. GGUF and safetensors files

@@ -752,6 +752,11 @@ PreparedRag rag = RagFactory.of(
 
 Classpath documents (**since 1.1.0**): `RagFactory.makeResource("docs/a.md")` / `.addResource(loader, path)`.
 
+Load-time **tuners** (**since 1.1.1**): `builder().addProcessor(RagTuner…)` can skip files
+(`isRagResourceAllowed`), replace UTF-8/PDF extraction (`extractRagText` → empty Optional keeps
+the default loader), and rewrite text (`preprocessRagText`) before sentence packing. Folder walks
+still use `folderExtensions`; add extra suffixes for custom formats.
+
 **Dense / hybrid** (**since 1.1.0**) need an embedding `LlmModel` (for example gte-small GGUF):
 
 ```java
