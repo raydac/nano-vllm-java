@@ -23,7 +23,15 @@
   top-k / top-p order, typical RAG vs chat ranges, and that greedy `0` is rejected. Public `llm`
   package types (`LLM`, `Config`/`HfConfig`, advisors, `GenerationStats`, `package-info`) document
   what each API is for, exclusive generate lock, chat vs complete vs generate, and KV/stop nuances —
-  not one-line restatements of the method name.
+  not one-line restatements of the method name. Landing JavaDoc (`package-info`, `LLM` / `LLM.Builder`,
+  `ChatSession`, `RagSession`, `LlmModelFactory.Builder`, `NanoLlvmProps`) includes goal → method
+  maps so a caller who does not know LLM jargon can find reply length, randomness, RAM, CPU, RAG
+  passages, and JVM flags. Method names such as `useTqdm` / `kvHeapFraction` / `forTokenizer` are
+  unchanged (rename would break callers). `LLM.Builder.dedicatedMatmulPool()` (1.1.1) gives a
+  server an engine-owned matmul pool that `close()` shuts down, instead of the process-wide
+  `nanollvm-matmul-*` default. Extra cores also speed prefill attention, RoPE, and token
+  embedding gathers on that same pool (nested pool work stays sequential so a fixed pool cannot
+  deadlock).
 - **`@since 1.1.0`:** new exported types (`ModelSupport`, `ModelFileSource`, `ThinkTags`,
   `ChatSpecials`, `DenseRagIndex`, …) and new public members on 1.0 types (`LlmModel.embed`,
   `SamplingParams.builder` / withers, `LLM.generate(…, Duration)` / `TokenEvent`,
@@ -75,8 +83,8 @@
 - Load pipeline: `models.llmcontainer.ContainerTransport` → `ContainerCatalog` → `ArchitectureProcessor` (`CausalArchitecture` for chat, `EmbeddingArchitecture` for BERT) bind → fill → create graph. HF-only chat (Gemma3 / Gemma4 / Llama) uses the causal default bind; Qwen3/BERT override with dual-source; LFM2 is GGUF-only. No Gemma3+Gemma4 parent — fill/graph differ. Those types carry contract Javadoc and `@since 1.1.0`.
 - Share one `LlmModel` / `PreparedRag` across many `LLM`s; one LLM not concurrent-safe for generate (`cancel()` is cross-thread)
 - Lifecycle: `LLM.close()` frees scheduler + KV/conv arenas + engine lease, and shuts down the shared matmul pool on the last checkout via `AtomicReference` CAS (no `synchronized`; caller-provided executors stay open); `LlmModel.close()` releases packed payloads / clears weight+network/encoder refs — close engines before model. Weight readers copy files ≤ 2 GiB into heap so close can drop them; shards > 2 GiB keep a positioned `FileChannel`. RoPE tables live on the model, not a process-wide cache.
-- `.disableMultiCpu()` / `cpuThreads(1)` → `MatmulRuntime.sequential()` (pool=null, calling thread only); builder thread count wins over `-Dnanollvm.cpu.threads`
-- Engine obtains `CausalLM` via `LlmModelAccess.resolveNetwork` (no public `network()`); embedding models hold `EmbeddingEncoder` instead
+- `.disableMultiCpu()` / `cpuThreads(1)` → `MatmulRuntime.sequential()` (pool=null, calling thread only); builder thread count wins over `-Dnanollvm.cpu.threads`. Default parallel path still checks out a process-wide daemon pool (`availableProcessors` threads). `LLM.Builder.dedicatedMatmulPool()` / `MatmulRuntime.Builder.dedicatedPool()` create a bounded owned pool of `cpuThreads` workers shut down with the runtime. `matmulExecutor` stays caller-owned.
+- Engine obtains `CausalLM` via `LlmModelImpl.peer(model)` (sealed `LlmModel`; no public `network()`); embedding models hold `EmbeddingEncoder` instead. No static `LlmModelAccess` registry. `LlmModel` is `abstract sealed` permitting only hidden `LlmModelImpl`.
 - HF Unigram SentencePiece `tokenizer.json` (XLM-RoBERTa / multilingual E5) encodes via Viterbi; embedding wrap accepts `<s>`/`</s>` as well as `[CLS]`/`[SEP]`. Precompiled Unigram charsmap is applied from HF `normalizer` (base64 blob) and from SentencePiece `tokenizer.model`.
 - ONNX: `OnnxProtoReader` reads initializers only; `OnnxWeightNames` maps chat HF names and BERT HF→GGUF schema keys (including MatMul aliases such as `/encoder/layer.N/attention/output/dense/MatMul`); external_data for `make(Path)` only (not ModelFileSource yet)
 - transformers.js / onnx-community: raw payload may be protobuf field **9** (legacy) or **13**; MatMul B is `[in,out]` → transpose to Linear `[out,in]`; anonymous `onnx::MatMul_*` remapped via MatMul node path; `OnnxDataTypes` catalogs TensorProto types — load FLOAT/FP16/BF16/DOUBLE, skip int/bool/string/complex (+ scalars), fail loudly on float8/nibble/unknown
@@ -93,10 +101,12 @@
 - Safetensors shards **> 2 GiB** (Gemma 4 QAT `model.safetensors` is ~2.29 GiB) use `FileChannel` positioned reads; files ≤ 2 GiB are copied into a heap `ByteBuffer` so `close()` can drop them
 - Weight/tensor records hold `byte[]`/`float[]`/`int[]` on purpose (no List boxing); Error Prone `ArrayRecordComponent` is suppressed at those records (and Unigram tokenizer `float[]` scores). Packed QAT/GGUF release is `packed.length == 0`, not identity with a sentinel array. SpotBugs `EI_EXPOSE_REP*` on those types (and `Tensor.data()`, `Context` tables, `Sequence.blockTable()`) is by design — copies would double RAM or break KV mutation.
 - Tensor/math perf (2026-08-15): dense decode uses panel GEMV (`FloatKernels.gemv`, x loaded once per K-vector across 8 outputs); Vector `dot`/`sumSquares` 4-acc unroll; `Ops` add/mul/scale/SiLU/GELU/RMSNorm/`tanhSoftcap` go through SIMD kernels; Attention reuses tile scratch, SIMD axpy, and reads paged KV in place (no per-step dense K/V copy). Fused packed dequant-dot still open.
+- CPU overdrive (2026-08-20): `MatmulRuntime.parallelRanges` splits independent index jobs on the engine pool. Causal `Attention` and BERT `BidirectionalAttention` fan out query×head (cost `qLen*heads*kLen >= 256`); RoPE fans out tokens; embedding gather fans out rows; Gemma QAT SRQ fans out elements. `ThreadLocal POOL_WORKER` forces nested `linear` / `parallelRanges` to sequential so a fixed pool cannot `invokeAll`-deadlock. Decoder layers stay sequential (residual). Do not `invokeAll` Q/K/V as three nested GEMMs. `LlmModel.embed` still uses `MatmulRuntime.sequential()` so RAG passage executors do not oversubscribe the shared pool.
 
 
 ## 3. Technical Debt & Refactoring
 - Attention O(n²); no float16 / TP / CUDA; GGUF packed by default; most HF safetensors still FP32 (Gemma 4 QAT stays packed)
+- RMSNorm / LayerNorm / Sampler still sequential over tokens or logit rows (small vs attention/GEMM; sampler batch is `maxNumSeqs`)
 - Optional GGUF perf: mmap weights; FP16 / smaller default KV; fused packed GEMM (dequant+dot without float row scratch)
 - GGUF metaspace pretok (prepend ▁) may need per-export tuning for exotic packs
 - Dense weight `float[]` still GC-only after model close (no eager zeroing of Tensor buffers)
@@ -186,7 +196,11 @@
 - Raw streaming decode (think tags and chat specials kept): `LlmTextKind.TEXT_RAW` on a `ChatSession` listener;
   `TEXT_THINKING` / `TEXT_ASSISTANT` stay parsed. CLI `streamTo` ignores `TEXT_RAW`.
 - Prefer `LlmModelFactory.open` / `make` → `LLM.builder(LlmModel)`; optional `.sampling(params)` on the engine;
-  close LLM then model
+  close LLM then model. In a server, do not rely on the default process-wide matmul pool: inject
+  `.matmulExecutor(appPool)`, call `.dedicatedMatmulPool()`, or `.disableMultiCpu()`. One `LLM` per
+  in-flight generate; share `LlmModel`. Cap turns with `ChatSession.timeout`. `ResourceLimits.setCurrent`
+  is JVM-global. Extra CPU cores help long prompts (attention/RoPE) as well as GEMM; decode of a
+  single token stays mostly sequential besides head-parallel attention on long context.
 - Embedding GGUFs/ONNX use the same factory; call `embed`, not `LLM.builder`
   (`samples.EmbeddingsHelloWorld`, default multilingual-e5-small ONNX with `query: ` prefix)
 - For Tiny-LLM-ONNX use `onnx/model.onnx` (fp32) or `model_fp16.onnx`; skip quantized community files

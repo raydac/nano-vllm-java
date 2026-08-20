@@ -3,13 +3,15 @@ package com.igormaznitsa.nanollvm.llm;
 import com.igormaznitsa.nanollvm.tokenizer.Tokenizer;
 
 /**
- * Neutral default {@link SamplingParams} for chat / completion helpers.
+ * Starting {@link SamplingParams} for chat / completion when you do not set
+ * {@link LLM.Builder#sampling(SamplingParams)}.
  *
  * <p>These are architecture-agnostic starting points, not a quality preset: temperature
- * {@code 0.6}, {@code maxTokens} {@code 256}, EOS honored, top-k off, top-p {@code 0.95}.
- * Lower temperature (and optionally a tighter top-p) for grounded / RAG answers; raise
- * temperature for more variety. Model-family knobs (e.g. turn-based top-k) belong in the
- * application or samples.
+ * {@code 0.6} (how random the next word-piece is), {@code maxTokens} {@code 256} (how long the
+ * reply may be), end-of-text honored, top-k off, top-p {@code 0.95}. Lower temperature (and
+ * optionally a tighter top-p) for factual / RAG answers; raise temperature for more variety.
+ * Prefer {@link #neutral()} or {@link SamplingParams#builder()} — {@link #forTokenizer(Tokenizer)}
+ * ignores its argument. Model-family extras (turn-based top-k, …) belong in the application.
  *
  * @see SamplingParams
  */
@@ -68,8 +70,8 @@ public final class SamplingDefaults {
   }
 
   /**
-   * Alias of {@link #neutral()}. The tokenizer argument is unused: family-specific knobs (turn-based
-   * top-k, thinking, …) stay in the application or samples, not in this library default.
+   * Prefer {@link #neutral()}. The tokenizer argument is unused: family-specific knobs stay in
+   * the application or samples, not in this library default.
    *
    * @param tokenizer ignored; may be {@code null}
    * @return {@link #neutral()}

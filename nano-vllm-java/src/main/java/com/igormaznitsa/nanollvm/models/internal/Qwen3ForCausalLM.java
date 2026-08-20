@@ -216,7 +216,7 @@ public record Qwen3ForCausalLM(Qwen3Model model, ParallelLMHead lmHead) implemen
         q = this.normHeads(q, this.qNorm);
         k = this.normHeads(k, this.kNorm);
       }
-      Tensor[] rotated = this.rotaryEmb.forward(positions, q, k);
+      Tensor[] rotated = this.rotaryEmb.forward(positions, q, k, context);
       Tensor o = this.attn.forward(rotated[0], rotated[1], v, context);
       return this.oProj.forward(o.reshape(o.size(0), this.numHeads * this.headDim), context);
     }
@@ -293,7 +293,7 @@ public record Qwen3ForCausalLM(Qwen3Model model, ParallelLMHead lmHead) implemen
       }
       Tensor v = this.vProj.forward(hiddenStates, context)
         .reshape(hiddenStates.size(0), this.numKvHeads, this.headDim);
-      Tensor[] rotated = this.rotaryEmb.forward(positions, q, k);
+      Tensor[] rotated = this.rotaryEmb.forward(positions, q, k, context);
       Tensor o = this.attn.forward(rotated[0], rotated[1], v, context);
       return this.oProj.forward(o.reshape(o.size(0), this.numHeads * this.headDim), context);
     }

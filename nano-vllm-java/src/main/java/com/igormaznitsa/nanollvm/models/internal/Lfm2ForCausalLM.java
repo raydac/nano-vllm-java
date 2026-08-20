@@ -177,7 +177,7 @@ public record Lfm2ForCausalLM(Lfm2Model model, ParallelLMHead lmHead) implements
         this.kNorm);
       Tensor v = this.vProj.forward(hiddenStates, context)
         .reshape(hiddenStates.size(0), this.numKvHeads, this.headDim);
-      Tensor[] rotated = this.rotaryEmb.forward(positions, q, k);
+      Tensor[] rotated = this.rotaryEmb.forward(positions, q, k, context);
       Tensor o = this.attn.forward(rotated[0], rotated[1], v, context);
       return this.oProj.forward(o.reshape(o.size(0), this.numHeads * this.headDim), context);
     }

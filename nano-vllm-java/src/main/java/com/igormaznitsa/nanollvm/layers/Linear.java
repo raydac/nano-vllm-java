@@ -209,13 +209,13 @@ public class Linear {
     float[] xData = x.data();
     int xOff = x.offset();
     if (this.inputActivationScale != 0f) {
-      Tensor quantized = this.scaleActivations(x, this.inputActivationScale);
+      Tensor quantized = this.scaleActivations(x, this.inputActivationScale, matmul);
       xData = quantized.data();
       xOff = quantized.offset();
     }
     this.kernel.apply(xData, xOff, biasData, y.data(), 0, rows, matmul);
     if (this.outputActivationScale != 0f) {
-      y = this.scaleActivations(y, this.outputActivationScale);
+      y = this.scaleActivations(y, this.outputActivationScale, matmul);
     }
     if (xs.length == 1) {
       return y.reshape(out);
@@ -231,16 +231,35 @@ public class Linear {
   /**
    * Gemma QAT SRQ: round {@code value / scale} to int8 then rescale. No-op when {@code scale == 0}.
    */
-  private Tensor scaleActivations(final Tensor values, final float scale) {
+  private Tensor scaleActivations(
+    final Tensor values,
+    final float scale,
+    final MatmulRuntime matmul
+  ) {
     Tensor out = Tensor.zeros(values.shape());
     float[] source = values.data();
     float[] dest = out.data();
     int off = values.offset();
     int n = values.numel();
-    for (int i = 0; i < n; i++) {
-      dest[i] = GemmaQat.applySrq(source[off + i], scale);
+    if (n < 4096) {
+      this.scaleRange(source, off, dest, scale, 0, n);
+      return out;
     }
+    matmul.parallelRanges(n, (start, end) -> this.scaleRange(source, off, dest, scale, start, end));
     return out;
+  }
+
+  private void scaleRange(
+    final float[] source,
+    final int sourceOffset,
+    final float[] dest,
+    final float scale,
+    final int start,
+    final int end
+  ) {
+    for (int i = start; i < end; i++) {
+      dest[i] = GemmaQat.applySrq(source[sourceOffset + i], scale);
+    }
   }
 
   /**

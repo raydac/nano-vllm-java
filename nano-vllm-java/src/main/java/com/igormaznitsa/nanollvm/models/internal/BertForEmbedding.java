@@ -206,7 +206,7 @@ public final class BertForEmbedding implements EmbeddingEncoder {
       Tensor q = this.qProj.forward(hidden, context);
       Tensor k = this.kProj.forward(hidden, context);
       Tensor v = this.vProj.forward(hidden, context);
-      Tensor attnOut = this.oProj.forward(this.attn.forward(q, k, v), context);
+      Tensor attnOut = this.oProj.forward(this.attn.forward(q, k, v, context), context);
       Tensor mid = this.attnNorm.forward(Ops.add(hidden, attnOut));
       Tensor ffn = this.ffnDown.forward(Ops.gelu(this.ffnUp.forward(mid, context)), context);
       return this.ffnNorm.forward(Ops.add(mid, ffn));

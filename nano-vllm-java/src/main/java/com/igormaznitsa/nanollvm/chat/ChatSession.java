@@ -20,11 +20,27 @@ import java.util.function.Predicate;
  * Multi-turn chat over an {@link LLM}: history, chat template, truncation, reply parsing, and
  * {@link LlmListener} events.
  *
- * <p>Not thread-safe; use one session per conversation thread. Text and status events compose
- * {@link LLM#listener()} with any session {@link #listen(LlmListener)} / {@link #streamTo} sink.
- * Streaming chat emits {@link LlmTextKind#TEXT_RAW} (full tokenizer decode, specials kept) plus
- * parsed {@link LlmTextKind#TEXT_THINKING} / {@link LlmTextKind#TEXT_ASSISTANT}. Prepared-prompt
- * {@link LlmTextKind#TEXT_DEBUG} is off until {@link #emitDebugPrompts(boolean) emitDebugPrompts(true)}.
+ * <p>Open with {@link LLM#chat()} (or {@link LLM#chat(int)} to cap reply length). Not thread-safe;
+ * one session per conversation thread. {@link #send(String)} is the usual turn. Show
+ * {@link ChatReply#answer()} to the user.
+ *
+ * <h2>If you want…</h2>
+ * <ul>
+ *   <li><b>Shorter replies</b> — {@link #maxTokens(int)} or {@link #sampling(SamplingParams)}</li>
+ *   <li><b>A wall-clock limit per turn</b> — {@link #timeout(Duration)}</li>
+ *   <li><b>Print thinking vs answer as they arrive</b> — {@link #streamTo} or {@link #listen}</li>
+ *   <li><b>Skip the model's private scratchpad</b> — {@link #enableThinking(boolean) enableThinking(false)}
+ *       (saves tokens; RAG sessions already default this off)</li>
+ *   <li><b>Fewer remembered turns</b> — {@link #maxHistoryMessages(int)} (process default:
+ *       {@link ResourceLimits#maxHistoryMessages()})</li>
+ *   <li><b>Retry blank / garbage answers</b> — {@link #recoverUnusableAnswers(boolean)} (off by default)</li>
+ *   <li><b>See the exact prompt sent to the model</b> — {@link #emitDebugPrompts(boolean)} (off by default)</li>
+ * </ul>
+ *
+ * <p>Text and status events compose {@link LLM#listener()} with any session {@link #listen} /
+ * {@link #streamTo} sink. Streaming emits {@link LlmTextKind#TEXT_RAW} (full decode, markers kept)
+ * plus parsed {@link LlmTextKind#TEXT_THINKING} / {@link LlmTextKind#TEXT_ASSISTANT}.
+ * {@link LlmTextKind#TEXT_DEBUG} stays off until {@link #emitDebugPrompts(boolean) emitDebugPrompts(true)}.
  */
 public final class ChatSession {
 
@@ -228,14 +244,13 @@ public final class ChatSession {
   }
 
   /**
-   * Enables or disables thinking-scratchpad invitation for this session.
+   * When {@code true}, invites the model to write a private scratchpad (often {@code <think>…})
+   * before the visible answer. When {@code false}, ChatML templates may seed an empty open/close
+   * pair from this session's {@link #thinkTags()} when {@link Tokenizer#invitesThinking(String, String)}
+   * is true for those markers, so the model skips that scratchpad (important for RAG token budgets).
+   * When never called, the default from vocab membership of those tags applies.
    *
-   * <p>When {@code false}, ChatML templates may seed an empty open/close pair from this session's
-   * {@link #thinkTags()} when {@link Tokenizer#invitesThinking(String, String)} is true for those
-   * markers, so the model skips long chain-of-thought (important for RAG token budgets). When never
-   * called, the default from vocab membership of those tags applies.
-   *
-   * @param enableThinking {@code true} to invite chain-of-thought, {@code false} to suppress it
+   * @param enableThinking {@code true} to invite the scratchpad, {@code false} to suppress it
    * @return {@code this} for fluent configuration
    */
   public ChatSession enableThinking(final boolean enableThinking) {

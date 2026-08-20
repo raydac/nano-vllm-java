@@ -12,6 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTimeout;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.igormaznitsa.nanollvm.chat.ChatMessage;
@@ -28,8 +29,13 @@ import com.igormaznitsa.nanollvm.engine.BlockManager;
 import com.igormaznitsa.nanollvm.engine.ConvStateArena;
 import com.igormaznitsa.nanollvm.engine.KvCacheArena;
 import com.igormaznitsa.nanollvm.engine.Sequence;
+import com.igormaznitsa.nanollvm.internal.Context;
 import com.igormaznitsa.nanollvm.internal.Json;
+import com.igormaznitsa.nanollvm.layers.Attention;
+import com.igormaznitsa.nanollvm.layers.BidirectionalAttention;
 import com.igormaznitsa.nanollvm.layers.Norms.RMSNorm;
+import com.igormaznitsa.nanollvm.layers.Norms.RotaryEmbedding;
+import com.igormaznitsa.nanollvm.layers.VocabParallelEmbedding;
 import com.igormaznitsa.nanollvm.llm.Config;
 import com.igormaznitsa.nanollvm.llm.GenerationStats;
 import com.igormaznitsa.nanollvm.llm.LLM;
@@ -49,6 +55,7 @@ import com.igormaznitsa.nanollvm.testsupport.OptionalModelAssumptions;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -524,6 +531,46 @@ class CoreUnitTest {
     }
   }
 
+  private static Tensor attendPrefill(
+    final MatmulRuntime runtime,
+    final Tensor q,
+    final Tensor k,
+    final Tensor v
+  ) {
+    Attention attn = new Attention(8, 4, 1f, 8, 0);
+    Context ctx = new Context();
+    try (KvCacheArena arena = new KvCacheArena(1, 2, 256, 8, 4)) {
+      ctx.bindKvCache(arena);
+      ctx.bindMatmul(runtime);
+      int tokens = q.size(0);
+      ctx.set(
+        true,
+        new int[] {0, tokens},
+        new int[] {0, tokens},
+        tokens,
+        tokens,
+        null,
+        null,
+        null,
+        new int[] {0});
+      return attn.forward(q, k, v, ctx);
+    } finally {
+      ctx.clear();
+    }
+  }
+
+  private static Tensor filledRamp(final int... shape) {
+    int n = 1;
+    for (int dim : shape) {
+      n *= dim;
+    }
+    float[] data = new float[n];
+    for (int i = 0; i < n; i++) {
+      data[i] = (i % 17) * 0.1f - 0.8f;
+    }
+    return Tensor.of(data, shape);
+  }
+
   @Test
   void sharedPoolSurvivesConcurrentCheckoutAndClose() throws Exception {
     ExecutorService hammer = Executors.newFixedThreadPool(8);
@@ -560,6 +607,15 @@ class CoreUnitTest {
       conv.close();
       assertNull(kv.k(0));
       assertTrue(conv.toString().contains("seqs=0"));
+    }
+  }
+
+  private static void assertTensorsClose(final Tensor expected, final Tensor actual) {
+    float[] want = expected.toFloatArray();
+    float[] got = actual.toFloatArray();
+    assertEquals(want.length, got.length);
+    for (int i = 0; i < want.length; i++) {
+      assertEquals(want[i], got[i], 1e-5f, "index " + i);
     }
   }
 
@@ -1264,5 +1320,155 @@ class CoreUnitTest {
       ChatReply.stripChatMarkup("<start_of_turn>model\nplan<end_of_turn>"));
     assertEquals("plan",
       ChatReply.stripChatMarkup("<|turn>model\nplan<turn|>"));
+  }
+
+  @Test
+  void dedicatedPoolDoesNotJoinSharedPoolAndShutsDownOnClose() {
+    try (MatmulRuntime owned = MatmulRuntime.builder().cpuThreads(2).dedicatedPool().build()) {
+      assertTrue(owned.backendInfo().contains("owned-pool"));
+      float[] y = new float[2];
+      owned.linear(
+        new float[] {1f, 0f}, 0,
+        new float[] {1f, 0f, 0f, 1f}, 0,
+        null, y, 0, 1, 2, 2);
+      assertEquals(1f, y[0], 1e-5f);
+      owned.close();
+      owned.close();
+      assertThrows(IllegalStateException.class, () -> owned.linear(
+        new float[] {1f, 0f}, 0,
+        new float[] {1f, 0f, 0f, 1f}, 0,
+        null, y, 0, 1, 2, 2));
+    }
+  }
+
+  @Test
+  void dedicatedPoolCannotCombineWithCallerExecutor() {
+    ExecutorService pool = Executors.newFixedThreadPool(2);
+    try {
+      assertThrows(IllegalStateException.class, () -> MatmulRuntime.builder()
+        .cpuThreads(2)
+        .executor(pool)
+        .dedicatedPool()
+        .build());
+    } finally {
+      pool.shutdownNow();
+    }
+  }
+
+  @Test
+  void dedicatedMatmulPoolIsEngineOwnedWhenWeightsPresent() {
+    Path path = OptionalModelAssumptions.requireQwen3();
+    ExecutorService foreign = Executors.newFixedThreadPool(2);
+    try (LlmModel model = LlmModelFactory.make(path)) {
+      assertThrows(IllegalStateException.class, () -> LLM.builder(model)
+        .cpuThreads(2)
+        .matmulExecutor(foreign)
+        .dedicatedMatmulPool()
+        .build());
+
+      var captured = new java.util.ArrayList<String>();
+      LlmListener probe = (source, event) -> {
+        if (event.kind() == LlmTextKind.STATUS_INFO) {
+          captured.add(event.text());
+        }
+      };
+      try (LLM llm = LLM.builder(model)
+        .listen(probe)
+        .cpuThreads(2)
+        .dedicatedMatmulPool()
+        .maxModelLen(256)
+        .numKvcacheBlocks(32)
+        .build()) {
+        assertTrue(captured.stream().anyMatch(line -> line.contains("owned-pool")));
+        assertEquals(2, llm.config().cpuThreads());
+      }
+    } finally {
+      foreign.shutdownNow();
+    }
+  }
+
+  @Test
+  void nestedParallelRangesFromPoolWorkerStaySequential() {
+    try (MatmulRuntime runtime = MatmulRuntime.builder().cpuThreads(2).dedicatedPool().build()) {
+      assertTimeout(Duration.ofSeconds(10), () -> runtime.parallelRanges(8, (start, end) -> {
+        float[] y = new float[2];
+        runtime.linear(
+          new float[] {1f, 0f}, 0,
+          new float[] {1f, 0f, 0f, 1f}, 0,
+          null, y, 0, 1, 2, 2);
+        assertEquals(1f, y[0], 1e-5f);
+        assertEquals(0f, y[1], 1e-5f);
+        runtime.parallelRanges(3, (innerStart, innerEnd) -> {
+          float[] nested = new float[2];
+          runtime.linear(
+            new float[] {0f, 1f}, 0,
+            new float[] {1f, 0f, 0f, 1f}, 0,
+            null, nested, 0, 1, 2, 2);
+          assertEquals(0f, nested[0], 1e-5f);
+          assertEquals(1f, nested[1], 1e-5f);
+        });
+      }));
+    }
+  }
+
+  @Test
+  void causalAttentionPrefillMatchesSequentialWhenParallel() {
+    Tensor q = filledRamp(16, 8, 4);
+    Tensor k = filledRamp(16, 8, 4);
+    Tensor v = filledRamp(16, 8, 4);
+    Tensor sequential = attendPrefill(MatmulRuntime.sequential(), q, k, v);
+    try (MatmulRuntime runtime = MatmulRuntime.builder().cpuThreads(2).dedicatedPool().build()) {
+      assertTensorsClose(sequential, attendPrefill(runtime, q, k, v));
+    }
+  }
+
+  @Test
+  void bidirectionalAttentionMatchesSequentialWhenParallel() {
+    BidirectionalAttention attn = new BidirectionalAttention(8, 4, 1f);
+    Tensor q = filledRamp(16, 32);
+    Tensor k = filledRamp(16, 32);
+    Tensor v = filledRamp(16, 32);
+    Tensor sequential = attn.forward(q, k, v);
+    try (MatmulRuntime runtime = MatmulRuntime.builder().cpuThreads(2).dedicatedPool().build()) {
+      Context ctx = new Context();
+      ctx.bindMatmul(runtime);
+      assertTensorsClose(sequential, attn.forward(q, k, v, ctx));
+    }
+  }
+
+  @Test
+  void rotaryEmbeddingMatchesSequentialWhenParallel() {
+    RotaryEmbedding rope = new RotaryEmbedding(8, 8, 128, 10_000f);
+    float[] pos = new float[64];
+    for (int i = 0; i < pos.length; i++) {
+      pos[i] = i;
+    }
+    Tensor positions = Tensor.of(pos, 64);
+    Tensor query = filledRamp(64, 8, 8);
+    Tensor key = filledRamp(64, 4, 8);
+    Tensor[] sequential = rope.forward(positions, query, key);
+    try (MatmulRuntime runtime = MatmulRuntime.builder().cpuThreads(2).dedicatedPool().build()) {
+      Context ctx = new Context();
+      ctx.bindMatmul(runtime);
+      Tensor[] parallel = rope.forward(positions, query, key, ctx);
+      assertTensorsClose(sequential[0], parallel[0]);
+      assertTensorsClose(sequential[1], parallel[1]);
+    }
+  }
+
+  @Test
+  void embeddingGatherMatchesSequentialWhenParallel() {
+    VocabParallelEmbedding embedding = new VocabParallelEmbedding(filledRamp(8, 512));
+    float[] ids = new float[64];
+    for (int i = 0; i < ids.length; i++) {
+      ids[i] = i % 8;
+    }
+    Tensor inputIds = Tensor.of(ids, 64);
+    Tensor sequential = embedding.forward(inputIds, null);
+    try (MatmulRuntime runtime = MatmulRuntime.builder().cpuThreads(2).dedicatedPool().build()) {
+      Context ctx = new Context();
+      ctx.bindMatmul(runtime);
+      assertTensorsClose(sequential, embedding.forward(inputIds, ctx));
+    }
   }
 }

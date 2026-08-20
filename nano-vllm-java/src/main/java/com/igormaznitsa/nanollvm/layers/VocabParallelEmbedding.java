@@ -15,8 +15,8 @@ import com.igormaznitsa.nanollvm.tensor.Tensor;
  * (no vocab-parallel split).
  *
  * <p>Table layout is {@code [vocab, dim]}. {@link #forward(Tensor, Context)} gathers one row per
- * token id. Tied output heads use {@link ParallelLMHead}, which reuses the same table as a linear
- * map from hidden states to logits.
+ * token id and may split large gathers across {@code context}'s matmul pool. Tied output heads use
+ * {@link ParallelLMHead}, which reuses the same table as a linear map from hidden states to logits.
  */
 public class VocabParallelEmbedding {
 
@@ -122,17 +122,26 @@ public class VocabParallelEmbedding {
   }
 
   /**
-   * Gathers embedding rows for each token id in {@code inputIds}. {@code context} is unused here
-   * (kept so call sites match {@link Linear#forward(Tensor, Context)}); {@link ParallelLMHead} uses it.
+   * Gathers embedding rows for each token id in {@code inputIds}. Independent tokens may run on
+   * {@code context}'s {@link MatmulRuntime} when the gather is large enough.
    *
    * @param inputIds rank-1 token ids stored as floats
-   * @param context  step context (ignored)
+   * @param context  step context (matmul pool); {@code null} is sequential
    * @return {@code [n, embeddingDim]}
    */
   public Tensor forward(final Tensor inputIds, final Context context) {
     int n = inputIds.numel();
-    Tensor out = Tensor.zeros(n, this.embeddingKernel.embeddingDim());
-    this.embeddingKernel.gather(inputIds.data(), inputIds.offset(), n, out.data(), 0);
+    int dim = this.embeddingKernel.embeddingDim();
+    Tensor out = Tensor.zeros(n, dim);
+    MatmulRuntime runtime = context != null && context.matmul() != null
+      ? context.matmul()
+      : MatmulRuntime.sequential();
+    if (n * dim < 16384) {
+      this.embeddingKernel.gather(inputIds.data(), inputIds.offset(), n, out.data(), 0);
+      return out;
+    }
+    runtime.parallelRanges(n, (start, end) -> this.embeddingKernel.gather(
+      inputIds.data(), inputIds.offset() + start, end - start, out.data(), start * dim));
     return out;
   }
 

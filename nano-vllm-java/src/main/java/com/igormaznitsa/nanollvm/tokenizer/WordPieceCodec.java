@@ -159,12 +159,11 @@ final class WordPieceCodec implements TokenCodec {
         }
         ids.add(unk);
         i += Character.charCount(text.codePointAt(i));
-        first = false;
       } else {
         ids.add(matchedId);
         i = matchedEnd;
-        first = false;
       }
+      first = false;
     }
     return ids;
   }

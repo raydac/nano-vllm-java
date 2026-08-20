@@ -148,7 +148,7 @@ public record Gemma3ForCausalLM(Gemma3Model model, ParallelLMHead lmHead) implem
       Tensor v = parts[2].reshape(parts[2].size(0), this.numKvHeads, this.headDim);
       q = this.normHeads(q, this.qNorm);
       k = this.normHeads(k, this.kNorm);
-      Tensor[] rotated = this.rotaryEmb.forward(positions, q, k);
+      Tensor[] rotated = this.rotaryEmb.forward(positions, q, k, context);
       Tensor o = this.attn.forward(rotated[0], rotated[1], v, context);
       return this.oProj.forward(o.reshape(o.size(0), this.numHeads * this.headDim), context);
     }

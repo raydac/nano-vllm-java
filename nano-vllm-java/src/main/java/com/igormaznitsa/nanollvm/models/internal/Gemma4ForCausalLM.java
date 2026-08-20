@@ -170,7 +170,7 @@ public record Gemma4ForCausalLM(Gemma4Model model, ParallelLMHead lmHead, float 
       Tensor v;
       if (this.kvShared) {
         Tensor[] rotated = this.rotaryEmb.forward(
-          positions, q, Tensor.zeros(q.size(0), this.numKvHeads, this.headDim));
+          positions, q, Tensor.zeros(q.size(0), this.numKvHeads, this.headDim), context);
         q = rotated[0];
         k = Tensor.zeros(q.size(0), this.numKvHeads, this.headDim);
         v = Tensor.zeros(q.size(0), this.numKvHeads, this.headDim);
@@ -180,7 +180,7 @@ public record Gemma4ForCausalLM(Gemma4Model model, ParallelLMHead lmHead, float 
           this.kNorm);
         v = this.vNorm.forward(
           this.reshapeHeads(this.vProj.forward(hiddenStates, context), this.numKvHeads));
-        Tensor[] rotated = this.rotaryEmb.forward(positions, q, k);
+        Tensor[] rotated = this.rotaryEmb.forward(positions, q, k, context);
         q = rotated[0];
         k = rotated[1];
       }

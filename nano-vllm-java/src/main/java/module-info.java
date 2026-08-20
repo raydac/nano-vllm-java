@@ -5,7 +5,7 @@
  * {@code exceptions}, {@code tokenizer}, {@code utils}.
  *
  * <p><b>Not exported:</b> {@code prompts} (engine wording), {@code models.internal} (CausalLM graph /
- * weights; in-module {@code LlmModelAccess} bridge), {@code engine}, {@code layers}, {@code tensor},
+ * weights; sealed {@code LlmModel} / hidden {@code LlmModelImpl}), {@code engine}, {@code layers}, {@code tensor},
  * {@code internal} (JSON / GGUF dequant / runtime helpers), {@code models.llmcontainer}
  * (weight-file transport), {@code models.llmarch} (architecture bind/fill/create). Application code should use
  * {@code LlmModelFactory} / {@code LLM} / {@code RagFactory}. Runnable demos live in the separate

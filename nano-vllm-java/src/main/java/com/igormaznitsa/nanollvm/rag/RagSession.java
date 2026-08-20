@@ -22,6 +22,22 @@ import java.util.function.Predicate;
 /**
  * Retrieval-augmented chat over an {@link LLM}: {@link RagIndex} → prompt → generate.
  *
+ * <p>Open with {@link LLM#rag(RagIndex)} after {@link RagFactory#make}. {@link #ask(String)}
+ * returns the visible answer; {@link #send(String)} returns a full {@link ChatReply}.
+ *
+ * <h2>If you want…</h2>
+ * <ul>
+ *   <li><b>More / fewer passages in the prompt</b> — {@link #topK(int)} and
+ *       {@link #maxContextChars(int)} (character cap on concatenated hits; not chunk size —
+ *       that is {@link RagLoadOptions} at index load)</li>
+ *   <li><b>Less random grounded answers</b> — {@link #sampling(SamplingParams)} with a low
+ *       temperature; hits already clamp temperature to {@value #GROUNDED_TEMPERATURE_CAP} when hotter</li>
+ *   <li><b>Ignore earlier assistant replies when answering from hits</b> —
+ *       {@link #isolateGeneration(boolean)} (off by default)</li>
+ *   <li><b>Same timeout / stream / thinking knobs as chat</b> — {@link #timeout}, {@link #streamTo},
+ *       {@link #enableThinking} (thinking is already off here by default)</li>
+ * </ul>
+ *
  * <p>History stores the original user text; the model sees a context-augmented last turn.
  * Short follow-ups with a prior turn are rewritten by an isolated LLM call into standalone
  * search keywords. Rewrite is skipped when the follow-up alone already retrieves hits; when the

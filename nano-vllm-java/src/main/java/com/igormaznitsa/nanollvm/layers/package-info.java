@@ -10,6 +10,9 @@
  *
  * <p><b>Causal vs encoder.</b> {@link Attention} is grouped-query attention with a paged KV cache
  * (chat). {@link BidirectionalAttention} is full self-attention with no cache (BERT embeddings).
+ * Independent attention jobs, RoPE tokens, and embedding rows may run on the step
+ * {@link com.igormaznitsa.nanollvm.internal.Context#matmul()} pool. Decoder layers stay sequential
+ * (residual stream).
  *
  * <p><b>Weights.</b> {@link Linear} and {@link VocabParallelEmbedding} bind a dense float32 table,
  * a packed GGUF weight, or Gemma QAT at construction. {@code VocabParallelEmbedding} keeps the vLLM

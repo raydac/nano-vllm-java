@@ -4,6 +4,7 @@ import static java.util.Objects.requireNonNull;
 
 import com.igormaznitsa.nanollvm.engine.KvCacheArena;
 import com.igormaznitsa.nanollvm.internal.Context;
+import com.igormaznitsa.nanollvm.tensor.MatmulRuntime;
 import com.igormaznitsa.nanollvm.tensor.Tensor;
 import com.igormaznitsa.nanollvm.tensor.VectorMath;
 import java.util.Arrays;
@@ -37,8 +38,9 @@ import java.util.Arrays;
  * {@code slidingWindow > 0} restricts the attended key range to the last {@code slidingWindow}
  * positions (Gemma local layers). {@code 0} is full causal context.
  *
- * <p><strong>Thread safety:</strong> not concurrent-safe; one layer instance is used on the
- * generate thread only (same contract as {@link com.igormaznitsa.nanollvm.engine.Transformer}).
+ * <p><strong>Thread safety:</strong> {@link #forward} is exclusive (one generate thread).
+ * Bound {@link MatmulRuntime} may run disjoint query×head jobs in parallel; jobs are leaf
+ * kernels and do not re-enter the pool.
  *
  * @see BidirectionalAttention
  * @see com.igormaznitsa.nanollvm.engine.KvCacheArena
@@ -249,7 +251,7 @@ public final class Attention {
       int qEnd = cuQ[b + 1];
       int kStart = cuK[b];
       int kEnd = cuK[b + 1];
-      this.attendRange(q, k, v, out, qStart, qEnd, kStart, kEnd - kStart, true, null);
+      this.attendRange(q, k, v, out, qStart, qEnd, kStart, kEnd - kStart, true, null, ctx);
     }
     return out;
   }
@@ -271,7 +273,7 @@ public final class Attention {
       int qEnd = cuQ[b + 1];
       int kLen = cuK[b + 1] - cuK[b];
       int[] slots = pagedSlots(blockTables[b], kLen, blockSize);
-      this.attendRange(q, kCache, vCache, out, qStart, qEnd, 0, kLen, true, slots);
+      this.attendRange(q, kCache, vCache, out, qStart, qEnd, 0, kLen, true, slots, ctx);
     }
     return out;
   }
@@ -290,7 +292,7 @@ public final class Attention {
     for (int b = 0; b < bs; b++) {
       int kLen = contextLens[b];
       int[] slots = pagedSlots(blockTables[b], kLen, blockSize);
-      this.attendRange(q, kCache, vCache, out, b, b + 1, 0, kLen, false, slots);
+      this.attendRange(q, kCache, vCache, out, b, b + 1, 0, kLen, false, slots, ctx);
     }
     return out;
   }
@@ -299,15 +301,43 @@ public final class Attention {
    * Online-softmax attention for query tokens {@code [qStart, qEnd)} over {@code kLen} keys.
    * When {@code causal} is true, query {@code i} sees keys up to its own position. {@code kvSlots}
    * {@code null} means dense keys starting at {@code kIndexBase}; otherwise keys are read from
-   * those arena slots.
+   * those arena slots. Query×head jobs are independent and run on {@code ctx.matmul()} when the
+   * work is large enough.
    */
   private void attendRange(
     final Tensor q, final Tensor k, final Tensor v, final Tensor out,
     final int qStart, final int qEnd, final int kIndexBase, final int kLen, final boolean causal,
-    final int[] kvSlots
+    final int[] kvSlots,
+    final Context ctx
   ) {
     int qLen = qEnd - qStart;
     int work = qLen * this.numHeads;
+    MatmulRuntime runtime = ctx.matmul() == null ? MatmulRuntime.sequential() : ctx.matmul();
+    int cost = work * Math.max(kLen, 1);
+    if (cost < 256) {
+      this.attendJobs(0, work, q, k, v, out, qStart, qLen, kIndexBase, kLen, causal, kvSlots);
+      return;
+    }
+    runtime.parallelRanges(
+      work,
+      (start, end) -> this.attendJobs(
+        start, end, q, k, v, out, qStart, qLen, kIndexBase, kLen, causal, kvSlots));
+  }
+
+  private void attendJobs(
+    final int jobStart,
+    final int jobEnd,
+    final Tensor q,
+    final Tensor k,
+    final Tensor v,
+    final Tensor out,
+    final int qStart,
+    final int qLen,
+    final int kIndexBase,
+    final int kLen,
+    final boolean causal,
+    final int[] kvSlots
+  ) {
     float[] acc = new float[this.headDim];
     float[] tileScores = new float[KEY_TILE];
     float[] qData = q.data();
@@ -315,7 +345,7 @@ public final class Attention {
     float[] vData = v.data();
     float[] oData = out.data();
 
-    for (int job = 0; job < work; job++) {
+    for (int job = jobStart; job < jobEnd; job++) {
       int qi = job / this.numHeads;
       int h = job % this.numHeads;
       int qPos = qStart + qi;

@@ -17,6 +17,10 @@ import java.util.concurrent.Executor;
  * Loads and preprocesses documents into a shareable {@link PreparedRag}.
  * Analogous to {@link com.igormaznitsa.nanollvm.models.LlmModelFactory} for weights.
  *
+ * <p>{@link #make(java.nio.file.Path)} indexes a file or folder with
+ * {@link RagLoadOptions#defaults()}. {@link #builder()} mixes folders, files, inline text, and
+ * classpath resources. Optional {@link #withEmbeddings} adds vector search on top of BM25.
+ *
  * <p>Chunk size and sentence packing live on {@link RagLoadOptions}: pass them to
  * {@link #make(Path, RagLoadOptions)} or {@link Builder#options(RagLoadOptions)} before adding
  * documents. Path-only {@link #make(Path)} uses {@link RagLoadOptions#defaults()} (500-char

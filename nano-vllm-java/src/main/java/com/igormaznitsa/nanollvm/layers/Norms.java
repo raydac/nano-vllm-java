@@ -2,6 +2,8 @@ package com.igormaznitsa.nanollvm.layers;
 
 import static java.util.Objects.requireNonNull;
 
+import com.igormaznitsa.nanollvm.internal.Context;
+import com.igormaznitsa.nanollvm.tensor.MatmulRuntime;
 import com.igormaznitsa.nanollvm.tensor.Ops;
 import com.igormaznitsa.nanollvm.tensor.Tensor;
 import java.util.HashMap;
@@ -147,6 +149,7 @@ public final class Norms {
 
   /**
    * Rotary position embedding: precomputed cos/sin tables applied to query and key heads.
+   * Independent tokens may run on the step matmul pool when the rotate is large enough.
    *
    * <p>{@link #of} uses full-head inv-freq ({@code rotaryDim == headSize}).
    * {@link #proportional} leaves a tail of angles at inv-freq {@code 0} (identity rotation) for
@@ -246,7 +249,7 @@ public final class Norms {
     }
 
     /**
-     * Rotates {@code query} and {@code key} at the given token positions.
+     * Rotates {@code query} and {@code key} at the given token positions (sequential).
      *
      * @param positions rank-1 positions, one per token (rounded to int)
      * @param query     {@code [tokens, headsQ, headSize]}
@@ -255,6 +258,26 @@ public final class Norms {
      * @throws IllegalArgumentException if a position is outside {@code [0, maxPosition)}
      */
     public Tensor[] forward(final Tensor positions, final Tensor query, final Tensor key) {
+      return this.forward(positions, query, key, null);
+    }
+
+    /**
+     * Rotates {@code query} and {@code key}. Independent tokens may run on
+     * {@link Context#matmul()} when the work is large enough.
+     *
+     * @param positions rank-1 positions, one per token (rounded to int)
+     * @param query     {@code [tokens, headsQ, headSize]}
+     * @param key       {@code [tokens, headsK, headSize]}
+     * @param context   step context (matmul pool), or {@code null} for sequential
+     * @return {@code {rotatedQuery, rotatedKey}}
+     * @throws IllegalArgumentException if a position is outside {@code [0, maxPosition)}
+     */
+    public Tensor[] forward(
+      final Tensor positions,
+      final Tensor query,
+      final Tensor key,
+      final Context context
+    ) {
       int tokens = query.size(0);
       int headsQ = query.size(1);
       int headsK = key.size(1);
@@ -262,7 +285,36 @@ public final class Norms {
       Tensor kOut = Tensor.zeros(key.shape());
       int half = this.headSize / 2;
       int maxPos = this.cosSinCache.size(0);
-      for (int t = 0; t < tokens; t++) {
+      MatmulRuntime runtime = context != null && context.matmul() != null
+        ? context.matmul()
+        : MatmulRuntime.sequential();
+      int cost = tokens * this.headSize * (headsQ + headsK);
+      if (cost < 4096) {
+        this.rotateTokens(
+          0, tokens, positions, query, key, qOut, kOut, headsQ, headsK, half, maxPos);
+        return new Tensor[] {qOut, kOut};
+      }
+      runtime.parallelRanges(
+        tokens,
+        (start, end) -> this.rotateTokens(
+          start, end, positions, query, key, qOut, kOut, headsQ, headsK, half, maxPos));
+      return new Tensor[] {qOut, kOut};
+    }
+
+    private void rotateTokens(
+      final int tokenStart,
+      final int tokenEnd,
+      final Tensor positions,
+      final Tensor query,
+      final Tensor key,
+      final Tensor qOut,
+      final Tensor kOut,
+      final int headsQ,
+      final int headsK,
+      final int half,
+      final int maxPos
+    ) {
+      for (int t = tokenStart; t < tokenEnd; t++) {
         int pos = Math.round(positions.get(t));
         if (pos < 0 || pos >= maxPos) {
           throw new IllegalArgumentException(
@@ -272,7 +324,6 @@ public final class Norms {
         this.apply(query, qOut, t, headsQ, half, cBase);
         this.apply(key, kOut, t, headsK, half, cBase);
       }
-      return new Tensor[] {qOut, kOut};
     }
 
     /**

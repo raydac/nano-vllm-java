@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased] — 1.1.1-SNAPSHOT
 
 ### Added
+- `LLM.Builder.dedicatedMatmulPool()`: a bounded matmul thread pool owned by that engine and shut
+  down on `close()`, so a server need not join the process-wide `nanollvm-matmul-*` pool or hand
+  the library a foreign `ExecutorService`. Combining it with `matmulExecutor` fails at `build()`.
+
 - Optional download scripts for [intfloat/multilingual-e5-small](https://huggingface.co/intfloat/multilingual-e5-small)
   (`models/download-multilingual-e5-small.sh` / `.ps1` / `.cmd` → `models/multilingual-e5-small/`, ONNX fp32 ~470 MB).
   Hugging Face Unigram SentencePiece tokenizers load from `tokenizer.json`; embedding wrap accepts XLM-R
@@ -42,6 +46,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - Dense RAG query embedding stays concurrent (each `LlmModel.embed` uses a fresh step context).
   Index-time passage embedding is sequential unless the caller supplies an `Executor`.
+- Extra CPU cores now work on long prompts, not only GEMM: independent attention heads, rotary
+  embeddings, token embedding gathers, and Gemma QAT activation scaling run on the same matmul
+  pool as linear layers when `cpuThreads > 1`.
+- `LlmModel` is a sealed API type. The factory still returns `LlmModel`; the transformer graph
+  and engine lease live on a hidden implementation (no static access registry).
 
 ## [1.1.0] — 2026-08-16
 

@@ -9,7 +9,7 @@ import com.igormaznitsa.nanollvm.layers.Sampler;
 import com.igormaznitsa.nanollvm.llm.Config;
 import com.igormaznitsa.nanollvm.models.LlmModel;
 import com.igormaznitsa.nanollvm.models.internal.CausalLM;
-import com.igormaznitsa.nanollvm.models.internal.LlmModelAccess;
+import com.igormaznitsa.nanollvm.models.internal.LlmModelImpl;
 import com.igormaznitsa.nanollvm.tensor.MatmulRuntime;
 import com.igormaznitsa.nanollvm.tensor.Tensor;
 import java.util.ArrayList;
@@ -120,7 +120,7 @@ public final class Transformer implements AutoCloseable {
     this.config = config;
     final LlmListener io1 = io == null ? LlmListeners.silent() : io;
     this.blockSize = config.kvcacheBlockSize();
-    this.network = LlmModelAccess.resolveNetwork(model, allowUnpackParameters, io1);
+    this.network = LlmModelImpl.peer(model).resolveNetwork(allowUnpackParameters, io1);
     this.matmul = requireNonNull(matmul, "matmul");
 
     // Allocate paged KV arena sized from config (or heap-aware estimate)

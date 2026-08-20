@@ -14,10 +14,13 @@ import java.util.Map;
  */
 final class Gpt2Bytes {
 
-  private static final String[] ENCODER = new String[256];
-  private static final Map<String, Integer> DECODER = new HashMap<>();
+  private static final String[] ENCODER;
+  private static final Map<String, Integer> DECODER;
 
   static {
+    final String[] encoder = new String[256];
+    final Map<String, Integer> decoder = new HashMap<>();
+
     List<Integer> bs = new ArrayList<>();
     for (int i = '!'; i <= '~'; i++) {
       bs.add(i);
@@ -39,9 +42,12 @@ final class Gpt2Bytes {
     }
     for (int i = 0; i < bs.size(); i++) {
       String ch = new String(Character.toChars(cs.get(i)));
-      ENCODER[bs.get(i)] = ch;
-      DECODER.put(ch, bs.get(i));
+      encoder[bs.get(i)] = ch;
+      decoder.put(ch, bs.get(i));
     }
+
+    ENCODER = encoder;
+    DECODER = Map.copyOf(decoder);
   }
 
   private Gpt2Bytes() {

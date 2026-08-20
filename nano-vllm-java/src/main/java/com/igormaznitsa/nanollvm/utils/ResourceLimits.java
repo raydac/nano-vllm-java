@@ -9,7 +9,11 @@ import java.util.concurrent.atomic.AtomicReference;
  *
  * <p>Defaults protect against accidental or hostile oversized inputs (OOM / hang). Replace the
  * process default with {@link #setCurrent(ResourceLimits)} or pass a custom instance into RAG /
- * load APIs that accept one. Every field must be {@code >= 1}. Prefer {@link #builder()} (starts
+ * load APIs that accept one. {@link #setCurrent(ResourceLimits)} is <em>JVM-global</em> — every
+ * thread and tenant in this process sees it. In a multi-tenant server prefer
+ * {@link com.igormaznitsa.nanollvm.rag.RagLoadOptions#withResourceLimits(ResourceLimits)} (and
+ * {@link com.igormaznitsa.nanollvm.chat.ChatSession#maxHistoryMessages(int)}) over mutating the
+ * process default. Every field must be {@code >= 1}. Prefer {@link #builder()} (starts
  * from {@link #current()}), {@link #defaults()}, or the {@code with*} copies.
  *
  * <pre>{@code
@@ -111,6 +115,7 @@ public record ResourceLimits(
 
   /**
    * Replaces {@link #current()} for this JVM. Subsequent loads / RAG / sessions pick this up.
+   * Visible to every thread in the process — not a request-scoped setting.
    *
    * @param limits must not be {@code null}
    */

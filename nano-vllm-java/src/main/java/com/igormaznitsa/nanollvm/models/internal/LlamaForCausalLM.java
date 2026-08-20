@@ -146,7 +146,7 @@ public record LlamaForCausalLM(LlamaModel model, ParallelLMHead lmHead) implemen
       Tensor q = parts[0].reshape(parts[0].size(0), this.numHeads, this.headDim);
       Tensor k = parts[1].reshape(parts[1].size(0), this.numKvHeads, this.headDim);
       Tensor v = parts[2].reshape(parts[2].size(0), this.numKvHeads, this.headDim);
-      Tensor[] rotated = this.rotaryEmb.forward(positions, q, k);
+      Tensor[] rotated = this.rotaryEmb.forward(positions, q, k, context);
       Tensor o = this.attn.forward(rotated[0], rotated[1], v, context);
       return this.oProj.forward(o.reshape(o.size(0), this.numHeads * this.headDim), context);
     }

@@ -14,6 +14,7 @@ import com.igormaznitsa.nanollvm.llm.Config;
 import com.igormaznitsa.nanollvm.llm.LLM;
 import com.igormaznitsa.nanollvm.models.internal.CausalLM;
 import com.igormaznitsa.nanollvm.models.internal.EmbeddingEncoder;
+import com.igormaznitsa.nanollvm.models.internal.LlmModelImpl;
 import com.igormaznitsa.nanollvm.models.internal.WeightBag;
 import com.igormaznitsa.nanollvm.models.llmarch.GgufModelLoader;
 import com.igormaznitsa.nanollvm.models.llmarch.GgufModelLoader.LoadedGguf;
@@ -58,8 +59,17 @@ import java.util.Map;
  * {@link com.igormaznitsa.nanollvm.exceptions.UnsupportedModelException} with a
  * catalog of what this library can run.
  *
- * <p>Prefer {@link #open(Path)} (or {@link #open(ModelFileSource)}) for named load knobs:
- * {@code LlmModelFactory.open(path).listen(io).unpackParameters().thinkTags(tags).chatSpecials(specials).make()}.
+ * <p>Prefer {@link #open(Path)} (or {@link #open(ModelFileSource)}) when you need named load knobs.
+ * {@link #make(Path)} is the silent packed default.
+ *
+ * <pre>{@code
+ * LlmModel model = LlmModelFactory.open(path)
+ *     .listen(LlmListeners.toSystem())   // load progress
+ *     .unpackParameters()                // GGUF → float32 at load (faster, more RAM)
+ *     .thinkTags(ThinkTags.of("<think>", "</think>"))
+ *     .make();
+ * }</pre>
+ *
  * Existing {@link #make} / {@link #fromClasspath} overloads remain.
  *
  * <p>Optional load-time settings go in a {@code Map} (frozen as {@link java.util.Map#copyOf} on
@@ -487,7 +497,7 @@ public final class LlmModelFactory {
     final Map<String, ?> options
   ) {
     requireNonNull(modelPath, "modelPath");
-    Map<String, Object> frozen = LlmModel.copyAndValidateOptions(options);
+    Map<String, Object> frozen = LlmModelImpl.copyAndValidateOptions(options);
     LlmListener streams = io == null ? LlmListeners.silent() : io;
     Path path = modelPath.toAbsolutePath().normalize();
     try {
@@ -513,7 +523,7 @@ public final class LlmModelFactory {
     final Map<String, ?> options
   ) {
     requireNonNull(source, "source");
-    Map<String, Object> frozen = LlmModel.copyAndValidateOptions(options);
+    Map<String, Object> frozen = LlmModelImpl.copyAndValidateOptions(options);
     LlmListener streams = io == null ? LlmListeners.silent() : io;
     try {
       ModelFileBundle bundle = ModelFileBundle.load(source, streams);
@@ -665,7 +675,7 @@ public final class LlmModelFactory {
         encoder.architectureName(), (System.nanoTime() - tGraph) / 1e9);
       LlmListeners.infof(io, null, "Model loaded in %.1fs%n",
         (System.nanoTime() - startedAtNanos) / 1e9);
-      return new LlmModel(modelPath, hfConfig, weights, encoder, tokenizer, options);
+      return new LlmModelImpl(modelPath, hfConfig, weights, encoder, tokenizer, options);
     }
 
     LlmListeners.info(io, null, "Building " + arch + " model graph…");
@@ -675,7 +685,7 @@ public final class LlmModelFactory {
       network.architectureName(), (System.nanoTime() - tGraph) / 1e9);
     LlmListeners.infof(io, null, "Model loaded in %.1fs%n",
       (System.nanoTime() - startedAtNanos) / 1e9);
-    return new LlmModel(modelPath, hfConfig, weights, network, tokenizer, options);
+    return new LlmModelImpl(modelPath, hfConfig, weights, network, tokenizer, options);
   }
 
   private static ModelSupport.Source resolveHfSource(
@@ -750,7 +760,8 @@ public final class LlmModelFactory {
     Tokenizer tokenizer = Tokenizer.fromGguf(tokenizerSource);
     LlmListeners.infof(io, null, "Model loaded in %.1fs%n",
       (System.nanoTime() - startedAtNanos) / 1e9);
-    return new LlmModel(modelPath, loaded.config(), loaded.weights(), network, tokenizer, options);
+    return new LlmModelImpl(modelPath, loaded.config(), loaded.weights(), network, tokenizer,
+      options);
   }
 
   private static LlmModel loadGgufEmbedding(
@@ -772,11 +783,16 @@ public final class LlmModelFactory {
     Tokenizer tokenizer = Tokenizer.fromGguf(tokenizerSource);
     LlmListeners.infof(io, null, "Model loaded in %.1fs%n",
       (System.nanoTime() - startedAtNanos) / 1e9);
-    return new LlmModel(modelPath, loaded.config(), loaded.weights(), encoder, tokenizer, options);
+    return new LlmModelImpl(modelPath, loaded.config(), loaded.weights(), encoder, tokenizer,
+      options);
   }
 
   /**
    * Fluent load configurator. Terminal {@link #make()} performs blocking I/O.
+   *
+   * <p><b>Progress</b> — {@link #listen}. <b>Faster GGUF (more RAM)</b> — {@link #unpackParameters()}.
+   * <b>Scratchpad / leftover chat markup</b> — {@link #thinkTags} / {@link #chatSpecials}
+   * (or {@link #options(Map)}). Omit a knob to keep the library default.
    *
    * @since 1.1.0
    */
@@ -804,7 +820,9 @@ public final class LlmModelFactory {
     }
 
     /**
-     * Unpacks GGUF weights to float32 during load.
+     * Unpacks GGUF weights to float32 during this load (faster math, higher peak RAM).
+     * Prefer this over {@link LLM.Builder#allowUnpackParameters()} so packed bytes never sit on
+     * the heap. No-op for already-dense Hugging Face folders.
      *
      * @since 1.1.0
      */
@@ -823,7 +841,9 @@ public final class LlmModelFactory {
     }
 
     /**
-     * Sets {@link LlmModel#OPTION_THINK_TAGS} for this load.
+     * Markers that wrap the model's private scratchpad in decoded text
+     * ({@link ThinkTags#DEFAULT} is {@code <think>} / {@code </think>}). Every {@link LLM} sharing
+     * this model inherits the pair.
      *
      * @since 1.1.0
      */
@@ -833,7 +853,8 @@ public final class LlmModelFactory {
     }
 
     /**
-     * Sets {@link LlmModel#OPTION_CHAT_SPECIALS} for this load.
+     * Extra chat-markup strings stripped from the visible answer (end-of-turn markers, …).
+     * Default is {@link ChatSpecials#DEFAULT}.
      *
      * @since 1.1.0
      */
