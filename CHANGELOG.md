@@ -22,8 +22,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Load-time RAG tuners on `RagFactory.Builder.addProcessor`: skip files, supply custom document
   text, or rewrite extracted strings before chunking. Several tuners run in order.
   Sample `RagTunerHelloWorld` extracts a bundled Project Gutenberg EPUB of Karel Čapek's *R.U.R.*
-  (JDK zip + StAX, no epub4j / xpp3), unpacks gte-small for faster CPU embedding, prints per-passage
-  index progress, and asks questions from that play. `DenseRagIndex.of` / `HybridRagIndex.of` accept
+  (JDK zip + StAX, no epub4j / xpp3), unpacks gte-small for faster CPU embedding, redraws a single
+  in-place percent/ETA bar while indexing, and asks questions from that play. `DenseRagIndex.of` / `HybridRagIndex.of` accept
   a per-passage embed callback and an optional caller `Executor` for parallel indexing (sequential
   when omitted).
 

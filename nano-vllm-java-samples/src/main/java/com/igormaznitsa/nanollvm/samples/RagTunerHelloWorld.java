@@ -1,5 +1,7 @@
 package com.igormaznitsa.nanollvm.samples;
 
+import static java.util.Locale.ROOT;
+
 import com.igormaznitsa.nanollvm.llm.LLM;
 import com.igormaznitsa.nanollvm.models.LlmModel;
 import com.igormaznitsa.nanollvm.models.LlmModelFactory;
@@ -13,10 +15,8 @@ import com.igormaznitsa.nanollvm.rag.RagTuner;
 import com.igormaznitsa.nanollvm.samples.utils.BundledModels;
 import com.igormaznitsa.nanollvm.samples.utils.EpubText;
 import com.igormaznitsa.nanollvm.samples.utils.SampleChatPrompts;
-
 import java.nio.file.Path;
 import java.util.List;
-import java.util.Locale;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -26,8 +26,8 @@ import java.util.concurrent.Executors;
  *
  * <p>Indexes Project Gutenberg {@code pg59112.epub} (Karel Čapek, <em>R.U.R.</em>) from the
  * samples classpath, unpacks gte-small and embeds every chunk (optional caller {@code Executor}
- * for parallel forwards, with per-passage progress), then asks questions that are answered in
- * that play.
+ * for parallel forwards, with an in-place percent/ETA bar), then asks questions that are answered
+ * in that play.
  *
  * <p>Args: optional chat model directory (default {@code models/Qwen3-0.6B}), optional embedding
  * checkpoint (default {@code models/gte-small.Q2_K.gguf}). From the repository root:
@@ -58,13 +58,9 @@ public final class RagTunerHelloWorld {
       System.out.println(
         "Embedding " + total + " passages with " + embed.architectureName()
           + " (unpacked GGUF, " + workers + " embed threads)…");
-      Object progressLock = new Object();
-      DenseRagIndex index = DenseRagIndex.of(documents, embed, embedPool, done -> {
-        synchronized (progressLock) {
-          System.out.printf(Locale.ROOT, "  embedded %d/%d%n", done, total);
-          System.out.flush();
-        }
-      });
+      EmbedProgress progress = new EmbedProgress(total);
+      DenseRagIndex index = DenseRagIndex.of(documents, embed, embedPool, progress::embedded);
+      progress.finish();
       System.out.println("Dense index: " + index.size() + " vectors, dim=" + index.dimensions());
 
       System.out.println("Loading chat model from " + chatDir);
@@ -132,9 +128,69 @@ public final class RagTunerHelloWorld {
     System.out.println("RAG hits:");
     int index = 1;
     for (RagHit hit : hits) {
-      System.out.printf(Locale.ROOT, "  [%d] %.3f  %s%n",
+      System.out.printf(ROOT, "  [%d] %.3f  %s%n",
         index++, hit.score(), hit.chunk().source());
       System.out.println("      " + hit.chunk().text().strip());
+    }
+  }
+
+  private static final class EmbedProgress {
+    private static final int BAR_WIDTH = 24;
+    private static final int LINE_WIDTH = 72;
+
+    private final int total;
+    private final long startNanos = System.nanoTime();
+    private boolean finished;
+
+    EmbedProgress(final int total) {
+      this.total = Math.max(1, total);
+      this.embedded(0);
+    }
+
+    private static String formatEta(final double seconds) {
+      if (seconds < 60) {
+        return String.format(ROOT, "%.0fs", seconds);
+      }
+      return String.format(ROOT, "%dm%02ds", (int) (seconds / 60), (int) (seconds % 60));
+    }
+
+    private static String pad(final String line) {
+      return line.length() >= LINE_WIDTH ? line :
+        String.format(ROOT, "%-" + LINE_WIDTH + "s", line);
+    }
+
+    synchronized void embedded(final int done) {
+      if (this.finished) {
+        return;
+      }
+      this.printBar(Math.clamp(done, 0, this.total));
+      if (done >= this.total) {
+        this.finish();
+      }
+    }
+
+    synchronized void finish() {
+      if (this.finished) {
+        return;
+      }
+      this.finished = true;
+      System.out.printf(ROOT, "\r%-" + LINE_WIDTH + "s%n",
+        String.format(ROOT, "Embedded: done in %.1fs",
+          (System.nanoTime() - this.startNanos) / 1e9));
+      System.out.flush();
+    }
+
+    private void printBar(final int done) {
+      double fraction = (double) done / this.total;
+      int filled = (int) Math.round(fraction * BAR_WIDTH);
+      String bar = "=".repeat(Math.max(0, filled)) + " ".repeat(Math.max(0, BAR_WIDTH - filled));
+      String eta = done <= 0
+        ? "--"
+        : formatEta((System.nanoTime() - this.startNanos) / 1e9 * (this.total - done) / done);
+
+      System.out.print("\r" + pad(String.format(ROOT, "Embedded: [%s] %3.0f%% (%d/%d) ETA %s",
+        bar, fraction * 100.0, done, this.total, eta)));
+      System.out.flush();
     }
   }
 }
