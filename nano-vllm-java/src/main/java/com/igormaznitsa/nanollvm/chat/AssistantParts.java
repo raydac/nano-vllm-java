@@ -6,6 +6,10 @@ import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+/**
+ * Package-private split of decoded assistant text into thinking / answer / {@code thinkOpen}.
+ * {@link ChatReply} is the public facade.
+ */
 record AssistantParts(String thinking, String answer, boolean thinkOpen) {
 
   private static final Pattern LINE_BREAK = Pattern.compile("\\R");
@@ -27,6 +31,11 @@ record AssistantParts(String thinking, String answer, boolean thinkOpen) {
 
   /**
    * Splits decoded assistant text into thinking vs answer using {@code tags} / {@code specials}.
+   *
+   * @param raw      decoded tokens; {@code null} / blank → empty channels
+   * @param tags     scratchpad pair
+   * @param specials chat markup (think tags are merged in)
+   * @return parsed parts
    */
   public static AssistantParts parse(
     final String raw,
@@ -77,6 +86,9 @@ record AssistantParts(String thinking, String answer, boolean thinkOpen) {
       thinkOpen);
   }
 
+  /**
+   * Recursively splits text after a closed think block in case another think pair follows.
+   */
   private static Remainder splitRemainder(
     final String after,
     final ThinkTags tags,
@@ -105,6 +117,9 @@ record AssistantParts(String thinking, String answer, boolean thinkOpen) {
       nested.open());
   }
 
+  /**
+   * Joins two think bodies with a newline; blank sides are dropped.
+   */
   private static String joinThink(final String first, final String second) {
     String a = first == null ? "" : first.strip();
     String b = second == null ? "" : second.strip();
@@ -117,6 +132,9 @@ record AssistantParts(String thinking, String answer, boolean thinkOpen) {
     return a + "\n" + b;
   }
 
+  /**
+   * Joins two answer fragments, preserving inner whitespace on the non-blank sides.
+   */
   private static String joinAnswer(final String first, final String second) {
     String a = first == null ? "" : first;
     String b = second == null ? "" : second;
@@ -129,6 +147,9 @@ record AssistantParts(String thinking, String answer, boolean thinkOpen) {
     return a.stripTrailing() + "\n" + b.stripLeading();
   }
 
+  /**
+   * Truncates the answer at the first chat special and strips a leading {@code assistant:} prefix.
+   */
   private static String sanitizeAnswer(final String text, final List<String> markup) {
     String cleaned = holdIncompleteMarkupSuffix(text, markup);
     for (String marker : markup) {
@@ -152,6 +173,11 @@ record AssistantParts(String thinking, String answer, boolean thinkOpen) {
 
   /**
    * Removes think tags and chat specials, then a leading {@code assistant:} prefix.
+   *
+   * @param text     decoded fragment; {@code null} / empty → {@code ""}
+   * @param tags     scratchpad pair
+   * @param specials chat markup (think tags are merged in)
+   * @return stripped text
    */
   public static String stripChatMarkup(
     final String text,
@@ -171,6 +197,9 @@ record AssistantParts(String thinking, String answer, boolean thinkOpen) {
     return finishSanitize(s);
   }
 
+  /**
+   * Strips a leading {@code assistant:} label and surrounding whitespace.
+   */
   private static String finishSanitize(final String text) {
     return LEADING_ASSISTANT.matcher(text).replaceFirst("").strip();
   }
@@ -187,6 +216,11 @@ record AssistantParts(String thinking, String answer, boolean thinkOpen) {
 
   /**
    * Visible answer after parse; falls back to {@link #salvageFromThinking(String)} when empty.
+   *
+   * @param raw      decoded tokens
+   * @param tags     scratchpad pair
+   * @param specials chat markup
+   * @return visible answer (possibly salvaged)
    */
   public static String cleanAssistantText(
     final String raw,
@@ -255,10 +289,16 @@ record AssistantParts(String thinking, String answer, boolean thinkOpen) {
     return one.length() > 200 ? one.substring(0, 200).strip() + "…" : one;
   }
 
+  /**
+   * Short last line that does not look like chain-of-thought preamble.
+   */
   private static boolean isBriefAnswerLine(final String line) {
     return line.length() <= 32 && !looksLikeReasoning(line);
   }
 
+  /**
+   * {@code true} for common reasoning openers ({@code okay}, {@code let me}, {@code the user}, …).
+   */
   private static boolean looksLikeReasoning(final String line) {
     String lower = line.toLowerCase(java.util.Locale.ROOT);
     return lower.startsWith("okay")
@@ -279,6 +319,9 @@ record AssistantParts(String thinking, String answer, boolean thinkOpen) {
     return holdIncompleteMarkupSuffix(text, ChatSpecials.DEFAULT.searchMarkers(ThinkTags.DEFAULT));
   }
 
+  /**
+   * Same as {@link #holdIncompleteMarkupSuffix(String)} against an explicit marker list.
+   */
   static String holdIncompleteMarkupSuffix(final String text, final List<String> markers) {
     if (text == null || text.isEmpty()) {
       return "";
@@ -294,11 +337,17 @@ record AssistantParts(String thinking, String answer, boolean thinkOpen) {
     return text;
   }
 
+  /**
+   * {@code true} when {@code suffix} is a proper prefix of some marker (not the full marker).
+   */
   private static boolean isStrictPrefixOfMarkup(final String suffix, final List<String> markers) {
     return markers.stream()
       .anyMatch(marker -> marker.startsWith(suffix) && !marker.equals(suffix));
   }
 
+  /**
+   * Nested think-block remainder: extra thinking, answer text before the next open tag, still-open flag.
+   */
   private record Remainder(String thinking, String answer, boolean open) {
   }
 }

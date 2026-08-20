@@ -72,6 +72,9 @@ public final class Scheduler {
   /**
    * Builds a scheduler from engine limits and stop tokens in {@code config}.
    * Instantiates a fresh {@link BlockManager} sized to {@code config.numKvcacheBlocks()}.
+   *
+   * @param config engine layout (batch limits, KV pages, stop ids)
+   * @throws NullPointerException if {@code config} is {@code null}
    */
   public Scheduler(final Config config) {
     this(config, seqId -> {
@@ -81,6 +84,10 @@ public final class Scheduler {
   /**
    * Same as {@link #Scheduler(Config)}, plus {@code onSequenceReleased} when a sequence's KV is
    * deallocated (finish, cancel/{@link #clear()}, or preempt) so callers can drop short-conv state.
+   *
+   * @param config              engine layout
+   * @param onSequenceReleased  {@link Sequence#seqId()} consumer; {@link Transformer#clearConvState(int)}
+   * @throws NullPointerException if {@code config} or {@code onSequenceReleased} is {@code null}
    */
   public Scheduler(final Config config, final IntConsumer onSequenceReleased) {
     requireNonNull(config, "config");
@@ -97,6 +104,8 @@ public final class Scheduler {
 
   /**
    * {@code true} when both waiting and running queues are empty (no work left for this generate).
+   *
+   * @return whether {@link #schedule()} has nothing left to do
    */
   public boolean isFinished() {
     return this.waiting.isEmpty() && this.running.isEmpty();
@@ -113,6 +122,9 @@ public final class Scheduler {
     this.waiting.clear();
   }
 
+  /**
+   * Deallocates KV and marks every sequence {@link Sequence.Status#FINISHED} (running queue).
+   */
   private void finishAndDeallocateAll(final Iterable<Sequence> sequences) {
     for (Sequence seq : sequences) {
       this.releaseSequence(seq);
@@ -120,6 +132,9 @@ public final class Scheduler {
     }
   }
 
+  /**
+   * Finishes waiting sequences, deallocating only those that already hold a block table.
+   */
   private void finishAndDeallocateWaiting() {
     for (Sequence seq : this.waiting) {
       if (!seq.blockTable().isEmpty()) {
@@ -130,6 +145,9 @@ public final class Scheduler {
     }
   }
 
+  /**
+   * Frees KV pages and notifies {@code onSequenceReleased} (conv-arena cleanup).
+   */
   private void releaseSequence(final Sequence seq) {
     this.blockManager.deallocate(seq);
     this.onSequenceReleased.accept(seq.seqId());
@@ -137,6 +155,9 @@ public final class Scheduler {
 
   /**
    * Enqueues {@code seq} at the end of the waiting queue (status should already be WAITING).
+   *
+   * @param seq new or not-yet-scheduled sequence
+   * @throws IllegalArgumentException if {@code seq.blockSize()} does not match this scheduler
    */
   public void add(final Sequence seq) {
     if (seq.blockSize() != this.blockSize) {
@@ -162,6 +183,11 @@ public final class Scheduler {
     return new ScheduleResult(this.scheduleDecodeBatch(), false);
   }
 
+  /**
+   * Admits waiting sequences into a prefill batch under {@code maxNumSeqs} /
+   * {@code maxNumBatchedTokens}. Stops when the next prompt cannot fit or {@link #planPrefillTokens}
+   * cannot allocate. Empty list means fall through to decode.
+   */
   private List<Sequence> trySchedulePrefill() {
     List<Sequence> scheduled = new ArrayList<>();
     int batchedTokens = 0;
@@ -190,6 +216,10 @@ public final class Scheduler {
     return scheduled;
   }
 
+  /**
+   * Remaining uncached tokens and whether {@link BlockManager#allocate} is still needed.
+   * {@code null} when the free list cannot admit this prompt.
+   */
   private PrefillPlan planPrefillTokens(final Sequence seq) {
     if (seq.blockTable().isEmpty()) {
       int cachedBlocks = this.blockManager.canAllocate(seq);
@@ -201,6 +231,10 @@ public final class Scheduler {
     return new PrefillPlan(seq.numTokens() - seq.numCachedTokens(), 0, false);
   }
 
+  /**
+   * Allocates pages if needed and sets {@link Sequence#numScheduledTokens()} to the chunk that
+   * fits {@code remainingCapacity}.
+   */
   private void commitPrefillSlot(final Sequence seq, final PrefillPlan plan,
                                  final int remainingCapacity) {
     if (plan.needsAllocate()) {
@@ -209,6 +243,9 @@ public final class Scheduler {
     seq.setNumScheduledTokens(Math.min(plan.tokenCount(), remainingCapacity));
   }
 
+  /**
+   * Moves {@code seq} waiting → running when this chunk covers the rest of the prompt.
+   */
   private void promoteToRunningIfPrefillComplete(final Sequence seq) {
     if (seq.numCachedTokens() + seq.numScheduledTokens() != seq.numTokens()) {
       return;
@@ -218,6 +255,10 @@ public final class Scheduler {
     this.running.addLast(seq);
   }
 
+  /**
+   * One decode token per admitted running sequence, after {@link #ensureAppendCapacity}. Restores
+   * running-queue order so the same sequences stay at the front for the next tick.
+   */
   private List<Sequence> scheduleDecodeBatch() {
     List<Sequence> scheduled = new ArrayList<>();
 
@@ -238,6 +279,10 @@ public final class Scheduler {
     return scheduled;
   }
 
+  /**
+   * Preempts other running sequences (LIFO) until {@link BlockManager#canAppend} succeeds, or
+   * preempts {@code seq} itself when it is alone. {@code false} means {@code seq} left the batch.
+   */
   private boolean ensureAppendCapacity(final Sequence seq) {
     while (!this.blockManager.canAppend(seq)) {
       if (this.running.isEmpty()) {
@@ -249,12 +294,19 @@ public final class Scheduler {
     return true;
   }
 
+  /**
+   * Marks one decode token and grows the block table when the last token starts a new page.
+   */
   private void commitDecodeSlot(final Sequence seq) {
     seq.setNumScheduledTokens(1);
     seq.setPrefill(false);
     this.blockManager.mayAppend(seq);
   }
 
+  /**
+   * Puts scheduled sequences back at the front of {@code running} in original order (they were
+   * {@code removeFirst}'d while building the batch).
+   */
   private void restoreRunningOrder(final List<Sequence> scheduled) {
     for (int i = scheduled.size() - 1; i >= 0; i--) {
       this.running.addFirst(scheduled.get(i));
@@ -264,6 +316,8 @@ public final class Scheduler {
   /**
    * Evicts {@code seq} from decode: frees its KV pages, marks it WAITING / prefill-again, and
    * requeues it at the <em>front</em> of waiting so it is retried before newer arrivals.
+   *
+   * @param seq running sequence that cannot append, or a victim chosen to free pages
    */
   public void preempt(final Sequence seq) {
     seq.setStatus(Sequence.Status.WAITING);
@@ -275,6 +329,9 @@ public final class Scheduler {
   /**
    * Applies one forward’s sampled token ids to the scheduled batch (no appended-token side channel).
    *
+   * @param seqs      same order as {@link #schedule()}
+   * @param tokenIds  one sampled id per sequence
+   * @param isPrefill {@code true} if this batch was a prefill step
    * @see #postprocess(List, List, boolean, List)
    */
   public void postprocess(final List<Sequence> seqs, final List<Integer> tokenIds,
@@ -306,6 +363,10 @@ public final class Scheduler {
       .forEach(i -> this.postprocessOne(seqs.get(i), tokenIds.get(i), isPrefill, appendedOut));
   }
 
+  /**
+   * Hashes the scheduled KV window, then either returns (mid-prefill) or appends {@code tokenId}
+   * and maybe finishes the sequence.
+   */
   private void postprocessOne(
     final Sequence seq,
     final int tokenId,
@@ -330,6 +391,10 @@ public final class Scheduler {
     }
   }
 
+  /**
+   * Stop id (unless {@link Sequence#ignoreEos()}), {@link Sequence#maxTokens()},
+   * {@code maxModelLen}, or {@link Sequence#hasDegenerateRepetition()}.
+   */
   private boolean shouldFinish(final Sequence seq, final int tokenId) {
     return (!seq.ignoreEos() && this.stopTokenIds.contains(tokenId))
       || seq.numCompletionTokens() == seq.maxTokens()
@@ -337,12 +402,19 @@ public final class Scheduler {
       || seq.hasDegenerateRepetition();
   }
 
+  /**
+   * Marks FINISHED, releases KV / conv state, and removes {@code seq} from {@code running}.
+   */
   private void finishSequence(final Sequence seq) {
     seq.setStatus(Sequence.Status.FINISHED);
     this.releaseSequence(seq);
     this.running.remove(seq);
   }
 
+  /**
+   * Prefill admission: remaining uncached tokens, prefix-cache hit count, and whether
+   * {@link BlockManager#allocate} still needs to run.
+   */
   private record PrefillPlan(int tokenCount, int cachedBlocks, boolean needsAllocate) {
   }
 

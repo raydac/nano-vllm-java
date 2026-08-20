@@ -29,6 +29,8 @@ public final class ChatHistory {
 
   /**
    * Shared empty snapshot.
+   *
+   * @return the interned empty history
    */
   public static ChatHistory empty() {
     return EMPTY;
@@ -38,6 +40,8 @@ public final class ChatHistory {
    * Frozen copy of {@code messages}. Empty input returns {@link #empty()}.
    *
    * @param messages turns in conversation order; must not be {@code null}
+   * @return frozen copy, or {@link #empty()} when {@code messages} is empty
+   * @throws NullPointerException if {@code messages} is {@code null}
    */
   public static ChatHistory of(final List<ChatMessage> messages) {
     requireNonNull(messages, "messages");
@@ -49,6 +53,8 @@ public final class ChatHistory {
 
   /**
    * Unmodifiable turns in conversation order.
+   *
+   * @return conversation turns; never {@code null}
    */
   public List<ChatMessage> messages() {
     return this.messages;
@@ -56,6 +62,8 @@ public final class ChatHistory {
 
   /**
    * {@code true} when {@link #messages()} is empty.
+   *
+   * @return whether this snapshot has no turns
    */
   public boolean isEmpty() {
     return this.messages.isEmpty();
@@ -63,6 +71,8 @@ public final class ChatHistory {
 
   /**
    * Number of turns in {@link #messages()}.
+   *
+   * @return turn count
    */
   public int size() {
     return this.messages.size();
@@ -70,6 +80,8 @@ public final class ChatHistory {
 
   /**
    * Stream over {@link #messages()} (not parallel).
+   *
+   * @return sequential stream of turns
    */
   public Stream<ChatMessage> stream() {
     return this.messages.stream();
@@ -77,6 +89,8 @@ public final class ChatHistory {
 
   /**
    * Copy containing only {@link ChatRole#USER} turns, in original order.
+   *
+   * @return frozen user-only snapshot
    */
   public ChatHistory userTurns() {
     return of(this.messages.stream()

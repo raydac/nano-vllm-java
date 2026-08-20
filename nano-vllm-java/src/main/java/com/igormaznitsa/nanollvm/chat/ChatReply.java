@@ -53,6 +53,10 @@ public record ChatReply(
   GenerationStats stats
 ) {
 
+  /**
+   * Canonical constructor: null thinking/answer become {@code ""}; null stats become
+   * {@link GenerationStats#NONE}.
+   */
   public ChatReply {
     thinking = thinking == null ? "" : thinking;
     answer = answer == null ? "" : answer;
@@ -70,6 +74,12 @@ public record ChatReply(
     this(thinking, answer, thinkOpen, GenerationStats.NONE);
   }
 
+  /**
+   * Wraps package-private parse output as a public {@code ChatReply} without stats.
+   *
+   * @param parts thinking / answer / thinkOpen from {@link AssistantParts#parse}
+   * @return public snapshot with {@link GenerationStats#NONE}
+   */
   static ChatReply from(final AssistantParts parts) {
     return new ChatReply(parts.thinking(), parts.answer(), parts.thinkOpen());
   }
@@ -122,6 +132,10 @@ public record ChatReply(
    * {@link #parse(String, ThinkTags, ChatSpecials)} using {@link LLM#thinkTags()} and
    * {@link LLM#chatSpecials()}.
    *
+   * @param raw decoded assistant tokens
+   * @param llm engine whose model markers to use
+   * @return parsed snapshot
+   * @throws NullPointerException if {@code llm} is {@code null}
    * @since 1.1.0
    */
   public static ChatReply parse(final String raw, final LLM llm) {
@@ -133,6 +147,10 @@ public record ChatReply(
    * {@link #parse(String, ThinkTags, ChatSpecials)} using {@link LlmModel#thinkTags()} and
    * {@link LlmModel#chatSpecials()}.
    *
+   * @param raw   decoded assistant tokens
+   * @param model loaded model whose markers to use
+   * @return parsed snapshot
+   * @throws NullPointerException if {@code model} is {@code null}
    * @since 1.1.0
    */
   public static ChatReply parse(final String raw, final LlmModel model) {
@@ -156,6 +174,9 @@ public record ChatReply(
   /**
    * {@link #cleanAssistantText(String)} with custom scratchpad markers.
    *
+   * @param raw  decoded assistant tokens
+   * @param tags scratchpad pair
+   * @return stripped visible text
    * @since 1.1.0
    */
   public static String cleanAssistantText(final String raw, final ThinkTags tags) {
@@ -165,6 +186,10 @@ public record ChatReply(
   /**
    * {@link #cleanAssistantText(String)} with custom scratchpad markers and chat specials.
    *
+   * @param raw      decoded assistant tokens
+   * @param tags     scratchpad pair
+   * @param specials chat markup to strip
+   * @return stripped visible text
    * @since 1.1.0
    */
   public static String cleanAssistantText(
@@ -192,6 +217,9 @@ public record ChatReply(
   /**
    * {@link #streamDisplayText(String)} with custom scratchpad markers.
    *
+   * @param raw  partial decode
+   * @param tags scratchpad pair
+   * @return stripped display text
    * @since 1.1.0
    */
   public static String streamDisplayText(final String raw, final ThinkTags tags) {
@@ -201,6 +229,10 @@ public record ChatReply(
   /**
    * {@link #streamDisplayText(String)} with custom scratchpad markers and chat specials.
    *
+   * @param raw      partial decode
+   * @param tags     scratchpad pair
+   * @param specials chat markup to strip
+   * @return stripped display text
    * @since 1.1.0
    */
   public static String streamDisplayText(
@@ -242,6 +274,9 @@ public record ChatReply(
   /**
    * {@link #stripChatMarkup(String)} including {@code tags} as extra markers to remove.
    *
+   * @param text arbitrary text
+   * @param tags scratchpad pair also stripped
+   * @return {@code text} with markup removed
    * @since 1.1.0
    */
   public static String stripChatMarkup(final String text, final ThinkTags tags) {
@@ -251,6 +286,10 @@ public record ChatReply(
   /**
    * {@link #stripChatMarkup(String)} using {@code tags} and {@code specials}.
    *
+   * @param text     arbitrary text
+   * @param tags     scratchpad pair also stripped
+   * @param specials chat markup to strip
+   * @return {@code text} with markup removed
    * @since 1.1.0
    */
   public static String stripChatMarkup(

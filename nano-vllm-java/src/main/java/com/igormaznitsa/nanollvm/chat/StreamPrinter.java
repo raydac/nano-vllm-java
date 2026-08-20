@@ -23,6 +23,8 @@ public final class StreamPrinter {
   private boolean answerStarted;
 
   /**
+   * Binds thinking and answer sinks. {@code color} applies dim cyan ANSI only to the thinking stream.
+   *
    * @param thinkOut  thinking / advisor / debug sink
    * @param answerOut visible assistant answer sink
    * @param color     when {@code true}, dim cyan ANSI styling on the thinking stream
@@ -47,6 +49,8 @@ public final class StreamPrinter {
 
   /**
    * Prints newly arrived thinking, then the answer once the think block is closed.
+   *
+   * @param parts streaming or finished {@link ChatReply}
    */
   public void update(final ChatReply parts) {
     this.emitThink(parts.thinking());
@@ -91,6 +95,10 @@ public final class StreamPrinter {
 
   /**
    * Prints one advisor note on the thinking stream as {@code thinking> [name] note}.
+   *
+   * @param advisorName non-blank advisor name
+   * @param note        note body; {@code null} becomes {@code ""}
+   * @throws IllegalArgumentException if {@code advisorName} is blank after strip
    */
   public void emitAdvisorNote(final String advisorName, final String note) {
     String name = requireNonNull(advisorName, "advisorName").strip();
@@ -112,6 +120,8 @@ public final class StreamPrinter {
 
   /**
    * Prints a prepared-prompt dump on the thinking stream ({@code debug>} lines).
+   *
+   * @param text prepared model-user text; {@code null} / empty prints {@code (empty)}
    */
   public void emitDebug(final String text) {
     String body = text == null ? "" : text;
@@ -125,6 +135,9 @@ public final class StreamPrinter {
     this.thinkOut.flush();
   }
 
+  /**
+   * Incremental thinking line ({@code thinking>}), including a redraw when the parse revises.
+   */
   private void emitThink(final String think) {
     if (think.isEmpty()) {
       return;
@@ -162,6 +175,9 @@ public final class StreamPrinter {
     this.shownThink = think;
   }
 
+  /**
+   * Resets ANSI and ends the thinking line after the close tag arrives.
+   */
   private void closeThinkLine() {
     if (this.color) {
       this.thinkOut.print(ANSI_RESET);
@@ -171,6 +187,9 @@ public final class StreamPrinter {
     this.thinkClosed = true;
   }
 
+  /**
+   * Incremental answer line ({@code assistant>}), including a redraw when the parse revises.
+   */
   private void emitAnswer(final String answer) {
     if (answer.isEmpty()) {
       return;

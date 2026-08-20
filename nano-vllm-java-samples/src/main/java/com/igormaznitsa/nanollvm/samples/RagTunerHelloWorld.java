@@ -73,7 +73,9 @@ public final class RagTunerHelloWorld {
           .topK(3)
           .maxContextChars(1800)
           .isolateGeneration(llm.tokenizer().isTurnBasedChat())
-          .sampling(SampleChatPrompts.samplingForDemo(llm.tokenizer(), 128))
+          .sampling(SampleChatPrompts.samplingForDemo(llm.tokenizer(), 128)
+            .withTemperature(0.1f)
+            .withTopP(0.8f))
           .recoverUnusableAnswers(true)
           .unusableAnswer(SampleChatPrompts::isSetupBoilerplate)
           .streamTo(System.err, System.out, false);
@@ -116,22 +118,31 @@ public final class RagTunerHelloWorld {
     System.out.println("Q: " + question);
     rag.send(question);
     System.out.println();
+    sleep(500);
     printHits(rag.lastHits());
+  }
+
+  private static void sleep(final long delay) {
+    try {
+      Thread.sleep(delay);
+    } catch (InterruptedException ex) {
+      Thread.currentThread().interrupt();
+    }
   }
 
   private static void printHits(final List<RagHit> hits) {
     if (hits.isEmpty()) {
-      System.out.println("(no RAG hits)");
+      System.err.println("(no RAG hits)");
       return;
     }
 
-    System.out.println("RAG hits:");
+    System.err.println("RAG hits:");
     int index = 1;
     for (RagHit hit : hits) {
-      System.out.printf(ROOT, "  [%d] %.3f  %s%n",
-        index++, hit.score(), hit.chunk().source());
-      System.out.println("      " + hit.chunk().text().strip());
+      System.err.printf(ROOT, "  [%d] %.3f  %s%n      %s%n",
+        index++, hit.score(), hit.chunk().source(), hit.chunk().text().strip());
     }
+    System.err.flush();
   }
 
   private static final class EmbedProgress {

@@ -10,8 +10,13 @@ import java.util.Locale;
  * treated as assistant (Gemma turn-based), anything else unknown becomes {@link #USER}.
  */
 public enum ChatRole {
+  /**
+   * Instruction / system seed turn.
+   */
   SYSTEM("system"),
+  /** Human turn. */
   USER("user"),
+  /** Model turn (visible answer in session history). */
   ASSISTANT("assistant");
 
   private final String wireName;
@@ -40,6 +45,8 @@ public enum ChatRole {
 
   /**
    * Canonical template role string ({@code system}, {@code user}, or {@code assistant}).
+   *
+   * @return wire name used in chat templates
    */
   public String wireName() {
     return this.wireName;

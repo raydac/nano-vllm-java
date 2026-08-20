@@ -8,6 +8,41 @@ import com.igormaznitsa.nanollvm.tensor.Tensor;
 import com.igormaznitsa.nanollvm.tensor.VectorMath;
 import java.util.Arrays;
 
+/**
+ * Causal grouped-query attention with a paged KV cache. Used by chat architectures
+ * (Qwen3, Gemma 3/4, Llama, LFM2). BERT uses {@link BidirectionalAttention} instead.
+ *
+ * <h2>Layout</h2>
+ * Query is {@code [tokens, numHeads, headDim]}; key/value are {@code [tokens, numKvHeads, headDim]}.
+ * When {@code numHeads > numKvHeads}, each KV head is reused {@code numHeads / numKvHeads} times
+ * (GQA). Scores are {@code q·k * scale} with online softmax over 64-key tiles.
+ *
+ * <h2>Prefill vs decode</h2>
+ * Driven by {@link Context#isPrefill()} and the bound {@link KvCacheArena}:
+ * <ul>
+ *   <li><b>Prefill, no block tables</b> — attend over the dense {@code k}/{@code v} of this batch
+ *       (varlen ranges from {@code cuSeqlensQ}/{@code cuSeqlensK}).</li>
+ *   <li><b>Prefill, with block tables</b> — write new KV into arena slots, then attend in place
+ *       over paged cache (no dense page copy).</li>
+ *   <li><b>Decode</b> — one query token per sequence; attend over the sequence's cached keys
+ *       via {@link Context#blockTables()} and {@link Context#contextLens()}.</li>
+ * </ul>
+ *
+ * <h2>Shared KV (Gemma 4)</h2>
+ * A layer with {@code writeKv == false} does not project or store K/V. It reads the producer
+ * layer's cache at {@code kvLayerIndex}. A shared layer still needs slot mapping or block tables
+ * so it can find those pages.
+ *
+ * <h2>Sliding window</h2>
+ * {@code slidingWindow > 0} restricts the attended key range to the last {@code slidingWindow}
+ * positions (Gemma local layers). {@code 0} is full causal context.
+ *
+ * <p><strong>Thread safety:</strong> not concurrent-safe; one layer instance is used on the
+ * generate thread only (same contract as {@link com.igormaznitsa.nanollvm.engine.Transformer}).
+ *
+ * @see BidirectionalAttention
+ * @see com.igormaznitsa.nanollvm.engine.KvCacheArena
+ */
 public final class Attention {
 
   private static final int KEY_TILE = 64;
@@ -20,11 +55,30 @@ public final class Attention {
   private final int kvLayerIndex;
   private final boolean writeKv;
 
+  /**
+   * Causal GQA that writes KV into {@code layerIndex} of the arena, with no sliding window.
+   *
+   * @param numHeads   query heads
+   * @param headDim    per-head width
+   * @param scale      score multiplier ({@code 1/√d} or architecture-specific)
+   * @param numKvHeads key/value heads ({@code <= numHeads}; GQA when smaller)
+   * @param layerIndex KV arena layer this projection writes
+   */
   public Attention(final int numHeads, final int headDim, final float scale, final int numKvHeads,
                    final int layerIndex) {
     this(numHeads, headDim, scale, numKvHeads, 0, layerIndex);
   }
 
+  /**
+   * Causal GQA that writes KV into {@code layerIndex}, optionally windowed.
+   *
+   * @param numHeads      query heads
+   * @param headDim       per-head width
+   * @param scale         score multiplier
+   * @param numKvHeads    key/value heads
+   * @param slidingWindow max attended keys; {@code 0} = full causal context
+   * @param layerIndex    KV arena layer this projection writes
+   */
   public Attention(
     final int numHeads,
     final int headDim,
@@ -36,6 +90,18 @@ public final class Attention {
     this(numHeads, headDim, scale, numKvHeads, slidingWindow, layerIndex, true);
   }
 
+  /**
+   * Causal GQA with an explicit KV producer layer and write flag (Gemma 4 shared-KV layers).
+   *
+   * @param numHeads      query heads
+   * @param headDim       per-head width
+   * @param scale         score multiplier
+   * @param numKvHeads    key/value heads
+   * @param slidingWindow max attended keys; {@code 0} = full causal context
+   * @param kvLayerIndex  arena layer to read (and write when {@code writeKv})
+   * @param writeKv       {@code false} to attend from a producer cache without storing
+   * @since 1.1.0
+   */
   public Attention(
     final int numHeads,
     final int headDim,
@@ -55,6 +121,31 @@ public final class Attention {
     this.writeKv = writeKv;
   }
 
+  /**
+   * Flattens a paged block table of length {@code kLen} into arena slot indices
+   * ({@code blockId * blockSize + offset}).
+   */
+  private static int[] pagedSlots(final int[] table, final int kLen, final int blockSize) {
+    int[] slots = new int[kLen];
+    for (int t = 0; t < kLen; t++) {
+      slots[t] = table[t / blockSize] * blockSize + (t % blockSize);
+    }
+    return slots;
+  }
+
+  /**
+   * One attention pass over a scheduled batch. Requires a {@link KvCacheArena} bound on
+   * {@code ctx}. When this layer writes KV and slot mapping matches the token count, new
+   * {@code k}/{@code v} are stored before attending.
+   *
+   * @param q   queries {@code [tokens, numHeads, headDim]}
+   * @param k   keys {@code [tokens, numKvHeads, headDim]} (ignored when not writing KV)
+   * @param v   values, same layout as {@code k}
+   * @param ctx step context (arena, cu-seqlens, slots / block tables)
+   * @return attended values {@code [tokens, numHeads, headDim]}
+   * @throws NullPointerException  if {@code ctx} has no KV arena
+   * @throws IllegalStateException if a shared-KV layer has neither slots nor block tables
+   */
   public Tensor forward(final Tensor q, final Tensor k, final Tensor v, final Context ctx) {
     KvCacheArena arena = requireNonNull(ctx.kvCache(), "KV cache arena not bound in Context");
     Tensor kCache = arena.k(this.kvLayerIndex);
@@ -76,6 +167,9 @@ public final class Attention {
     return this.decode(q, ctx, kCache, vCache);
   }
 
+  /**
+   * Shared-KV path: attend using the producer layer's cache, never the caller's {@code k}/{@code v}.
+   */
   private Tensor attendFromCache(
     final Tensor q,
     final Context ctx,
@@ -97,6 +191,10 @@ public final class Attention {
     return this.prefillDense(q, gathered[0], gathered[1], ctx);
   }
 
+  /**
+   * Copies KV rows from arena slots into dense {@code [n, numKvHeads, headDim]} tensors.
+   * Negative slots are left as zeros (padding).
+   */
   private Tensor[] gatherKvCache(final int[] slotMapping, final Tensor kCache,
                                  final Tensor vCache) {
     int n = slotMapping.length;
@@ -114,6 +212,9 @@ public final class Attention {
     return new Tensor[] {k, v};
   }
 
+  /**
+   * Writes each token's K/V into the arena at {@code slotMapping[i]}. Negative slots are skipped.
+   */
   private void storeKvCache(
     final Tensor key,
     final Tensor value,
@@ -135,14 +236,9 @@ public final class Attention {
     }
   }
 
-  private static int[] pagedSlots(final int[] table, final int kLen, final int blockSize) {
-    int[] slots = new int[kLen];
-    for (int t = 0; t < kLen; t++) {
-      slots[t] = table[t / blockSize] * blockSize + (t % blockSize);
-    }
-    return slots;
-  }
-
+  /**
+   * Prefill over dense K/V of this batch, one varlen sequence at a time.
+   */
   private Tensor prefillDense(final Tensor q, final Tensor k, final Tensor v, final Context ctx) {
     int[] cuQ = ctx.cuSeqlensQ();
     int[] cuK = ctx.cuSeqlensK();
@@ -158,6 +254,9 @@ public final class Attention {
     return out;
   }
 
+  /**
+   * Prefill that attends in place over paged cache slots (no dense K/V copy).
+   */
   private Tensor prefillWithCache(final Tensor q, final Context ctx, final Tensor kCache,
                                   final Tensor vCache) {
     int[] cuQ = ctx.cuSeqlensQ();
@@ -177,6 +276,9 @@ public final class Attention {
     return out;
   }
 
+  /**
+   * Decode: one query token per sequence, attend over that sequence's cached keys.
+   */
   private Tensor decode(final Tensor q, final Context ctx, final Tensor kCache,
                         final Tensor vCache) {
     int bs = q.size(0);
@@ -193,6 +295,12 @@ public final class Attention {
     return out;
   }
 
+  /**
+   * Online-softmax attention for query tokens {@code [qStart, qEnd)} over {@code kLen} keys.
+   * When {@code causal} is true, query {@code i} sees keys up to its own position. {@code kvSlots}
+   * {@code null} means dense keys starting at {@code kIndexBase}; otherwise keys are read from
+   * those arena slots.
+   */
   private void attendRange(
     final Tensor q, final Tensor k, final Tensor v, final Tensor out,
     final int qStart, final int qEnd, final int kIndexBase, final int kLen, final boolean causal,
@@ -256,6 +364,9 @@ public final class Attention {
     }
   }
 
+  /**
+   * Byte offset of KV-head {@code kvh} for key index {@code kj} in {@code cache}.
+   */
   private int kvHeadBase(
     final Tensor cache,
     final int kIndexBase,

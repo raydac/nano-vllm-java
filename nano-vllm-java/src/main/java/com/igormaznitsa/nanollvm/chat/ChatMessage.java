@@ -23,6 +23,9 @@ import java.util.Map;
  */
 public record ChatMessage(ChatRole role, String content) {
 
+  /**
+   * Canonical constructor: {@code role} must be non-null; null {@code content} becomes {@code ""}.
+   */
   public ChatMessage {
     requireNonNull(role, "role");
     content = content == null ? "" : content;
@@ -32,6 +35,7 @@ public record ChatMessage(ChatRole role, String content) {
    * System / instruction turn (optional seed at the start of a conversation).
    *
    * @param content instruction text; {@code null} becomes {@code ""}
+   * @return system message
    */
   public static ChatMessage system(final String content) {
     return new ChatMessage(ChatRole.SYSTEM, content);
@@ -41,6 +45,7 @@ public record ChatMessage(ChatRole role, String content) {
    * User turn.
    *
    * @param content user text; {@code null} becomes {@code ""}
+   * @return user message
    */
   public static ChatMessage user(final String content) {
     return new ChatMessage(ChatRole.USER, content);
@@ -50,6 +55,7 @@ public record ChatMessage(ChatRole role, String content) {
    * Assistant turn (visible answer only in session history).
    *
    * @param content assistant text; {@code null} becomes {@code ""}
+   * @return assistant message
    */
   public static ChatMessage assistant(final String content) {
     return new ChatMessage(ChatRole.ASSISTANT, content);
@@ -63,6 +69,7 @@ public record ChatMessage(ChatRole role, String content) {
    *
    * @param map wire map; must not be {@code null}
    * @return parsed message
+   * @throws NullPointerException if {@code map} is {@code null}
    */
   public static ChatMessage fromMap(final Map<String, String> map) {
     requireNonNull(map, "map");

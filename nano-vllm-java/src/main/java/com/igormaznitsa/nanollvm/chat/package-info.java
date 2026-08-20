@@ -9,6 +9,13 @@
  * answer-search specials as {@link com.igormaznitsa.nanollvm.models.LlmModel#OPTION_CHAT_SPECIALS}
  * when the checkpoint does not use the library defaults; {@link ChatSession#thinkTags()}
  * overrides the scratchpad pair for one conversation.
+ *
+ * <p><b>Which call.</b> {@link ChatSession#send(String)} is a normal turn (history and generate
+ * share the user text). {@link ChatSession#sendPrepared} records one string in history and
+ * generates from another (RAG). {@link ChatMessages} trims / scrubs the live history list.
+ *
+ * <p><b>Events.</b> {@link LlmListener#onText} receives {@link LlmTextEvent}s. Compose sinks with
+ * {@link LlmListeners}. CLI tools use {@link LlmListeners#toPrintStreams} ({@link StreamPrinter}).
  */
 
 package com.igormaznitsa.nanollvm.chat;

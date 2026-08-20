@@ -3,14 +3,40 @@ package com.igormaznitsa.nanollvm.llm;
 import java.util.Objects;
 
 /**
- * Immutable sampling knobs for {@link LLM#generate} and chat turns.
+ * Immutable next-token sampling knobs for {@link LLM#generate} and chat / RAG turns.
  *
  * <p>Construct only via {@link #builder()} or {@link SamplingDefaults}. Copies use {@code with*}
- * methods. Greedy sampling is rejected ({@code temperature} must be greater than {@code 1e-10}).
- * {@code topK == 0} disables top-k; {@code topP} must be in {@code (0, 1]}. Safe to share across
- * threads and across prompts in a batch.
+ * methods. The built object is safe to share across threads and across prompts in a batch. There
+ * is no RNG seed on this type: the same knobs can still produce different text on repeated runs.
+ *
+ * <p>Each decode step turns logits into a distribution, then draws one token, in this order:
+ * <ol>
+ *   <li><b>Temperature</b> — softmax uses {@code logits / temperature}. Lower values peak on the
+ *       highest-logit token (more repeatable, less random). Higher values flatten the distribution
+ *       (more variety). Must be {@code > 1e-10}; pure greedy {@code argmax} ({@code 0}) is rejected.
+ *       Neutral chat is {@link SamplingDefaults#DEFAULT_TEMPERATURE} ({@code 0.6}). Factoid / RAG
+ *       answers usually want {@code 0.1}–{@code 0.2}.</li>
+ *   <li><b>Top-k</b> — keep only the {@code k} most probable tokens and renormalize.
+ *       {@code 0} leaves the full vocabulary (disabled). Typical chat values are {@code 20}–{@code 64}
+ *       (some turn-based models sit near {@code 64}).</li>
+ *   <li><b>Top-p</b> (nucleus) — keep the smallest prefix of remaining tokens whose probabilities
+ *       sum to at least {@code p}, then renormalize. Must be in {@code (0, 1]}; {@code 1} disables
+ *       nucleus. {@link SamplingDefaults#DEFAULT_TOP_P} is {@code 0.95}. Tighter values
+ *       ({@code 0.8}–{@code 0.85}) cut a long low-probability tail.</li>
+ * </ol>
+ * Top-k runs first when enabled, then top-p. Both may be combined.
+ *
+ * <p>{@link #maxTokens()} caps <em>new</em> tokens; the engine also clamps it to remaining context
+ * ({@code maxModelLen}). {@link #ignoreEos()} {@code true} keeps generating through end-of-sequence
+ * until that cap.
+ *
+ * <p>{@link com.igormaznitsa.nanollvm.rag.RagSession} may further lower temperature on turns that
+ * retrieved passages, even if these knobs are hotter.
  *
  * @see SamplingDefaults
+ * @see LLM.Builder#sampling(SamplingParams)
+ * @see com.igormaznitsa.nanollvm.chat.ChatSession#sampling(SamplingParams)
+ * @see com.igormaznitsa.nanollvm.rag.RagSession#sampling(SamplingParams)
  */
 public final class SamplingParams {
 
@@ -47,8 +73,11 @@ public final class SamplingParams {
   }
 
   /**
-   * Fluent configurator. Defaults match {@link SamplingDefaults#neutral()}.
+   * Fluent configurator. Unset fields match {@link SamplingDefaults#neutral()} ({@code temperature}
+   * {@code 0.6}, {@code maxTokens} {@code 256}, EOS honored, top-k off, top-p {@code 0.95}).
+   * Validation runs in {@link Builder#build()}.
    *
+   * @return a new builder
    * @since 1.1.0
    */
   public static Builder builder() {
@@ -56,46 +85,62 @@ public final class SamplingParams {
   }
 
   /**
-   * Softmax temperature; must be {@code > 1e-10}. Lower values make the next-token distribution
-   * more peaked.
+   * Softmax temperature {@code τ}: logits are divided by this value before softmax.
+   * Lower {@code τ} → more deterministic; higher {@code τ} → more random. Always {@code > 1e-10}.
+   *
+   * @return temperature in {@code (1e-10, +∞)}
    */
   public float temperature() {
     return this.temperature;
   }
 
   /**
-   * Maximum newly generated tokens per sequence; must be {@code >= 1}. The engine also clamps this
-   * to remaining context ({@code maxModelLen}).
+   * Maximum newly generated tokens per sequence. The engine also clamps this to remaining context
+   * ({@code maxModelLen}).
+   *
+   * @return cap {@code >= 1}
    */
   public int maxTokens() {
     return this.maxTokens;
   }
 
   /**
-   * When {@code true}, end-of-sequence does not finish the sequence ({@code maxTokens} still
-   * applies).
+   * When {@code true}, an end-of-sequence token does not finish the sequence; generation continues
+   * until {@link #maxTokens()} (or the context clamp).
+   *
+   * @return {@code true} if EOS is ignored
    */
   public boolean ignoreEos() {
     return this.ignoreEos;
   }
 
   /**
-   * Keep only the top-{@code k} logits before nucleus; {@code 0} disables top-k.
+   * After softmax, keep only this many highest-probability tokens. {@code 0} disables top-k
+   * (full vocabulary, then top-p if it is below {@code 1}).
+   *
+   * @return {@code k >= 0}; {@code 0} means top-k is off
    */
   public int topK() {
     return this.topK;
   }
 
   /**
-   * Nucleus sampling cumulative probability in {@code (0, 1]}.
+   * Nucleus (top-p) cumulative probability. Applied after top-k. {@code 1} keeps the whole
+   * remaining mass (nucleus off).
+   *
+   * @return {@code p} in {@code (0, 1]}
    */
   public float topP() {
     return this.topP;
   }
 
   /**
-   * Copy with a new temperature ({@code > 1e-10}).
+   * Copy with a new temperature. Lower values make answers less random; must stay {@code > 1e-10}
+   * (greedy {@code 0} is rejected).
    *
+   * @param temperature softmax {@code τ}; must be {@code > 1e-10}
+   * @return a new instance; this object is unchanged
+   * @throws IllegalArgumentException if {@code temperature <= 1e-10}
    * @since 1.1.0
    */
   public SamplingParams withTemperature(final float temperature) {
@@ -103,8 +148,12 @@ public final class SamplingParams {
   }
 
   /**
-   * Copy with a new {@code maxTokens} ({@code >= 1}).
+   * Copy with a different {@link #maxTokens()} cap. The engine still clamps this to remaining
+   * context ({@code maxModelLen - promptLen}) at generate time.
    *
+   * @param maxTokens must be {@code >= 1}
+   * @return a new instance; this object is unchanged
+   * @throws IllegalArgumentException if {@code maxTokens < 1}
    * @since 1.1.0
    */
   public SamplingParams withMaxTokens(final int maxTokens) {
@@ -114,6 +163,8 @@ public final class SamplingParams {
   /**
    * Copy that honors or ignores end-of-sequence.
    *
+   * @param ignoreEos {@code true} to keep generating through EOS until {@link #maxTokens()}
+   * @return a new instance; this object is unchanged
    * @since 1.1.0
    */
   public SamplingParams withIgnoreEos(final boolean ignoreEos) {
@@ -121,8 +172,11 @@ public final class SamplingParams {
   }
 
   /**
-   * Copy with a new top-k ({@code 0} disables).
+   * Copy with a new top-k. {@code 0} disables the cap.
    *
+   * @param topK must be {@code >= 0}
+   * @return a new instance; this object is unchanged
+   * @throws IllegalArgumentException if {@code topK < 0}
    * @since 1.1.0
    */
   public SamplingParams withTopK(final int topK) {
@@ -130,8 +184,12 @@ public final class SamplingParams {
   }
 
   /**
-   * Copy with a new nucleus probability in {@code (0, 1]}.
+   * Copy with a new nucleus probability. {@code 1} disables nucleus; smaller values (for example
+   * {@code 0.8}) cut a longer tail.
    *
+   * @param topP must be in {@code (0, 1]}
+   * @return a new instance; this object is unchanged
+   * @throws IllegalArgumentException if {@code topP} is outside {@code (0, 1]}
    * @since 1.1.0
    */
   public SamplingParams withTopP(final float topP) {
@@ -165,8 +223,9 @@ public final class SamplingParams {
   }
 
   /**
-   * Fluent configurator. Defaults match {@link SamplingDefaults#neutral()}.
+   * Fluent configurator. Unset fields match {@link SamplingDefaults#neutral()}.
    *
+   * @see SamplingParams
    * @since 1.1.0
    */
   public static final class Builder {
@@ -181,8 +240,10 @@ public final class SamplingParams {
     }
 
     /**
-     * Softmax temperature; must be {@code > 1e-10}.
+     * Softmax temperature. Lower → less random; must be {@code > 1e-10} at {@link #build()}.
      *
+     * @param temperature softmax {@code τ}
+     * @return {@code this}
      * @since 1.1.0
      */
     public Builder temperature(final float temperature) {
@@ -191,8 +252,10 @@ public final class SamplingParams {
     }
 
     /**
-     * Maximum newly generated tokens; must be {@code >= 1}.
+     * Maximum newly generated tokens per sequence.
      *
+     * @param maxTokens must be {@code >= 1} at {@link #build()}
+     * @return {@code this}
      * @since 1.1.0
      */
     public Builder maxTokens(final int maxTokens) {
@@ -203,6 +266,8 @@ public final class SamplingParams {
     /**
      * When {@code true}, end-of-sequence does not finish the sequence.
      *
+     * @param ignoreEos {@code true} to ignore EOS
+     * @return {@code this}
      * @since 1.1.0
      */
     public Builder ignoreEos(final boolean ignoreEos) {
@@ -211,8 +276,10 @@ public final class SamplingParams {
     }
 
     /**
-     * Keep only the top-{@code k} logits; {@code 0} disables top-k.
+     * Keep only the {@code k} most probable tokens after softmax. {@code 0} disables top-k.
      *
+     * @param topK must be {@code >= 0} at {@link #build()}
+     * @return {@code this}
      * @since 1.1.0
      */
     public Builder topK(final int topK) {
@@ -221,8 +288,10 @@ public final class SamplingParams {
     }
 
     /**
-     * Nucleus sampling cumulative probability in {@code (0, 1]}.
+     * Nucleus cumulative probability after top-k. {@code 1} disables nucleus.
      *
+     * @param topP must be in {@code (0, 1]} at {@link #build()}
+     * @return {@code this}
      * @since 1.1.0
      */
     public Builder topP(final float topP) {
@@ -233,6 +302,10 @@ public final class SamplingParams {
     /**
      * Seals this configurator into an immutable {@link SamplingParams}.
      *
+     * @return a new validated instance
+     * @throws IllegalArgumentException if temperature is greedy ({@code <= 1e-10}),
+     *                                  {@code maxTokens < 1}, {@code topK < 0}, or {@code topP}
+     *                                  is outside {@code (0, 1]}
      * @since 1.1.0
      */
     public SamplingParams build() {

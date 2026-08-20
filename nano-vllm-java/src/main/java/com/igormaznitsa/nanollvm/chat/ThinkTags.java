@@ -26,8 +26,17 @@ import static java.util.Objects.requireNonNull;
  */
 public record ThinkTags(String open, String close) {
 
+  /**
+   * Qwen3 / DeepSeek-R1-style pair {@code <think>} / {@code </think>}.
+   */
   public static final ThinkTags DEFAULT = new ThinkTags("<think>", "</think>");
 
+  /**
+   * Canonical constructor: strips both markers, rejects blank / equal / nested pairs.
+   *
+   * @throws NullPointerException     if {@code open} or {@code close} is {@code null}
+   * @throws IllegalArgumentException if a marker is blank, equal, or contains the other
+   */
   public ThinkTags {
     requireNonNull(open, "open");
     requireNonNull(close, "close");
@@ -49,6 +58,7 @@ public record ThinkTags(String open, String close) {
    *
    * @param open  start marker; non-blank
    * @param close end marker; non-blank and distinct from {@code open}
+   * @return validated pair
    * @since 1.1.0
    */
   public static ThinkTags of(final String open, final String close) {
@@ -59,6 +69,7 @@ public record ThinkTags(String open, String close) {
    * Empty scratchpad inserted after the ChatML assistant opener when thinking is disabled and both
    * markers exist in the tokenizer vocab.
    *
+   * @return {@code open + "\\n\\n" + close + "\\n\\n"}
    * @since 1.1.0
    */
   public String skipSeed() {

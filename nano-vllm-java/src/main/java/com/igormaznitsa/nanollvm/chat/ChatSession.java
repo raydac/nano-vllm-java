@@ -50,6 +50,7 @@ public final class ChatSession {
    * model (system turn when the architecture uses one).
    *
    * @param llm engine that owns generation; must not be {@code null}
+   * @throws NullPointerException if {@code llm} is {@code null}
    */
   public ChatSession(final LLM llm) {
     this(llm, llm.defaultSampling());
@@ -61,6 +62,7 @@ public final class ChatSession {
    * @param llm            engine that owns generation; must not be {@code null}
    * @param samplingParams temperature / top-k / top-p / max tokens for each {@link #send}; must not
    *                       be {@code null}
+   * @throws NullPointerException if {@code llm} or {@code samplingParams} is {@code null}
    */
   public ChatSession(final LLM llm, final SamplingParams samplingParams) {
     this.llm = requireNonNull(llm, "llm");
@@ -95,6 +97,8 @@ public final class ChatSession {
   /**
    * Sets max new tokens for subsequent turns; other sampling knobs stay.
    *
+   * @param maxTokens upper bound on new tokens per turn
+   * @return {@code this} for fluent configuration
    * @since 1.1.0
    */
   public ChatSession maxTokens(final int maxTokens) {
@@ -105,6 +109,9 @@ public final class ChatSession {
   /**
    * Appends few-shot turns after the engine system seed, then trims to the history cap.
    *
+   * @param messages seed turns; must not be {@code null} (elements must be non-null and non-blank)
+   * @return {@code this} for fluent configuration
+   * @throws IllegalArgumentException if a message body is blank
    * @since 1.1.0
    */
   public ChatSession seed(final ChatMessage... messages) {
@@ -115,6 +122,9 @@ public final class ChatSession {
   /**
    * Appends few-shot turns after the engine system seed, then trims to the history cap.
    *
+   * @param messages seed turns; must not be {@code null} (elements must be non-null and non-blank)
+   * @return {@code this} for fluent configuration
+   * @throws IllegalArgumentException if a message body is blank
    * @since 1.1.0
    */
   public ChatSession seed(final List<ChatMessage> messages) {
@@ -132,6 +142,8 @@ public final class ChatSession {
 
   /**
    * Engine that owns generation for this session.
+   *
+   * @return the {@link LLM} passed at construction
    */
   public LLM llm() {
     return this.llm;
@@ -140,7 +152,7 @@ public final class ChatSession {
   /**
    * Sampling parameters currently used by {@link #send} / {@link #sendPrepared}.
    *
-   * @return the live sampling params (immutable record)
+   * @return the live sampling knobs (immutable)
    */
   public SamplingParams samplingParams() {
     return this.samplingParams;
@@ -149,6 +161,8 @@ public final class ChatSession {
   /**
    * Wall time of the advisor pass on the last {@link #send} / {@link #sendPrepared}
    * ({@code 0} when no advisors ran or before the first turn).
+   *
+   * @return advisor nanos for the last turn
    */
   public long lastAdvisorNanos() {
     return this.lastAdvisorNanos;
@@ -157,6 +171,8 @@ public final class ChatSession {
   /**
    * Engine stats for the main assistant generate(s) on the last {@link #send} /
    * {@link #sendPrepared} (includes optional unusable-answer retries' elapsed time; excludes advisors).
+   *
+   * @return last main-generate stats, or {@link GenerationStats#NONE} before the first turn
    */
   public GenerationStats lastGenerateStats() {
     return this.lastGenerateStats;
@@ -164,6 +180,8 @@ public final class ChatSession {
 
   /**
    * {@link GenerationStats#elapsedNanos()} of {@link #lastGenerateStats()}.
+   *
+   * @return last main-generate wall time in nanos
    */
   public long lastGenerateNanos() {
     return this.lastGenerateStats.elapsedNanos();
@@ -243,6 +261,7 @@ public final class ChatSession {
    * Markers currently used by {@link #send} / streaming parse ({@link LLM#thinkTags()} unless
    * {@link #thinkTags(ThinkTags)} was called).
    *
+   * @return session override, or the model's pair
    * @since 1.1.0
    */
   public ThinkTags thinkTags() {
@@ -254,6 +273,8 @@ public final class ChatSession {
    * advisor notes if the main answer matches {@link #unusableAnswer(Predicate)}. Off by default —
    * enable from demos/apps that need it for small turn-based models.
    *
+   * @param enable {@code true} to retry / salvage unusable answers
+   * @return {@code this} for fluent configuration
    * @since 1.1.0
    */
   public ChatSession recoverUnusableAnswers(final boolean enable) {
@@ -265,6 +286,8 @@ public final class ChatSession {
    * Predicate for answers treated as unusable when {@link #recoverUnusableAnswers(boolean)} is on.
    * Default: blank only.
    *
+   * @param predicate test on stripped answer text; must not be {@code null}
+   * @return {@code this} for fluent configuration
    * @since 1.1.0
    */
   public ChatSession unusableAnswer(final Predicate<String> predicate) {
@@ -275,6 +298,9 @@ public final class ChatSession {
   /**
    * Fallback visible reply when recovery still yields nothing usable.
    *
+   * @param fallback non-blank user-facing string
+   * @return {@code this} for fluent configuration
+   * @throws IllegalArgumentException if {@code fallback} is blank after strip
    * @since 1.1.0
    */
   public ChatSession unusableAnswerFallback(final String fallback) {
@@ -288,6 +314,10 @@ public final class ChatSession {
   /**
    * Caps retained dialog turns (system + user + assistant). Oldest non-system messages are dropped
    * when the cap is exceeded. Default from {@link ResourceLimits#maxHistoryMessages()}.
+   *
+   * @param maxHistoryMessages must be {@code >= 1}
+   * @return {@code this} for fluent configuration
+   * @throws IllegalArgumentException if {@code maxHistoryMessages < 1}
    */
   public ChatSession maxHistoryMessages(final int maxHistoryMessages) {
     if (maxHistoryMessages < 1) {
@@ -301,6 +331,9 @@ public final class ChatSession {
   /**
    * When {@code true}, emits {@link LlmTextKind#TEXT_DEBUG} with the prepared model-user text after
    * advisors. Off by default so full prompts are not sent to listeners; turn on only when debugging.
+   *
+   * @param emitDebugPrompts {@code true} to emit prepared-prompt debug events
+   * @return {@code this} for fluent configuration
    */
   public ChatSession emitDebugPrompts(final boolean emitDebugPrompts) {
     this.emitDebugPrompts = emitDebugPrompts;
@@ -327,6 +360,9 @@ public final class ChatSession {
     return this;
   }
 
+  /**
+   * Composes {@link LLM#listener()} with the session sink and unwraps a CLI print adapter if present.
+   */
   private void bindListener() {
     this.listener = LlmListeners.compose(this.llm.listener(), this.sessionListener);
     this.printSink = LlmListeners.unwrapPrintStream(this.sessionListener);
@@ -370,6 +406,9 @@ public final class ChatSession {
   /**
    * One turn with explicit sampling; session sampling is restored afterward.
    *
+   * @param userText       non-blank user turn
+   * @param samplingParams knobs for this turn only
+   * @return finished {@link ChatReply}
    * @since 1.1.0
    */
   public ChatReply send(final String userText, final SamplingParams samplingParams) {
@@ -467,6 +506,9 @@ public final class ChatSession {
     return this.finishTurn(reply, turn);
   }
 
+  /**
+   * User turns already in history, excluding the turn just appended (advisor context).
+   */
   private List<ChatMessage> priorDialogForAdvisors() {
     List<ChatMessage> users = this.history.stream()
       .filter(message -> message.role() == ChatRole.USER)
@@ -477,6 +519,9 @@ public final class ChatSession {
     return users.subList(0, users.size() - 1);
   }
 
+  /**
+   * {@code true} when {@link #unusableAnswer} matches, or the answer is an advisor name (tiny-model latch).
+   */
   private boolean isUnusableMainAnswer(final String answer) {
     String body = answer == null ? "" : answer.strip();
     if (this.unusableAnswer.test(body)) {
@@ -487,6 +532,9 @@ public final class ChatSession {
       .anyMatch(name -> name.equalsIgnoreCase(body));
   }
 
+  /**
+   * Last-resort reply: joined advisor salvage notes, else {@link #unusableAnswerFallback}.
+   */
   private ChatReply advisorSalvageFallback(final AdvisorEnrichment enrichment) {
     String salvage = String.join(" ", enrichment.answerSalvageNotes());
     if (!salvage.isBlank()) {
@@ -497,6 +545,9 @@ public final class ChatSession {
     return new ChatReply("", this.unusableAnswerFallback, false, this.lastGenerateStats);
   }
 
+  /**
+   * Resets the CLI printer for a new generate (or retry) and returns a fresh stream accumulator.
+   */
   private TurnStream beginTurn() {
     if (this.printSink != null) {
       this.printSink.resetTurn();
@@ -504,12 +555,18 @@ public final class ChatSession {
     return new TurnStream();
   }
 
+  /**
+   * Clears a partially printed {@code assistant>} line so a retry does not leave two answers.
+   */
   private void discardPrintedAnswer() {
     if (this.printSink != null) {
       this.printSink.discardAnswer();
     }
   }
 
+  /**
+   * Emits {@link LlmTextKind#TEXT_ADVISOR_NOTE} for each advisor response.
+   */
   private void emitAdvisorNotes(final List<AdvisorResponse> responses) {
     if (responses == null || responses.isEmpty()) {
       return;
@@ -520,6 +577,9 @@ public final class ChatSession {
     }
   }
 
+  /**
+   * Emits {@link LlmTextKind#TEXT_DEBUG} with the prepared model-user string when enabled.
+   */
   private void emitPreparedUserDebug(final AdvisorEnrichment enrichment) {
     if (!this.emitDebugPrompts) {
       return;
@@ -527,10 +587,17 @@ public final class ChatSession {
     this.listener.onText(this.llm, LlmTextEvent.debug(enrichment.modelUserText()));
   }
 
+  /**
+   * Emits {@link LlmTextKind#TEXT_DIAGNOSTICS} (salvage / retry / empty-reply notices).
+   */
   private void emitDiagnostics(final String message) {
     this.listener.onText(this.llm, LlmTextEvent.of(LlmTextKind.TEXT_DIAGNOSTICS, message));
   }
 
+  /**
+   * One {@link LLM#generate}: chat template, token stream parse, measured stats.
+   * {@code isolateGeneration} feeds only system seed + prepared user text.
+   */
   private ChatReply generateTurn(
     final TurnStream turn,
     final String lastUserOverride,
@@ -577,6 +644,9 @@ public final class ChatSession {
       .withStats(this.lastGenerateStats);
   }
 
+  /**
+   * Adds {@code next.elapsedNanos()} onto {@code prior} when a retry ran a second generate.
+   */
   private GenerationStats mergeGenerateStats(
     final GenerationStats prior,
     final GenerationStats next
@@ -590,6 +660,9 @@ public final class ChatSession {
       prior.elapsedNanos() + next.elapsedNanos());
   }
 
+  /**
+   * Session {@link #enableThinking(boolean)} if set; otherwise vocab membership of the active tags.
+   */
   private boolean thinkingEnabled(final Tokenizer tokenizer) {
     if (this.enableThinking != null) {
       return this.enableThinking;
@@ -598,12 +671,19 @@ public final class ChatSession {
     return tokenizer.invitesThinking(tags.open(), tags.close());
   }
 
+  /**
+   * System seed (if any) plus one user turn — prior dialog is omitted from the template.
+   */
   private List<ChatMessage> isolatedTurn(final String modelUserText) {
     List<ChatMessage> turn = new ArrayList<>(this.llm.newConversation());
     turn.add(ChatMessage.user(modelUserText));
     return turn;
   }
 
+  /**
+   * History for the chat template, swapping the last user turn to {@code lastUserOverride} when it
+   * differs from what was stored (RAG prepared text).
+   */
   private List<ChatMessage> historyForTemplate(final String lastUserOverride) {
     if (this.history.isEmpty()) {
       return List.of();
@@ -617,6 +697,10 @@ public final class ChatSession {
     return copy;
   }
 
+  /**
+   * Salvages / fallbacks a blank or truncated answer, pushes a final stream snapshot, records
+   * the assistant turn in history.
+   */
   private ChatReply finishTurn(final ChatReply reply, final TurnStream turn) {
     String answer = reply.answer().strip();
     String thinking = reply.thinking();
@@ -641,6 +725,9 @@ public final class ChatSession {
     return finished;
   }
 
+  /**
+   * Drops oldest non-system turns until {@link #maxHistoryMessages} is honored.
+   */
   private void trimHistoryToCap() {
     while (this.history.size() > this.maxHistoryMessages) {
       int dropAt = 0;
@@ -654,12 +741,19 @@ public final class ChatSession {
     }
   }
 
+  /**
+   * Ends the CLI think/answer lines for this turn when a print sink is installed.
+   */
   private void closePrintTurn() {
     if (this.printSink != null) {
       this.printSink.closeTurn();
     }
   }
 
+  /**
+   * {@code true} when thinking is non-blank and the answer is empty or a short stub vs a long
+   * scratchpad (model closed the tag but put the real reply in notes).
+   */
   private boolean shouldSalvageAnswer(final String answer, final String thinking) {
     if (thinking.isBlank()) {
       return false;
@@ -670,11 +764,18 @@ public final class ChatSession {
     return answer.length() <= 12 && thinking.length() >= 120;
   }
 
+  /**
+   * Per-turn stream state: last shown raw / think / answer so listener events are deltas (or
+   * snapshots when the parse revises an earlier prefix).
+   */
   private static final class TurnStream {
     private String shownRaw = "";
     private String shownThink = "";
     private String shownAnswer = "";
 
+    /**
+     * Emits raw / thinking / answer deltas (or snapshots) for this prefix.
+     */
     void push(
       final LLM llm,
       final LlmListener listener,
@@ -692,6 +793,9 @@ public final class ChatSession {
       }
     }
 
+    /**
+     * Suffix delta when {@code current} extends {@code shown}; otherwise a full snapshot.
+     */
     private void emit(
       final LLM llm,
       final LlmListener listener,

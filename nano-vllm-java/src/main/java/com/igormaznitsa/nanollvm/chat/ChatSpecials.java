@@ -29,6 +29,9 @@ import java.util.List;
  */
 public record ChatSpecials(List<String> markers) {
 
+  /**
+   * ChatML, Gemma turn, Llama header/stop, and default {@link ThinkTags} strings, longest first.
+   */
   public static final ChatSpecials DEFAULT = new ChatSpecials(List.of(
     "<|im_end|>",
     "<|im_start|>",
@@ -52,6 +55,12 @@ public record ChatSpecials(List<String> markers) {
     ThinkTags.DEFAULT.close()
   ));
 
+  /**
+   * Canonical constructor: strips, rejects blank markers, de-duplicates, sorts longest first.
+   *
+   * @throws NullPointerException     if {@code markers} or an element is {@code null}
+   * @throws IllegalArgumentException if a marker is blank after strip
+   */
   public ChatSpecials {
     requireNonNull(markers, "markers");
     markers = List.copyOf(longestFirst(markers.stream()
@@ -63,6 +72,8 @@ public record ChatSpecials(List<String> markers) {
   /**
    * Distinct non-blank search strings (sorted longest first at construction).
    *
+   * @param markers markers to search; must not be {@code null} (may be empty)
+   * @return validated specials
    * @since 1.1.0
    */
   public static ChatSpecials of(final String... markers) {
@@ -72,12 +83,17 @@ public record ChatSpecials(List<String> markers) {
   /**
    * Distinct non-blank search strings (sorted longest first at construction).
    *
+   * @param markers markers to search; must not be {@code null}
+   * @return validated specials
    * @since 1.1.0
    */
   public static ChatSpecials of(final List<String> markers) {
     return new ChatSpecials(requireNonNull(markers, "markers"));
   }
 
+  /**
+   * Strips {@code marker}; rejects {@code null} and blank after strip.
+   */
   private static String requireNonBlankMarker(final String marker) {
     String stripped = requireNonNull(marker, "marker").strip();
     if (stripped.isEmpty()) {
@@ -86,12 +102,21 @@ public record ChatSpecials(List<String> markers) {
     return stripped;
   }
 
+  /** Stable sort: longer strings first, then lexicographic. */
   private static List<String> longestFirst(final List<String> markers) {
     return markers.stream()
       .sorted(comparingInt(String::length).reversed().thenComparing(naturalOrder()))
       .toList();
   }
 
+  /**
+   * Markers to search in a decode, including {@code tags} when they are not already in this list
+   * (longest first). Used when splitting a generate so think tags are stripped even if this list
+   * omitted them.
+   *
+   * @param tags scratchpad pair merged into {@link #markers()} when absent
+   * @return unmodifiable list, longest first
+   */
   List<String> searchMarkers(final ThinkTags tags) {
     requireNonNull(tags, "tags");
     if (this.markers.contains(tags.open()) && this.markers.contains(tags.close())) {

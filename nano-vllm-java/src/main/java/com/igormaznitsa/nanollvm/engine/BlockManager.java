@@ -12,6 +12,26 @@ import java.util.Map;
 import java.util.Set;
 import java.util.zip.CRC32;
 
+/**
+ * Paged KV allocator with prefix-cache reuse for one {@link Scheduler}.
+ *
+ * <p>The pool has a fixed number of pages ({@code numBlocks × blockSize} token slots). Each
+ * {@link Sequence} holds a {@linkplain Sequence#blockTable() block table} of physical page ids.
+ * Full pages are hashed ({@link #computeHash}) so a later prompt that shares a prefix can share
+ * those pages (refcount++) instead of allocating new ones.
+ *
+ * <p>{@link #canAllocate} is the admission probe (how many leading pages hit cache, or {@code -1}
+ * if the free list cannot cover the miss). {@link #allocate} attaches cached pages and new pages.
+ * {@link #hashBlocks} publishes hashes after a step fills complete pages.
+ * {@link #canAppend} / {@link #mayAppend} grow the table by one page when the current last token
+ * is the first slot of a new page ({@code length % blockSize == 1}).
+ *
+ * <p><strong>Thread safety:</strong> not concurrent-safe; one manager per scheduler, generate
+ * thread only.
+ *
+ * @see Sequence
+ * @see KvCacheArena
+ */
 public final class BlockManager {
 
   private static final long HASH_POLY = 0xC96C5795D7870F42L;
@@ -22,6 +42,13 @@ public final class BlockManager {
   private final Deque<Integer> freeBlockIds;
   private final Set<Integer> usedBlockIds;
 
+  /**
+   * Builds a pool of {@code numBlocks} empty pages.
+   *
+   * @param numBlocks page count ({@code >= 1})
+   * @param blockSize tokens per page (must match {@link Sequence#blockSize()})
+   * @throws IllegalArgumentException if {@code numBlocks < 1}
+   */
   public BlockManager(final int numBlocks, final int blockSize) {
     if (numBlocks < 1) {
       throw new IllegalArgumentException("numBlocks must be >= 1");
@@ -37,6 +64,16 @@ public final class BlockManager {
     }
   }
 
+  /**
+   * Content hash of a full page, chained from the previous page's hash.
+   *
+   * <p>{@code prefix == -1} means this is the first page of a sequence. The mix is FNV-1a over
+   * little-endian token bytes, XOR a CRC32 of {@code (prefix, tokens)}.
+   *
+   * @param tokenIds page contents
+   * @param prefix   previous page hash, or {@code -1} for the first page
+   * @return page hash used as the prefix-cache map key
+   */
   public static long computeHash(final List<Integer> tokenIds, final long prefix) {
     long h = 0xCBF29CE484222325L;
     if (prefix != -1L) {
@@ -63,6 +100,12 @@ public final class BlockManager {
     return h ^ (crc.getValue() * HASH_POLY);
   }
 
+  /**
+   * Takes one unused page, resets its hash/tokens, and marks it used with refcount 1.
+   *
+   * @return physical block id
+   * @throws IllegalStateException if the free list is empty
+   */
   private int allocateBlock() {
     Integer blockId = this.freeBlockIds.pollFirst();
     if (blockId == null) {
@@ -80,6 +123,9 @@ public final class BlockManager {
     return blockId;
   }
 
+  /**
+   * Returns {@code blockId} to the free list. Caller must have dropped the last ref.
+   */
   private void deallocateBlock(final int blockId) {
     if (this.blocks.get(blockId).refCount() != 0) {
       throw new IllegalStateException("cannot free block with refs");
@@ -88,6 +134,16 @@ public final class BlockManager {
     this.freeBlockIds.addLast(blockId);
   }
 
+  /**
+   * Prefix-cache probe: how many leading <em>full</em> pages of {@code seq} already live in the
+   * pool (hash + token equality), and whether the free list can cover the rest.
+   *
+   * <p>The last (possibly partial) page is never treated as a cache hit. Sharing a cached page
+   * that is already in {@code usedBlockIds} does not consume an extra free page (refcount bump).
+   *
+   * @param seq sequence whose prompt pages are probed
+   * @return cached full-page count, or {@code -1} if allocation cannot succeed
+   */
   public int canAllocate(final Sequence seq) {
     long h = -1L;
     int numCachedBlocks = 0;
@@ -110,6 +166,15 @@ public final class BlockManager {
     return numCachedBlocks;
   }
 
+  /**
+   * Fills {@code seq}'s empty block table: {@code numCachedBlocks} shared pages (refcount++), then
+   * new pages for the remainder. Sets {@link Sequence#numCachedTokens()} to the cached prefix
+   * length ({@code numCachedBlocks * blockSize}).
+   *
+   * @param seq             sequence with an empty block table
+   * @param numCachedBlocks value previously returned by {@link #canAllocate}
+   * @throws IllegalStateException if the table is already non-empty or the pool is exhausted
+   */
   public void allocate(final Sequence seq, final int numCachedBlocks) {
     if (!seq.blockTable().isEmpty()) {
       throw new IllegalStateException("sequence already has block table");
@@ -135,6 +200,12 @@ public final class BlockManager {
     seq.setNumCachedTokens(numCachedBlocks * this.blockSize);
   }
 
+  /**
+   * Drops this sequence's refs on its pages (freeing a page at refcount 0), clears the block
+   * table, and zeros {@link Sequence#numCachedTokens()}.
+   *
+   * @param seq sequence to release
+   */
   public void deallocate(final Sequence seq) {
     List<Integer> table = seq.blockTable();
     for (int i = table.size() - 1; i >= 0; i--) {
@@ -149,16 +220,35 @@ public final class BlockManager {
     table.clear();
   }
 
+  /**
+   * {@code true} if a decode append can proceed without allocating, or the free list has a page
+   * when {@code seq.length() % blockSize == 1} (last token is the first slot of a new page).
+   *
+   * @param seq running sequence
+   * @return whether {@link #mayAppend} will succeed
+   */
   public boolean canAppend(final Sequence seq) {
     return this.freeBlockIds.size() >= (seq.length() % this.blockSize == 1 ? 1 : 0);
   }
 
+  /**
+   * Allocates one new page onto {@code seq}'s table when the last token starts a new page.
+   *
+   * @param seq running sequence about to write one decode slot
+   * @throws IllegalStateException if a page is required and the pool is empty
+   */
   public void mayAppend(final Sequence seq) {
     if (seq.length() % this.blockSize == 1) {
       seq.blockTable().add(this.allocateBlock());
     }
   }
 
+  /**
+   * Hashes complete pages in {@code [numCachedTokens, numCachedTokens + numScheduledTokens)} so
+   * later sequences can prefix-cache them. Partial last pages are left unhashed.
+   *
+   * @param seq sequence whose just-scheduled window should be published
+   */
   public void hashBlocks(final Sequence seq) {
     int start = seq.numCachedTokens() / this.blockSize;
     int end = (seq.numCachedTokens() + seq.numScheduledTokens()) / this.blockSize;
@@ -175,24 +265,34 @@ public final class BlockManager {
     }
   }
 
+  /**
+   * One physical KV page: refcount, content hash ({@code -1} if unhashed), and a snapshot of the
+   * tokens that produced that hash. Mutation is package-private to {@link BlockManager}.
+   */
   public static final class Block {
     private final int blockId;
     private int refCount;
     private long hash;
     private List<Integer> tokenIds;
 
-    Block(int blockId) {
+    Block(final int blockId) {
       this.blockId = blockId;
       this.refCount = 0;
       this.hash = -1L;
       this.tokenIds = List.of();
     }
 
+    /**
+     * Records a full-page hash and an immutable token snapshot for prefix matching.
+     */
     void update(final long hash, final List<Integer> tokenIds) {
       this.hash = hash;
       this.tokenIds = List.copyOf(tokenIds);
     }
 
+    /**
+     * Fresh allocation: refcount 1, no hash, empty token snapshot.
+     */
     void reset() {
       this.refCount = 1;
       this.hash = -1L;

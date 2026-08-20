@@ -13,7 +13,15 @@ import com.igormaznitsa.nanollvm.tensor.kernels.PackedLinearKernel;
 
 /**
  * Immutable affine transform {@code y = x Wᵀ + b}. A {@link LinearKernel} is bound at construction
- * (dense F32, or packed with a GGML-type-fixed dequant).
+ * (dense F32, packed GGUF with a GGML-type-fixed dequant, or Gemma QAT).
+ *
+ * <p>Weight layout is {@code [out, in]} (Hugging Face / this port). The last axis of {@code x} must
+ * be {@code in}; leading axes are treated as rows. Nested types keep vLLM names
+ * ({@link Column} / {@link Row} / {@link Merged} / {@link Qkv}) so architecture graphs can tell
+ * fused projections from output projections; this port is single-device (no tensor parallel).
+ *
+ * <p>Gemma QAT layers may apply {@link GemmaQat#applySrq(float, float) SRQ} to activations before
+ * and after the matmul when the checkpoint stores non-zero scales.
  */
 public class Linear {
 
@@ -24,10 +32,23 @@ public class Linear {
   private final float inputActivationScale;
   private final float outputActivationScale;
 
+  /**
+   * Dense float32 weight {@code [out, in]} with optional bias of length {@code out}.
+   *
+   * @param weight matrix {@code [out, in]}
+   * @param bias   length {@code out}, or {@code null}
+   */
   public Linear(final Tensor weight, final Tensor bias) {
     this(LinearKernel.of(requireNonNull(weight, "weight")), bias, 0f, 0f, weight, null);
   }
 
+  /**
+   * Packed GGUF weight. Float32 packs are materialized and the packed bytes released; other GGML
+   * types stay packed and dequant on each forward.
+   *
+   * @param weight packed matrix {@code [out, in]}
+   * @param bias   length {@code out}, or {@code null}
+   */
   public Linear(final PackedWeight weight, final Tensor bias) {
     this(denseOrPacked(requireNonNull(weight, "weight"), bias));
   }
@@ -47,10 +68,21 @@ public class Linear {
     return new Linear(LinearKernel.of(weight), bias, 0f, 0f, null, weight);
   }
 
+  /**
+   * Packed GGUF weight with no bias.
+   *
+   * @param weight packed matrix {@code [out, in]}
+   */
   public Linear(final PackedWeight weight) {
     this(weight, null);
   }
 
+  /**
+   * Gemma QAT packed weight (int2/4/8 + scales). Bias is unused; SRQ scales come from the weight.
+   *
+   * @param weight QAT matrix
+   * @since 1.1.0
+   */
   public Linear(final GemmaQatWeight weight) {
     this(
       PackedLinearKernel.of(
@@ -65,6 +97,12 @@ public class Linear {
       null);
   }
 
+  /**
+   * Already-bound kernel (tests and custom graphs). No dense/packed table is stored.
+   *
+   * @param kernel affine kernel
+   * @param bias   length {@code outFeatures()}, or {@code null}
+   */
   public Linear(final LinearKernel kernel, final Tensor bias) {
     this(kernel, bias, 0f, 0f, null, null);
   }
@@ -85,6 +123,12 @@ public class Linear {
     this.packedWeight = packedWeight;
   }
 
+  /**
+   * Dense float32 table. Packed layers materialize a copy (expensive); QAT-only kernels have none.
+   *
+   * @return weight {@code [out, in]}
+   * @throws IllegalStateException if this layer has no dense or packed table
+   */
   public Tensor weight() {
     if (this.weight != null) {
       return this.weight;
@@ -95,22 +139,52 @@ public class Linear {
     throw new IllegalStateException("linear has no dense weight table");
   }
 
+  /**
+   * Packed GGUF payload, or {@code null} for dense / QAT-kernel layers.
+   *
+   * @return packed weight, or {@code null}
+   */
   public PackedWeight packedWeight() {
     return this.packedWeight;
   }
 
+  /**
+   * {@code true} when this layer still holds a GGUF packed payload (not yet a dense table).
+   *
+   * @return whether {@link #packedWeight()} is non-null
+   */
   public boolean isPacked() {
     return this.packedWeight != null;
   }
 
+  /**
+   * Kernel bound at construction (dense, packed, or QAT).
+   *
+   * @return affine kernel
+   */
   public LinearKernel kernel() {
     return this.kernel;
   }
 
+  /**
+   * Additive bias of length {@code out}, or {@code null}.
+   *
+   * @return bias tensor, or {@code null}
+   */
   public Tensor bias() {
     return this.bias;
   }
 
+  /**
+   * {@code y = x Wᵀ (+ b)} along the last axis of {@code x}. Uses {@code context}'s
+   * {@link MatmulRuntime}, or {@link MatmulRuntime#sequential()} when unbound / {@code null}.
+   *
+   * @param x       activations; last dim must equal {@code in}
+   * @param context step context (matmul pool); {@code null} is sequential
+   * @return tensor with last dim {@code out}, other axes preserved
+   * @throws NullPointerException     if {@code x} is {@code null}
+   * @throws IllegalArgumentException if {@code x} width is not a multiple of {@code in}
+   */
   public Tensor forward(final Tensor x, final Context context) {
     requireNonNull(x, "x");
     MatmulRuntime matmul = context != null && context.matmul() != null
@@ -154,6 +228,9 @@ public class Linear {
     return y.reshape(newShape);
   }
 
+  /**
+   * Gemma QAT SRQ: round {@code value / scale} to int8 then rescale. No-op when {@code scale == 0}.
+   */
   private Tensor scaleActivations(final Tensor values, final float scale) {
     Tensor out = Tensor.zeros(values.shape());
     float[] source = values.data();
@@ -166,33 +243,83 @@ public class Linear {
     return out;
   }
 
+  /**
+   * Column-style projection (output dim is the packed axis): Q/K/V, gate+up, and similar
+   * expansions. Marker type for architecture graphs; math matches {@link Linear}.
+   */
   public static class Column extends Linear {
+
+    /**
+     * Dense float32 column projection.
+     *
+     * @param weight matrix {@code [out, in]}
+     * @param bias   length {@code out}, or {@code null}
+     */
     public Column(final Tensor weight, final Tensor bias) {
       super(weight, bias);
     }
 
+    /**
+     * Packed GGUF column projection.
+     *
+     * @param weight packed matrix {@code [out, in]}
+     * @param bias   length {@code out}, or {@code null}
+     */
     public Column(final PackedWeight weight, final Tensor bias) {
       super(weight, bias);
     }
   }
 
+  /**
+   * Row-style projection (input dim is the packed axis): {@code o_proj}, {@code down_proj},
+   * and similar reductions. Marker type for architecture graphs; math matches {@link Linear}.
+   */
   public static final class Row extends Linear {
+
+    /**
+     * Dense float32 row projection with no bias.
+     *
+     * @param weight matrix {@code [out, in]}
+     */
     public Row(final Tensor weight) {
       super(weight, null);
     }
 
+    /**
+     * Dense float32 row projection.
+     *
+     * @param weight matrix {@code [out, in]}
+     * @param bias   length {@code out}, or {@code null}
+     */
     public Row(final Tensor weight, final Tensor bias) {
       super(weight, bias);
     }
 
+    /**
+     * Packed GGUF row projection with no bias.
+     *
+     * @param weight packed matrix {@code [out, in]}
+     */
     public Row(final PackedWeight weight) {
       super(weight, null);
     }
 
+    /**
+     * Packed GGUF row projection.
+     *
+     * @param weight packed matrix {@code [out, in]}
+     * @param bias   length {@code out}, or {@code null}
+     */
     public Row(final PackedWeight weight, final Tensor bias) {
       super(weight, bias);
     }
 
+    /**
+     * Gemma QAT row projection.
+     *
+     * @param weight QAT matrix
+     * @since 1.1.0
+     */
     public Row(final GemmaQatWeight weight) {
       super(weight);
     }
@@ -200,12 +327,24 @@ public class Linear {
 
   /**
    * Packed gate+up projection; {@code weight} shape {@code [2*intermediate, hidden]}.
+   * The MLP splits the last dim into gate and up halves after {@link Linear#forward}.
    */
   public static final class Merged extends Column {
+
+    /**
+     * Dense fused gate+up.
+     *
+     * @param weight matrix {@code [2*intermediate, hidden]}
+     */
     public Merged(final Tensor weight) {
       super(weight, null);
     }
 
+    /**
+     * Packed fused gate+up.
+     *
+     * @param weight packed matrix {@code [2*intermediate, hidden]}
+     */
     public Merged(final PackedWeight weight) {
       super(weight, null);
     }
@@ -213,16 +352,34 @@ public class Linear {
 
   /**
    * Packed Q/K/V projection; {@code weight} shape {@code [(nH+2nKV)*d, hidden]}.
+   * The attention block splits the last dim into Q, K, and V after {@link Linear#forward}.
    */
   public static final class Qkv extends Column {
+
+    /**
+     * Dense fused QKV with optional bias.
+     *
+     * @param weight matrix {@code [(nH+2nKV)*d, hidden]}
+     * @param bias   length {@code out}, or {@code null}
+     */
     public Qkv(final Tensor weight, final Tensor bias) {
       super(weight, bias);
     }
 
+    /**
+     * Dense fused QKV with no bias.
+     *
+     * @param weight matrix {@code [(nH+2nKV)*d, hidden]}
+     */
     public Qkv(final Tensor weight) {
       this(weight, null);
     }
 
+    /**
+     * Packed fused QKV with no bias.
+     *
+     * @param weight packed matrix {@code [(nH+2nKV)*d, hidden]}
+     */
     public Qkv(final PackedWeight weight) {
       super(weight, null);
     }

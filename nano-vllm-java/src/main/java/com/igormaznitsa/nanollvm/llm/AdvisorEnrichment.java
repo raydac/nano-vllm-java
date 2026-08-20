@@ -33,9 +33,12 @@ public record AdvisorEnrichment(
   }
 
   /**
-   * No advisors ran: {@code modelUserText} unchanged, empty responses and salvage notes.
+   * No advisors ran (or none were configured): {@code modelUserText} is returned unchanged, with
+   * empty {@link #responses()} and {@link #salvageNotes()}. Chat / RAG use this as a cheap skip.
    *
    * @param modelUserText prepared user string; must not be {@code null}
+   * @return enrichment that leaves the turn prompt as-is
+   * @throws NullPointerException if {@code modelUserText} is {@code null}
    */
   public static AdvisorEnrichment passthrough(final String modelUserText) {
     return new AdvisorEnrichment(
@@ -43,7 +46,10 @@ public record AdvisorEnrichment(
   }
 
   /**
-   * {@code true} when at least one advisor wrote a non-blank note.
+   * {@code true} when at least one {@link #responses()} entry has a non-blank {@link AdvisorResponse#text()}.
+   * Empty or whitespace-only notes do not count — mix / salvage may still be empty.
+   *
+   * @return whether any advisor wrote usable text
    */
   public boolean hasAdvisorNotes() {
     return this.responses.stream()

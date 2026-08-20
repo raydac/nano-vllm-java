@@ -211,7 +211,9 @@ public final class LLM implements AutoCloseable {
   }
 
   /**
-   * Starts a fluent configurator for a shared immutable {@link LlmModel}.
+   * Starts a fluent configurator for a shared immutable {@link LlmModel}. This engine does not
+   * close the model — close {@link LLM} first, then the model. Embedding checkpoints are rejected
+   * at {@link Builder#build()}; use {@link LlmModel#embed} instead.
    *
    * @param model loaded model to bind; not closed by this {@code LLM}; must be non-{@code null}
    * @return a new builder; call {@link Builder#build()} to construct the engine
@@ -222,7 +224,8 @@ public final class LLM implements AutoCloseable {
   }
 
   /**
-   * The immutable loaded model bound to this engine (safe to share with other {@code LLM}s).
+   * The immutable loaded model bound to this engine. Safe to share with other {@code LLM}s; this
+   * instance does not own it. Closing this engine does not unload weights.
    *
    * @return the model passed to the builder; never {@code null}
    */
@@ -335,7 +338,12 @@ public final class LLM implements AutoCloseable {
   }
 
   /**
-   * Generates completions for one or more text prompts (no progress line, no timeout, no token callback).
+   * Completes each prompt string with shared sampling: no progress line, no timeout, no token
+   * stream. Use this when you only need finished text. Strings are <em>not</em> wrapped in a chat
+   * template — for dialog use {@link #chat()} / {@link #chatOnce(String)}.
+   *
+   * <p>Exclusive on this instance (see class-level thread-safety). Empty {@code prompts} returns
+   * an empty list. {@code maxTokens} is clamped to remaining {@link Config#maxModelLen()}.
    *
    * @param prompts        one string per sequence; non-{@code null}; elements non-{@code null};
    *                       size limited by {@link Config#maxNumSeqs()}
@@ -343,8 +351,8 @@ public final class LLM implements AutoCloseable {
    * @return one {@link GenerationOutput} per prompt, in completion order by sequence id
    * @throws GenerationCancelledException if {@link #cancel()} fires during the run
    * @throws NullPointerException         if {@code prompts} or {@code samplingParams} is {@code null}
-   * @throws IllegalArgumentException     if a prompt element is not a {@link String} (internal path)
-   * @apiNote Exclusive with other generate/chat/RAG/complete on this instance.
+   * @throws IllegalStateException        if this engine is {@linkplain #isClosed() closed}
+   * @see #generate(List, SamplingParams, boolean, Duration, IntConsumer)
    */
   public List<GenerationOutput> generate(final List<String> prompts,
                                          final SamplingParams samplingParams) {
@@ -352,9 +360,16 @@ public final class LLM implements AutoCloseable {
   }
 
   /**
-   * Text-prompt generate with a wall-clock limit and no token callback.
+   * Same as {@link #generate(List, SamplingParams)} with a wall-clock limit. {@code null}, zero,
+   * or negative {@code timeout} means no limit. On expiry the batch throws
+   * {@link GenerationTimeoutException} and leftover KV pages are released.
    *
-   * @param timeout {@code null} / zero / negative = no limit
+   * @param prompts        one string per sequence; non-{@code null}
+   * @param samplingParams shared sampling; non-{@code null}
+   * @param timeout        max wall time for the whole batch; {@code null} / zero / negative = none
+   * @return one output per prompt
+   * @throws GenerationTimeoutException   if {@code timeout} elapses before the batch finishes
+   * @throws GenerationCancelledException if {@link #cancel()} fires
    * @since 1.1.0
    */
   public List<GenerationOutput> generate(
@@ -366,8 +381,15 @@ public final class LLM implements AutoCloseable {
   }
 
   /**
-   * Text-prompt generate with a per-token id callback and no timeout.
+   * Same as {@link #generate(List, SamplingParams)} with a per-token <em>id</em> callback and no
+   * timeout. {@code onToken} sees every new token across the batch but not which prompt it belongs
+   * to — use {@link #generate(List, SamplingParams, Consumer)} for {@link TokenEvent#seqId()}.
+   * Must not call generate / chat / {@link #runAdvisors} from the callback (deadlock).
    *
+   * @param prompts        one string per sequence; non-{@code null}
+   * @param samplingParams shared sampling; non-{@code null}
+   * @param onToken        invoked for each newly decoded token id ({@code null} = no stream)
+   * @return one output per prompt
    * @since 1.1.0
    */
   public List<GenerationOutput> generate(
@@ -379,8 +401,14 @@ public final class LLM implements AutoCloseable {
   }
 
   /**
-   * Text-prompt generate with a seq-aware token callback and no timeout.
+   * Same as {@link #generate(List, SamplingParams)} with a seq-aware token callback and no timeout.
+   * {@link TokenEvent#seqId()} matches the prompt index in {@code prompts}. Must not re-enter
+   * generate from the callback.
    *
+   * @param prompts        one string per sequence; non-{@code null}
+   * @param samplingParams shared sampling; non-{@code null}
+   * @param onToken        per-token events ({@code null} = no stream)
+   * @return one output per prompt
    * @since 1.1.0
    */
   public List<GenerationOutput> generate(
@@ -394,8 +422,15 @@ public final class LLM implements AutoCloseable {
   }
 
   /**
-   * Text-prompt generate with a wall-clock limit and a seq-aware token callback.
+   * Text-prompt generate with a wall-clock limit and a seq-aware token callback. Combines
+   * {@link #generate(List, SamplingParams, Duration)} and
+   * {@link #generate(List, SamplingParams, Consumer)}.
    *
+   * @param prompts        one string per sequence; non-{@code null}
+   * @param samplingParams shared sampling; non-{@code null}
+   * @param timeout        max wall time; {@code null} / zero / negative = none
+   * @param onToken        per-token events ({@code null} = no stream); must not re-enter generate
+   * @return one output per prompt
    * @since 1.1.0
    */
   public List<GenerationOutput> generate(
@@ -410,7 +445,9 @@ public final class LLM implements AutoCloseable {
   }
 
   /**
-   * Generates completions for text prompts, optionally printing batch progress.
+   * Completes each prompt string with shared sampling and an optional in-place progress line.
+   * Progress is emitted only when {@code useTqdm} is true <em>and</em> {@link #listener()} is not
+   * silent — the library-default silent listener prints nothing.
    *
    * @param prompts        one string per sequence; non-{@code null}
    * @param samplingParams shared sampling; non-{@code null}
@@ -427,8 +464,14 @@ public final class LLM implements AutoCloseable {
   }
 
   /**
-   * Text-prompt generate with per-prompt sampling (no progress, no timeout, no callback).
+   * Completes each prompt with <em>its own</em> {@link SamplingParams} (temperature / max tokens
+   * may differ). List sizes must match. No progress, timeout, or token stream — see the five-arg
+   * overload for those knobs.
    *
+   * @param prompts        one string per sequence; non-{@code null}
+   * @param samplingParams one params object per prompt; sizes must match; non-{@code null}
+   * @return one output per prompt
+   * @throws IllegalArgumentException if list sizes differ
    * @since 1.1.0
    */
   public List<GenerationOutput> generate(
@@ -518,7 +561,10 @@ public final class LLM implements AutoCloseable {
   }
 
   /**
-   * Generates completions for pre-tokenized prompts (no progress, no timeout, no callback).
+   * Completes pre-tokenized prompts with shared sampling: no progress, timeout, or stream.
+   * Each inner list is vocabulary ids from {@link #tokenizer()} (or an equivalent encode).
+   * Prefer this when the caller already tokenized; {@link #generate(List, SamplingParams)}
+   * encodes strings for you.
    *
    * @param prompts        one token-id list per sequence; non-{@code null}; each list non-{@code null}
    * @param samplingParams shared sampling; non-{@code null}
@@ -532,8 +578,14 @@ public final class LLM implements AutoCloseable {
   }
 
   /**
-   * Token-id generate with a wall-clock limit and no token callback.
+   * Same as {@link #generateTokenIds(List, SamplingParams)} with a wall-clock limit.
+   * {@code null} / zero / negative {@code timeout} means no limit.
    *
+   * @param prompts        one token-id list per sequence; non-{@code null}
+   * @param samplingParams shared sampling; non-{@code null}
+   * @param timeout        max wall time; {@code null} / zero / negative = none
+   * @return one output per prompt
+   * @throws GenerationTimeoutException if {@code timeout} elapses
    * @since 1.1.0
    */
   public List<GenerationOutput> generateTokenIds(
@@ -545,8 +597,14 @@ public final class LLM implements AutoCloseable {
   }
 
   /**
-   * Token-id generate with a per-token id callback and no timeout.
+   * Same as {@link #generateTokenIds(List, SamplingParams)} with a per-token id callback and no
+   * timeout. The callback does not include {@code seqId} — use
+   * {@link #generateTokenIds(List, SamplingParams, Consumer)} for seq-aware events.
    *
+   * @param prompts        one token-id list per sequence; non-{@code null}
+   * @param samplingParams shared sampling; non-{@code null}
+   * @param onToken        per-token ids ({@code null} = no stream); must not re-enter generate
+   * @return one output per prompt
    * @since 1.1.0
    */
   public List<GenerationOutput> generateTokenIds(
@@ -558,8 +616,13 @@ public final class LLM implements AutoCloseable {
   }
 
   /**
-   * Token-id generate with a seq-aware token callback and no timeout.
+   * Same as {@link #generateTokenIds(List, SamplingParams)} with a seq-aware token callback and no
+   * timeout. {@link TokenEvent#seqId()} matches the prompt index.
    *
+   * @param prompts        one token-id list per sequence; non-{@code null}
+   * @param samplingParams shared sampling; non-{@code null}
+   * @param onToken        per-token events ({@code null} = no stream)
+   * @return one output per prompt
    * @since 1.1.0
    */
   public List<GenerationOutput> generateTokenIds(
@@ -575,6 +638,11 @@ public final class LLM implements AutoCloseable {
   /**
    * Token-id generate with a wall-clock limit and a seq-aware token callback.
    *
+   * @param prompts        one token-id list per sequence; non-{@code null}
+   * @param samplingParams shared sampling; non-{@code null}
+   * @param timeout        max wall time; {@code null} / zero / negative = none
+   * @param onToken        per-token events ({@code null} = no stream); must not re-enter generate
+   * @return one output per prompt
    * @since 1.1.0
    */
   public List<GenerationOutput> generateTokenIds(
@@ -589,8 +657,13 @@ public final class LLM implements AutoCloseable {
   }
 
   /**
-   * Token-id generate with per-prompt sampling (no progress, no timeout, no callback).
+   * Completes pre-tokenized prompts with per-prompt sampling (no progress, timeout, or stream).
+   * List sizes must match.
    *
+   * @param prompts        one token-id list per sequence; non-{@code null}
+   * @param samplingParams one params object per prompt; sizes must match
+   * @return one output per prompt
+   * @throws IllegalArgumentException if list sizes differ
    * @since 1.1.0
    */
   public List<GenerationOutput> generateTokenIds(
@@ -911,9 +984,11 @@ public final class LLM implements AutoCloseable {
 
   /**
    * Engine sampling policy from {@link Builder#sampling(SamplingParams)}, or
-   * {@link SamplingDefaults#neutral()} when unset.
+   * {@link SamplingDefaults#neutral()} when unset. Chat / complete / RAG helpers use this unless
+   * the call overrides max tokens or passes its own {@link SamplingParams}.
    *
    * @return a new immutable {@link SamplingParams}; never {@code null}
+   * @throws IllegalStateException if this engine is closed
    */
   public SamplingParams defaultSampling() {
     this.assertNotClosed();
@@ -921,11 +996,13 @@ public final class LLM implements AutoCloseable {
   }
 
   /**
-   * Engine sampling with a custom max new-token budget (other knobs unchanged).
+   * {@link #defaultSampling()} with a custom max new-token budget; temperature, top-k, and top-p
+   * stay unchanged. Chat / complete / RAG max-token shortcuts use this.
    *
    * @param maxTokens maximum newly generated tokens per sequence; must be {@code >= 1}
    * @return a new immutable {@link SamplingParams}
    * @throws IllegalArgumentException if {@code maxTokens < 1}
+   * @throws IllegalStateException    if this engine is closed
    */
   public SamplingParams defaultSampling(final int maxTokens) {
     this.assertNotClosed();
@@ -934,9 +1011,12 @@ public final class LLM implements AutoCloseable {
 
   /**
    * Opens a multi-turn {@link ChatSession} using {@link #defaultSampling()} and this instance's
-   * {@link #systemPrompt()}.
+   * {@link #systemPrompt()}. The session applies the tokenizer chat template, keeps history, and
+   * parses thinking/answer. Not thread-safe; sends use this engine exclusively. Prefer this over
+   * raw {@link #generate} for dialog.
    *
    * @return a new session; not thread-safe; uses this {@code LLM} exclusively while sending
+   * @throws IllegalStateException if this engine is closed
    */
   public ChatSession chat() {
     this.assertNotClosed();
@@ -944,11 +1024,13 @@ public final class LLM implements AutoCloseable {
   }
 
   /**
-   * Opens a multi-turn session with explicit sampling.
+   * Opens a multi-turn session with explicit sampling for each {@link ChatSession#send}. Other
+   * session behavior matches {@link #chat()}.
    *
    * @param samplingParams sampling for each {@link ChatSession#send}; non-{@code null}
    * @return a new session bound to this engine
-   * @throws NullPointerException if {@code samplingParams} is {@code null}
+   * @throws NullPointerException  if {@code samplingParams} is {@code null}
+   * @throws IllegalStateException if this engine is closed
    */
   public ChatSession chat(final SamplingParams samplingParams) {
     this.assertNotClosed();
@@ -957,11 +1039,12 @@ public final class LLM implements AutoCloseable {
 
   /**
    * Opens a multi-turn session with engine sampling limited to {@code maxTokens}
-   * ({@link #defaultSampling(int)}).
+   * ({@link #defaultSampling(int)}). Temperature / top-k / top-p stay at {@link #defaultSampling()}.
    *
    * @param maxTokens max new tokens per turn; must be {@code >= 1}
    * @return a new session
    * @throws IllegalArgumentException if {@code maxTokens < 1}
+   * @throws IllegalStateException    if this engine is closed
    */
   public ChatSession chat(final int maxTokens) {
     this.assertNotClosed();
@@ -969,14 +1052,15 @@ public final class LLM implements AutoCloseable {
   }
 
   /**
-   * Opens a retrieval-augmented session over {@code index}
-   * (typically a {@link PreparedRag} from {@link RagFactory}).
-   * Chunk size is chosen at index load via {@link com.igormaznitsa.nanollvm.rag.RagLoadOptions},
-   * not on this session.
+   * Opens a retrieval-augmented session over {@code index} (typically a {@link PreparedRag} from
+   * {@link RagFactory}). Each user turn retrieves passages, then chat-generates. Chunk size is
+   * chosen at index load via {@link com.igormaznitsa.nanollvm.rag.RagLoadOptions}, not here.
+   * Grounded turns may clamp sampling temperature; thinking is off by default on the session.
    *
    * @param index corpus index; non-{@code null}; may be shared across sessions/engines
    * @return a new {@link RagSession} using {@link #defaultSampling()}
-   * @throws NullPointerException if {@code index} is {@code null}
+   * @throws NullPointerException  if {@code index} is {@code null}
+   * @throws IllegalStateException if this engine is closed
    * @apiNote Session turns call {@link #generate}; exclusive on this {@code LLM} while active.
    * @see com.igormaznitsa.nanollvm.rag.RagLoadOptions#withMaxChunkChars(int)
    */
@@ -986,13 +1070,15 @@ public final class LLM implements AutoCloseable {
   }
 
   /**
-   * Opens a RAG session with model-aware sampling limited to {@code maxTokens}.
+   * Opens a RAG session like {@link #rag(RagIndex)} with model-aware sampling limited to
+   * {@code maxTokens} (other knobs from {@link #defaultSampling()}).
    *
    * @param index     corpus index; non-{@code null}
    * @param maxTokens max new tokens per answer turn; must be {@code >= 1}
    * @return a new session
    * @throws NullPointerException     if {@code index} is {@code null}
    * @throws IllegalArgumentException if {@code maxTokens < 1}
+   * @throws IllegalStateException    if this engine is closed
    */
   public RagSession rag(final RagIndex index, final int maxTokens) {
     this.assertNotClosed();
@@ -1000,20 +1086,27 @@ public final class LLM implements AutoCloseable {
   }
 
   /**
-   * Raw text completion (no chat template). Uses {@link #defaultSampling()}.
+   * Raw text continuation with {@link #defaultSampling()}. No chat template and no history —
+   * the model sees {@code prompt} as a prefix to complete. For instruct/chat models prefer
+   * {@link #chatOnce(String)}.
    *
    * @param prompt continuation seed as plain text; non-{@code null} (may be empty)
    * @return decoded completion text for the single prompt (not including the prompt itself)
    * @throws NullPointerException         if {@code prompt} is {@code null}
    * @throws GenerationCancelledException if {@link #cancel()} fires
+   * @throws IllegalStateException        if this engine is closed
    */
   public String complete(final String prompt) {
     return this.complete(prompt, this.defaultSampling());
   }
 
   /**
-   * Raw text completion with engine sampling limited to {@code maxTokens}.
+   * Raw text continuation like {@link #complete(String)} with engine sampling limited to
+   * {@code maxTokens}. Other knobs stay at {@link #defaultSampling()}.
    *
+   * @param prompt    continuation seed; non-{@code null}
+   * @param maxTokens new-token cap; must be {@code >= 1}
+   * @return decoded completion (prompt not echoed)
    * @since 1.1.0
    */
   public String complete(final String prompt, final int maxTokens) {
@@ -1050,8 +1143,12 @@ public final class LLM implements AutoCloseable {
   }
 
   /**
-   * Single-turn chat with engine sampling limited to {@code maxTokens}. History is not retained.
+   * Single-turn chat with engine sampling limited to {@code maxTokens}. History is not retained;
+   * thinking/answer parsing matches {@link #chatOnce(String)}.
    *
+   * @param userMessage user turn text; non-{@code null}
+   * @param maxTokens   new-token cap; must be {@code >= 1}
+   * @return visible answer only
    * @since 1.1.0
    */
   public String chatOnce(final String userMessage, final int maxTokens) {
@@ -1074,9 +1171,10 @@ public final class LLM implements AutoCloseable {
   }
 
   /**
-   * Tokenizer bound to {@link #model()}.
+   * Tokenizer bound to {@link #model()}. Encode/decode and chat templates go through this instance.
+   * Treat it as immutable from the application; do not share mutations across engines.
    *
-   * @return shared tokenizer instance; never {@code null}; treat as immutable for callers
+   * @return shared tokenizer instance; never {@code null}
    */
   public Tokenizer tokenizer() {
     return this.tokenizer;
@@ -1085,7 +1183,9 @@ public final class LLM implements AutoCloseable {
   /**
    * Scratchpad markers from {@link LlmModel#thinkTags()} — the pair belongs to the checkpoint,
    * not this engine. Override per conversation with {@link ChatSession#thinkTags(ThinkTags)}.
+   * ChatML skip-seed only applies when both markers are whole vocab tokens.
    *
+   * @return model think-tag pair; never {@code null}
    * @since 1.1.0
    */
   public ThinkTags thinkTags() {
@@ -1094,8 +1194,9 @@ public final class LLM implements AutoCloseable {
 
   /**
    * Chat-markup search strings from {@link LlmModel#chatSpecials()} — the list belongs to the
-   * checkpoint, not this engine.
+   * checkpoint, not this engine. Used when stripping specials from visible answers.
    *
+   * @return model chat specials; never {@code null}
    * @since 1.1.0
    */
   public ChatSpecials chatSpecials() {
@@ -1113,9 +1214,11 @@ public final class LLM implements AutoCloseable {
   }
 
   /**
-   * Status / progress / text event sink used by load and optional generate progress.
+   * Status / progress / text event sink used by load messages and optional generate progress.
+   * Construction defaults to {@link LlmListeners#silent()}; CLI tools typically pass
+   * {@link LlmListeners#toSystem()} via {@link Builder#listen(LlmListener)}.
    *
-   * @return listener from the builder; never {@code null} ({@link LlmListeners#silent()} if unset)
+   * @return listener from the builder; never {@code null}
    */
   public LlmListener listener() {
     return this.listener;
@@ -1136,7 +1239,8 @@ public final class LLM implements AutoCloseable {
   }
 
   /**
-   * Advisors configured at build time.
+   * Advisors configured at build time. Empty when {@link Builder#noAdvisors()} or none were set.
+   * Chat / RAG run this list as one batched generate before the main reply.
    *
    * @return immutable list; empty when advisors are disabled; never {@code null}
    */
@@ -1145,7 +1249,8 @@ public final class LLM implements AutoCloseable {
   }
 
   /**
-   * Mixer used by {@link #runAdvisors} after advisor generates.
+   * Mixer used by {@link #runAdvisors} after advisor generates. Defaults to
+   * {@link LlmAdvisorMixer#defaults()} (insert notes into the facts block).
    *
    * @return configured mixer; never {@code null}
    */
@@ -1154,9 +1259,11 @@ public final class LLM implements AutoCloseable {
   }
 
   /**
-   * Keeps advisor notes that pass this predicate (default: non-blank). Demo policies may reject
-   * short setup acknowledgments.
+   * Keeps advisor notes that pass this predicate after decode (default: non-blank). Demo policies
+   * may reject short setup acknowledgments before mix / salvage. Set via
+   * {@link Builder#advisorNoteFilter(Predicate)}.
    *
+   * @return filter used on advisor answer text; never {@code null}
    * @since 1.1.0
    */
   public Predicate<String> advisorNoteFilter() {
@@ -1187,8 +1294,12 @@ public final class LLM implements AutoCloseable {
   }
 
   /**
-   * Runs advisors with no prior dialog (first turn / callers without history).
+   * Runs advisors with no prior dialog (first turn / callers without history). Same as
+   * {@link #runAdvisors(String, List, SamplingParams)} with an empty history list.
    *
+   * @param modelUserText  user text advisors see as the latest turn; non-{@code null}
+   * @param samplingParams sampling for advisor generates; non-{@code null}
+   * @return enrichment notes for mix / thinking; never {@code null}
    * @see #runAdvisors(String, List, SamplingParams)
    */
   public AdvisorEnrichment runAdvisors(final String modelUserText,
@@ -1198,8 +1309,11 @@ public final class LLM implements AutoCloseable {
 
   /**
    * Fresh dialog history: optional system turn from {@link #systemPrompt()}, nothing else.
+   * Blank system prompt means no system message. Suitable as the seed list for a new
+   * {@link ChatSession}; the session will append user/assistant turns itself.
    *
-   * @return a new mutable list suitable for a new {@link ChatSession}; never {@code null}
+   * @return a new mutable list; never {@code null}
+   * @throws IllegalStateException if this engine is closed
    */
   public List<ChatMessage> newConversation() {
     this.assertNotClosed();
@@ -1207,7 +1321,10 @@ public final class LLM implements AutoCloseable {
   }
 
   /**
-   * {@code true} after {@link #close()} has released per-engine resources.
+   * {@code true} after {@link #close()} has released per-engine resources. Further generate / chat
+   * / RAG calls throw {@link IllegalStateException}. The bound {@link #model()} may still be open.
+   *
+   * @return whether this engine was closed
    */
   public boolean isClosed() {
     return this.closed.get();
@@ -1332,7 +1449,9 @@ public final class LLM implements AutoCloseable {
     }
 
     /**
-     * Forces no system turn in {@link LLM#newConversation()} / chat helpers.
+     * Forces no system turn in {@link LLM#newConversation()} / chat helpers. Equivalent to
+     * {@link #systemPrompt(String) systemPrompt("")}. Use when the checkpoint template should not
+     * see a system message.
      *
      * @return {@code this}
      */
@@ -1341,7 +1460,8 @@ public final class LLM implements AutoCloseable {
     }
 
     /**
-     * Clears an override so the library empty default applies again.
+     * Clears a previous {@link #systemPrompt(String)} / {@link #noSystemPrompt()} override so the
+     * empty library default applies again (no system turn unless you set one).
      *
      * @return {@code this}
      */
@@ -1392,7 +1512,8 @@ public final class LLM implements AutoCloseable {
     }
 
     /**
-     * Clears advisor configuration so chat / RAG turns skip the advisor pass.
+     * Clears advisor configuration so chat / RAG turns skip the advisor pass (no extra batched
+     * generate). Mixer resets to {@link LlmAdvisorMixer#defaults()}.
      *
      * @return {@code this}
      */
@@ -1403,9 +1524,12 @@ public final class LLM implements AutoCloseable {
     }
 
     /**
-     * Predicate for keeping advisor note text after decode (default: non-blank).
-     * Applications may reject demo setup fillers before mix / salvage.
+     * Predicate for keeping advisor note text after decode (default: non-blank). Applications may
+     * reject demo setup fillers before mix / salvage. Does not change whether advisors run.
      *
+     * @param filter keep-test; must not be {@code null}
+     * @return {@code this}
+     * @throws NullPointerException if {@code filter} is {@code null}
      * @since 1.1.0
      */
     public Builder advisorNoteFilter(final Predicate<String> filter) {
@@ -1417,8 +1541,11 @@ public final class LLM implements AutoCloseable {
      * Seals default sampling for {@link LLM#chat()}, {@link LLM#chatOnce(String)},
      * {@link LLM#complete(String)}, {@link LLM#rag(RagIndex)}, and {@link LLM#defaultSampling()}.
      * Unset → {@link SamplingDefaults#neutral()}. {@link LLM#chat(int)} / max-token shortcuts
-     * override only {@code maxTokens}.
+     * override only {@code maxTokens}. See {@link SamplingParams} for temperature, top-k, and
+     * top-p (lower temperature → less random; greedy {@code 0} is rejected).
      *
+     * @param samplingParams default knobs; must not be {@code null}
+     * @return {@code this}
      * @since 1.1.0
      */
     public Builder sampling(final SamplingParams samplingParams) {
@@ -1427,9 +1554,14 @@ public final class LLM implements AutoCloseable {
     }
 
     /**
-     * Replaces tokenizer EOS / stop ids after {@link Config.Builder#applyTokenizer}.
-     * First id becomes {@link Config#eos()}.
+     * Replaces tokenizer EOS / stop ids after {@link Config.Builder#applyTokenizer}. The first id
+     * becomes {@link Config#eos()}. Use this when the vocab stop list is wrong for the application
+     * (extra EOS, extra IM_END, …). Must be non-empty.
      *
+     * @param ids non-empty stop-token ids; must not be {@code null}
+     * @return {@code this}
+     * @throws NullPointerException     if {@code ids} is {@code null}
+     * @throws IllegalArgumentException if {@code ids} is empty
      * @since 1.1.0
      */
     public Builder stopTokenIds(final List<Integer> ids) {
@@ -1511,7 +1643,8 @@ public final class LLM implements AutoCloseable {
     }
 
     /**
-     * Sets matmul workers to {@link Runtime#availableProcessors()}.
+     * Sets matmul workers to {@link Runtime#availableProcessors()}. This wins over
+     * {@code -Dnanollvm.cpu.threads}. For a single-thread engine use {@link #disableMultiCpu()}.
      *
      * @return {@code this}
      */
@@ -1594,7 +1727,9 @@ public final class LLM implements AutoCloseable {
     }
 
     /**
-     * Runs a short synthetic generate after load to warm JIT / caches (off by default).
+     * Runs a short synthetic generate after {@link #build()} to warm JIT / caches. Off by default
+     * so construction stays cheap; enable for long-running servers where the first real request
+     * should not pay the cold penalty.
      *
      * @return {@code this}
      */
@@ -1603,7 +1738,8 @@ public final class LLM implements AutoCloseable {
     }
 
     /**
-     * Enables or disables post-load warmup. Default {@code false}.
+     * Enables or disables post-load warmup. Default {@code false}. When true, {@link #build()}
+     * runs a short synthetic generate before returning.
      *
      * @param value {@code true} to run warmup inside {@link #build()}
      * @return {@code this}
@@ -1614,7 +1750,8 @@ public final class LLM implements AutoCloseable {
     }
 
     /**
-     * Disables post-load warmup (same as the builder default).
+     * Disables post-load warmup (same as the builder default). Explicit when a chain previously
+     * called {@link #warmup()}.
      *
      * @return {@code this}
      */
@@ -1697,7 +1834,9 @@ public final class LLM implements AutoCloseable {
   }
 
   /**
-   * One newly decoded token in a {@link LLM#generate} batch ({@code seqId} matches prompt order).
+   * One newly decoded token in a {@link LLM#generate} batch. {@code seqId} is the prompt index in
+   * that call (0-based). {@code tokenId} is a vocabulary id — decode with {@link #tokenizer()} if
+   * you need text. Callbacks must not call generate / chat / advisors on this engine.
    *
    * @param seqId   sequence index in the current generate batch
    * @param tokenId vocabulary id of the appended token

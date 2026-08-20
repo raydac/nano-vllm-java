@@ -7,7 +7,12 @@ import com.igormaznitsa.nanollvm.tensor.VectorMath;
 import java.util.Arrays;
 
 /**
- * Full (non-causal) multi-head self-attention for encoder models. No KV cache.
+ * Full (non-causal) multi-head self-attention for encoder models. No KV cache and no GQA:
+ * {@code q}, {@code k}, and {@code v} share the same head count. BERT embeddings use this;
+ * chat graphs use {@link Attention}.
+ *
+ * <p>Inputs are packed {@code [seq, numHeads * headDim]}. Every query position attends to every
+ * key (no causal mask, no sliding window). Softmax is per head, per query row.
  *
  * @since 1.1.0
  */
@@ -17,6 +22,14 @@ public final class BidirectionalAttention {
   private final int headDim;
   private final float scale;
 
+  /**
+   * Full self-attention with {@code numHeads} heads of width {@code headDim}.
+   *
+   * @param numHeads query/key/value heads (same count)
+   * @param headDim  per-head width
+   * @param scale    score multiplier, typically {@code 1/√headDim}
+   * @throws IllegalArgumentException if {@code numHeads} or {@code headDim} is {@code <= 0}
+   */
   public BidirectionalAttention(final int numHeads, final int headDim, final float scale) {
     if (numHeads <= 0 || headDim <= 0) {
       throw new IllegalArgumentException("numHeads and headDim must be > 0");
@@ -26,6 +39,16 @@ public final class BidirectionalAttention {
     this.scale = scale;
   }
 
+  /**
+   * Full self-attention over one sequence.
+   *
+   * @param q queries {@code [seq, numHeads * headDim]}
+   * @param k keys, same shape as {@code q}
+   * @param v values, same shape as {@code q}
+   * @return attended values, same shape as {@code q}
+   * @throws NullPointerException     if any argument is {@code null}
+   * @throws IllegalArgumentException if sequence lengths or last dims disagree
+   */
   public Tensor forward(final Tensor q, final Tensor k, final Tensor v) {
     requireNonNull(q, "q");
     requireNonNull(k, "k");

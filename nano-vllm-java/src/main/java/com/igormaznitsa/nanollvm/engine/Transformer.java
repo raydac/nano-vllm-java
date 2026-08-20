@@ -75,6 +75,7 @@ public final class Transformer implements AutoCloseable {
    * @param model  immutable loaded graph + weights (shared across LLMs)
    * @param config engine limits used to size the KV arena
    * @param matmul per-LLM dense matmul runtime
+   * @throws NullPointerException if {@code model}, {@code config}, or {@code matmul} is {@code null}
    */
   public Transformer(final LlmModel model, final Config config, final MatmulRuntime matmul) {
     this(model, config, matmul, LlmListeners.silent());
@@ -161,6 +162,7 @@ public final class Transformer implements AutoCloseable {
    * @param seqs      sequences chosen by {@link Scheduler#schedule()} for this tick
    * @param isPrefill {@code true} for a prompt-token batch; {@code false} for one-token decode
    * @return sampled next-token id for each sequence, same order as {@code seqs}
+   * @throws IllegalStateException if this transformer is {@linkplain #close() closed}
    */
   public List<Integer> step(final List<Sequence> seqs, final boolean isPrefill) {
     this.requireOpen();
@@ -268,6 +270,8 @@ public final class Transformer implements AutoCloseable {
 
   /**
    * Drops short-conv state for {@code seqId} (no-op when this transformer has no conv arena).
+   *
+   * @param seqId {@link Sequence#seqId()} whose KV was just released
    */
   public void clearConvState(final int seqId) {
     ConvStateArena arena = this.convCache;
@@ -276,6 +280,12 @@ public final class Transformer implements AutoCloseable {
     }
   }
 
+  /**
+   * Generate-thread closed flag. {@link com.igormaznitsa.nanollvm.llm.LLM} supplies visibility via
+   * its generate lock.
+   *
+   * @throws IllegalStateException if {@link #close()} has already run
+   */
   private void requireOpen() {
     if (this.closed) {
       throw new IllegalStateException("Transformer is closed");

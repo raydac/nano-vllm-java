@@ -23,7 +23,10 @@ package com.igormaznitsa.nanollvm.llm;
 public record GenerationStats(int promptTokens, int completionTokens, long elapsedNanos) {
 
   /**
-   * Placeholder when generate has not finished or stats were never attached (all zeros).
+   * Placeholder when generate has not finished or stats were never attached. All counts and
+   * elapsed time are zero; {@link #completionTokensPerSecond()} is {@code 0}. Streaming
+   * {@link com.igormaznitsa.nanollvm.chat.ChatReply} snapshots and {@code ChatReply.parse} without
+   * {@code withStats} use this value.
    */
   public static final GenerationStats NONE = new GenerationStats(0, 0, 0);
 
@@ -34,14 +37,20 @@ public record GenerationStats(int promptTokens, int completionTokens, long elaps
   }
 
   /**
-   * {@link #promptTokens()} + {@link #completionTokens()}.
+   * Prefill plus completion token count for this sequence. In a batch, elapsed time is still the
+   * whole {@code generate} call — do not treat {@link #completionTokensPerSecond()} as isolated
+   * per-sequence throughput when several prompts ran together.
+   *
+   * @return {@link #promptTokens()} + {@link #completionTokens()}
    */
   public int totalTokens() {
     return this.promptTokens + this.completionTokens;
   }
 
   /**
-   * Completion throughput for this output using {@link #elapsedNanos} as the denominator.
+   * Completion throughput for this output using {@link #elapsedNanos()} as the denominator.
+   * In a multi-prompt batch every output shares that elapsed time, so this is batch wall
+   * throughput attributed to this sequence's new tokens, not a private clock.
    *
    * @return tokens per second, or {@code 0} when elapsed or completion count is zero
    */

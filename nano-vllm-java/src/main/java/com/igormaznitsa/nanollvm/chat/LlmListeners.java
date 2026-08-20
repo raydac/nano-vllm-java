@@ -16,6 +16,8 @@ public final class LlmListeners {
 
   /**
    * No-op listener (load/generate status and chat text are discarded).
+   *
+   * @return the interned silent sink
    */
   public static LlmListener silent() {
     return Silent.INSTANCE;
@@ -23,6 +25,9 @@ public final class LlmListeners {
 
   /**
    * {@code true} when {@code listener} is {@code null} or {@link #silent()}.
+   *
+   * @param listener sink to test; {@code null} counts as silent
+   * @return whether events would be discarded
    */
   public static boolean isSilent(final LlmListener listener) {
     return listener == null || listener == Silent.INSTANCE;
@@ -31,6 +36,10 @@ public final class LlmListeners {
   /**
    * Forwards each event to {@code first} then {@code second}. {@code null} / silent sides collapse
    * so a single listener is not wrapped.
+   *
+   * @param first  left sink; {@code null} → silent
+   * @param second right sink; {@code null} → silent
+   * @return {@code second}, {@code first}, or a composite
    */
   public static LlmListener compose(final LlmListener first, final LlmListener second) {
     LlmListener left = first == null ? Silent.INSTANCE : first;
@@ -47,6 +56,8 @@ public final class LlmListeners {
   /**
    * Status only: {@link LlmTextKind#STATUS_INFO} → {@code err},
    * {@link LlmTextKind#STATUS_PROGRESS} → {@code out}.
+   *
+   * @return listener writing to {@link System#out} / {@link System#err}
    */
   public static LlmListener toSystem() {
     return ofStatusStreams(System.out, System.err);
@@ -58,6 +69,7 @@ public final class LlmListeners {
    *
    * @param out progress sink; must not be {@code null}
    * @param err info sink; must not be {@code null}
+   * @return status-only listener
    */
   public static LlmListener ofStatusStreams(final PrintStream out, final PrintStream err) {
     PrintStream progress = requireNonNull(out, "out");
@@ -80,6 +92,11 @@ public final class LlmListeners {
 
   /**
    * CLI chat adapter: thinking / advisor notes → {@code thinkOut}, answer → {@code answerOut}.
+   *
+   * @param thinkOut  thinking / advisor / debug sink
+   * @param answerOut visible assistant answer sink
+   * @param color     when {@code true}, dim cyan ANSI styling on the thinking stream
+   * @return session-oriented listener wrapping a {@link StreamPrinter}
    */
   public static LlmListener toPrintStreams(
     final PrintStream thinkOut,
@@ -95,6 +112,10 @@ public final class LlmListeners {
 
   /**
    * Emits {@link LlmTextKind#STATUS_INFO} (appends a newline when missing).
+   *
+   * @param listener sink; {@code null} → silent
+   * @param source   engine, or {@code null} during load
+   * @param message  info line
    */
   public static void info(final LlmListener listener, final LLM source, final String message) {
     String body = message == null ? "" : message;
@@ -104,6 +125,11 @@ public final class LlmListeners {
   /**
    * {@link String#format(Locale, String, Object...)} then {@link LlmTextKind#STATUS_INFO}
    * ({@link Locale#ROOT}).
+   *
+   * @param listener sink; {@code null} → silent
+   * @param source   engine, or {@code null} during load
+   * @param format   {@link Locale#ROOT} format string
+   * @param args     format arguments
    */
   @SuppressWarnings("AnnotateFormatMethod")
   public static void infof(
@@ -118,6 +144,11 @@ public final class LlmListeners {
   /**
    * {@link String#format(Locale, String, Object...)} then {@link LlmTextKind#STATUS_PROGRESS}
    * ({@link Locale#ROOT}).
+   *
+   * @param listener sink; {@code null} → silent
+   * @param source   engine, or {@code null} during load
+   * @param format   {@link Locale#ROOT} format string
+   * @param args     format arguments
    */
   @SuppressWarnings("AnnotateFormatMethod")
   public static void progressf(
@@ -129,6 +160,9 @@ public final class LlmListeners {
     emit(listener, source, LlmTextKind.STATUS_PROGRESS, String.format(Locale.ROOT, format, args));
   }
 
+  /**
+   * Forwards {@code text} as {@code kind} to {@code listener} ({@code null} → silent).
+   */
   private static void emit(
     final LlmListener listener,
     final LLM source,
@@ -139,6 +173,10 @@ public final class LlmListeners {
     sink.onText(source, LlmTextEvent.of(kind, text));
   }
 
+  /**
+   * Finds a {@link PrintStreamLlmListener} inside {@code listener} or a {@link Composite}, so
+   * {@link ChatSession} can reset / discard / close a CLI turn.
+   */
   static PrintStreamLlmListener unwrapPrintStream(final LlmListener listener) {
     if (listener instanceof PrintStreamLlmListener print) {
       return print;
@@ -153,6 +191,9 @@ public final class LlmListeners {
     return null;
   }
 
+  /**
+   * Interned no-op {@link LlmListener}.
+   */
   enum Silent implements LlmListener {
     INSTANCE;
 
@@ -164,6 +205,9 @@ public final class LlmListeners {
     }
   }
 
+  /**
+   * Forwards each event to {@code left} then {@code right}.
+   */
   private record Composite(LlmListener left, LlmListener right) implements LlmListener {
     /** {@inheritDoc} */
     @Override
@@ -173,14 +217,22 @@ public final class LlmListeners {
     }
   }
 
+  /**
+   * Session CLI adapter: accumulates thinking/answer and drives a {@link StreamPrinter}.
+   * {@link LlmTextKind#TEXT_RAW} and status kinds are ignored (the session already prints parsed
+   * channels).
+   */
   static final class PrintStreamLlmListener implements LlmListener {
 
     private final StreamPrinter printer;
     private String think = "";
     private String answer = "";
 
+    /**
+     * Binds the CLI printer that this adapter drives.
+     */
     PrintStreamLlmListener(final StreamPrinter printer) {
-      this.printer = printer;
+      this.printer = requireNonNull(printer, "printer");
     }
 
     /** {@inheritDoc} */
@@ -202,21 +254,33 @@ public final class LlmListeners {
       }
     }
 
+    /**
+     * Ends the printed think/answer lines for this turn.
+     */
     void closeTurn() {
       this.printer.closeTurn();
     }
 
+    /**
+     * Clears a partially streamed answer so a retry can reprint {@code assistant>}.
+     */
     void discardAnswer() {
       this.printer.discardAnswer();
       this.answer = "";
     }
 
+    /**
+     * Clears accumulated think/answer and the printer for a new generate or retry.
+     */
     void resetTurn() {
       this.think = "";
       this.answer = "";
       this.printer.reset();
     }
 
+    /**
+     * Appends a delta or replaces with a snapshot.
+     */
     private String merge(final String previous, final LlmTextEvent event) {
       if (event.snapshot()) {
         return event.text();

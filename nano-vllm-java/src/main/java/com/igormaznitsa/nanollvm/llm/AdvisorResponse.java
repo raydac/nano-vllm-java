@@ -3,11 +3,13 @@ package com.igormaznitsa.nanollvm.llm;
 import static java.util.Objects.requireNonNull;
 
 /**
- * One advisor generate result: configured {@link LlmAdvisor#name()} plus the generated note.
+ * One advisor generate result: the configured {@link LlmAdvisor#name()} plus the generated note.
  *
- * <p>Produced by the optional advisor pass before the main chat generate. Mixers read
- * {@link #text()}; session salvage may use it when the main answer is unusable. {@code text} is
- * never {@code null} (empty when the advisor wrote nothing). Immutable; safe to share.
+ * <p>Produced by the optional advisor pass <em>before</em> the main chat generate. Mixers read
+ * {@link #text()}; session salvage may reuse it when the main answer is unusable.
+ * {@code text} is the answer-channel parse of the advisor completion (thinking stripped), never
+ * {@code null} — empty when the advisor wrote nothing or the note filter dropped it. Immutable;
+ * safe to share.
  *
  * @param advisorName unique non-blank name from {@link LlmAdvisor#name()}
  * @param text        generated advisor note after answer-channel parse; never {@code null}

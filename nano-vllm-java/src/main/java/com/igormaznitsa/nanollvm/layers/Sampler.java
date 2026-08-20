@@ -5,8 +5,35 @@ import com.igormaznitsa.nanollvm.tensor.Tensor;
 import java.util.Arrays;
 import java.util.concurrent.ThreadLocalRandom;
 
+/**
+ * Next-token draw from a batch of logits: temperature softmax, then top-k, then top-p, then
+ * Gumbel-max. Used by {@link com.igormaznitsa.nanollvm.engine.Transformer} once per generate step.
+ *
+ * <p>Order matches {@link com.igormaznitsa.nanollvm.llm.SamplingParams}: logits are divided by
+ * temperature, softmaxed, top-k zeros the tail and renormalizes, top-p keeps the smallest prefix
+ * whose mass is at least {@code p} and renormalizes, then one index is drawn. {@code topK == 0}
+ * skips top-k; {@code topP >= 1} skips nucleus.
+ *
+ * <p>There is no RNG seed on this type. {@link ThreadLocalRandom} is used, so repeated calls with
+ * the same logits can differ. Temperature must be {@code > 0}; {@code SamplingParams} already
+ * rejects greedy {@code 0}.
+ *
+ * <p><strong>Thread safety:</strong> {@link #forward(Tensor, float[], int[], float[])} may run
+ * on the generate thread only (same as {@code Transformer}); the RNG itself is thread-local.
+ *
+ * @see com.igormaznitsa.nanollvm.llm.SamplingParams
+ */
 public final class Sampler {
 
+  /**
+   * Draws one token id per logit row.
+   *
+   * @param logits       {@code [rows, vocab]}
+   * @param temperatures per-row softmax temperature; length {@code rows}
+   * @param topKs        per-row top-k ({@code 0} = disabled), or {@code null} for all disabled
+   * @param topPs        per-row nucleus ({@code 1} = disabled), or {@code null} for all {@code 1}
+   * @return token ids, length {@code rows}
+   */
   public int[] forward(final Tensor logits, final float[] temperatures, final int[] topKs,
                        final float[] topPs) {
     int rows = logits.size(0);
@@ -21,6 +48,13 @@ public final class Sampler {
     return out;
   }
 
+  /**
+   * Draws with top-k disabled and top-p {@code 1} (temperature only).
+   *
+   * @param logits       {@code [rows, vocab]}
+   * @param temperatures per-row softmax temperature
+   * @return token ids, length {@code rows}
+   */
   public int[] forward(final Tensor logits, final float[] temperatures) {
     int[] topKs = new int[temperatures.length];
     float[] topPs = new float[temperatures.length];
@@ -28,6 +62,9 @@ public final class Sampler {
     return this.forward(logits, temperatures, topKs, topPs);
   }
 
+  /**
+   * Softmax → top-k → top-p → Gumbel-max for one vocabulary row.
+   */
   private int sampleRow(final Tensor logits, final int row, final int vocab,
                         final float temperature, final int topK,
                         final float topP) {
@@ -91,6 +128,9 @@ public final class Sampler {
     return best;
   }
 
+  /**
+   * Rescales {@code scores} to sum to 1. No-op when the mass is {@code <= 0}.
+   */
   private void renormalize(final float[] scores) {
     float sum = 0f;
     for (float s : scores) {
@@ -105,6 +145,9 @@ public final class Sampler {
     }
   }
 
+  /**
+   * Indices of {@code scores} sorted by descending probability (for top-k / top-p prefixes).
+   */
   private int[] sortedIndicesDesc(final float[] scores) {
     int n = scores.length;
     Integer[] idx = new Integer[n];

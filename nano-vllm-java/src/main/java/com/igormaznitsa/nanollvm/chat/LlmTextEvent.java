@@ -22,6 +22,10 @@ import static java.util.Objects.requireNonNull;
  */
 public record LlmTextEvent(LlmTextKind kind, String text, String advisorName, boolean snapshot) {
 
+  /**
+   * Canonical constructor: {@code kind} must be non-null; null {@code text} / {@code advisorName}
+   * become {@code ""}.
+   */
   public LlmTextEvent {
     requireNonNull(kind, "kind");
     text = text == null ? "" : text;
@@ -33,6 +37,7 @@ public record LlmTextEvent(LlmTextKind kind, String text, String advisorName, bo
    *
    * @param kind channel; must not be {@code null}
    * @param text payload; {@code null} becomes {@code ""}
+   * @return delta event
    */
   public static LlmTextEvent of(final LlmTextKind kind, final String text) {
     return new LlmTextEvent(kind, text, "", false);
@@ -43,6 +48,7 @@ public record LlmTextEvent(LlmTextKind kind, String text, String advisorName, bo
    *
    * @param kind channel; must not be {@code null}
    * @param text full current buffer; {@code null} becomes {@code ""}
+   * @return snapshot event
    */
   public static LlmTextEvent snapshot(final LlmTextKind kind, final String text) {
     return new LlmTextEvent(kind, text, "", true);
@@ -53,6 +59,7 @@ public record LlmTextEvent(LlmTextKind kind, String text, String advisorName, bo
    *
    * @param advisorName non-blank advisor name
    * @param text        note body; {@code null} becomes {@code ""}
+   * @return advisor-note event
    * @throws IllegalArgumentException if {@code advisorName} is blank after strip
    */
   public static LlmTextEvent advisorNote(final String advisorName, final String text) {
@@ -67,6 +74,7 @@ public record LlmTextEvent(LlmTextKind kind, String text, String advisorName, bo
    * Debug snapshot ({@link LlmTextKind#TEXT_DEBUG}) — typically the prepared model-user string.
    *
    * @param text debug payload; {@code null} becomes {@code ""}
+   * @return debug snapshot
    */
   public static LlmTextEvent debug(final String text) {
     return new LlmTextEvent(LlmTextKind.TEXT_DEBUG, text, "", true);

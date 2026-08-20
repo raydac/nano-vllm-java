@@ -33,7 +33,8 @@ import java.util.function.Predicate;
  * {@link #isolateGeneration(boolean)} omits prior assistant answers from grounded (hit) generates
  * when on (default {@code false}; demos may enable for small turn-based models). No-hit turns always isolate so prior corpus answers cannot latch.
  * Thinking is off by default so small max-token budgets are not spent on {@code <think>} blocks.
- * Grounded turns also clamp sampling temperature. Not thread-safe.
+ * Grounded turns clamp sampling temperature to {@value #GROUNDED_TEMPERATURE_CAP} when the caller
+ * set a hotter value. Not thread-safe.
  *
  * <p>{@link #open(ChatSession, RagIndex)} reuses that session's {@link LLM} (rewrite stays enabled).
  *
@@ -262,11 +263,14 @@ public final class RagSession {
   }
 
   /**
-   * Replaces sampling parameters for subsequent turns. Grounded turns still clamp temperature in
-   * {@link #send(String)}; no-hit turns may raise max tokens via {@link #maxTokensWhenNoHits(int)}.
+   * Replaces sampling parameters for subsequent turns. When a turn retrieves hits, temperature
+   * above {@value #GROUNDED_TEMPERATURE_CAP} is clamped to that cap so grounded answers stay
+   * conservative. No-hit turns keep the caller's temperature and may raise max tokens via
+   * {@link #maxTokensWhenNoHits(int)}.
    *
    * @param samplingParams new knobs; must not be {@code null}
    * @return {@code this} for fluent configuration
+   * @see SamplingParams
    */
   public RagSession sampling(final SamplingParams samplingParams) {
     this.baseSampling = requireNonNull(samplingParams, "samplingParams");
