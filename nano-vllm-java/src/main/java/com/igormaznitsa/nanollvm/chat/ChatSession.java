@@ -26,6 +26,8 @@ import java.util.function.Predicate;
  *
  * <h2>If you want…</h2>
  * <ul>
+ *   <li><b>The same wording every turn</b> — {@link #deterministic()} or
+ *       {@link com.igormaznitsa.nanollvm.llm.LLM.Builder#deterministic()}</li>
  *   <li><b>Shorter replies</b> — {@link #maxTokens(int)} or {@link #sampling(SamplingParams)}</li>
  *   <li><b>A wall-clock limit per turn</b> — {@link #timeout(Duration)}</li>
  *   <li><b>Print thinking vs answer as they arrive</b> — {@link #streamTo} or {@link #listen}</li>
@@ -107,6 +109,18 @@ public final class ChatSession {
    */
   public ChatSession sampling(final SamplingParams samplingParams) {
     this.samplingParams = requireNonNull(samplingParams, "samplingParams");
+    return this;
+  }
+
+  /**
+   * Greedy argmax for subsequent turns ({@code topK = 1}, nucleus off). Other knobs stay.
+   *
+   * @return {@code this} for fluent configuration
+   * @see SamplingParams#asDeterministic()
+   * @since 1.1.1
+   */
+  public ChatSession deterministic() {
+    this.samplingParams = this.samplingParams.asDeterministic();
     return this;
   }
 

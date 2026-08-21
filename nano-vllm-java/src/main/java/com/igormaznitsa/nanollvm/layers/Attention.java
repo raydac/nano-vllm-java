@@ -39,7 +39,8 @@ import java.util.Arrays;
  * positions (Gemma local layers). {@code 0} is full causal context.
  *
  * <p><strong>Thread safety:</strong> {@link #forward} is exclusive (one generate thread).
- * Bound {@link MatmulRuntime} may run disjoint query×head jobs in parallel; jobs are leaf
+ * Bound {@link MatmulRuntime} may run disjoint head×query jobs in parallel (head-major so
+ * each chunk covers a full query range and causal work stays balanced); jobs are leaf
  * kernels and do not re-enter the pool.
  *
  * @see BidirectionalAttention
@@ -301,7 +302,7 @@ public final class Attention {
    * Online-softmax attention for query tokens {@code [qStart, qEnd)} over {@code kLen} keys.
    * When {@code causal} is true, query {@code i} sees keys up to its own position. {@code kvSlots}
    * {@code null} means dense keys starting at {@code kIndexBase}; otherwise keys are read from
-   * those arena slots. Query×head jobs are independent and run on {@code ctx.matmul()} when the
+   * those arena slots. Head×query jobs are independent and run on {@code ctx.matmul()} when the
    * work is large enough.
    */
   private void attendRange(
@@ -346,8 +347,8 @@ public final class Attention {
     float[] oData = out.data();
 
     for (int job = jobStart; job < jobEnd; job++) {
-      int qi = job / this.numHeads;
-      int h = job % this.numHeads;
+      int h = job / qLen;
+      int qi = job % qLen;
       int qPos = qStart + qi;
       int causalEnd = causal ? (kLen - qLen + qi + 1) : kLen;
       int causalStart = 0;

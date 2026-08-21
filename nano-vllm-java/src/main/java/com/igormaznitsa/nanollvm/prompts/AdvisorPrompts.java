@@ -49,9 +49,11 @@ public final class AdvisorPrompts {
     }
     String facts = RagPrompts.facts(base);
     String question = RagPrompts.question(base);
+    boolean hadPassages = !facts.isBlank();
     if (question.isEmpty()) {
       question = base;
       facts = "";
+      hadPassages = false;
     }
     String existingFacts = facts;
     String block = notes.stream()
@@ -62,7 +64,9 @@ public final class AdvisorPrompts {
       return base;
     }
     String mergedFacts = existingFacts.isBlank() ? block : existingFacts + "\n" + block;
-    return mergedFacts + "\n\n" + question;
+    return hadPassages
+      ? RagPrompts.withContext(question, mergedFacts)
+      : mergedFacts + "\n\n" + question;
   }
 
   public static String mixNoteLine(final String note) {

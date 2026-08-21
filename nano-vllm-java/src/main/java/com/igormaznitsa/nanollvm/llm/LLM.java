@@ -80,8 +80,10 @@ import java.util.stream.IntStream;
  *   <li><b>Shorter or longer replies</b> — {@link SamplingParams.Builder#maxTokens(int)} via
  *       {@link Builder#sampling(SamplingParams)}, or {@link #chat(int)} /
  *       {@link ChatSession#maxTokens(int)}.</li>
- *   <li><b>More predictable wording</b> — lower {@link SamplingParams.Builder#temperature(float)}
- *       ({@code 0.1}–{@code 0.2} for facts / RAG; default {@code 0.6}). {@code 0} is rejected.</li>
+ *   <li><b>The same wording every run</b> — {@link Builder#deterministic()} (greedy argmax;
+ *       {@code temperature(0)} is still rejected).</li>
+ *   <li><b>More predictable wording, still random</b> — lower {@link SamplingParams.Builder#temperature(float)}
+ *       ({@code 0.1}–{@code 0.2} for facts / RAG; default {@code 0.6}).</li>
  *   <li><b>Faster CPU</b> — {@link Builder#cpuThreads(int)} / {@link Builder#allCpuThreads()};
  *       for packed GGUF also {@link LlmModelFactory.Builder#unpackParameters()} at load
  *       (more RAM, faster math).</li>
@@ -206,9 +208,7 @@ public final class LLM implements AutoCloseable {
       this.advisors = builder.advisors;
       this.advisorMixer = builder.advisorMixer;
       this.advisorNoteFilter = builder.advisorNoteFilter;
-      this.defaultSampling = builder.samplingParams == null
-        ? SamplingDefaults.neutral()
-        : builder.samplingParams;
+      this.defaultSampling = builder.resolveSampling();
       createdTransformer = new Transformer(
         this.model, this.config, this.matmul, this.listener, builder.allowUnpackParameters);
       this.transformer = createdTransformer;
@@ -1028,8 +1028,9 @@ public final class LLM implements AutoCloseable {
 
   /**
    * Engine sampling policy from {@link Builder#sampling(SamplingParams)}, or
-   * {@link SamplingDefaults#neutral()} when unset. Chat / complete / RAG helpers use this unless
-   * the call overrides max tokens or passes its own {@link SamplingParams}.
+   * {@link SamplingDefaults#neutral()} when unset. {@link Builder#deterministic()} seals greedy
+   * argmax on that policy. Chat / complete / RAG helpers use this unless the call overrides max
+   * tokens or passes its own {@link SamplingParams}.
    *
    * @return a new immutable {@link SamplingParams}; never {@code null}
    * @throws IllegalStateException if this engine is closed
@@ -1412,14 +1413,15 @@ public final class LLM implements AutoCloseable {
    *
    * <p>Defaults: {@link LlmListeners#silent()}, warmup off, GGUF weights packed (size-first;
    * {@link #allowUnpackParameters()} for float32 speed), empty system prompt, no advisors,
-   * {@link SamplingDefaults#neutral()} until {@link #sampling(SamplingParams)}.
+   * {@link SamplingDefaults#neutral()} until {@link #sampling(SamplingParams)} or
+   * {@link #deterministic()}.
    *
    * <p>Provide a shared {@link LlmModel} via {@link LLM#builder(LlmModel)}. Call {@link #build()} last.
    *
    * <h2>Which setter?</h2>
    * <ul>
    *   <li><b>Reply style</b> — {@link #sampling}, {@link #systemPrompt} / {@link #noSystemPrompt},
-   *       {@link #advisors}</li>
+   *       {@link #advisors}, {@link #deterministic}</li>
    *   <li><b>How much text one generate may hold</b> — {@link #maxModelLen}
    *       (prompt + new tokens; not the same as {@code maxTokens} on sampling)</li>
    *   <li><b>CPU / speed</b> — {@link #cpuThreads}, {@link #allCpuThreads}, {@link #disableMultiCpu},
@@ -1461,6 +1463,7 @@ public final class LLM implements AutoCloseable {
     private LlmAdvisorMixer advisorMixer = LlmAdvisorMixer.defaults();
     private Predicate<String> advisorNoteFilter = note -> note != null && !note.isBlank();
     private SamplingParams samplingParams;
+    private boolean deterministic;
     private List<Integer> stopTokenIds;
 
     private Builder(final LlmModel model) {
@@ -1603,7 +1606,8 @@ public final class LLM implements AutoCloseable {
      * Seals default sampling for {@link LLM#chat()}, {@link LLM#chatOnce(String)},
      * {@link LLM#complete(String)}, {@link LLM#rag(RagIndex)}, and {@link LLM#defaultSampling()}.
      * Unset → {@link SamplingDefaults#neutral()}. {@link LLM#chat(int)} / max-token shortcuts
-     * override only {@code maxTokens}. See {@link SamplingParams} for temperature, top-k, and
+     * override only {@code maxTokens}. {@link #deterministic()} still wins at {@link #build()} and
+     * turns these knobs into greedy argmax. See {@link SamplingParams} for temperature, top-k, and
      * top-p (lower temperature → less random; greedy {@code 0} is rejected).
      *
      * @param samplingParams default knobs; must not be {@code null}
@@ -1612,6 +1616,21 @@ public final class LLM implements AutoCloseable {
      */
     public Builder sampling(final SamplingParams samplingParams) {
       this.samplingParams = requireNonNull(samplingParams, "samplingParams");
+      return this;
+    }
+
+    /**
+     * Always pick the highest-logit token (greedy argmax). Applied at {@link #build()} on top of
+     * {@link #sampling(SamplingParams)} or {@link SamplingDefaults#neutral()}: {@code topK = 1},
+     * nucleus off. Chat, complete, RAG, and advisors inherit this. Call order with {@link #sampling}
+     * does not matter. {@code temperature(0)} stays rejected.
+     *
+     * @return {@code this}
+     * @see SamplingParams#deterministic()
+     * @since 1.1.1
+     */
+    public Builder deterministic() {
+      this.deterministic = true;
       return this;
     }
 
@@ -1876,6 +1895,13 @@ public final class LLM implements AutoCloseable {
 
     private LlmModel resolveModel() {
       return this.sharedModel;
+    }
+
+    private SamplingParams resolveSampling() {
+      SamplingParams sampling = this.samplingParams == null
+        ? SamplingDefaults.neutral()
+        : this.samplingParams;
+      return this.deterministic ? sampling.asDeterministic() : sampling;
     }
 
     private Path modelPath() {

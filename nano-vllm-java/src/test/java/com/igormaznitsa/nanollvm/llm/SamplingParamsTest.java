@@ -2,6 +2,7 @@ package com.igormaznitsa.nanollvm.llm;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -62,5 +63,33 @@ class SamplingParamsTest {
   void forTokenizerIsNeutralAlias() {
     assertEquals(SamplingDefaults.neutral(), SamplingDefaults.forTokenizer(null));
     assertEquals(SamplingDefaults.neutral(100), SamplingDefaults.forTokenizer(null, 100));
+  }
+
+  @Test
+  void deterministicKeepsArgmaxKnobs() {
+    SamplingParams params = SamplingParams.deterministic(64);
+    assertTrue(params.isDeterministic());
+    assertEquals(1, params.topK());
+    assertEquals(1f, params.topP());
+    assertEquals(64, params.maxTokens());
+    assertEquals(SamplingDefaults.DEFAULT_TEMPERATURE, params.temperature());
+    assertEquals(params, SamplingDefaults.deterministic(64));
+    assertEquals(SamplingParams.deterministic(), SamplingDefaults.deterministic());
+
+    SamplingParams hotter = SamplingParams.builder()
+      .temperature(0.9f)
+      .maxTokens(32)
+      .topK(64)
+      .topP(0.8f)
+      .ignoreEos(true)
+      .build();
+    SamplingParams greedy = hotter.asDeterministic();
+    assertTrue(greedy.isDeterministic());
+    assertEquals(0.9f, greedy.temperature());
+    assertEquals(32, greedy.maxTokens());
+    assertTrue(greedy.ignoreEos());
+    assertEquals(1, greedy.topK());
+    assertEquals(1f, greedy.topP());
+    assertSame(greedy, greedy.asDeterministic());
   }
 }

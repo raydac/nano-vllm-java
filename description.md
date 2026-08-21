@@ -2360,7 +2360,8 @@ $$
 **Numerics:** compute $e^{z_i - \max_j z_j}$ then renormalize (`Ops.softmaxLastDim`, and inside `Sampler`).
 
 **Temperature** $\tau > 0$ for sampling: use $z_i / \tau$ before softmax. Small $\tau$ → peaked; large $\tau$ → flatter.
-This port rejects $\tau \rightarrow 0$ (pure greedy) in `SamplingParams`.
+This port rejects $\tau \rightarrow 0$ (pure greedy) in `SamplingParams`. Repeatable argmax is
+`LLM.Builder.deterministic()` / `SamplingParams.deterministic()` (`topK = 1`), not temperature zero.
 
 ### Causal self-attention (the scoring math)
 
@@ -2495,7 +2496,9 @@ Imagine a very large hat of slips of paper. Softmax writes how many copies of ea
 
 Then one slip is drawn. This project’s sampler uses a **Gumbel-max–style** draw over the remaining probabilities (not a
 naive left-to-right walk of a cumulative table). Pure greedy decoding (temperature ≈ 0) is **rejected** by
-`SamplingParams` — use a small positive temperature instead.
+`SamplingParams`. For the same tokens every run, call `LLM.Builder.deterministic()` (or
+`SamplingParams.deterministic()` / `ChatSession.deterministic()` / `RagSession.deterministic()`):
+that keeps only the highest-logit token (`topK = 1`) and does not draw from the RNG.
 
 Default helpers (`SamplingDefaults.neutral()` / `forTokenizer`, and `SamplingParams.builder().build()`)
 use temperature `0.6`, top-p `0.95`, 256 new tokens, and **top-k off** (`0`) for every tokenizer.
@@ -2511,8 +2514,9 @@ finished.”
 **Further reading:** nucleus (top-p) sampling —
 [Holtzman et al., *The Curious Case of Neural Text Degeneration*](https://arxiv.org/abs/1904.09751).
 
-**In the code:** `SamplingParams` / `SamplingDefaults.forTokenizer`; draw in `Sampler.forward` (Gumbel-max style); stop
-ids, `maxTokens`, `maxModelLen`, and degenerate-loop checks enforced in `Scheduler.postprocess` (chapter 16).
+**In the code:** `SamplingParams` / `SamplingDefaults` / `LLM.Builder.deterministic()`; draw in `Sampler.forward`
+(Gumbel-max, or argmax when `topK = 1`); stop ids, `maxTokens`, `maxModelLen`, and degenerate-loop checks
+enforced in `Scheduler.postprocess` (chapter 16).
 
 
 ---
@@ -3615,7 +3619,7 @@ unused.
 optionally `withEmbeddings`); session `LLM.rag(index)` → `RagSession`; demo corpus folder `rag/` via
 `samples.utils.BundledRag` in `samples.Example` (model → RAG-mode → advisor-count menus **since 1.1.0**)
 and the linear `samples.AdvisorRagHelloWorld` (one custom advisor + BM25 over `rag/`) plus
-`samples.RagTunerHelloWorld` (bundled *R.U.R.* EPUB through `RagTuner` extract + dense embeddings).
+`samples.RagTunerHelloWorld` (bundled *R.U.R.* EPUB through `RagTuner` extract + BM25).
 
 ### Load path — preparing documents
 
@@ -3673,7 +3677,7 @@ classpath document is walked **three times**, with a different combine rule each
 `RagResource` is the document handle: disk `Path` or `classpath:…` label, file name, and (at extract time) loaded
 bytes. Folder walks still honor `folderExtensions`; add extra suffixes for custom extractors (`.pdf`, `.epub`, `.html`, …).
 Override only the methods you need, or use `RagTuner.allowing` / `extracting` / `preprocessing`.
-Demo: `samples.RagTunerHelloWorld` extracts a classpath EPUB, then embeds chunks (`DenseRagIndex`).
+Demo: `samples.RagTunerHelloWorld` extracts a classpath EPUB, then indexes chunks with BM25.
 
 **In the code (tuners):** `RagFactory.Builder.addProcessor` → package-private `RagTunerChain` inside `CorpusLoader`
 (filter before read, extract in `readBody`, preprocess in `appendChunks`).
@@ -3766,11 +3770,10 @@ RagIndex.retrieve(query, topK)  →  List<RagHit>
    │  HybridRagIndex: BM25 + dense fused by RRF           (since 1.1.0)
    │  off-topic: index may refuse (hybrid needs both sides to agree)
    ▼
-RagSession.formatUserMessage(hits, user text, maxContextChars, compact?)
+RagSession.formatUserMessage(hits, user text, maxContextChars)
    │  (internal: UserMessage.format; wording in prompts.RagPrompts)
-   │  compact (tiny chat models): question first, Context lines, then “answer from Context”
-   │  no hits: “No context…” + reply briefly; named advisors still run (mixer folds notes)
-   │  default: Context / Question + “do not invent… say you do not know”
+   │  hits: grounding line (“Answer using only the passages…”) + bullets + blank + question
+   │  no hits: question only
    ▼
 ChatSession.sendPrepared(historyUser = original text,
                          modelUser   = RAG prompt,
@@ -3801,8 +3804,8 @@ keywords). `LLM.rag(RagIndex)` / `rag(index, maxTokens)` open the session.
 RAG does not change attention math, the KV cache, or sampling math itself. It only changes the **token ids of the last
 user message** (and thus the prefill), plus a temperature clamp on grounded turns. Everything in chapters 8–12 still
 applies: longer RAG context means a heavier prefill; tiny models can still ignore instructions, so the stack prefers
-short passages, compact “answer from Context” wording (no leading “say you do not know” priming),
-no-hit refusal, optional `isolateGeneration` (library default **false**; demos may enable it), and low temperature
+short passages, a one-line “answer using only the passages / do not invent books” prefix (`RagPrompts.GROUNDING`),
+optional `isolateGeneration` (library default **false**; demos may enable it), and low temperature
 (`RagLoadOptions.forTinyModels()`, small `topK`, compact formatting in `samples.Example`).
 
 Think of the layers again:
@@ -3825,8 +3828,9 @@ gte-small alone still opens the embedding REPL (`samples.EmbeddingsHelloWorld` d
 ONNX and adds `query: ` for that family).
 `samples.AdvisorRagHelloWorld` is the non-interactive BM25 + custom-advisor path (Gemma3-270M, advisor Alex,
 Grimm names and father). `samples.RagTunerHelloWorld` extracts a bundled EPUB of Čapek's *R.U.R.* with
-`RagTuner` filter / extract / preprocess (plain text via JDK zip + StAX),
-embeds the passages (`DenseRagIndex`, default gte-small), and asks questions from the play.
+`RagTuner` filter / extract / preprocess (plain text via JDK zip + StAX), indexes with BM25,
+stamps the short OPF title on later chunks via a Markdown heading, isolates each generate from prior answers,
+and asks questions from the play (`LLM.Builder.deterministic()` so repeats keep the same tokens).
 
 ### What this RAG is *not*
 

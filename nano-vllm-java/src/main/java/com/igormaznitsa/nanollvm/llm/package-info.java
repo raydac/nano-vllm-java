@@ -13,7 +13,8 @@
  * timeout, progress, token stream). {@link LLM#rag} wraps chat with a {@link com.igormaznitsa.nanollvm.rag.RagIndex}.
  *
  * <p><b>Knobs (where to look).</b> How long / how random a reply is:
- * {@link SamplingParams} / {@link SamplingDefaults} (or {@link LLM.Builder#sampling(SamplingParams)}). How much
+ * {@link SamplingParams} / {@link SamplingDefaults} (or {@link LLM.Builder#sampling(SamplingParams)} /
+ * {@link LLM.Builder#deterministic()}). How much
  * conversation the engine can hold, CPU workers, and memory:
  * {@link LLM.Builder} ({@code maxModelLen}, {@code cpuThreads}, {@code kvHeapFraction}).
  * Per-conversation extras: {@link com.igormaznitsa.nanollvm.chat.ChatSession}. {@link Config} is

@@ -1,12 +1,19 @@
 package com.igormaznitsa.nanollvm.prompts;
 
 /**
- * Model-facing RAG document layout: facts first, blank line, user question last.
+ * Model-facing RAG document layout: a short grounding line, facts, blank line, user question last.
  */
 public final class RagPrompts {
 
   public static final String NO_CONTEXT_DOCUMENTS = "No context documents";
   public static final String ABSTAIN_REPLY = "I do not know";
+  /**
+   * Lead sentence on a grounded RAG user turn: answer from the passages, do not invent a source.
+   *
+   * @since 1.1.1
+   */
+  public static final String GROUNDING =
+    "Answer using only the passages below. Do not invent books, plays, or sources.";
 
   public static final String REWRITE_STANDALONE = """
     Rewrite the question as a short keyword search for a document index.
@@ -29,10 +36,10 @@ public final class RagPrompts {
   }
 
   /**
-   * Facts block, then blank line, then the user question.
+   * Grounding line, facts block, then blank line, then the user question.
    */
   public static String withContext(final String question, final String context) {
-    return context.strip() + "\n\n" + question.strip();
+    return GROUNDING + "\n\n" + context.strip() + "\n\n" + question.strip();
   }
 
   /**
@@ -51,7 +58,7 @@ public final class RagPrompts {
     if (sep < 0) {
       return "";
     }
-    return text.substring(0, sep).strip();
+    return stripGrounding(text.substring(0, sep).strip());
   }
 
   public static String question(final String document) {
@@ -68,6 +75,16 @@ public final class RagPrompts {
 
   public static boolean hasFacts(final String document) {
     return !facts(document).isBlank();
+  }
+
+  private static String stripGrounding(final String block) {
+    if (block.equals(GROUNDING)) {
+      return "";
+    }
+    if (block.startsWith(GROUNDING)) {
+      return block.substring(GROUNDING.length()).strip();
+    }
+    return block;
   }
 
   public static String rewriteStandalone(final String question) {

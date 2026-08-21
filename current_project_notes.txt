@@ -39,7 +39,8 @@
   `ResourceLimits` is 1.0 — no class `@since`
 - **`@since 1.1.1`:** new types and new public members on older types (`Tokenizer.fromSentencePiece`,
   `ModelFileId.TOKENIZER_MODEL`, `ModelFileBundle.sentencePieceModel()`, tokenizer codec/load
-  classes, `RagTuner` / `RagResource` / `RagFactory.Builder.addProcessor`). Do not retag 1.0/1.1.0
+  classes, `RagTuner` / `RagResource` / `RagFactory.Builder.addProcessor`,
+  `LLM.Builder.deterministic` / `SamplingParams.deterministic` / session `deterministic()`). Do not retag 1.0/1.1.0
   members when only their behavior expands.
 
 - Advisors: `advisors(LlmAdvisorMixer, LlmAdvisor…)`; unique non-blank names; one batched `generate`; library ships no default advisor names/prompts (samples own `SampleAdvisorPrompts`); optional `advisorNoteFilter`
@@ -76,7 +77,7 @@
 
 - **RAG:** `RagFactory` → `PreparedRag` (BM25); `addResource` / `makeResource` for classpath docs; optional `withEmbeddings` → `HybridRagIndex` (`DenseRagIndex` + RRF); package-private `CorpusLoader`; public API includes `RagTuner` / `RagResource` (`Builder.addProcessor` filter / extract / preprocess, `@since 1.1.1`). Default extract is UTF-8 only (no `PdfTextExtractor` / pdfbox); PDF/EPUB need a custom extractor + `.folderExtensions` for folder walks. `ResourceLimits` no longer has PDF inflate / CMap caps. Chunk ceiling is `RagLoadOptions` (`defaults()` 500 / `forTinyModels()` 220, then `withMaxChunkChars`); Javadoc on that type, `RagFactory`, package-info, `PreparedRag.options()`, `RagSession.maxContextChars` (prompt cap, separate). Packing leftover-long-sentence windows honor `chunkOverlap` (was hardcoded 40).
 - **RAG off-topic:** `isOutsideCorpus` ignores conversational glue (`what`/`think`/`about`/…); source stems use `/`+`\` basename (Windows-safe)
-- **Samples** (`nano-vllm-java-samples`): linear `main` flows (`HelloWorld`, `NextTokenHelloWorld`, `EmbeddingsHelloWorld`, `LogTriageHelloWorld`, `AdvisorRagHelloWorld`, `RagTunerHelloWorld`, `Bench`, `Example`); `NextTokenHelloWorld` encodes a seed and prints the next tokens on Tiny-LLM-ONNX; `EmbeddingsHelloWorld` encodes text with multilingual-e5-small ONNX (`LlmModel.embed`, `query: ` prefix); `AdvisorRagHelloWorld` is one `main` (Alex advisor + BM25 over `rag/`, Grimm names/father, Gemma3-270M); `RagTunerHelloWorld` extracts bundled `pg59112.epub` (Čapek *R.U.R.*) via `RagTuner` + JDK zip/StAX (no epub4j/xpp3), unpacks gte-small, indexes with a caller thread pool + a single-line percent/ETA bar (`ReentrantLock` + `AtomicBoolean`), then asks play questions on Qwen3-0.6B with cooler sampling (temperature 0.1, top-p 0.8); hit dump (score, source, passage) is one stderr block so Maven/IDE do not split it from stdout answers; `Example` is a terminal app (model menu → RAG mode → advisor count → chat/embed); RAG turns print retrieved passage text; Enter = first menu item; downloaded models listed first (Qwen3-0.6B preferred); empty disk exits with download help; `--debug` enables prepared-prompt dumps; SmolLM2 Instruct ONNX (compact chat demo) + Tiny-LLM (base); gte-small / e5 embeddings; `BundledModels` / `BundledRag` / `OrderedConsole` in `samples.utils` (`ReentrantLock` for drain and stream buffers)
+- **Samples** (`nano-vllm-java-samples`): linear `main` flows (`HelloWorld`, `NextTokenHelloWorld`, `EmbeddingsHelloWorld`, `LogTriageHelloWorld`, `AdvisorRagHelloWorld`, `RagTunerHelloWorld`, `Bench`, `Example`); `NextTokenHelloWorld` encodes a seed and prints the next tokens on Tiny-LLM-ONNX; `EmbeddingsHelloWorld` encodes text with multilingual-e5-small ONNX (`LlmModel.embed`, `query: ` prefix); `AdvisorRagHelloWorld` is one `main` (Alex advisor + BM25 over `rag/`, Grimm names/father, Gemma3-270M); `RagTunerHelloWorld` extracts bundled `pg59112.epub` (Čapek *R.U.R.*) via `RagTuner` + JDK zip/StAX (no epub4j/xpp3; OPF title kept as a short Markdown heading so later chunks still name the play), indexes with BM25, then asks play questions on Qwen3-0.6B with `LLM.Builder.deterministic()` and `isolateGeneration(true)` (greedy argmax, same tokens each run); RAG hits prepend `RagPrompts.GROUNDING`; hit dump (score, source, passage) is one stderr block so Maven/IDE do not split it from stdout answers; `Example` is a terminal app (model menu → RAG mode → advisor count → chat/embed); RAG turns print retrieved passage text; Enter = first menu item; downloaded models listed first (Qwen3-0.6B preferred); empty disk exits with download help; `--debug` enables prepared-prompt dumps; SmolLM2 Instruct ONNX (compact chat demo) + Tiny-LLM (base); gte-small / e5 embeddings; `BundledModels` / `BundledRag` / `OrderedConsole` in `samples.utils` (`ReentrantLock` for drain and stream buffers)
 
 
 ## 2. Architecture & Technical Discoveries
@@ -96,12 +97,14 @@
 - RAG load tuners (`RagTuner`): AND-filter files/classpath (`isRagResourceAllowed`); first present `extractRagText` Optional wins else UTF-8; `preprocessRagText` chain then built-in sentence packing. Inline `add(text)` is not filtered. Folder walks still use `folderExtensions`. Binary formats (PDF, EPUB, …) need a custom extractor.
 - Dense RAG: index-time `LlmModel.embed` of all chunks (sequential unless caller passes an `Executor`);
   query cosine (dot); hybrid = BM25 + dense RRF; off-topic = both indexes agree; query embeds are concurrent
-- Lexical off-topic uses salient query terms only (skips conversational glue); file-name stems split on `/` and `\`
+- RAG retrieve is independent of generate: a high cosine hit can still be answered from pretraining
+  if the passage never names the work and the user turn is only “facts then question”
+
 - Gemma 4 text (QAT mobile): flatten nested `text_config`; skip `vision_tower`/`audio_tower`; packed int2/4/8 + SRQ (`GemmaQat`); PLE after MLP; KV share from last same-type non-shared layer; RMS `onePlusWeight=false`; attn scale 1.0; chat `<|turn>`/`<turn|>`. Weightless `RMSNorm` residual uses `Ops.addRmsNorm(x, residual, eps)` (identity scale; `weight == null` is valid).
 - Safetensors shards **> 2 GiB** (Gemma 4 QAT `model.safetensors` is ~2.29 GiB) use `FileChannel` positioned reads; files ≤ 2 GiB are copied into a heap `ByteBuffer` so `close()` can drop them
 - Weight/tensor records hold `byte[]`/`float[]`/`int[]` on purpose (no List boxing); Error Prone `ArrayRecordComponent` is suppressed at those records (and Unigram tokenizer `float[]` scores). Packed QAT/GGUF release is `packed.length == 0`, not identity with a sentinel array. SpotBugs `EI_EXPOSE_REP*` on those types (and `Tensor.data()`, `Context` tables, `Sequence.blockTable()`) is by design — copies would double RAM or break KV mutation.
 - Tensor/math perf (2026-08-15): dense decode uses panel GEMV (`FloatKernels.gemv`, x loaded once per K-vector across 8 outputs); Vector `dot`/`sumSquares` 4-acc unroll; `Ops` add/mul/scale/SiLU/GELU/RMSNorm/`tanhSoftcap` go through SIMD kernels; Attention reuses tile scratch, SIMD axpy, and reads paged KV in place (no per-step dense K/V copy). Fused packed dequant-dot still open.
-- CPU overdrive (2026-08-20): `MatmulRuntime.parallelRanges` splits independent index jobs on the engine pool. Causal `Attention` and BERT `BidirectionalAttention` fan out query×head (cost `qLen*heads*kLen >= 256`); RoPE fans out tokens; embedding gather fans out rows; Gemma QAT SRQ fans out elements. `ThreadLocal POOL_WORKER` forces nested `linear` / `parallelRanges` to sequential so a fixed pool cannot `invokeAll`-deadlock. Decoder layers stay sequential (residual). Do not `invokeAll` Q/K/V as three nested GEMMs. `LlmModel.embed` still uses `MatmulRuntime.sequential()` so RAG passage executors do not oversubscribe the shared pool.
+- CPU overdrive (2026-08-20): `MatmulRuntime.parallelRanges` splits independent index jobs on the engine pool. Causal `Attention` and BERT `BidirectionalAttention` fan out head×query (cost `qLen*heads*kLen >= 256`; causal jobs are head-major so each chunk covers a full query range — query-major left later tokens on the last worker); RoPE fans out tokens; embedding gather fans out rows; Gemma QAT SRQ fans out elements. `ThreadLocal POOL_WORKER` forces nested `linear` / `parallelRanges` to sequential so a fixed pool cannot `invokeAll`-deadlock. Decoder layers stay sequential (residual). Do not `invokeAll` Q/K/V as three nested GEMMs. `LlmModel.embed` still uses `MatmulRuntime.sequential()` so RAG passage executors do not oversubscribe the shared pool. `ConvStateArena` is a plain `HashMap` (generate-thread confined; generate lock covers `clear`).
 
 
 ## 3. Technical Debt & Refactoring
@@ -116,7 +119,7 @@
 
 
 ## 4. Current Work In Progress
-- Concurrency hygiene: no `volatile`/`synchronized` left; engine close flags are `AtomicBoolean`; sample embed bar and concurrent-test log use `ReentrantLock`
+- Concurrency hygiene (re-audit 2026-08-21): no `volatile`/`synchronized`; close flags `AtomicBoolean`; generate lock is the only exclusive engine lock (`cancel` is a flag). Causal prefill jobs are head-major (balanced); `ConvStateArena` dropped `ConcurrentHashMap`. Sample embed bar and concurrent-test log still use `ReentrantLock`.
 - Development line **`1.1.1-SNAPSHOT`** (after **1.1.0** 2026-08-16); Maven Central still **1.1.0**
 - README Hello World / Central badge stay **1.1.0**; in-repo `mvn package` JARs are `1.1.1-SNAPSHOT`
 - **Gemma 4 E2B QAT mobile** — text-only `LlmModel` load for `models/Gemma4-E2B-IT-QAT-Mobile/` (`google/gemma-4-E2B-it-qat-mobile-transformers`). Vision/audio unused. Packed QAT (int2/4/8 + SRQ), PLE, KV sharing, `<|turn>` chat.
@@ -151,9 +154,11 @@
   `SmolLM2-135M-Instruct-ONNX` and `gte-small.Q2_K.gguf`
 - Packed GGUF BERT (gte-small Q2_K) is slow if left packed: dequant on every matmul. Indexing is
   sequential unless you pass an `Executor` to `DenseRagIndex.of` / `RagFactory.withEmbeddings`.
-  The EPUB demo unpacks gte-small and supplies a fixed thread pool.
+  `Example` dense/hybrid RAG still uses gte-small; `RagTunerHelloWorld` is BM25 only.
 - Tiny-LLM-ONNX (~10M) is a toy checkpoint — expect incoherent text; context is only 1024 tokens
 - Lexical `isOutsideCorpus` ignores conversational glue words; still BM25/heuristic (no LLM judge)
+- Tiny greedy chat (Qwen3-0.6B + `deterministic`) can invent a famous book even when RAG hits are correct;
+  `RagPrompts.GROUNDING` and repeating the EPUB OPF title on later chunks reduce that, they do not eliminate it
 
 
 ## 6. Open Questions & Pending Decisions
@@ -176,7 +181,7 @@
 - ONNX demo: `./models/download-smollm2-135m-instruct-onnx.sh` (chat) or `./models/download-tiny-llm-onnx.sh` (base toy)
 - Dense RAG: `RagFactory.withEmbeddings(preparedRag, embedModel)` → `HybridRagIndex`; keep BM25 via `PreparedRag` alone
 - Advisor+BM25 demo: `AdvisorRagHelloWorld` (Gemma3-270M, advisor Alex, Grimm names/father)
-- EPUB RagTuner demo: `RagTunerHelloWorld` (Qwen3-0.6B chat + unpacked gte-small embeddings, bundled `pg59112.epub` / *R.U.R.*, JDK zip+StAX extract); pass an `Executor` to `DenseRagIndex.of` for parallel indexing
+- EPUB RagTuner demo: `RagTunerHelloWorld` (Qwen3-0.6B chat + BM25, bundled `pg59112.epub` / *R.U.R.*, JDK zip+StAX extract, OPF title as Markdown heading)
 - Classpath RAG: `RagFactory.makeResource("docs/a.md")` / `.addResource(loader, path)` / `.addResource(Class, "/abs.md")`
 - Props: `nanollvm.*` / `NANOLLVM_*` only (`NanoLlvmProps`)
 - Heap/vector: `.mvn/jvm.config`; surefire uses `jvm.module.args`
@@ -197,7 +202,8 @@
 - Raw streaming decode (think tags and chat specials kept): `LlmTextKind.TEXT_RAW` on a `ChatSession` listener;
   `TEXT_THINKING` / `TEXT_ASSISTANT` stay parsed. CLI `streamTo` ignores `TEXT_RAW`.
 - Prefer `LlmModelFactory.open` / `make` → `LLM.builder(LlmModel)`; optional `.sampling(params)` on the engine;
-  close LLM then model. In a server, do not rely on the default process-wide matmul pool: inject
+  `.deterministic()` for greedy argmax (same tokens every run; `temperature(0)` is still rejected).
+  Close LLM then model. In a server, do not rely on the default process-wide matmul pool: inject
   `.matmulExecutor(appPool)`, call `.dedicatedMatmulPool()`, or `.disableMultiCpu()`. One `LLM` per
   in-flight generate; share `LlmModel`. Cap turns with `ChatSession.timeout`. `ResourceLimits.setCurrent`
   is JVM-global. Extra CPU cores help long prompts (attention/RoPE) as well as GEMM; decode of a

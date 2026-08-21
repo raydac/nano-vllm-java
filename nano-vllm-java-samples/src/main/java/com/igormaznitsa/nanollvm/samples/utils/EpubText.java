@@ -43,7 +43,9 @@ public final class EpubText {
   private static final Pattern TAG = Pattern.compile("(?s)<[^>]+>");
   private static final Pattern NAMED_ENTITY = Pattern.compile("&([A-Za-z][A-Za-z0-9]+);");
   private static final Pattern NUMERIC_ENTITY = Pattern.compile("&#(x[0-9A-Fa-f]+|\\d+);");
-  private static final Pattern WHITESPACE = Pattern.compile("\\s+");
+  private static final Pattern HORIZONTAL_WS = Pattern.compile("[^\\S\\n]+");
+  private static final Pattern MULTI_NEWLINE = Pattern.compile("\\n{3,}");
+  private static final Pattern TITLE_SUBTITLE = Pattern.compile("\\s+/\\s+");
   private static final Pattern ZIP_SLASH = Pattern.compile("/");
   private static final Map<String, String> NAMED_ENTITIES = Map.ofEntries(
     Map.entry("amp", "&"),
@@ -87,7 +89,8 @@ public final class EpubText {
 
   public static String normalizeWhitespace(final String text) {
     requireNonNull(text, "text");
-    return WHITESPACE.matcher(text.strip()).replaceAll(" ");
+    String squeezed = HORIZONTAL_WS.matcher(text.strip()).replaceAll(" ");
+    return MULTI_NEWLINE.matcher(squeezed).replaceAll("\n\n").strip();
   }
 
   private static XMLInputFactory secureXmlFactory() {
@@ -223,16 +226,25 @@ public final class EpubText {
   }
 
   private static String metadataPreface(final Publication publication) {
-    String titles = String.join("; ", publication.titles());
+    String title = headingTitle(publication.titles());
     String authors = String.join(", ", publication.authors());
-    StringBuilder preface = new StringBuilder();
-    if (!titles.isEmpty()) {
-      preface.append("Title: ").append(titles).append('\n');
+    if (title.isEmpty() && authors.isEmpty()) {
+      return "";
     }
-    if (!authors.isEmpty()) {
-      preface.append("Author: ").append(authors).append('\n');
+    if (authors.isEmpty()) {
+      return "# " + title + "\n";
     }
-    return preface.toString();
+    if (title.isEmpty()) {
+      return "# " + authors + "\n";
+    }
+    return "# " + title + " — " + authors + "\n";
+  }
+
+  private static String headingTitle(final List<String> titles) {
+    if (titles.isEmpty()) {
+      return "";
+    }
+    return TITLE_SUBTITLE.split(titles.getFirst().strip(), 2)[0].strip();
   }
 
   private static Optional<String> htmlBody(final byte[] data) {

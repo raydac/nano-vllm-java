@@ -4,26 +4,22 @@ import static java.util.stream.Collectors.joining;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import com.igormaznitsa.nanollvm.models.LlmModel;
-import com.igormaznitsa.nanollvm.models.LlmModelFactory;
-import com.igormaznitsa.nanollvm.rag.DenseRagIndex;
 import com.igormaznitsa.nanollvm.rag.PreparedRag;
-import com.igormaznitsa.nanollvm.rag.RagFactory;
 import com.igormaznitsa.nanollvm.rag.RagHit;
+import com.igormaznitsa.nanollvm.rag.RagIndex;
 import com.igormaznitsa.nanollvm.rag.RagResource;
 import com.igormaznitsa.nanollvm.rag.TextChunk;
 import com.igormaznitsa.nanollvm.samples.utils.EpubText;
-import com.igormaznitsa.nanollvm.samples.utils.SampleModelAssumptions;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.UncheckedIOException;
-import java.nio.file.Path;
+import java.util.List;
 import java.util.Locale;
 import org.junit.jupiter.api.Test;
 
 class RagTunerHelloWorldTest {
 
-  private static String joinedHits(final DenseRagIndex index, final String query) {
+  private static String joinedHits(final RagIndex index, final String query) {
     return index.retrieve(query, 5).stream()
       .map(RagHit::chunk)
       .map(TextChunk::text)
@@ -54,11 +50,6 @@ class RagTunerHelloWorldTest {
     assertFalse(folded.contains("<html"));
   }
 
-  private static String bookExcerpt() {
-    String text = EpubText.extract(loadedEpub()).orElseThrow();
-    return text.substring(0, Math.min(text.length(), 8_000));
-  }
-
   @Test
   void ragTunerChunksBundledEpub() {
     PreparedRag documents = RagTunerHelloWorld.loadBundledEpub();
@@ -66,23 +57,29 @@ class RagTunerHelloWorldTest {
   }
 
   @Test
-  void denseIndexRetrievesBookFactsWhenGtePresent() {
-    Path gte = SampleModelAssumptions.requireGteSmallGguf();
-    String excerpt = bookExcerpt();
-    PreparedRag documents = RagFactory.builder()
-      .add("rur-excerpt", excerpt)
-      .build();
+  void helenaGloryChunksCarryPlayTitle() {
+    List<String> helena = RagTunerHelloWorld.loadBundledEpub().chunks().stream()
+      .map(TextChunk::text)
+      .map(text -> text.toLowerCase(Locale.ROOT))
+      .filter(text -> text.contains("helena glory"))
+      .toList();
+    assertFalse(helena.isEmpty());
+    assertTrue(helena.stream().anyMatch(text -> text.contains("r.u.r")
+      || text.contains("rossum")
+      || text.contains("čapek")
+      || text.contains("capek")));
+    assertTrue(helena.stream().noneMatch(text -> text.contains("fantastic melodrama")));
+  }
 
-    try (LlmModel embed = LlmModelFactory.make(gte)) {
-      DenseRagIndex index = DenseRagIndex.of(documents, embed);
-      assertTrue(index.size() > 0);
+  @Test
+  void bm25RetrievesBookFacts() {
+    PreparedRag documents = RagTunerHelloWorld.loadBundledEpub();
 
-      assertTrue(joinedHits(index, "What does the Czech word robot mean?")
-        .toLowerCase(Locale.ROOT)
-        .contains("worker"));
-      assertTrue(joinedHits(index, "Who is Helena Glory?")
-        .toLowerCase(Locale.ROOT)
-        .contains("helena"));
-    }
+    assertTrue(joinedHits(documents, "What does the Czech word robot mean?")
+      .toLowerCase(Locale.ROOT)
+      .contains("worker"));
+    assertTrue(joinedHits(documents, "Who is Helena Glory?")
+      .toLowerCase(Locale.ROOT)
+      .contains("helena"));
   }
 }

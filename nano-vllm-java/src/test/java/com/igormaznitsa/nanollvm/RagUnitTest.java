@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.igormaznitsa.nanollvm.prompts.RagPrompts;
 import com.igormaznitsa.nanollvm.rag.PreparedRag;
 import com.igormaznitsa.nanollvm.rag.RagFactory;
 import com.igormaznitsa.nanollvm.rag.RagHit;
@@ -98,7 +99,9 @@ class RagUnitTest {
     String prompt = RagSession.formatUserMessage(hits, "What are cats?");
     assertTrue(prompt.contains("Cats are mammals."));
     assertTrue(prompt.contains("What are cats?"));
+    assertTrue(prompt.contains(RagPrompts.GROUNDING));
     assertTrue(prompt.endsWith("What are cats?"));
+    assertEquals("Cats are mammals.", RagPrompts.facts(prompt).replaceFirst("^- ", ""));
     assertFalse(prompt.contains("Context:"));
   }
 

@@ -10,6 +10,7 @@ import com.igormaznitsa.nanollvm.tokenizer.Tokenizer;
  * {@code 0.6} (how random the next word-piece is), {@code maxTokens} {@code 256} (how long the
  * reply may be), end-of-text honored, top-k off, top-p {@code 0.95}. Lower temperature (and
  * optionally a tighter top-p) for factual / RAG answers; raise temperature for more variety.
+ * Same answer every run: {@link #deterministic()} or {@link LLM.Builder#deterministic()}.
  * Prefer {@link #neutral()} or {@link SamplingParams#builder()} — {@link #forTokenizer(Tokenizer)}
  * ignores its argument. Model-family extras (turn-based top-k, …) belong in the application.
  *
@@ -67,6 +68,31 @@ public final class SamplingDefaults {
    */
   public static SamplingParams neutral(final int maxTokens) {
     return SamplingParams.builder().maxTokens(maxTokens).build();
+  }
+
+  /**
+   * Repeatable knobs: highest-logit token every step ({@code topK = 1}, nucleus off). Other
+   * fields match {@link #neutral()}. Prefer {@link LLM.Builder#deterministic()} to seal this on
+   * chat / complete / RAG.
+   *
+   * @return a new immutable {@link SamplingParams}
+   * @see SamplingParams#deterministic()
+   * @since 1.1.1
+   */
+  public static SamplingParams deterministic() {
+    return SamplingParams.deterministic();
+  }
+
+  /**
+   * {@link #deterministic()} with a custom {@code maxTokens} budget.
+   *
+   * @param maxTokens new-token cap; must be {@code >= 1}
+   * @return a new immutable {@link SamplingParams}
+   * @throws IllegalArgumentException if {@code maxTokens < 1}
+   * @since 1.1.1
+   */
+  public static SamplingParams deterministic(final int maxTokens) {
+    return SamplingParams.deterministic(maxTokens);
   }
 
   /**

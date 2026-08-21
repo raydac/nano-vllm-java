@@ -7,13 +7,15 @@ import java.util.Objects;
  *
  * <p>Construct only via {@link #builder()} or {@link SamplingDefaults}. Copies use {@code with*}
  * methods. The built object is safe to share across threads and across prompts in a batch. There
- * is no RNG seed on this type: the same knobs can still produce different text on repeated runs.
+ * is no RNG seed: repeated runs can differ unless the knobs are {@linkplain #deterministic()
+ * deterministic} ({@code topK == 1}), which always picks the highest-logit token.
  *
  * <p>Each decode step turns logits into a distribution, then draws one token, in this order:
  * <ol>
  *   <li><b>Temperature</b> — softmax uses {@code logits / temperature}. Lower values peak on the
  *       highest-logit token (more repeatable, less random). Higher values flatten the distribution
- *       (more variety). Must be {@code > 1e-10}; pure greedy {@code argmax} ({@code 0}) is rejected.
+ *       (more variety). Must be {@code > 1e-10}; {@code 0} is rejected. Repeatable argmax is
+ *       {@link #deterministic()} / {@link LLM.Builder#deterministic()}, not temperature zero.
  *       Neutral chat is {@link SamplingDefaults#DEFAULT_TEMPERATURE} ({@code 0.6}). Factoid / RAG
  *       answers usually want {@code 0.1}–{@code 0.2}.</li>
  *   <li><b>Top-k</b> — keep only the {@code k} most probable tokens and renormalize.
@@ -82,6 +84,30 @@ public final class SamplingParams {
    */
   public static Builder builder() {
     return new Builder();
+  }
+
+  /**
+   * Repeatable next-token picks: keep only the highest-logit token ({@code topK = 1}) and turn
+   * nucleus off ({@code topP = 1}). Temperature stays at {@link SamplingDefaults#DEFAULT_TEMPERATURE}
+   * (ranking is unchanged). Same prompt → same token ids.
+   *
+   * @return a new immutable instance
+   * @since 1.1.1
+   */
+  public static SamplingParams deterministic() {
+    return builder().deterministic().build();
+  }
+
+  /**
+   * {@link #deterministic()} with a custom {@link #maxTokens()} cap.
+   *
+   * @param maxTokens must be {@code >= 1}
+   * @return a new immutable instance
+   * @throws IllegalArgumentException if {@code maxTokens < 1}
+   * @since 1.1.1
+   */
+  public static SamplingParams deterministic(final int maxTokens) {
+    return builder().deterministic().maxTokens(maxTokens).build();
   }
 
   /**
@@ -197,6 +223,29 @@ public final class SamplingParams {
   }
 
   /**
+   * {@code true} when next-token choice cannot use the RNG ({@link #topK()} is {@code 1}).
+   *
+   * @return whether these knobs are greedy argmax
+   * @since 1.1.1
+   */
+  public boolean isDeterministic() {
+    return this.topK == 1;
+  }
+
+  /**
+   * Copy that always picks the highest-logit token ({@code topK = 1}, {@code topP = 1}).
+   * Temperature, {@link #maxTokens()}, and {@link #ignoreEos()} stay.
+   *
+   * @return this instance when already deterministic; otherwise a new copy
+   * @since 1.1.1
+   */
+  public SamplingParams asDeterministic() {
+    return this.isDeterministic() && this.topP == 1f
+      ? this
+      : new SamplingParams(this.temperature, this.maxTokens, this.ignoreEos, 1, 1f);
+  }
+
+  /**
    * {@inheritDoc}
    */
   @Override
@@ -296,6 +345,19 @@ public final class SamplingParams {
      */
     public Builder topP(final float topP) {
       this.topP = topP;
+      return this;
+    }
+
+    /**
+     * Greedy argmax: {@code topK(1)} and {@code topP(1)}. Temperature and {@link #maxTokens(int)}
+     * stay as set. Prefer {@link LLM.Builder#deterministic()} to seal this on an engine.
+     *
+     * @return {@code this}
+     * @since 1.1.1
+     */
+    public Builder deterministic() {
+      this.topK = 1;
+      this.topP = 1f;
       return this;
     }
 

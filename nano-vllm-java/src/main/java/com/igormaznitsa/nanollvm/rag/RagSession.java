@@ -30,6 +30,8 @@ import java.util.function.Predicate;
  *   <li><b>More / fewer passages in the prompt</b> — {@link #topK(int)} and
  *       {@link #maxContextChars(int)} (character cap on concatenated hits; not chunk size —
  *       that is {@link RagLoadOptions} at index load)</li>
+ *   <li><b>The same grounded answer every run</b> — {@link #deterministic()} or
+ *       {@link com.igormaznitsa.nanollvm.llm.LLM.Builder#deterministic()}</li>
  *   <li><b>Less random grounded answers</b> — {@link #sampling(SamplingParams)} with a low
  *       temperature; hits already clamp temperature to {@value #GROUNDED_TEMPERATURE_CAP} when hotter</li>
  *   <li><b>Ignore earlier assistant replies when answering from hits</b> —
@@ -292,6 +294,20 @@ public final class RagSession {
     this.baseSampling = requireNonNull(samplingParams, "samplingParams");
     this.chat.sampling(this.baseSampling);
     return this;
+  }
+
+  /**
+   * Greedy argmax for subsequent turns ({@code topK = 1}, nucleus off). Other knobs stay.
+   *
+   * @return {@code this} for fluent configuration
+   * @see SamplingParams#asDeterministic()
+   * @since 1.1.1
+   */
+  public RagSession deterministic() {
+    SamplingParams current = this.baseSampling != null
+      ? this.baseSampling
+      : this.chat.samplingParams();
+    return this.sampling(current.asDeterministic());
   }
 
   /**

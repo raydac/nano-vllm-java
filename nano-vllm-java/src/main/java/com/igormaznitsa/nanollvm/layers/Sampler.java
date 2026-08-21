@@ -14,9 +14,10 @@ import java.util.concurrent.ThreadLocalRandom;
  * whose mass is at least {@code p} and renormalizes, then one index is drawn. {@code topK == 0}
  * skips top-k; {@code topP >= 1} skips nucleus.
  *
- * <p>There is no RNG seed on this type. {@link ThreadLocalRandom} is used, so repeated calls with
- * the same logits can differ. Temperature must be {@code > 0}; {@code SamplingParams} already
- * rejects greedy {@code 0}.
+ * <p>There is no RNG seed on this type. {@link ThreadLocalRandom} is used unless
+ * {@code topK == 1}, which is greedy argmax (no draw). Repeated calls with the same logits
+ * can differ when {@code topK != 1}. Temperature must be {@code > 0}; {@code SamplingParams}
+ * already rejects greedy {@code 0}.
  *
  * <p><strong>Thread safety:</strong> {@link #forward(Tensor, float[], int[], float[])} may run
  * on the generate thread only (same as {@code Transformer}); the RNG itself is thread-local.
@@ -68,6 +69,10 @@ public final class Sampler {
   private int sampleRow(final Tensor logits, final int row, final int vocab,
                         final float temperature, final int topK,
                         final float topP) {
+    if (topK == 1) {
+      return this.argmax(logits, row, vocab);
+    }
+
     float[] scores = new float[vocab];
     int base = logits.offset() + row * vocab;
     float max = Float.NEGATIVE_INFINITY;
@@ -122,6 +127,20 @@ public final class Sampler {
       float s = p / Math.max(1e-10f, g);
       if (s > bestScore) {
         bestScore = s;
+        best = i;
+      }
+    }
+    return best;
+  }
+
+  private int argmax(final Tensor logits, final int row, final int vocab) {
+    int base = logits.offset() + row * vocab;
+    int best = 0;
+    float bestScore = logits.data()[base];
+    for (int i = 1; i < vocab; i++) {
+      float v = logits.data()[base + i];
+      if (v > bestScore) {
+        bestScore = v;
         best = i;
       }
     }

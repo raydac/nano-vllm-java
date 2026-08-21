@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased] — 1.1.1-SNAPSHOT
 
 ### Added
+- RAG user turns with retrieved passages now start with `RagPrompts.GROUNDING` so small chat models
+  are told to answer from those lines only and not invent a book or play.
+
+- `LLM.Builder.deterministic()` (also `SamplingParams` / `ChatSession` / `RagSession`): same prompt
+  always picks the highest-logit token (`topK = 1`, nucleus off). `temperature(0)` stays rejected.
+
 - `LLM.Builder.dedicatedMatmulPool()`: a bounded matmul thread pool owned by that engine and shut
   down on `close()`, so a server need not join the process-wide `nanollvm-matmul-*` pool or hand
   the library a foreign `ExecutorService`. Combining it with `matmulExecutor` fails at `build()`.
@@ -26,8 +32,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Load-time RAG tuners on `RagFactory.Builder.addProcessor`: skip files, supply custom document
   text, or rewrite extracted strings before chunking. Several tuners run in order.
   Sample `RagTunerHelloWorld` extracts a bundled Project Gutenberg EPUB of Karel Čapek's *R.U.R.*
-  (JDK zip + StAX, no epub4j / xpp3), unpacks gte-small for faster CPU embedding, redraws a single
-  in-place percent/ETA bar while indexing, and asks questions from that play. `DenseRagIndex.of` / `HybridRagIndex.of` accept
+  (JDK zip + StAX, no epub4j / xpp3), keeps the short OPF title (before a subtitle slash) as a
+  Markdown heading so later chunks still name the play, indexes with BM25, and asks questions from that play with
+  `LLM.Builder.deterministic()` so repeats pick the same tokens. `DenseRagIndex.of` / `HybridRagIndex.of` accept
   a per-passage embed callback and an optional caller `Executor` for parallel indexing (sequential
   when omitted).
 
@@ -48,7 +55,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Index-time passage embedding is sequential unless the caller supplies an `Executor`.
 - Extra CPU cores now work on long prompts, not only GEMM: independent attention heads, rotary
   embeddings, token embedding gathers, and Gemma QAT activation scaling run on the same matmul
-  pool as linear layers when `cpuThreads > 1`.
+  pool as linear layers when `cpuThreads > 1`. Causal attention splits that work head-major so
+  each worker covers a full query range (later tokens attend more keys; query-major chunks
+  left the last worker with most of the prefill).
 - `LlmModel` is a sealed API type. The factory still returns `LlmModel`; the transformer graph
   and engine lease live on a hidden implementation (no static access registry).
 

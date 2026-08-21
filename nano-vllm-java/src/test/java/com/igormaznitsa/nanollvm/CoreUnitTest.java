@@ -35,6 +35,7 @@ import com.igormaznitsa.nanollvm.layers.Attention;
 import com.igormaznitsa.nanollvm.layers.BidirectionalAttention;
 import com.igormaznitsa.nanollvm.layers.Norms.RMSNorm;
 import com.igormaznitsa.nanollvm.layers.Norms.RotaryEmbedding;
+import com.igormaznitsa.nanollvm.layers.Sampler;
 import com.igormaznitsa.nanollvm.layers.VocabParallelEmbedding;
 import com.igormaznitsa.nanollvm.llm.Config;
 import com.igormaznitsa.nanollvm.llm.GenerationStats;
@@ -931,6 +932,19 @@ class CoreUnitTest {
   }
 
   @Test
+  void samplerTopKOnePicksHighestLogit() {
+    Sampler sampler = new Sampler();
+    Tensor logits = Tensor.of(new float[] {0.2f, 4.5f, 4.4f, -1f}, 1, 4);
+    float[] temperatures = {0.9f};
+    int[] topKs = {1};
+    float[] topPs = {0.3f};
+    int[] first = sampler.forward(logits, temperatures, topKs, topPs);
+    int[] second = sampler.forward(logits, temperatures, topKs, topPs);
+    assertEquals(1, first[0]);
+    assertEquals(first[0], second[0]);
+  }
+
+  @Test
   void engineSamplingSurvivesChatMaxTokensWhenWeightsPresent() {
     Path path = OptionalModelAssumptions.requireQwen3();
     SamplingParams policy = SamplingParams.builder()
@@ -958,6 +972,28 @@ class CoreUnitTest {
       assertEquals(64, session.samplingParams().topK());
       assertEquals(2, session.history().size());
       assertEquals(ChatRole.USER, session.history().getFirst().role());
+    }
+  }
+
+  @Test
+  void engineDeterministicSamplingWhenWeightsPresent() {
+    Path path = OptionalModelAssumptions.requireQwen3();
+    try (LlmModel model = LlmModelFactory.make(path);
+         LLM llm = LLM.builder(model)
+           .sampling(
+             SamplingParams.builder().temperature(0.9f).topK(64).topP(0.8f).maxTokens(32).build())
+           .deterministic()
+           .maxModelLen(256)
+           .numKvcacheBlocks(32)
+           .build()) {
+      assertTrue(llm.defaultSampling().isDeterministic());
+      assertEquals(1, llm.defaultSampling().topK());
+      assertEquals(1f, llm.defaultSampling().topP());
+      assertEquals(0.9f, llm.defaultSampling().temperature(), 1e-6f);
+      assertEquals(32, llm.defaultSampling().maxTokens());
+      assertTrue(llm.chat().samplingParams().isDeterministic());
+      assertTrue(llm.chat(16).samplingParams().isDeterministic());
+      assertEquals(16, llm.chat(16).samplingParams().maxTokens());
     }
   }
 

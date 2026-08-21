@@ -1,7 +1,7 @@
 package com.igormaznitsa.nanollvm.engine;
 
+import java.util.HashMap;
 import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Per-LLM rolling short-convolution state for hybrid short-conv models (LFM2), keyed by
@@ -13,15 +13,15 @@ import java.util.concurrent.ConcurrentHashMap;
  * through {@link Transformer#clearConvState(int)} when a sequence's KV is released (finish,
  * preempt, cancel).
  *
- * <p>The backing map is concurrent so a release can drop a row without iterating the generate
- * thread's local structures; this is still not a concurrent generate API.
+ * <p>The backing map is generate-thread confined (same contract as {@link Scheduler});
+ * {@link #clear(int)} runs under the engine generate lock.
  *
  * @see Transformer
  * @see com.igormaznitsa.nanollvm.layers.ShortConv
  */
 public final class ConvStateArena implements AutoCloseable {
 
-  private final Map<Integer, float[][]> bySeqId = new ConcurrentHashMap<>();
+  private final Map<Integer, float[][]> bySeqId = new HashMap<>();
   private final int numLayers;
   private final int hiddenSize;
   private final int stateLen;

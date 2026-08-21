@@ -181,13 +181,12 @@ mvn -pl nano-vllm-java-samples -q exec:java \
 ```
 
 Load-time **RagTuner** over a bundled EPUB (Karel Čapek, *R.U.R.*): filter `.epub`, extract plain
-text with JDK zip + StAX, embed chunks with gte-small, then ask the play
-(Qwen3-0.6B chat; download the encoder with `./models/download-gte-small-gguf.sh`):
+text with JDK zip + StAX, index with BM25, then ask the play (Qwen3-0.6B chat):
 
 ```bash
 mvn -pl nano-vllm-java-samples -q exec:java \
   -Dexec.mainClass=com.igormaznitsa.nanollvm.samples.RagTunerHelloWorld
-# optional: … -Dexec.args="models/Qwen3-0.6B models/gte-small.Q2_K.gguf"
+# optional: … -Dexec.args="models/Qwen3-0.6B"
 ```
 
 More API samples (streaming, RAG, GGUF, advisors) are in [Library quick start](#library-quick-start).
@@ -590,7 +589,8 @@ try (LlmModel model = LlmModelFactory.make(modelDir);  // or open(dir).listen(Ll
 ```
 
 Load weights once with `LlmModelFactory.make` or `open(path).make()`, then bind engines with
-`LLM.builder(model)` so one model can be shared (close engines first, then the model):
+`LLM.builder(model)` so one model can be shared (close engines first, then the model).
+Same tokens every run: `.deterministic()` on the builder (`temperature(0)` is still rejected).
 
 ```java
 try (LlmModel model = LlmModelFactory.make(Path.of("models/Qwen3-0.6B"));
@@ -767,7 +767,7 @@ Load-time **tuners** (**since 1.1.1**): `builder().addProcessor(RagTuner…)` ca
 (`isRagResourceAllowed`), replace UTF-8 extraction (`extractRagText` → empty Optional keeps
 the default loader), and rewrite text (`preprocessRagText`) before sentence packing. The library
 does not parse PDF/EPUB itself — register an extractor and, for folder walks, add the suffix to
-`folderExtensions`. Linear demo: `samples.RagTunerHelloWorld` (bundled *R.U.R.* EPUB, dense embeddings).
+`folderExtensions`. Linear demo: `samples.RagTunerHelloWorld` (bundled *R.U.R.* EPUB, BM25).
 
 **Dense / hybrid** (**since 1.1.0**) need an embedding `LlmModel` (for example gte-small GGUF):
 
