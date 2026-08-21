@@ -197,7 +197,8 @@ More API samples (streaming, RAG, GGUF, advisors) are in [Library quick start](#
 - Continuous batching scheduler with paged KV cache and prefix caching
 - **Qwen3** (HF safetensors, ONNX **1.1.0**, or GGUF **1.1.0**), **Gemma3**, **Gemma 4 text** QAT mobile (**since 1.1.0**, packed safetensors), **Llama** (**since 1.1.0**), and **LFM2** (hybrid short-conv + GQA, GGUF) causal LMs
 - Weight crates: HF **safetensors**, **GGUF**, and (**since 1.1.0**) ONNX Tier A — see [Supported formats and variants](#supported-formats-and-variants)
-- Optional multi-thread CPU matmul (`cpuThreads` / `matmulExecutor` / `disableMultiCpu`); default = all processors on a lazily shared pool
+- Optional multi-thread CPU matmul (`cpuThreads` / `matmulExecutor` / `dedicatedMatmulPool` **since 1.1.1** /
+  `disableMultiCpu`); default = all processors on a lazily shared pool
 - GPT-2 byte BPE, Gemma Metaspace BPE, GGUF-embedded, BERT WordPiece, Unigram SentencePiece
   (including precompiled charsmap), WordLevel, character, and SentencePiece `tokenizer.model` tokenizers
 - Optional **BM25 text RAG** over a local `rag/` corpus (Example demo menu: none / BM25 / dense / hybrid); dense / hybrid embeddings **since 1.1.0**
@@ -284,7 +285,7 @@ Each checkpoint folder must look like a standard Hugging Face snapshot:
 ```
 models/Qwen3-0.6B/
   config.json
-  tokenizer.json
+  tokenizer.json             # or tokenizer.model (SentencePiece) since 1.1.1
   tokenizer_config.json
   model.safetensors          # one or more *.safetensors
   …                          # merges.txt / vocab.json as needed
