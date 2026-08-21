@@ -15,6 +15,7 @@ import com.igormaznitsa.nanollvm.tensor.Tensor;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * Named home for one transformer tick: prepare batch tensors → {@link CausalLM#forward} →
@@ -64,10 +65,10 @@ public final class Transformer implements AutoCloseable {
   private final MatmulRuntime matmul;
   private final Context stepContext = new Context();
   private final Sampler sampler = new Sampler();
+  private final AtomicBoolean closed = new AtomicBoolean();
   private CausalLM network;
   private KvCacheArena kvCache;
   private ConvStateArena convCache;
-  private boolean closed;
 
   /**
    * Builds a transformer with silent engine I/O (no load-progress lines).
@@ -255,17 +256,18 @@ public final class Transformer implements AutoCloseable {
    */
   @Override
   public void close() {
-    this.closed = true;
-    this.stepContext.clear();
-    if (this.kvCache != null) {
-      this.kvCache.close();
-      this.kvCache = null;
+    if (this.closed.compareAndSet(false, true)) {
+      this.stepContext.clear();
+      if (this.kvCache != null) {
+        this.kvCache.close();
+        this.kvCache = null;
+      }
+      if (this.convCache != null) {
+        this.convCache.close();
+        this.convCache = null;
+      }
+      this.network = null;
     }
-    if (this.convCache != null) {
-      this.convCache.close();
-      this.convCache = null;
-    }
-    this.network = null;
   }
 
   /**
@@ -280,14 +282,8 @@ public final class Transformer implements AutoCloseable {
     }
   }
 
-  /**
-   * Generate-thread closed flag. {@link com.igormaznitsa.nanollvm.llm.LLM} supplies visibility via
-   * its generate lock.
-   *
-   * @throws IllegalStateException if {@link #close()} has already run
-   */
   private void requireOpen() {
-    if (this.closed) {
+    if (this.closed.get()) {
       throw new IllegalStateException("Transformer is closed");
     }
   }

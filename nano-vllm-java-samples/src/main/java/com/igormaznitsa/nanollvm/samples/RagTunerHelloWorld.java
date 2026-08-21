@@ -19,6 +19,8 @@ import java.nio.file.Path;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.locks.ReentrantLock;
 
 /**
  * Dense embedding RAG over a bundled EPUB: {@link RagTuner} filter / extract / preprocess,
@@ -151,7 +153,8 @@ public final class RagTunerHelloWorld {
 
     private final int total;
     private final long startNanos = System.nanoTime();
-    private boolean finished;
+    private final AtomicBoolean finished = new AtomicBoolean();
+    private final ReentrantLock paintLock = new ReentrantLock();
 
     EmbedProgress(final int total) {
       this.total = Math.max(1, total);
@@ -170,21 +173,34 @@ public final class RagTunerHelloWorld {
         String.format(ROOT, "%-" + LINE_WIDTH + "s", line);
     }
 
-    synchronized void embedded(final int done) {
-      if (this.finished) {
-        return;
-      }
-      this.printBar(Math.clamp(done, 0, this.total));
-      if (done >= this.total) {
-        this.finish();
+    void embedded(final int done) {
+      this.paintLock.lock();
+      try {
+        if (this.finished.get()) {
+          return;
+        }
+        this.printBar(Math.clamp(done, 0, this.total));
+        if (done >= this.total) {
+          this.completeBar();
+        }
+      } finally {
+        this.paintLock.unlock();
       }
     }
 
-    synchronized void finish() {
-      if (this.finished) {
+    void finish() {
+      this.paintLock.lock();
+      try {
+        this.completeBar();
+      } finally {
+        this.paintLock.unlock();
+      }
+    }
+
+    private void completeBar() {
+      if (!this.finished.compareAndSet(false, true)) {
         return;
       }
-      this.finished = true;
       System.out.printf(ROOT, "\r%-" + LINE_WIDTH + "s%n",
         String.format(ROOT, "Embedded: done in %.1fs",
           (System.nanoTime() - this.startNanos) / 1e9));

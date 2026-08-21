@@ -35,6 +35,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.locks.ReentrantLock;
 import java.util.stream.IntStream;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -75,6 +76,7 @@ class ConcurrentLibraryUseTest {
   private final AtomicInteger liveWorkers = new AtomicInteger();
   private final AtomicInteger liveHammers = new AtomicInteger();
   private final AtomicInteger liveTurns = new AtomicInteger();
+  private final ReentrantLock logLock = new ReentrantLock();
   private long testStartedNanos;
 
   private static ThreadFactory namedWorkers() {
@@ -515,9 +517,12 @@ class ConcurrentLibraryUseTest {
     double elapsed = this.testStartedNanos == 0L
       ? 0d
       : (System.nanoTime() - this.testStartedNanos) / 1e9;
-    synchronized (System.err) {
+    this.logLock.lock();
+    try {
       System.err.printf(Locale.ROOT, "[nanollvm-concurrent] +%6.1fs  %s  [%s]%n",
         elapsed, message, this.parallelSnapshot());
+    } finally {
+      this.logLock.unlock();
     }
   }
 

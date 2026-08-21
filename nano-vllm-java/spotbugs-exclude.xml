@@ -34,8 +34,9 @@
         <Bug pattern="CT_CONSTRUCTOR_THROW"/>
     </Match>
 
-    <!-- Sequence / Transformer / MatmulRuntime live under LLM.generate's ReentrantLock;
-         fluent builders are single-threaded until build(). -->
+    <!-- Sequence mutate-in-place and Transformer arena refs live under LLM.generate's
+         ReentrantLock; fluent builders are single-threaded until build(). Close flags
+         on Transformer / MatmulRuntime are AtomicBoolean. -->
     <Match>
         <Or>
             <Class name="com.igormaznitsa.nanollvm.engine.Sequence"/>

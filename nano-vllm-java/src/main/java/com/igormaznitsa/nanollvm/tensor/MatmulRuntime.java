@@ -37,6 +37,7 @@ public final class MatmulRuntime implements AutoCloseable {
   private static final ThreadLocal<Boolean> POOL_WORKER =
     ThreadLocal.withInitial(() -> Boolean.FALSE);
   private final AtomicBoolean checkoutReleased = new AtomicBoolean();
+  private final AtomicBoolean closed = new AtomicBoolean();
 
   private final int cpuThreads;
   private final ExecutorService pool;
@@ -65,7 +66,6 @@ public final class MatmulRuntime implements AutoCloseable {
       }
     }
   }
-  private boolean closed;
 
   private MatmulRuntime(
     final int cpuThreads,
@@ -130,7 +130,7 @@ public final class MatmulRuntime implements AutoCloseable {
   @Override
   public void close() {
     if (this.markClosedOnClose) {
-      this.closed = true;
+      this.closed.set(true);
     }
     if (this.sharedCheckout) {
       if (this.checkoutReleased.compareAndSet(false, true)) {
@@ -411,7 +411,7 @@ public final class MatmulRuntime implements AutoCloseable {
   }
 
   private void requireOpen() {
-    if (this.closed) {
+    if (this.closed.get()) {
       throw new IllegalStateException("MatmulRuntime is closed");
     }
   }
