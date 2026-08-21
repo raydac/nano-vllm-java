@@ -264,7 +264,7 @@ public final class RagFactory {
    * @throws IllegalArgumentException if {@code lexical} has no chunks or {@code embeddingModel} is
    *                                  not an embedding encoder
    * @throws IllegalStateException    if {@code embeddingModel} is closed, or embedding is interrupted
-   * @since 1.1.1
+   * @since 1.2.0
    */
   public static HybridRagIndex withEmbeddings(
     final PreparedRag lexical,
@@ -430,7 +430,7 @@ public final class RagFactory {
      * @param tuners must not contain {@code null}; empty is a no-op
      * @return {@code this}
      * @throws NullPointerException if {@code tuners} or an element is {@code null}
-     * @since 1.1.1
+     * @since 1.2.0
      */
     public Builder addProcessor(final RagTuner... tuners) {
       this.corpus.addProcessor(tuners);
@@ -628,7 +628,7 @@ public final class RagFactory {
      *                                  embedding encoder
      * @throws IllegalStateException    if {@code embeddingModel} is closed, or embedding is interrupted
      * @throws ModelLoadException       if no non-blank chunks were added
-     * @since 1.1.1
+     * @since 1.2.0
      */
     public HybridRagIndex build(final LlmModel embeddingModel, final Executor executor) {
       return withEmbeddings(this.build(), embeddingModel, executor);

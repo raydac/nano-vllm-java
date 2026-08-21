@@ -10,7 +10,7 @@ import java.util.regex.Pattern;
 /**
  * GPT-2 byte-level BPE.
  *
- * @since 1.1.1
+ * @since 1.2.0
  */
 final class Gpt2ByteBpeCodec implements TokenCodec {
 

@@ -5,7 +5,7 @@ import java.util.List;
 /**
  * Encode/decode algorithm selected at tokenizer load.
  *
- * @since 1.1.1
+ * @since 1.2.0
  */
 sealed interface TokenCodec
   permits Gpt2ByteBpeCodec, MetaspaceBpeCodec, WordPieceCodec, UnigramCodec, WordLevelCodec,

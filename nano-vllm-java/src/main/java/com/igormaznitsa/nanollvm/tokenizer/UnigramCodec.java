@@ -12,7 +12,7 @@ import java.util.Map;
 /**
  * Unigram SentencePiece (Viterbi).
  *
- * @since 1.1.1
+ * @since 1.2.0
  */
 final class UnigramCodec implements TokenCodec {
 
@@ -134,7 +134,7 @@ final class UnigramCodec implements TokenCodec {
   /**
    * Piece scores for Unigram Viterbi.
    *
-   * @since 1.1.1
+   * @since 1.2.0
    */
   @SuppressWarnings("ArrayRecordComponent")
   record UnigramScores(float[] scores, int unkId, int maxPieceChars) {

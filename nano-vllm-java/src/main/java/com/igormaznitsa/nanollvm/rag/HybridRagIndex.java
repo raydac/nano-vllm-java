@@ -74,7 +74,7 @@ public final class HybridRagIndex implements RagIndex {
    * @throws IllegalArgumentException if {@code lexical} has no chunks or {@code embeddingModel} is
    *                                  not an embedding encoder
    * @throws IllegalStateException    if {@code embeddingModel} is closed
-   * @since 1.1.1
+   * @since 1.2.0
    */
   public static HybridRagIndex of(
     final PreparedRag lexical,
@@ -96,7 +96,7 @@ public final class HybridRagIndex implements RagIndex {
    * @throws IllegalArgumentException if {@code lexical} has no chunks or {@code embeddingModel} is
    *                                  not an embedding encoder
    * @throws IllegalStateException    if {@code embeddingModel} is closed, or embedding is interrupted
-   * @since 1.1.1
+   * @since 1.2.0
    */
   public static HybridRagIndex of(
     final PreparedRag lexical,
@@ -119,7 +119,7 @@ public final class HybridRagIndex implements RagIndex {
    * @throws IllegalArgumentException if {@code lexical} has no chunks or {@code embeddingModel} is
    *                                  not an embedding encoder
    * @throws IllegalStateException    if {@code embeddingModel} is closed, or embedding is interrupted
-   * @since 1.1.1
+   * @since 1.2.0
    */
   public static HybridRagIndex of(
     final PreparedRag lexical,

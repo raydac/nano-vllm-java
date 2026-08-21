@@ -284,7 +284,7 @@ public final class ModelFileBundle {
   /**
    * SentencePiece {@code tokenizer.model} bytes when present.
    *
-   * @since 1.1.1
+   * @since 1.2.0
    */
   public Optional<byte[]> sentencePieceModel() {
     return this.sentencePieceModel == null

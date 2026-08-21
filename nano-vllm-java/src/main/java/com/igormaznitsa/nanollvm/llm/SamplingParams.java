@@ -92,7 +92,7 @@ public final class SamplingParams {
    * (ranking is unchanged). Same prompt → same token ids.
    *
    * @return a new immutable instance
-   * @since 1.1.1
+   * @since 1.2.0
    */
   public static SamplingParams deterministic() {
     return builder().deterministic().build();
@@ -104,7 +104,7 @@ public final class SamplingParams {
    * @param maxTokens must be {@code >= 1}
    * @return a new immutable instance
    * @throws IllegalArgumentException if {@code maxTokens < 1}
-   * @since 1.1.1
+   * @since 1.2.0
    */
   public static SamplingParams deterministic(final int maxTokens) {
     return builder().deterministic().maxTokens(maxTokens).build();
@@ -226,7 +226,7 @@ public final class SamplingParams {
    * {@code true} when next-token choice cannot use the RNG ({@link #topK()} is {@code 1}).
    *
    * @return whether these knobs are greedy argmax
-   * @since 1.1.1
+   * @since 1.2.0
    */
   public boolean isDeterministic() {
     return this.topK == 1;
@@ -237,7 +237,7 @@ public final class SamplingParams {
    * Temperature, {@link #maxTokens()}, and {@link #ignoreEos()} stay.
    *
    * @return this instance when already deterministic; otherwise a new copy
-   * @since 1.1.1
+   * @since 1.2.0
    */
   public SamplingParams asDeterministic() {
     return this.isDeterministic() && this.topP == 1f
@@ -353,7 +353,7 @@ public final class SamplingParams {
      * stay as set. Prefer {@link LLM.Builder#deterministic()} to seal this on an engine.
      *
      * @return {@code this}
-     * @since 1.1.1
+     * @since 1.2.0
      */
     public Builder deterministic() {
       this.topK = 1;

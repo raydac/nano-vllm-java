@@ -10,7 +10,7 @@ public final class RagPrompts {
   /**
    * Lead sentence on a grounded RAG user turn: answer from the passages, do not invent a source.
    *
-   * @since 1.1.1
+   * @since 1.2.0
    */
   public static final String GROUNDING =
     "Answer using only the passages below. Do not invent books, plays, or sources.";

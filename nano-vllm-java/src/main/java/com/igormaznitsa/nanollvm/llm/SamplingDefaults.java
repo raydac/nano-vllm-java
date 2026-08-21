@@ -77,7 +77,7 @@ public final class SamplingDefaults {
    *
    * @return a new immutable {@link SamplingParams}
    * @see SamplingParams#deterministic()
-   * @since 1.1.1
+   * @since 1.2.0
    */
   public static SamplingParams deterministic() {
     return SamplingParams.deterministic();
@@ -89,7 +89,7 @@ public final class SamplingDefaults {
    * @param maxTokens new-token cap; must be {@code >= 1}
    * @return a new immutable {@link SamplingParams}
    * @throws IllegalArgumentException if {@code maxTokens < 1}
-   * @since 1.1.1
+   * @since 1.2.0
    */
   public static SamplingParams deterministic(final int maxTokens) {
     return SamplingParams.deterministic(maxTokens);

@@ -14,7 +14,7 @@ import java.util.Optional;
  * ({@link #content()} empty). {@link RagTuner#extractRagText(RagResource)} always sees loaded
  * bytes. Construct via {@link #file(Path)} / {@link #classpath(String)} (tests and custom tuners).
  *
- * @since 1.1.1
+ * @since 1.2.0
  */
 public final class RagResource {
 
@@ -271,7 +271,7 @@ public final class RagResource {
   /**
    * Where the document was found.
    *
-   * @since 1.1.1
+   * @since 1.2.0
    */
   public enum Kind {
     /**

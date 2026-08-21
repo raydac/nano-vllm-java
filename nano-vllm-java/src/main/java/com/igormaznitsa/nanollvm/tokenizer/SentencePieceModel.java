@@ -18,7 +18,7 @@ import java.util.Set;
 /**
  * SentencePiece {@code tokenizer.model} protobuf reader.
  *
- * @since 1.1.1
+ * @since 1.2.0
  */
 final class SentencePieceModel {
 
@@ -229,7 +229,7 @@ final class SentencePieceModel {
   /**
    * Decoded {@code tokenizer.model} fields.
    *
-   * @since 1.1.1
+   * @since 1.2.0
    */
   @SuppressWarnings("ArrayRecordComponent")
   record Parsed(

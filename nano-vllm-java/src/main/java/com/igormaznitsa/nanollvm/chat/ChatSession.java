@@ -117,7 +117,7 @@ public final class ChatSession {
    *
    * @return {@code this} for fluent configuration
    * @see SamplingParams#asDeterministic()
-   * @since 1.1.1
+   * @since 1.2.0
    */
   public ChatSession deterministic() {
     this.samplingParams = this.samplingParams.asDeterministic();

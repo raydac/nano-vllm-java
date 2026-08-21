@@ -10,7 +10,7 @@ import java.util.Map;
 /**
  * GPT-2 printable-byte mapping.
  *
- * @since 1.1.1
+ * @since 1.2.0
  */
 final class Gpt2Bytes {
 

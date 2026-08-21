@@ -102,7 +102,7 @@ public final class Tokenizer {
    * @param tokenizerConfigJson  optional {@code tokenizer_config.json}
    * @param generationConfigJson optional {@code generation_config.json}
    * @return immutable tokenizer
-   * @since 1.1.1
+   * @since 1.2.0
    */
   public static Tokenizer fromSentencePiece(
     final byte[] modelBytes,

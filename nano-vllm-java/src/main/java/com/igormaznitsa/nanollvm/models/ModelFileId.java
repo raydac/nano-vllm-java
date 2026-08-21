@@ -9,7 +9,7 @@ import static java.util.Objects.requireNonNull;
  * {@link #MODEL_ONNX} and {@link #MODEL_ONNX_FP16} are Tier A weight imports (<strong>since
  * 1.1.0</strong>); adapters may also resolve the same names under an {@code onnx/} subfolder.
  * {@link #TOKENIZER_MODEL} is the SentencePiece sidecar when {@link #TOKENIZER} is absent
- * (<strong>since 1.1.1</strong>).
+ * (<strong>since 1.2.0</strong>).
  *
  * @since 1.1.0
  */
@@ -21,7 +21,7 @@ public enum ModelFileId {
   /**
    * SentencePiece protobuf vocab used when {@link #TOKENIZER} is absent.
    *
-   * @since 1.1.1
+   * @since 1.2.0
    */
   TOKENIZER_MODEL("tokenizer.model"),
   GENERATION_CONFIG("generation_config.json"),

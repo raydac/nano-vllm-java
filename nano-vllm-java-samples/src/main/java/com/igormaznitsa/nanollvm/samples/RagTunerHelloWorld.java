@@ -31,7 +31,7 @@ import java.util.List;
  * repository root:
  * {@code mvn -pl nano-vllm-java-samples -q exec:java -Dexec.mainClass=com.igormaznitsa.nanollvm.samples.RagTunerHelloWorld}
  *
- * @since 1.1.1
+ * @since 1.2.0
  */
 public final class RagTunerHelloWorld {
 

@@ -22,7 +22,7 @@ import java.util.Set;
 /**
  * Constructs {@link Tokenizer} from JSON, SentencePiece, or GGUF sidecars.
  *
- * @since 1.1.1
+ * @since 1.2.0
  */
 final class TokenizerLoader {
 
@@ -180,7 +180,7 @@ final class TokenizerLoader {
   /**
    * Builds a tokenizer from a SentencePiece {@code tokenizer.model} protobuf.
    *
-   * @since 1.1.1
+   * @since 1.2.0
    */
   static Tokenizer fromSentencePiece(
     final byte[] modelBytes,

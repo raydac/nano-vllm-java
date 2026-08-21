@@ -9,7 +9,7 @@ import java.util.Map;
 /**
  * SentencePiece-style BPE with {@code ▁} word boundaries.
  *
- * @since 1.1.1
+ * @since 1.2.0
  */
 final class MetaspaceBpeCodec implements TokenCodec {
 

@@ -21,7 +21,7 @@ import java.util.regex.Pattern;
 /**
  * Hugging Face / SentencePiece normalizer chain.
  *
- * @since 1.1.1
+ * @since 1.2.0
  */
 final class TextNormalizer {
 

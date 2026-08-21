@@ -1627,7 +1627,7 @@ public final class LLM implements AutoCloseable {
      *
      * @return {@code this}
      * @see SamplingParams#deterministic()
-     * @since 1.1.1
+     * @since 1.2.0
      */
     public Builder deterministic() {
       this.deterministic = true;
@@ -1775,7 +1775,7 @@ public final class LLM implements AutoCloseable {
      * {@link #matmulExecutor(ExecutorService)}.
      *
      * @return {@code this}
-     * @since 1.1.1
+     * @since 1.2.0
      */
     public Builder dedicatedMatmulPool() {
       this.dedicatedMatmulPool = true;

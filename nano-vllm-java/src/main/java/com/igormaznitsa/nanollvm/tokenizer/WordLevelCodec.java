@@ -8,7 +8,7 @@ import java.util.List;
 /**
  * Whole-word vocab lookup.
  *
- * @since 1.1.1
+ * @since 1.2.0
  */
 final class WordLevelCodec implements TokenCodec {
 

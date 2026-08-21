@@ -6,7 +6,7 @@ import java.util.List;
 /**
  * SentencePiece {@code ▁} word-boundary helpers.
  *
- * @since 1.1.1
+ * @since 1.2.0
  */
 final class MetaspaceText {
 

@@ -1,7 +1,7 @@
 ## 1. Implementation Progress
-- Maven multi-module **`1.1.1-SNAPSHOT`** (post **1.1.0** 2026-08-16; previous **1.0.0** 2026-08-09): parent `nano-vllm-java-pom`, library `nano-vllm-java`, demos `nano-vllm-java-samples`; enforcer Java `[21,)`, Maven `[3.8,)`; JPMS module `com.igormaznitsa.nanollvm` (library only)
+- Maven multi-module **`1.2.0-SNAPSHOT`** (post **1.1.0** 2026-08-16; previous **1.0.0** 2026-08-09): parent `nano-vllm-java-pom`, library `nano-vllm-java`, demos `nano-vllm-java-samples`; enforcer Java `[21,)`, Maven `[3.8,)`; JPMS module `com.igormaznitsa.nanollvm` (library only)
 - CPU kernels: panel GEMV for dense linear, Vector-API 4-acc dots, SIMD elementwise/RMSNorm/MLP/attention axpy; paged KV attend in place
-- **ResourceLimits** (exported utils): process-wide defaults + builder; RAG/JSON/GGUF/safetensors/corpus/history budgets (PDF inflate/CMap fields removed in 1.1.1 with `PdfTextExtractor`)
+- **ResourceLimits** (exported utils): process-wide defaults + builder; RAG/JSON/GGUF/safetensors/corpus/history budgets (PDF inflate/CMap fields removed in 1.2.0 with `PdfTextExtractor`)
 - CausalLM: Qwen3 + Gemma3 + **Gemma 4 text (QAT mobile)** + **Llama** + LFM2 (GGUF); tokenizers are
   package-private codecs behind public `Tokenizer`: GPT-2 BPE / Metaspace BPE / GGUF-embedded /
   BERT WordPiece (HF `##` or GGUF metaspace) / Unigram SentencePiece (charsmap) / WordLevel / Char /
@@ -13,7 +13,7 @@
 - **GGUF:** packed by default; dequant catalog matches current llama.cpp weight types (K/IQ/TQ/MX/NV/legacy); `LlmModelFactory.make(path, io, true)` unpacks at load; `LLM.Builder.allowUnpackParameters()` late-unpacks packed models. Chat GGUF: **qwen3** + **lfm2**; embeddings **bert**. Load = `models.llmcontainer` transport → `models.llmarch` ArchitectureProcessor bind/fill/create
 - Library: `LlmModelFactory.open(path).make()` or `make` → shared `LlmModel` (`AutoCloseable`); also `make(ModelFileSource)` / `fromClasspath*` / `openClasspath*` (stream → heap; no disk cache); `LLM.Builder` only (warmup **off** by default); `.sampling(SamplingParams)` seals chat/complete defaults; close **LLM first**, then **model** (`try`-with-resources preferred). `LlmModel.toString()` prints kind, architecture, container, sizes, packed/dense/qat, chat format (safe after close). Builder-built types (`LLM`, `Config`, `LlmAdvisor`, `SamplingParams`, `MatmulRuntime`, `RagFactory`/`CorpusLoader` corpus) keep constructors private; `ResourceLimits` is a public record so its canonical constructor cannot be hidden.
 - **Concurrent use test:** `ConcurrentLibraryUseTest` (`@Tag("concurrent_test")`) loads SmolLM2-135M-Instruct-ONNX + gte-small, shares chat `LlmModel` + BM25/hybrid RAG over 12 depots + filler docs, races 6 generate workers against 8 retrieve hammers (start barrier only; KV kept modest to avoid OOM); excluded from the default Surefire run, enabled with `-Pconcurrent_test`
-- **`description.md`:** released **1.1.0** plus **1.1.1-SNAPSHOT** notes — Gemma 4 text QAT in ch. 2 / 7 / 7c (safetensors only, not ONNX), family list includes Llama / LFM2 / BERT / E5; `ResourceLimits` tagged **1.0.0**; panel GEMV / SIMD `Ops` / in-place paged KV; `TEXT_DEBUG` off unless `emitDebugPrompts(true)`; ONNX Tier A (**§7c**); Qwen3 GGUF in **§7a**; KV cache ch. **12**; ThinkTags / ChatSpecials / `TEXT_RAW`; usage snippets in ch. 4 / 7a / 7c / 14 / 16 / 17; RAG tuners (`RagTuner` / `RagResource` / `Builder.addProcessor`) in **§17**; SentencePiece `tokenizer.model` / Unigram / WordLevel / Char / `fromSentencePiece` in ch. **6** / **16**; `dedicatedMatmulPool` in §7a / Sample A3; no built-in PDF extractor (ch. 19). TOC anchors and ch. 20–21 URLs rechecked 2026-08-21.
+- **`description.md`:** released **1.1.0** plus **1.2.0-SNAPSHOT** notes — Gemma 4 text QAT in ch. 2 / 7 / 7c (safetensors only, not ONNX), family list includes Llama / LFM2 / BERT / E5; `ResourceLimits` tagged **1.0.0**; panel GEMV / SIMD `Ops` / in-place paged KV; `TEXT_DEBUG` off unless `emitDebugPrompts(true)`; ONNX Tier A (**§7c**); Qwen3 GGUF in **§7a**; KV cache ch. **12**; ThinkTags / ChatSpecials / `TEXT_RAW`; usage snippets in ch. 4 / 7a / 7c / 14 / 16 / 17; RAG tuners (`RagTuner` / `RagResource` / `Builder.addProcessor`) in **§17**; SentencePiece `tokenizer.model` / Unigram / WordLevel / Char / `fromSentencePiece` in ch. **6** / **16**; `dedicatedMatmulPool` in §7a / Sample A3; no built-in PDF extractor (ch. 19). TOC anchors and ch. 20–21 URLs rechecked 2026-08-21.
 - Optional download scripts: Qwen3 / Gemma3 / **Gemma4 E2B QAT mobile** / LFM2 GGUF / gte-small / **multilingual-e5-small ONNX** / **Tiny-LLM-ONNX** / **SmolLM2-135M-Instruct-ONNX** (`.sh` + Windows `.ps1`/`.cmd`; PS1 ASCII-only + `$PSScriptRoot` + absolute outs)
 - ONNX JavaDoc: Tier A contracts + {@code @since 1.1.0} on public Onnx* APIs / ModelFileId ONNX roles / LlmModelFactory note
 - **API ergonomics (1.1.0):** `LlmModelFactory.open(…).make()`, `SamplingParams.builder()` / withers,
@@ -27,7 +27,7 @@
   `ChatSession`, `RagSession`, `LlmModelFactory.Builder`, `NanoLlvmProps`) includes goal → method
   maps so a caller who does not know LLM jargon can find reply length, randomness, RAM, CPU, RAG
   passages, and JVM flags. Method names such as `useTqdm` / `kvHeapFraction` / `forTokenizer` are
-  unchanged (rename would break callers). `LLM.Builder.dedicatedMatmulPool()` (1.1.1) gives a
+  unchanged (rename would break callers). `LLM.Builder.dedicatedMatmulPool()` (1.2.0) gives a
   server an engine-owned matmul pool that `close()` shuts down, instead of the process-wide
   `nanollvm-matmul-*` default. Extra cores also speed prefill attention, RoPE, and token
   embedding gathers on that same pool (nested pool work stays sequential so a fixed pool cannot
@@ -37,7 +37,7 @@
   `SamplingParams.builder` / withers, `LLM.generate(…, Duration)` / `TokenEvent`,
   `LlmTextKind.TEXT_RAW`, `Config.HfConfig` Gemma 4 helpers, `SamplingDefaults.neutral()`, …).
   `ResourceLimits` is 1.0 — no class `@since`
-- **`@since 1.1.1`:** new types and new public members on older types (`Tokenizer.fromSentencePiece`,
+- **`@since 1.2.0`:** new types and new public members on older types (`Tokenizer.fromSentencePiece`,
   `ModelFileId.TOKENIZER_MODEL`, `ModelFileBundle.sentencePieceModel()`, tokenizer codec/load
   classes, `RagTuner` / `RagResource` / `RagFactory.Builder.addProcessor`,
   `LLM.Builder.deterministic` / `SamplingParams.deterministic` / session `deterministic()`). Do not retag 1.0/1.1.0
@@ -75,7 +75,7 @@
   (Attention/Linear/…; Scheduler/Transformer/Sequence/BlockManager/KV+conv arenas) in the same
   contract style as `tensor.Ops`.
 
-- **RAG:** `RagFactory` → `PreparedRag` (BM25); `addResource` / `makeResource` for classpath docs; optional `withEmbeddings` → `HybridRagIndex` (`DenseRagIndex` + RRF); package-private `CorpusLoader`; public API includes `RagTuner` / `RagResource` (`Builder.addProcessor` filter / extract / preprocess, `@since 1.1.1`). Default extract is UTF-8 only (no `PdfTextExtractor` / pdfbox); PDF/EPUB need a custom extractor + `.folderExtensions` for folder walks. `ResourceLimits` no longer has PDF inflate / CMap caps. Chunk ceiling is `RagLoadOptions` (`defaults()` 500 / `forTinyModels()` 220, then `withMaxChunkChars`); Javadoc on that type, `RagFactory`, package-info, `PreparedRag.options()`, `RagSession.maxContextChars` (prompt cap, separate). Packing leftover-long-sentence windows honor `chunkOverlap` (was hardcoded 40).
+- **RAG:** `RagFactory` → `PreparedRag` (BM25); `addResource` / `makeResource` for classpath docs; optional `withEmbeddings` → `HybridRagIndex` (`DenseRagIndex` + RRF); package-private `CorpusLoader`; public API includes `RagTuner` / `RagResource` (`Builder.addProcessor` filter / extract / preprocess, `@since 1.2.0`). Default extract is UTF-8 only (no `PdfTextExtractor` / pdfbox); PDF/EPUB need a custom extractor + `.folderExtensions` for folder walks. `ResourceLimits` no longer has PDF inflate / CMap caps. Chunk ceiling is `RagLoadOptions` (`defaults()` 500 / `forTinyModels()` 220, then `withMaxChunkChars`); Javadoc on that type, `RagFactory`, package-info, `PreparedRag.options()`, `RagSession.maxContextChars` (prompt cap, separate). Packing leftover-long-sentence windows honor `chunkOverlap` (was hardcoded 40).
 - **RAG off-topic:** `isOutsideCorpus` ignores conversational glue (`what`/`think`/`about`/…); source stems use `/`+`\` basename (Windows-safe)
 - **Samples** (`nano-vllm-java-samples`): linear `main` flows (`HelloWorld`, `NextTokenHelloWorld`, `EmbeddingsHelloWorld`, `LogTriageHelloWorld`, `AdvisorRagHelloWorld`, `RagTunerHelloWorld`, `Bench`, `Example`); `NextTokenHelloWorld` encodes a seed and prints the next tokens on Tiny-LLM-ONNX; `EmbeddingsHelloWorld` encodes text with multilingual-e5-small ONNX (`LlmModel.embed`, `query: ` prefix); `AdvisorRagHelloWorld` is one `main` (Alex advisor + BM25 over `rag/`, Grimm names/father, Gemma3-270M); `RagTunerHelloWorld` extracts bundled `pg59112.epub` (Čapek *R.U.R.*) via `RagTuner` + JDK zip/StAX (no epub4j/xpp3; OPF title kept as a short Markdown heading so later chunks still name the play), indexes with BM25, then asks play questions on Qwen3-0.6B with `LLM.Builder.deterministic()` and `isolateGeneration(true)` (greedy argmax, same tokens each run); RAG hits prepend `RagPrompts.GROUNDING`; hit dump (score, source, passage) is one stderr block so Maven/IDE do not split it from stdout answers; `Example` is a terminal app (model menu → RAG mode → advisor count → chat/embed); RAG turns print retrieved passage text; Enter = first menu item; downloaded models listed first (Qwen3-0.6B preferred); empty disk exits with download help; `--debug` enables prepared-prompt dumps; SmolLM2 Instruct ONNX (compact chat demo) + Tiny-LLM (base); gte-small / e5 embeddings; `BundledModels` / `BundledRag` / `OrderedConsole` in `samples.utils` (`ReentrantLock` for drain and stream buffers)
 
@@ -120,13 +120,13 @@
 
 ## 4. Current Work In Progress
 - Concurrency hygiene (re-audit 2026-08-21): no `volatile`/`synchronized`; close flags `AtomicBoolean`; generate lock is the only exclusive engine lock (`cancel` is a flag). Causal prefill jobs are head-major (balanced); `ConvStateArena` dropped `ConcurrentHashMap`. Sample embed bar and concurrent-test log still use `ReentrantLock`.
-- Development line **`1.1.1-SNAPSHOT`** (after **1.1.0** 2026-08-16); Maven Central still **1.1.0**
-- README Hello World / Central badge stay **1.1.0**; in-repo `mvn package` JARs are `1.1.1-SNAPSHOT`
+- Development line **`1.2.0-SNAPSHOT`** (after **1.1.0** 2026-08-16); Maven Central still **1.1.0**
+- README Hello World / Central badge stay **1.1.0**; in-repo `mvn package` JARs are `1.2.0-SNAPSHOT`
 - **Gemma 4 E2B QAT mobile** — text-only `LlmModel` load for `models/Gemma4-E2B-IT-QAT-Mobile/` (`google/gemma-4-E2B-it-qat-mobile-transformers`). Vision/audio unused. Packed QAT (int2/4/8 + SRQ), PLE, KV sharing, `<|turn>` chat.
 - Tokenizer codecs are package-private (`Gpt2ByteBpeCodec`, `MetaspaceBpeCodec`, `WordPieceCodec`,
   `UnigramCodec`, `WordLevelCodec`, `CharCodec`) behind public `Tokenizer`. Load is `TokenizerLoader`
   (`tokenizer.json` → `tokenizer.model` → bare `config.json`). `Tokenizer.fromSentencePiece` is public.
-  New tokenizer types and that factory carry `@since 1.1.1`.
+  New tokenizer types and that factory carry `@since 1.2.0`.
 - `Example` terminal demo: downloaded models first (Qwen3-0.6B preferred); Enter = first item; empty disk exits with download help; `--debug` for prepared prompts
 - **Qwen3 GGUF** — `LlmModelFactory.make(qwen3.gguf)` via transport + `ArchitectureProcessor`; unfused packed Q/K/V (no qkv_proj concat). HF safetensors Qwen3 folder unchanged. Live `Qwen3-0.6B-Q8_0.gguf` load test removed (file not kept in `models/`); `ModelBindingTest` uses a synthetic catalog only. README / `description.md` §7a / `models/README.md` document bring-your-own Qwen3 GGUF (no download script).
 - Windows download scripts audited/hardened (parity with `.sh` URLs/files OK)
@@ -172,8 +172,8 @@
 
 ## 7. Useful References
 - `security_audit.txt` — 1.0.0 threat-model summary
-- `CHANGELOG.md` — **1.1.0** released 2026-08-16; active line **1.1.1-SNAPSHOT**
-- `README.md` — Hello World, CLI, library samples; Maven Central **1.1.0**; in-repo JARs `1.1.1-SNAPSHOT`; Gemma 4 text; ONNX + Tiny-LLM; dense/hybrid RAG
+- `CHANGELOG.md` — **1.1.0** released 2026-08-16; active line **1.2.0-SNAPSHOT**
+- `README.md` — Hello World, CLI, library samples; Maven Central **1.1.0**; in-repo JARs `1.2.0-SNAPSHOT`; Gemma 4 text; ONNX + Tiny-LLM; dense/hybrid RAG
 - Build: `mvn22 -q test` / `MAVEN_OPTS="-Xmx8g" mvn22 -pl nano-vllm-java-samples -q exec:java` (document as `mvn` in README); other mains: `-Dexec.mainClass=…` (samples POM default `exec.mainClass` is `Example`); SpotBugs: `mvn22 -pl nano-vllm-java -am compile spotbugs:check` (also on `verify`); concurrent RAG test: `mvn22 -pl nano-vllm-java -Pconcurrent_test test`
 - Library: `LlmModelFactory.make(path)` / `open(path).make()` — engines close before model
 - Embeddings: `LlmModelFactory.make(e5Onnx); model.embed("query: " + text)` — sample `EmbeddingsHelloWorld` (default `models/multilingual-e5-small`); gte-small GGUF still works if you pass the path
@@ -192,8 +192,8 @@
 - Prefer `ChatSession` for dialog; raw `generate` / `generateTokenIds` / `complete` for continuations
   (`samples.NextTokenHelloWorld`)
 - Hugging Face folders load `tokenizer.json`, else SentencePiece `tokenizer.model`, else a tiny
-  `config.json` fallback. `Tokenizer.fromSentencePiece` is for in-memory protobuf bytes (`@since 1.1.1`).
-- New types and new public members in **1.1.1-SNAPSHOT** get `@since 1.1.1`; keep existing `@since`
+  `config.json` fallback. `Tokenizer.fromSentencePiece` is for in-memory protobuf bytes (`@since 1.2.0`).
+- New types and new public members in **1.2.0-SNAPSHOT** get `@since 1.2.0`; keep existing `@since`
   on older methods when load paths or codecs grow
 - Custom think/scratchpad markers: `LlmModelFactory.open(path).thinkTags(ThinkTags.of(open, close)).make()`;
   `ChatReply.parse(raw, llm)` uses the model pair; `ChatReply.parse(raw)` still defaults to `<think>`/`</think>`

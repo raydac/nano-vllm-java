@@ -42,7 +42,7 @@ public final class BundledModels {
   /**
    * Bundled multilingual-e5-small ONNX embedding folder under {@link #DEFAULT_MODELS_DIR}.
    *
-   * @since 1.1.1
+   * @since 1.2.0
    */
   public static final String MULTILINGUAL_E5_SMALL =
     DEFAULT_MODELS_DIR + "/multilingual-e5-small";
