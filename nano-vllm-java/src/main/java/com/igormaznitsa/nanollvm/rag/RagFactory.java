@@ -18,8 +18,10 @@ import java.util.concurrent.Executor;
  * Analogous to {@link com.igormaznitsa.nanollvm.models.LlmModelFactory} for weights.
  *
  * <p>{@link #make(java.nio.file.Path)} indexes a file or folder with
- * {@link RagLoadOptions#defaults()}. {@link #builder()} mixes folders, files, inline text, and
- * classpath resources. Optional {@link #withEmbeddings} adds vector search on top of BM25.
+ * {@link RagLoadOptions#defaults()}. {@link #builder()} mixes several folders, files, inline
+ * text, and classpath resources into one BM25 index (do not fuse separate {@link PreparedRag}
+ * instances with {@link HybridRagIndex} for that). Optional {@link #withEmbeddings} adds vector
+ * search on top of BM25.
  *
  * <p>Chunk size and sentence packing live on {@link RagLoadOptions}: pass them to
  * {@link #make(Path, RagLoadOptions)} or {@link Builder#options(RagLoadOptions)} before adding
@@ -190,7 +192,7 @@ public final class RagFactory {
   }
 
   /**
-   * Fluent corpus builder (inline text, files, folders, classpath resources). Set
+   * Fluent corpus builder (inline text, files, one or more folders, classpath resources). Set
    * {@link Builder#options(RagLoadOptions)} before adding documents to change chunk size.
    * Optional {@link Builder#addProcessor(RagTuner...)} registers load-time tuners.
    *
@@ -366,7 +368,8 @@ public final class RagFactory {
    * Fluent corpus assembler. {@link RagLoadOptions#defaults()} until {@link #options(RagLoadOptions)}
    * or {@link #forTinyModels()}; those must run before adding documents. Optional
    * {@link #addProcessor(RagTuner...)} may be called at any time and applies to documents added
-   * afterwards.
+   * afterwards. Mix {@link #addFolder(Path)} / {@link #addFolders(Path...)},
+   * {@link #addResource(String)}, and {@link #add(String)} on one builder.
    */
   public static final class Builder {
 
@@ -579,6 +582,25 @@ public final class RagFactory {
       this.corpus.addFolder(folder);
       if (this.sourceRoot == null) {
         this.sourceRoot = folder.toAbsolutePath().normalize();
+      }
+      return this;
+    }
+
+    /**
+     * Walks each directory like {@link #addFolder(Path)}. The first folder becomes
+     * {@link #sourceRoot(Path)} when none is set.
+     *
+     * @param folders directories to scan; must not be {@code null}
+     * @return {@code this}
+     * @throws NullPointerException     if {@code folders} or an element is {@code null}
+     * @throws IllegalArgumentException if an element is not a directory
+     * @since 1.2.0
+     */
+    public Builder addFolders(final Path... folders) {
+      requireNonNull(folders, "folders");
+      this.hasContent = true;
+      for (Path folder : folders) {
+        this.addFolder(folder);
       }
       return this;
     }

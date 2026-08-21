@@ -3246,10 +3246,16 @@ try (LlmModel model = LlmModelFactory.open(Path.of("models/Qwen3-0.6B")).make();
   String raw = llm.complete("The capital of France is");
 
   // Text RAG — prepare documents once (like LlmModel), share freely
-  var rag = RagFactory.make(Path.of("docs"));
-  // since 1.1.0: classpath — RagFactory.makeResource("docs/a.md") / .builder().addResource(…)
+  var rag = RagFactory.builder()
+      .addFolders(Path.of("docs/kb"), Path.of("docs/policies"))
+      .addResource(MyApp.class, "/help/faq.md")
+      .add("support-hours", "Live chat is available 9–17 UTC.")
+      .build();
+  // one folder: RagFactory.make(Path.of("docs"))
+  // since 1.1.0: one classpath file — RagFactory.makeResource("docs/a.md")
   //             hybrid — RagFactory.withEmbeddings(rag, embedModel)  (chapter 17)
   // since 1.2.0: builder().addProcessor(RagTuner…) filter / extract / preprocess (chapter 17)
+  //             builder().addFolders(dir, dir) for several disk trees
   String grounded = llm.rag(rag).topK(2).send("What is the capital of France?").answer();
 } // close LLM before LlmModel (try-with-resources closes in reverse declaration order)
 
@@ -3510,7 +3516,7 @@ optional since 1.1.0:
   LlmModel embed = LlmModelFactory.make(gteGguf)   // embedding encoder, not LLM.builder
   DenseRagIndex.of(prepared, embed)                // cosine over L2 vectors (sequential)
   DenseRagIndex.of(prepared, embed, executor)      // same, caller Executor
-  HybridRagIndex / RagFactory.withEmbeddings(…)    // BM25 + dense RRF
+  HybridRagIndex / RagFactory.withEmbeddings(…)    // RRF over RagIndex sources (BM25+dense factory)
 
 llm.rag(index).topK(k).send(user)   // any RagIndex: BM25, dense, or hybrid
     → RagIndex.retrieve
@@ -3534,7 +3540,7 @@ nano-vllm-java/src/main/java/com/igormaznitsa/nanollvm/
   rag/RagTuner.java / RagResource.java  ← since 1.2.0: load-time filter / extract / preprocess
   rag/PreparedRag.java         ← shareable corpus + BM25 index (+ Passage record)
   rag/DenseRagIndex.java       ← since 1.1.0: embedding cosine index
-  rag/HybridRagIndex.java      ← since 1.1.0: BM25 + dense RRF
+  rag/HybridRagIndex.java      ← since 1.1.0: RRF over two or more RagIndex (any list since 1.2.0)
   rag/RagSession.java          ← retrieve → prompt → chat (UserMessage, QueryRewrite)
   rag/CorpusLoader.java        ← package-private load/chunk pipeline
   engine/Transformer.java      ← forward + sample (not exported)
@@ -3624,8 +3630,8 @@ and the linear `samples.AdvisorRagHelloWorld` (one custom advisor + BM25 over `r
 ### Load path — preparing documents
 
 ```text
-files / strings / folder / classpath resource   (classpath since 1.1.0)
-        │
+folders / files / classpath resources / inline strings
+        │  (one RagFactory.builder(); addFolders since 1.2.0)
         ▼
   CorpusLoader (package-private)
         │  optional RagTuner (since 1.2.0): filter files, custom extract, preprocess text
@@ -3708,19 +3714,20 @@ At load, each passage gets:
 
 **In the code (load):** `RagFactory.make` / `of` / `builder` → `CorpusLoader` (UTF-8 text/markup;
 **since 1.1.0** also `makeResource` / `Builder.addResource` for classpath paths,
-source label `classpath:…`; **since 1.2.0** `Builder.addProcessor(RagTuner…)` for filter / extract /
-preprocess) → `PreparedRag.fromChunks`. Options live in `RagLoadOptions`.
+source label `classpath:…`; **since 1.2.0** `Builder.addFolders` for several disk trees and
+`Builder.addProcessor(RagTuner…)` for filter / extract / preprocess) → `PreparedRag.fromChunks`.
+Options live in `RagLoadOptions`.
 
 ```java
 // BM25 only — prepare once, share across many LLM engines
-PreparedRag prepared = RagFactory.make(Path.of("rag"), RagLoadOptions.forTinyModels());
-// or classpath (since 1.1.0):
-// PreparedRag prepared = RagFactory.makeResource("docs/facts.md");
-// PreparedRag prepared = RagFactory.builder()
-//     .addProcessor(RagTuner.allowing(r -> !r.fileName().startsWith("_")))
-//     .addResource(MyApp.class, "/docs/a.md")
-//     .add("inline.txt", "Paris is the capital of France.")
-//     .build();
+PreparedRag prepared = RagFactory.builder()
+    .addFolders(Path.of("docs/kb"), Path.of("docs/policies"))
+    .addResource(MyApp.class, "/help/faq.md")
+    .add("support-hours", "Live chat is available 9–17 UTC.")
+    .build();
+// one folder: RagFactory.make(Path.of("rag"), RagLoadOptions.forTinyModels());
+// one classpath file: RagFactory.makeResource("docs/facts.md");
+// HybridRagIndex.of(index, index) fuses rankings (BM25+dense), not document lists.
 
 assert prepared.isOutsideCorpus("what do you think about BMW?");
 assert prepared.retrieve("what do you think about BMW?", 3).isEmpty();
@@ -3750,9 +3757,11 @@ try (LLM llm = LLM.builder(chatModel).build()) {
 
 - **`DenseRagIndex`:** at build time embeds every chunk (calling thread, or a caller `Executor` since 1.2.0); at query time embeds the question and ranks by cosine (dot
   product on L2-normalized vectors). Linear scan — fine for small corpora.
-- **`HybridRagIndex` / `RagFactory.withEmbeddings`:** runs BM25 and dense, fuses ranks with **RRF**. Off-topic gating
-  requires **both** indexes to agree (`isOutsideCorpus`), so paraphrases can still retrieve when lexical overlap is
-  weak.
+- **`HybridRagIndex`:** fuses two or more `RagIndex` rankings with **RRF**
+  (`HybridRagIndex.of(bm25, dense)` or `of(index, index, …)`). Nested hybrids flatten so each
+  source ranks once. Off-topic gating requires **every** source to agree (`isOutsideCorpus`), so
+  paraphrases can still retrieve when one side has no lexical overlap.
+  `RagFactory.withEmbeddings` is the BM25+dense convenience factory.
 - Chat generation stays on the causal `LLM`; the embedding model is only for retrieval.
 
 ### Query path — one RAG turn
@@ -3767,8 +3776,8 @@ user text
 RagIndex.retrieve(query, topK)  →  List<RagHit>
    │  PreparedRag: BM25 + coverage/length re-rank
    │  DenseRagIndex: cosine over passage vectors          (since 1.1.0)
-   │  HybridRagIndex: BM25 + dense fused by RRF           (since 1.1.0)
-   │  off-topic: index may refuse (hybrid needs both sides to agree)
+   │  HybridRagIndex: RRF over two or more RagIndex sources  (since 1.1.0; any list since 1.2.0)
+   │  off-topic: index may refuse (hybrid needs every source to agree)
    ▼
 RagSession.formatUserMessage(hits, user text, maxContextChars)
    │  (internal: UserMessage.format; wording in prompts.RagPrompts)
@@ -3916,7 +3925,7 @@ Short glossary. For the Java home of each idea, prefer the **In the code** notes
 | `PreparedRag.Passage` | Load-time model text, search text, and term frequencies for one chunk                               |
 | BM25                  | Lexical ranking over passages (inverted index; default RAG path)                                     |
 | `DenseRagIndex`       | Embedding cosine index over chunks (**since 1.1.0**; needs embedding `LlmModel`)                     |
-| `HybridRagIndex`      | BM25 + dense fused by RRF (**since 1.1.0**; `RagFactory.withEmbeddings`)                             |
+| `HybridRagIndex`      | RRF over two or more `RagIndex` sources (**since 1.1.0**; any list **since 1.2.0**)                 |
 | `RagTuner`            | Load-time filter / extract / preprocess (**since 1.2.0**; `RagFactory.Builder.addProcessor`)         |
 | `RagResource`         | File or classpath document seen by tuners during load (**since 1.2.0**)                             |
 | `RagSession`          | Retrieve → format prompt → `ChatSession.sendPrepared`                                            |

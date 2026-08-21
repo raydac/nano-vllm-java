@@ -11,6 +11,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - RAG user turns with retrieved passages now start with `RagPrompts.GROUNDING` so small chat models
   are told to answer from those lines only and not invent a book or play.
 
+- `HybridRagIndex.of(RagIndex…)` fuses any two or more indexes with RRF (nested hybrids flatten).
+  BM25+dense via `RagFactory.withEmbeddings` is unchanged. To mix disk folders, classpath files,
+  and inline strings, add them on one `RagFactory.builder()` — `HybridRagIndex` does not concatenate
+  corpora. `Builder.addFolders` walks several directories in one call.
+
 - `LLM.Builder.deterministic()` (also `SamplingParams` / `ChatSession` / `RagSession`): same prompt
   always picks the highest-logit token (`topK = 1`, nucleus off). `temperature(0)` stays rejected.
 

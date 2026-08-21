@@ -1,8 +1,9 @@
 /**
- * Text RAG: load documents once into a shareable {@link PreparedRag} (chunking, BM25 index)
- * from paths, inline text, or classpath resources; optionally wrap with
- * {@link RagFactory#withEmbeddings} for hybrid dense retrieval, then {@link RagSession} for
- * retrieval-augmented chat.
+ * Text RAG: load documents once into a shareable {@link PreparedRag} (chunking, BM25 index).
+ * Mix folders, classpath resources, and inline strings on one {@link RagFactory#builder()};
+ * optionally wrap with {@link RagFactory#withEmbeddings} for hybrid dense retrieval, or
+ * {@link HybridRagIndex#of(java.util.List)} to fuse rankings (not to concatenate corpora), then
+ * {@link RagSession} for retrieval-augmented chat.
  *
  * <p>Index chunk size is chosen at load via {@link RagLoadOptions}
  * ({@link RagLoadOptions#defaults()} or {@link RagLoadOptions#forTinyModels()}, then

@@ -724,21 +724,21 @@ separate advisor PARALLEL/SEQUENTIAL mode.
 
 ### Text RAG
 
-Index documents once (UTF-8 `.txt` / `.md` / …), share `PreparedRag` across LLMs:
+Index documents once (UTF-8 `.txt` / `.md` / …), share `PreparedRag` across LLMs. One builder
+mixes disk folders, classpath files, and strings from code:
 
 ```java
-import com.igormaznitsa.nanollvm.chat.LlmListeners;
 import com.igormaznitsa.nanollvm.llm.LLM;
 import com.igormaznitsa.nanollvm.rag.PreparedRag;
 import com.igormaznitsa.nanollvm.rag.RagFactory;
-import com.igormaznitsa.nanollvm.rag.RagLoadOptions;
 
 import java.nio.file.Path;
 
-PreparedRag rag = RagFactory.make(Path.of("rag")); // silent; 500-char packed sentences
-// progress: RagFactory.make(Path.of("rag"), RagLoadOptions.defaults(), LlmListeners.toSystem());
-// tiny models: RagFactory.make(Path.of("rag"), RagLoadOptions.forTinyModels());
-// custom ceiling: RagFactory.make(Path.of("rag"), RagLoadOptions.defaults().withMaxChunkChars(800));
+PreparedRag rag = RagFactory.builder()
+    .addFolders(Path.of("docs/kb"), Path.of("docs/policies"))
+    .addResource(MyApp.class, "/help/faq.md")
+    .add("support-hours", "Live chat is available 9–17 UTC.")
+    .build();
 
 try (LLM llm = LLM.builder(model).build()) {
   String answer = llm.rag(rag)
@@ -753,15 +753,12 @@ try (LLM llm = LLM.builder(model).build()) {
 }
 ```
 
-Inline corpus without files:
-
-```java
-PreparedRag rag = RagFactory.of(
-    "Paris is the capital of France.",
-    "Berlin is the capital of Germany.");
-```
-
-Classpath documents (**since 1.1.0**): `RagFactory.makeResource("docs/a.md")` / `.addResource(loader, path)`.
+Shortcuts when there is only one origin: `RagFactory.make(Path.of("rag"))` (one folder or file;
+pass `RagLoadOptions` / `LlmListeners.toSystem()` for chunk size or load lines),
+`RagFactory.of("Paris is the capital of France.")` (inline only),
+`RagFactory.makeResource("docs/a.md")` (one classpath file). Do not
+`HybridRagIndex.of(RagFactory.make(a), RagFactory.make(b))` to concatenate corpora — that fuses
+rankings; add both folders on the same builder instead.
 
 Load-time **tuners** (**since 1.2.0**): `builder().addProcessor(RagTuner…)` can skip files
 (`isRagResourceAllowed`), replace UTF-8 extraction (`extractRagText` → empty Optional keeps
@@ -777,6 +774,7 @@ import com.igormaznitsa.nanollvm.models.LlmModelFactory;
 
 try (LlmModel embed = LlmModelFactory.make(Path.of("models/gte-small.Q2_K.gguf"))) {
   var hybrid = RagFactory.withEmbeddings(rag, embed); // BM25 + cosine, fused by RRF
+  // or HybridRagIndex.of(bm25, dense, otherIndex);
   System.out.println(llm.rag(hybrid).ask("Who are the Grimm brothers?"));
 }
 ```
@@ -800,7 +798,8 @@ question). Treat RAG directories and listener sinks as trusted. Untrusted upload
 need app-level sanitization; the library does not fence or redact retrieved passages.
 
 Retrieval defaults to **lexical BM25**. **Since 1.1.0**, `RagFactory.withEmbeddings(prepared, embedModel)` builds a
-dense cosine index or a hybrid BM25+dense RRF index (`DenseRagIndex` / `HybridRagIndex`). Short anaphoric follow-ups
+dense cosine index or a hybrid BM25+dense RRF index (`DenseRagIndex` / `HybridRagIndex`). **Since 1.2.0**,
+`HybridRagIndex.of(index, index, …)` fuses any `RagIndex` list the same way. Short anaphoric follow-ups
 may rewrite to keywords; if the rewrite returns `NONE`, the session falls back to Prior + follow-up instead of
 aborting. Off-topic queries with contentful out-of-vocabulary terms tend to yield no hits.
 

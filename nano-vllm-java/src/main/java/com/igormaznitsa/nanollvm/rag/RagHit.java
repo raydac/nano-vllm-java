@@ -7,8 +7,8 @@ import static java.util.Objects.requireNonNull;
  *
  * <p>{@link RagIndex#retrieve} returns hits highest-score first. Score meaning depends on the
  * index: BM25 ({@link PreparedRag}), cosine/dot after L2 ({@link DenseRagIndex}), or reciprocal
- * rank fusion ({@link HybridRagIndex}). Scores are not comparable across index types. Immutable;
- * safe to share.
+ * rank fusion of two or more sources ({@link HybridRagIndex}). Scores are not comparable across
+ * index types. Immutable; safe to share.
  *
  * <pre>{@code
  * for (RagHit hit : index.retrieve(question, 3)) {
