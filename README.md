@@ -491,7 +491,7 @@ Example session (ask about the demo corpus):
 Select model to load:
   1) Qwen3-0.6B (chat, safetensors)
   …
-Choice [1-7, Enter=1]:
+Choice [1-9, Enter=1]:
 Select RAG index and use mode:
   2) BM25 lexical
 Choice [1-5, Enter=1]: 2
