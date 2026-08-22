@@ -1,5 +1,5 @@
 ## 1. Implementation Progress
-- Maven multi-module **`1.2.0`** (released **2026-08-22**; previous **1.1.0** 2026-08-16, **1.0.0** 2026-08-09): parent `nano-vllm-java-pom`, library `nano-vllm-java`, demos `nano-vllm-java-samples`; enforcer Java `[21,)`, Maven `[3.8,)`; JPMS module `com.igormaznitsa.nanollvm` (library only)
+- Maven multi-module **`1.2.1-SNAPSHOT`** (post **1.2.0** 2026-08-22; previous **1.1.0** 2026-08-16, **1.0.0** 2026-08-09): parent `nano-vllm-java-pom`, library `nano-vllm-java`, demos `nano-vllm-java-samples`; enforcer Java `[21,)`, Maven `[3.8,)`; JPMS module `com.igormaznitsa.nanollvm` (library only)
 - CPU kernels: panel GEMV for dense linear, Vector-API 4-acc dots, SIMD elementwise/RMSNorm/MLP/attention axpy; paged KV attend in place
 - `KvCacheArena` layer pages: `getKeyCache(layer)` / `getValueCache(layer)` (JavaBean; was single-letter `k`/`v`)
 - **ResourceLimits** (exported utils): process-wide defaults + builder; RAG/JSON/GGUF/safetensors/corpus/history budgets (PDF inflate/CMap fields removed in 1.2.0 with `PdfTextExtractor`)
@@ -125,8 +125,8 @@
 ## 4. Current Work In Progress
 - JPMS re-audit (2026-08-22): `module-info` still exports only `models` / `llm` / `chat` / `rag` / `exceptions` / `tokenizer` / `utils`; `requires static jdk.incubator.vector` is optional SIMD. Hidden: `engine` / `layers` / `tensor` (+kernels/scalar/vector) / `internal` / `prompts` / `models.internal` / `models.llmcontainer` / `models.llmarch`. `ModuleExportsTest` green; samples import only exported packages. `RagPrompts` / `MatmulRuntime` / `ModelFileBundle` stay module-private on purpose.
 - Concurrency hygiene (re-audit 2026-08-21): no `volatile`/`synchronized`; close flags `AtomicBoolean`; generate lock is the only exclusive engine lock (`cancel` is a flag). Causal prefill jobs are head-major (balanced); `ConvStateArena` dropped `ConcurrentHashMap`. Sample embed bar and concurrent-test log still use `ReentrantLock`.
-- Release line **`1.2.0`** (2026-08-22); POMs, README Central badge / Hello World coords, and changelog dated for publish
-- Next SNAPSHOT bump (1.3.0-SNAPSHOT) is post-publish, not done yet
+- Development line **`1.2.1-SNAPSHOT`** (after **1.2.0** 2026-08-22); Maven Central still **1.2.0**
+- README is public docs for the **latest release** — never SNAPSHOT (badge, Maven/Gradle coords, JAR names stay **1.2.0**)
 - **Gemma 4 E2B QAT mobile** — text-only `LlmModel` load for `models/Gemma4-E2B-IT-QAT-Mobile/` (`google/gemma-4-E2B-it-qat-mobile-transformers`). Vision/audio unused. Packed QAT (int2/4/8 + SRQ), PLE, KV sharing, `<|turn>` chat.
 - Tokenizer codecs are package-private (`Gpt2ByteBpeCodec`, `MetaspaceBpeCodec`, `WordPieceCodec`,
   `UnigramCodec`, `WordLevelCodec`, `CharCodec`) behind public `Tokenizer`. Load is `TokenizerLoader`
@@ -177,8 +177,8 @@
 
 ## 7. Useful References
 - `security_audit.txt` — 1.0.0 threat-model summary
-- `CHANGELOG.md` — **1.2.0** released 2026-08-22; previous **1.1.0** 2026-08-16
-- `README.md` — Hello World, CLI, library samples; Maven Central **1.2.0**; in-repo JARs `1.2.0`; Gemma 4 text; ONNX + Tiny-LLM; dense/hybrid RAG; SentencePiece / RagTuner / dedicated pool
+- `CHANGELOG.md` — **1.2.0** released 2026-08-22; active line **1.2.1-SNAPSHOT**
+- `README.md` — Hello World, CLI, library samples; public docs for released **1.2.0** (never SNAPSHOT); Gemma 4 text; ONNX + Tiny-LLM; dense/hybrid RAG; SentencePiece / RagTuner / dedicated pool
 - Build: `mvn22 -q test` / `MAVEN_OPTS="-Xmx8g" mvn22 -pl nano-vllm-java-samples -q exec:java` (document as `mvn` in README); other mains: `-Dexec.mainClass=…` (samples POM default `exec.mainClass` is `Example`); SpotBugs: `mvn22 -pl nano-vllm-java -am compile spotbugs:check` (also on `verify`); concurrent RAG test: `mvn22 -pl nano-vllm-java -Pconcurrent_test test`
 - Library: `LlmModelFactory.make(path)` / `open(path).make()` — engines close before model
 - Embeddings: `LlmModelFactory.make(e5Onnx); model.embed("query: " + text)` — sample `EmbeddingsHelloWorld` (default `models/multilingual-e5-small`); gte-small GGUF still works if you pass the path
@@ -194,11 +194,13 @@
 
 ## 8. User Advice and Recommendations
 - Document Maven as `mvn` (portable); agent on this machine may use `mvn22`
+- README is the public latest-release doc: badge, Maven/Gradle coords, and JAR names stay on the
+  last shipped version — do not write SNAPSHOT versions into it when bumping the reactor
 - Prefer `ChatSession` for dialog; raw `generate` / `generateTokenIds` / `complete` for continuations
   (`samples.NextTokenHelloWorld`)
 - Hugging Face folders load `tokenizer.json`, else SentencePiece `tokenizer.model`, else a tiny
   `config.json` fallback. `Tokenizer.fromSentencePiece` is for in-memory protobuf bytes (`@since 1.2.0`).
-- New types and new public members in **1.2.0** get `@since 1.2.0`; keep existing `@since`
+- New types and new public members in **1.2.1-SNAPSHOT** get `@since 1.2.1`; keep existing `@since`
   on older methods when load paths or codecs grow
 - Custom think/scratchpad markers: `LlmModelFactory.open(path).thinkTags(ThinkTags.of(open, close)).make()`;
   `ChatReply.parse(raw, llm)` uses the model pair; `ChatReply.parse(raw)` still defaults to `<think>`/`</think>`
