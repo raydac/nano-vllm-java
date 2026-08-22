@@ -12,6 +12,7 @@ import com.igormaznitsa.nanollvm.llm.LLM;
 import com.igormaznitsa.nanollvm.llm.LlmAdvisor;
 import com.igormaznitsa.nanollvm.llm.LlmAdvisorMixer;
 import com.igormaznitsa.nanollvm.llm.SamplingParams;
+import com.igormaznitsa.nanollvm.models.LlmModality;
 import com.igormaznitsa.nanollvm.models.LlmModel;
 import com.igormaznitsa.nanollvm.models.LlmModelFactory;
 import com.igormaznitsa.nanollvm.rag.DenseRagIndex;
@@ -36,6 +37,7 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
+import java.util.Set;
 import java.util.function.Function;
 import java.util.function.Supplier;
 import java.util.stream.Stream;
@@ -112,6 +114,7 @@ public final class Example {
       }
 
       try (LlmModel model = LlmModelFactory.make(modelPath, status)) {
+        printSupportedModalities(model, console);
         if (model.isEmbeddingModel()) {
           runEmbeddingSession(model, in, console);
           return;
@@ -350,7 +353,8 @@ public final class Example {
     final OrderedConsole console
   ) throws Exception {
     console.printlnInfo(
-      "Embedding model (" + model.architectureName() + ") — each line → L2-normalized vector.");
+      "Embedding model (" + model.architectureName()
+        + ", " + model.modalities() + ") — each line → L2-normalized vector.");
     console.println("Type text and press Enter. Commands: /exit  /quit  /clear");
     console.println();
 
@@ -862,6 +866,28 @@ public final class Example {
     console.println("Windows: matching .ps1 / .cmd scripts in models/.");
     console.println(
       "Or pass a local folder: mvn -pl nano-vllm-java-samples -q exec:java -Dexec.args=models/YourModel");
+  }
+
+  private static void printSupportedModalities(
+    final LlmModel model,
+    final OrderedConsole console
+  ) {
+    console.printlnInfo(
+      "Checkpoint modalities: input %s, output %s.".formatted(
+        formatModalities(model.inputModalities()),
+        formatModalities(model.outputModalities())));
+    if (!model.modalities().equals(model.usableModalities())) {
+      console.printlnInfo(
+        "This library runs: input %s, output %s.".formatted(
+          formatModalities(model.usableModalities().input()),
+          formatModalities(model.usableModalities().output())));
+    }
+  }
+
+  private static String formatModalities(final Set<LlmModality> modalities) {
+    return modalities.isEmpty()
+      ? "none"
+      : modalities.stream().map(LlmModality::wireName).collect(joining("+"));
   }
 
   private static void printLoadHints(final Path path, final OrderedConsole console) {

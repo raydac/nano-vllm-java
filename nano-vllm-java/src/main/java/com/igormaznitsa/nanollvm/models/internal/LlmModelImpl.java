@@ -8,6 +8,7 @@ import com.igormaznitsa.nanollvm.chat.LlmListener;
 import com.igormaznitsa.nanollvm.chat.LlmListeners;
 import com.igormaznitsa.nanollvm.chat.ThinkTags;
 import com.igormaznitsa.nanollvm.llm.Config;
+import com.igormaznitsa.nanollvm.models.LlmModalities;
 import com.igormaznitsa.nanollvm.models.LlmModel;
 import com.igormaznitsa.nanollvm.models.ModelSupport;
 import com.igormaznitsa.nanollvm.tensor.MatmulRuntime;
@@ -37,6 +38,8 @@ public final class LlmModelImpl extends LlmModel {
   private final Tokenizer tokenizer;
   private final Map<String, Object> options;
   private final boolean embeddingModel;
+  private final LlmModalities modalities;
+  private final LlmModalities usableModalities;
   private final AtomicReference<WeightBag> weights;
   private final AtomicReference<CausalLM> network;
   private final AtomicReference<EmbeddingEncoder> encoder;
@@ -86,6 +89,8 @@ public final class LlmModelImpl extends LlmModel {
     this.embeddingModel = encoder != null;
     this.tokenizer = requireNonNull(tokenizer, "tokenizer");
     this.options = copyAndValidateOptions(options);
+    this.modalities = LlmModalities.ofCheckpoint(this.hfConfig, this.embeddingModel);
+    this.usableModalities = LlmModalities.usable(this.embeddingModel);
   }
 
   public static LlmModelImpl peer(final LlmModel model) {
@@ -189,6 +194,16 @@ public final class LlmModelImpl extends LlmModel {
   }
 
   @Override
+  public LlmModalities modalities() {
+    return this.modalities;
+  }
+
+  @Override
+  public LlmModalities usableModalities() {
+    return this.usableModalities;
+  }
+
+  @Override
   public boolean isCausalModel() {
     this.assertNotClosed();
     return this.network.get() != null;
@@ -214,10 +229,12 @@ public final class LlmModelImpl extends LlmModel {
   public String toString() {
     Config.HfConfig cfg = this.hfConfig;
     WeightBag bag = this.weights.get();
-    return ("LlmModel{kind=%s, architecture=%s, container=%s, path=%s, layers=%d, hidden=%d, "
-      + "intermediate=%d, heads=%d/%d, headDim=%d, context=%d, vocab=%d, tensors=%s, weights=%s, "
-      + "chatFormat=%s%s%s}").formatted(
+    return ("LlmModel{kind=%s, modalities=%s%s, architecture=%s, container=%s, path=%s, layers=%d, "
+      + "hidden=%d, intermediate=%d, heads=%d/%d, headDim=%d, context=%d, vocab=%d, tensors=%s, "
+      + "weights=%s, chatFormat=%s%s%s}").formatted(
       this.kindLabel(),
+      this.modalities,
+      this.usableSuffix(),
       this.architectureName(),
       this.containerLabel(),
       this.path,
@@ -234,6 +251,12 @@ public final class LlmModelImpl extends LlmModel {
       this.tokenizer.chatFormat(),
       this.thinkSuffix() + this.chatSpecialsSuffix(),
       this.closed.get() ? ", closed" : "");
+  }
+
+  private String usableSuffix() {
+    return this.modalities.equals(this.usableModalities)
+      ? ""
+      : ", usable=" + this.usableModalities;
   }
 
   private String kindLabel() {

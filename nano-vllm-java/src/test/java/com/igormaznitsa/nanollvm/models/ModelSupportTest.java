@@ -127,6 +127,9 @@ class ModelSupportTest {
     assertEquals(256, gemma4.headDim());
     assertTrue(gemma4.isGemma4());
     assertTrue(gemma4.visionConfigPresent());
+    assertTrue(gemma4.imageConfigPresent());
+    assertTrue(gemma4.audioConfigPresent());
+    assertTrue(gemma4.videoConfigPresent());
     assertTrue(gemma4.nestedTextConfig());
     assertEquals(15, gemma4.firstKvSharedLayer());
     assertFalse(gemma4.isKvSharedLayer(14));

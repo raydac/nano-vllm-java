@@ -196,7 +196,7 @@ public final class ModelSupport {
       }
       return Optional.empty();
     }
-    if (config.visionConfigPresent()) {
+    if (config.visionConfigPresent() || config.audioConfigPresent()) {
       return Optional.of(multimodalReason(config.modelType()));
     }
     if (config.nestedTextConfig()) {

@@ -10,6 +10,7 @@ import com.igormaznitsa.nanollvm.tokenizer.Tokenizer;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Loaded model: architecture weights, HF/GGUF config, and tokenizer.
@@ -20,6 +21,10 @@ import java.util.Map;
  * {@link #OPTION_CHAT_SPECIALS}) are frozen at
  * {@link LlmModelFactory#make} and never change. Embedding models expose
  * {@link #embed(CharSequence)} instead of chat/generate.
+ *
+ * <p>{@link #modalities()} is what the checkpoint file declares (Gemma 4 QAT mobile includes
+ * image, audio, and video keys). {@link #usableModalities()} is what this library actually
+ * runs: text→text chat or text→embedding. Extra towers are skipped at load.
  *
  * <p>GGUF models keep quantized weights packed by default. Prefer unpacking at load with
  * {@link LlmModelFactory#make(Path, LlmListener, boolean)} ({@code true}) so float32 is built
@@ -105,6 +110,42 @@ public abstract sealed class LlmModel implements AutoCloseable permits LlmModelI
   public abstract String architectureName();
 
   /**
+   * Content types declared by the checkpoint. Chat graphs always include text; Gemma 4 QAT mobile
+   * also declares image, audio, and video input. Embedding encoders are
+   * {@link LlmModalities#TEXT_TO_EMBEDDING}. This library does not yet consume image / audio /
+   * video — see {@link #usableModalities()}. Safe to call after {@link #close()}.
+   *
+   * @since 1.2.0
+   */
+  public abstract LlmModalities modalities();
+
+  /**
+   * Content types this library actually consumes and produces for the loaded graph: text→text
+   * chat, or text→embedding. Safe to call after {@link #close()}.
+   *
+   * @since 1.2.0
+   */
+  public abstract LlmModalities usableModalities();
+
+  /**
+   * Modalities this checkpoint consumes.
+   *
+   * @since 1.2.0
+   */
+  public final Set<LlmModality> inputModalities() {
+    return this.modalities().input();
+  }
+
+  /**
+   * Modalities this checkpoint produces.
+   *
+   * @since 1.2.0
+   */
+  public final Set<LlmModality> outputModalities() {
+    return this.modalities().output();
+  }
+
+  /**
    * {@code true} when this file is for chat / text completion — use {@link LLM#builder(LlmModel)}.
    *
    * @since 1.1.0
@@ -130,7 +171,8 @@ public abstract sealed class LlmModel implements AutoCloseable permits LlmModelI
   public abstract boolean isClosed();
 
   /**
-   * Kind, architecture, container, sizes, packed/dense/qat, and chat format (safe after close).
+   * Kind, architecture, modalities, container, sizes, packed/dense/qat, and chat format
+   * (safe after close).
    *
    * @since 1.1.0
    */

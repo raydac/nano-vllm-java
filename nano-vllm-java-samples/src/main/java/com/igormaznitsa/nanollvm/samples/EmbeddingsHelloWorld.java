@@ -57,7 +57,8 @@ public final class EmbeddingsHelloWorld {
     final boolean e5Prefix
   ) {
     System.out.println("architecture=" + model.architectureName()
-      + " embedding=" + model.isEmbeddingModel());
+      + " embedding=" + model.isEmbeddingModel()
+      + " modalities=" + model.modalities());
 
     float[] vector = model.embed(embedInput(text, e5Prefix));
     float[] same = model.embed(embedInput(text, e5Prefix));

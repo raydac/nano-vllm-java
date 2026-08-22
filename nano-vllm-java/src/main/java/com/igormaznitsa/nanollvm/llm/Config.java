@@ -490,7 +490,14 @@ public final class Config {
    * @param queryPreAttnScalar    {@code query_pre_attn_scalar}; {@code 0} → use {@code headDim}
    *                              in {@link #attentionScale()}
    * @param convLCache            {@code conv_L_cache} (LFM2 short-conv state length)
-   * @param visionConfigPresent   {@code true} when vision/image/video keys exist (unsupported VLMs)
+   * @param visionConfigPresent   {@code true} when vision/image/video keys exist (unsupported VLMs
+   *                              except Gemma 4 text load, which skips those towers)
+   * @param imageConfigPresent    {@code true} when {@code vision_config} or {@code image_token_id}
+   *                              is present
+   * @param audioConfigPresent    {@code true} when {@code audio_config} or {@code audio_token_id}
+   *                              is present
+   * @param videoConfigPresent    {@code true} when {@code video_config} or {@code video_token_id}
+   *                              is present
    * @param nestedTextConfig      {@code true} when {@code text_config} is a nested object
    * @param gemma4                Gemma 4 text extras; {@code null} for other families
    */
@@ -519,6 +526,9 @@ public final class Config {
     float queryPreAttnScalar,
     int convLCache,
     boolean visionConfigPresent,
+    boolean imageConfigPresent,
+    boolean audioConfigPresent,
+    boolean videoConfigPresent,
     boolean nestedTextConfig,
     Gemma4Text gemma4
   ) {
@@ -578,9 +588,7 @@ public final class Config {
       Map<String, Object> root = Json.parseObject(requireNonNull(configJson, "configJson"));
       String modelType = Json.asString(root.get("model_type"));
       boolean nestedText = root.get("text_config") instanceof Map<?, ?>;
-      boolean vision = root.containsKey("vision_config")
-        || root.containsKey("image_token_id")
-        || root.containsKey("video_token_id");
+      ModalityFlags flags = modalityFlags(root);
       Map<String, Object> m = isGemma4Family(modelType) && nestedText
         ? flattenGemma4Text(root)
         : root;
@@ -643,10 +651,26 @@ public final class Config {
         rope.localBaseFreq(),
         queryPre,
         Json.asInt(m.get("conv_L_cache"), 0),
-        vision,
+        flags.vision(),
+        flags.image(),
+        flags.audio(),
+        flags.video(),
         nestedText,
         isGemma4Family(modelType) ? parseGemma4Text(m, rope.partialRotaryFactor()) : null
       );
+    }
+
+    private static ModalityFlags modalityFlags(final Map<String, Object> root) {
+      boolean image = root.containsKey("vision_config") || root.containsKey("image_token_id");
+      boolean audio = root.containsKey("audio_config") || root.containsKey("audio_token_id");
+      boolean video = root.containsKey("video_config") || root.containsKey("video_token_id");
+      return new ModalityFlags(image, audio, video);
+    }
+
+    private record ModalityFlags(boolean image, boolean audio, boolean video) {
+      boolean vision() {
+        return this.image || this.video;
+      }
     }
 
     static boolean isGemma4Family(final String modelType) {

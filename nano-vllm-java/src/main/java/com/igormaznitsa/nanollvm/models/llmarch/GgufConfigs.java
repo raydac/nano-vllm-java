@@ -73,6 +73,9 @@ final class GgufConfigs {
       0,
       false,
       false,
+      false,
+      false,
+      false,
       null
     );
   }
@@ -129,6 +132,9 @@ final class GgufConfigs {
       convL,
       false,
       false,
+      false,
+      false,
+      false,
       null
     );
   }
@@ -181,6 +187,9 @@ final class GgufConfigs {
       10_000f,
       0f,
       0,
+      false,
+      false,
+      false,
       false,
       false,
       null

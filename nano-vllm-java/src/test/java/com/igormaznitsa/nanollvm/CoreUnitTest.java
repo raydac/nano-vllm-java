@@ -44,6 +44,8 @@ import com.igormaznitsa.nanollvm.llm.LlmAdvisor;
 import com.igormaznitsa.nanollvm.llm.LlmAdvisorMixer;
 import com.igormaznitsa.nanollvm.llm.SamplingDefaults;
 import com.igormaznitsa.nanollvm.llm.SamplingParams;
+import com.igormaznitsa.nanollvm.models.LlmModalities;
+import com.igormaznitsa.nanollvm.models.LlmModality;
 import com.igormaznitsa.nanollvm.models.LlmModel;
 import com.igormaznitsa.nanollvm.models.LlmModelFactory;
 import com.igormaznitsa.nanollvm.prompts.ChatPrompts;
@@ -60,6 +62,7 @@ import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -130,8 +133,12 @@ class CoreUnitTest {
       assertEquals(2, model.options().size());
       assertEquals(ThinkTags.DEFAULT, model.thinkTags());
       assertEquals(ChatSpecials.DEFAULT, model.chatSpecials());
+      assertEquals(LlmModalities.TEXT_TO_TEXT, model.modalities());
+      assertEquals(LlmModalities.TEXT_TO_TEXT, model.usableModalities());
+      assertEquals(Set.of(LlmModality.TEXT), model.inputModalities());
+      assertEquals(Set.of(LlmModality.TEXT), model.outputModalities());
       String text = model.toString();
-      assertTrue(text.startsWith("LlmModel{kind=chat, architecture="), text);
+      assertTrue(text.startsWith("LlmModel{kind=chat, modalities=text->text, architecture="), text);
       assertTrue(text.contains("container=folder"), text);
       assertTrue(text.contains("weights=dense"), text);
       assertTrue(text.contains("path=" + path.toAbsolutePath().normalize()), text);
@@ -207,13 +214,17 @@ class CoreUnitTest {
     llm.close();
 
     String architecture = model.architectureName();
+    LlmModalities modalities = model.modalities();
     model.close();
     assertTrue(model.isClosed());
     String closed = model.toString();
     assertTrue(closed.contains("kind=chat"), closed);
+    assertTrue(closed.contains("modalities=text->text"), closed);
     assertTrue(closed.contains("closed"), closed);
     assertTrue(closed.contains("weights=released"), closed);
     assertEquals(architecture, model.architectureName());
+    assertEquals(LlmModalities.TEXT_TO_TEXT, modalities);
+    assertEquals(LlmModalities.TEXT_TO_TEXT, model.modalities());
     assertThrows(IllegalStateException.class, model::thinkTags);
     assertThrows(IllegalStateException.class, model::chatSpecials);
     assertThrows(IllegalStateException.class, model::options);
@@ -1196,7 +1207,8 @@ class CoreUnitTest {
                 100, 64, 128, 1, 4, 1, 16, 128, 1e-6f, "gelu", false, false,
                 1e6f, null, "float32", "gemma3_text",
                 List.of("Gemma3ForCausalLM"), "gelu_pytorch_tanh",
-              512, List.of("sliding_attention"), 10_000f, 256f, 0, false, false, null)));
+              512, List.of("sliding_attention"), 10_000f, 256f, 0, false, false, false, false,
+              false, null)));
 
     Path dir = createTempDirectory("gemma-tok");
     try {

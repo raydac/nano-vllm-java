@@ -6,10 +6,13 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.igormaznitsa.nanollvm.llm.LLM;
+import com.igormaznitsa.nanollvm.models.LlmModalities;
+import com.igormaznitsa.nanollvm.models.LlmModality;
 import com.igormaznitsa.nanollvm.models.LlmModel;
 import com.igormaznitsa.nanollvm.models.LlmModelFactory;
 import com.igormaznitsa.nanollvm.testsupport.OptionalModelAssumptions;
 import java.nio.file.Path;
+import java.util.Set;
 import org.junit.jupiter.api.Test;
 
 final class BertEmbeddingTest {
@@ -38,8 +41,13 @@ final class BertEmbeddingTest {
       assertTrue(model.isEmbeddingModel());
       assertFalse(model.isCausalModel());
       assertEquals("bert", model.architectureName());
+      assertEquals(LlmModalities.TEXT_TO_EMBEDDING, model.modalities());
+      assertEquals(LlmModalities.TEXT_TO_EMBEDDING, model.usableModalities());
+      assertEquals(Set.of(LlmModality.TEXT), model.inputModalities());
+      assertEquals(Set.of(LlmModality.EMBEDDING), model.outputModalities());
       String text = model.toString();
       assertTrue(text.contains("kind=embedding"), text);
+      assertTrue(text.contains("modalities=text->embedding"), text);
       assertTrue(text.contains("architecture=bert"), text);
       assertTrue(text.contains("container=gguf"), text);
 
@@ -76,8 +84,11 @@ final class BertEmbeddingTest {
       assertTrue(model.isEmbeddingModel());
       assertFalse(model.isCausalModel());
       assertEquals("bert", model.architectureName());
+      assertEquals(LlmModalities.TEXT_TO_EMBEDDING, model.modalities());
+      assertEquals(LlmModalities.TEXT_TO_EMBEDDING, model.usableModalities());
       String text = model.toString();
       assertTrue(text.contains("kind=embedding"), text);
+      assertTrue(text.contains("modalities=text->embedding"), text);
       assertTrue(text.contains("architecture=bert"), text);
       assertTrue(text.contains("container=folder"), text);
 

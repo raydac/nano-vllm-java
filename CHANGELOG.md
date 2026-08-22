@@ -8,6 +8,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased] — 1.2.0-SNAPSHOT
 
 ### Added
+- `LlmModel.modalities()` (and `inputModalities()` / `outputModalities()`): input and output
+  content types as `LlmModality` (`TEXT`, `IMAGE`, `AUDIO`, `VIDEO`, `EMBEDDING`). Values follow
+  the checkpoint config (Gemma 4 QAT mobile declares text+image+audio+video in). Embedding
+  encoders are text→embedding. `LlmModel.usableModalities()` is what this library actually runs
+  (text→text chat, or text→embedding); vision/audio towers are still skipped at load.
+  `LlmModel.toString()` includes `modalities=` and `usable=` when they differ. The `Example`
+  demo prints checkpoint modalities after load, plus the runtime line when they are not the same.
+
 - RAG user turns with retrieved passages now start with `RagPrompts.GROUNDING` so small chat models
   are told to answer from those lines only and not invent a book or play.
 

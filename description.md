@@ -276,8 +276,11 @@ After load, the **learned shelves stay fixed**. Chat does not rewrite the model 
 worksheets change while answering. Close order: close each **`LLM` first**, then the shared **`LlmModel`**.
 
 **In the code:** `LlmModelFactory.make` (Path, `ModelFileSource`, or `fromClasspath*`) seals an immutable `LlmModel`.
-`LlmModel.toString()` prints kind, architecture, container, sizes, and packed/dense/qat (safe after close).
-Optional `Map` load options (**since 1.1.0**) include `LlmModel.OPTION_THINK_TAGS` (`ThinkTags`) and
+`LlmModel.toString()` prints kind, modalities, architecture, container, sizes, and packed/dense/qat (safe after close).
+`LlmModel.modalities()` follows the checkpoint (`LlmModality` enum). Chat graphs are at least
+text→text; Gemma 4 QAT mobile also declares image, audio, and video input. Embedding encoders are
+text→embedding. `LlmModel.usableModalities()` is the text-only path this library actually runs
+(vision/audio towers stay skipped). Optional `Map` load options (**since 1.1.0**) include `LlmModel.OPTION_THINK_TAGS` (`ThinkTags`) and
 `LlmModel.OPTION_CHAT_SPECIALS` (`ChatSpecials`; both frozen on the model, library defaults when omitted).
 A non-silent `LlmListener` sees the same in-place percent/ETA bar while **safetensors**, **GGUF**, or **ONNX** weights
 are poured (`models.llmcontainer.LoadProgress`). Causal graphs use `ArchitectureProcessor.createCausal`; embedding GGUFs
@@ -395,8 +398,33 @@ same `config.json` detection (chapter **7c**).
 
 - Qwen3-0.6B: `"model_type": "qwen3"`, `"architectures": ["Qwen3ForCausalLM"]`
 - Gemma3-270M: `"model_type": "gemma3_text"`, `"architectures": ["Gemma3ForCausalLM"]`
-- Gemma 4 E2B QAT mobile: `"model_type": "gemma4"` / `"gemma4_text"` — text chat only (vision/audio unused)
+- Gemma 4 E2B QAT mobile: `"model_type": "gemma4"` / `"gemma4_text"` — text chat in this port (vision/audio towers skipped; see **Input and output modalities** below)
 - SmolLM2 / Tiny-LLM ONNX: `"model_type": "llama"`, `"architectures": ["LlamaForCausalLM"]`
+
+---
+
+### Input and output modalities (**since 1.2.0**)
+
+After load, `LlmModel.modalities()` is **what the checkpoint file declares**, not a hard-coded family list.
+Detection looks at **keys on the root of `config.json`** (GGUF-mapped configs do not ship these keys):
+
+| Input type | Declared when the root object has | Typical files |
+|------------|-----------------------------------|---------------|
+| **text** | Always, for every chat graph | Qwen3, Gemma3, Llama, LFM2, Gemma 4 |
+| **image** | `vision_config` **or** `image_token_id` | Gemma 4 QAT mobile |
+| **audio** | `audio_config` **or** `audio_token_id` | Gemma 4 QAT mobile |
+| **video** | `video_config` **or** `video_token_id` | Gemma 4 QAT mobile (`video_token_id`) |
+
+Chat **output** is always **text**. BERT-style embedding files skip that scan and report **text → embedding**.
+
+`LlmModel.usableModalities()` is the narrower set this Java engine actually runs: **text → text** for chat, or
+**text → embedding** for BERT. Gemma 4’s extra towers stay skipped (`Gemma4QatLoader` drops `vision_tower` /
+`audio_tower` weights). The `Example` demo prints the checkpoint pair after load, then a second “this library runs”
+line when the two differ.
+
+**In the code:** `Config.HfConfig` sets `imageConfigPresent` / `audioConfigPresent` / `videoConfigPresent` from those
+keys; `LlmModalities.ofCheckpoint` builds the declared pair; `LlmModel.usableModalities()` is `TEXT_TO_TEXT` or
+`TEXT_TO_EMBEDDING`.
 
 ---
 
@@ -1415,7 +1443,8 @@ GGUF loads — not a public enum apps set), often with lowercase and metaspace-s
 
 **In the code (graph — internal):** `models.internal.BertForEmbedding`; blocks use `layers.BidirectionalAttention`
 (not the causal `Attention` used for chat); norms via `Norms.LayerNorm`; pooling and L2 live at the end of `encode`.
-**Public surface:** `LlmModel.isEmbeddingModel()` / `embed(…)`.
+**Public surface:** `LlmModel.isEmbeddingModel()` / `embed(…)` / `modalities()` (`text->embedding`; same as
+`usableModalities()` on this path).
 
 ### What you use the vectors for
 
