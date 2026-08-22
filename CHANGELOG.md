@@ -5,7 +5,12 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased] — 1.2.0-SNAPSHOT
+## [Unreleased]
+
+## [1.2.0] — 2026-08-22
+
+Public release of **nano-vllm-java** `1.2.0` (Maven coordinates `com.igormaznitsa:nano-vllm-java:1.2.0`).
+SentencePiece and extra tokenizer families, RAG load tuners, engine-owned matmul pool, deterministic sampling, checkpoint modalities, and `close()` resource reclaim.
 
 ### Added
 - `LlmModel.modalities()` (and `inputModalities()` / `outputModalities()`): input and output

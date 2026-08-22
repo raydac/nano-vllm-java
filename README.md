@@ -3,7 +3,7 @@
 [![License Apache 2.0](https://img.shields.io/badge/license-Apache%20License%202.0-green.svg)](http://www.apache.org/licenses/LICENSE-2.0)
 [![Java 21+](https://img.shields.io/badge/java-21.0%2b-green.svg)](https://bell-sw.com/pages/downloads/)
 [![Maven 3.8+](https://img.shields.io/badge/maven-3.8%2b-green.svg)](https://maven.apache.org/)
-[![Maven central](https://img.shields.io/badge/Maven%20central-1.1.0-green.svg)](http://search.maven.org/#artifactdetails|com.igormaznitsa|nano-vllm-java|1.1.0|jar)   
+[![Maven central](https://img.shields.io/badge/Maven%20central-1.2.0-green.svg)](http://search.maven.org/#artifactdetails|com.igormaznitsa|nano-vllm-java|1.2.0|jar)   
 [![Arthur's acres sanctuary donation](assets/arthur_sanctuary_banner.png)](https://www.arthursacresanimalsanctuary.org/donate)
 
 # Nano-vLLM Java
@@ -12,8 +12,9 @@ Pure **Java 21+** LLM inference library: continuous batching, paged KV cache, an
 loading on **CPU only** — no CUDA, PyTorch, or native runtime bindings. Add it to a Maven or Gradle app and call it
 from ordinary Java.
 
-The latest release is **1.1.0** on Maven Central (ONNX, Llama, Gemma 4 text QAT, BERT embeddings, Qwen3 GGUF,
-dense/hybrid RAG, stream/classpath load). Features marked **since 1.1.0** are in that release.
+The latest release is **1.2.0** on Maven Central (SentencePiece `tokenizer.model` and extra tokenizer families,
+RAG load tuners, dedicated matmul pool, deterministic sampling, checkpoint modalities). Features marked
+**since 1.1.0** and **since 1.2.0** are in that release.
 
 Ideas in this project were inspired by the Python [nano-vllm](https://github.com/GeeeekExplorer/nano-vllm) educational
 engine.
@@ -70,14 +71,14 @@ choose), ask a short business question, print the answer.
 <dependency>
   <groupId>com.igormaznitsa</groupId>
   <artifactId>nano-vllm-java</artifactId>
-  <version>1.1.0</version>
+  <version>1.2.0</version>
 </dependency>
 ```
 
 **Gradle (Groovy)**
 
 ```gradle
-implementation 'com.igormaznitsa:nano-vllm-java:1.1.0'
+implementation 'com.igormaznitsa:nano-vllm-java:1.2.0'
 ```
 
 JPMS module name: `com.igormaznitsa.nanollvm` (`requires com.igormaznitsa.nanollvm;`).
@@ -233,7 +234,7 @@ integration tests when those files are absent. The concurrent model+RAG race
 
 Artifacts:
 
-- `nano-vllm-java/target/nano-vllm-java-1.2.0-SNAPSHOT.jar` — library JAR (JPMS module `com.igormaznitsa.nanollvm`; no `Main-Class`)
+- `nano-vllm-java/target/nano-vllm-java-1.2.0.jar` — library JAR (JPMS module `com.igormaznitsa.nanollvm`; no `Main-Class`)
 - `nano-vllm-java-samples/target/…` — demo classes (not published to Maven Central)
 
 Tests use the Vector incubator module (`jvm.module.args` in the POM). Production runs should use the same flags
@@ -248,7 +249,7 @@ example.
 <dependency>
   <groupId>com.igormaznitsa</groupId>
   <artifactId>nano-vllm-java</artifactId>
-  <version>1.1.0</version>
+  <version>1.2.0</version>
 </dependency>
 ```
 
@@ -539,7 +540,7 @@ After `mvn package` (prefer `mvn -pl nano-vllm-java-samples exec:java` when poss
 ```bash
 java --add-modules jdk.incubator.vector \
   -Xmx16g \
-  -cp nano-vllm-java/target/nano-vllm-java-1.2.0-SNAPSHOT.jar:nano-vllm-java-samples/target/nano-vllm-java-samples-1.2.0-SNAPSHOT.jar \
+  -cp nano-vllm-java/target/nano-vllm-java-1.2.0.jar:nano-vllm-java-samples/target/nano-vllm-java-samples-1.2.0.jar \
   com.igormaznitsa.nanollvm.samples.Example \
   models/Qwen3-0.6B
 ```
