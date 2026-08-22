@@ -81,8 +81,6 @@ final class TextNormalizer {
       case "Replace" -> steps.add(replace(map));
       case "BertNormalizer" -> steps.add(bert(map));
       case "Precompiled" -> steps.add(precompiled(map)::normalize);
-      case "ByteLevel", "Identity" -> {
-      }
       default -> {
       }
     }

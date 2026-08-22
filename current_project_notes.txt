@@ -1,6 +1,7 @@
 ## 1. Implementation Progress
 - Maven multi-module **`1.2.0-SNAPSHOT`** (post **1.1.0** 2026-08-16; previous **1.0.0** 2026-08-09): parent `nano-vllm-java-pom`, library `nano-vllm-java`, demos `nano-vllm-java-samples`; enforcer Java `[21,)`, Maven `[3.8,)`; JPMS module `com.igormaznitsa.nanollvm` (library only)
 - CPU kernels: panel GEMV for dense linear, Vector-API 4-acc dots, SIMD elementwise/RMSNorm/MLP/attention axpy; paged KV attend in place
+- `KvCacheArena` layer pages: `getKeyCache(layer)` / `getValueCache(layer)` (JavaBean; was single-letter `k`/`v`)
 - **ResourceLimits** (exported utils): process-wide defaults + builder; RAG/JSON/GGUF/safetensors/corpus/history budgets (PDF inflate/CMap fields removed in 1.2.0 with `PdfTextExtractor`)
 - CausalLM: Qwen3 + Gemma3 + **Gemma 4 text (QAT mobile)** + **Llama** + LFM2 (GGUF); tokenizers are
   package-private codecs behind public `Tokenizer`: GPT-2 BPE / Metaspace BPE / GGUF-embedded /

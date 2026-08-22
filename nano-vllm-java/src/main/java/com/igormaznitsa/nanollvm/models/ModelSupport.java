@@ -248,34 +248,36 @@ public final class ModelSupport {
     final Config.HfConfig config
   ) {
     String id = selected.architectureId();
+    String modelType = config == null ? id : config.modelType();
+    List<String> architectures = config == null ? List.of() : config.architectures();
     boolean hfFolderOnlyChat = ARCH_GEMMA3.equals(id) || ARCH_LLAMA.equals(id);
     if (ARCH_GEMMA4.equals(id) && source != Source.HF_SAFETENSORS) {
       throw unsupported(
         ("Architecture '%s' loads from a Hugging Face folder (config.json + *.safetensors QAT), "
           + "not from GGUF or ONNX. Vision and audio towers are skipped; text chat only.")
           .formatted(id),
-        config == null ? id : config.modelType(),
-        config == null ? List.of() : config.architectures());
+        modelType,
+        architectures);
     }
     if (hfFolderOnlyChat && source == Source.GGUF) {
       throw unsupported(
         ("Architecture '%s' loads from a Hugging Face folder (config.json + *.safetensors or "
           + "*.onnx), not from GGUF. GGUF chat is qwen3 and lfm2; embeddings are bert.")
           .formatted(id),
-        config == null ? id : config.modelType(),
-        config == null ? List.of() : config.architectures());
+        modelType,
+        architectures);
     }
     if (ARCH_LFM2.equals(id) && source != Source.GGUF) {
       throw unsupported(
         "LFM2 loads from a .gguf file only, not from Hugging Face safetensors or ONNX.",
-        config == null ? id : config.modelType(),
-        config == null ? List.of() : config.architectures());
+        modelType,
+        architectures);
     }
     if (ARCH_BERT.equals(id) && source == Source.HF_SAFETENSORS) {
       throw unsupported(
         "BERT embeddings load from GGUF or ONNX, not from Hugging Face safetensors.",
-        config == null ? id : config.modelType(),
-        config == null ? List.of() : config.architectures());
+        modelType,
+        architectures);
     }
   }
 

@@ -62,7 +62,7 @@ record AssistantParts(String thinking, String answer, boolean thinkOpen) {
     String after;
     if (startThink >= 0 && endThink > startThink) {
       thinking = text.substring(startThink + open.length(), endThink);
-      Remainder rest = splitRemainder(text.substring(endThink + close.length()), tags, markup);
+      Remainder rest = splitRemainder(afterThinkClose(text, endThink, close), tags, markup);
       thinking = joinThink(thinking, rest.thinking());
       after = rest.answer();
       thinkOpen = rest.open();
@@ -71,7 +71,7 @@ record AssistantParts(String thinking, String answer, boolean thinkOpen) {
       after = "";
       thinkOpen = true;
     } else if (endThink >= 0) {
-      Remainder rest = splitRemainder(text.substring(endThink + close.length()), tags, markup);
+      Remainder rest = splitRemainder(afterThinkClose(text, endThink, close), tags, markup);
       thinking = rest.thinking();
       after = rest.answer();
       thinkOpen = rest.open();
@@ -84,6 +84,10 @@ record AssistantParts(String thinking, String answer, boolean thinkOpen) {
     return new AssistantParts(stripChatMarkup(thinking, tags, specials),
       sanitizeAnswer(after, markup),
       thinkOpen);
+  }
+
+  private static String afterThinkClose(final String text, final int closeAt, final String close) {
+    return text.substring(closeAt + close.length());
   }
 
   /**
@@ -110,7 +114,7 @@ record AssistantParts(String thinking, String answer, boolean thinkOpen) {
     }
 
     String inner = fromThink.substring(0, end);
-    Remainder nested = splitRemainder(fromThink.substring(end + close.length()), tags, markup);
+    Remainder nested = splitRemainder(afterThinkClose(fromThink, end, close), tags, markup);
     return new Remainder(
       joinThink(inner, nested.thinking()),
       joinAnswer(before, nested.answer()),

@@ -25,8 +25,8 @@ import java.util.Arrays;
  */
 public final class KvCacheArena implements AutoCloseable {
 
-  private final Tensor[] kCaches;
-  private final Tensor[] vCaches;
+  private final Tensor[] keyCaches;
+  private final Tensor[] valueCaches;
 
   /**
    * Uniform head width; every layer is allocated.
@@ -76,15 +76,15 @@ public final class KvCacheArena implements AutoCloseable {
     if (headDims.length != allocateLayer.length) {
       throw new IllegalArgumentException("headDims and allocateLayer length mismatch");
     }
-    this.kCaches = new Tensor[headDims.length];
-    this.vCaches = new Tensor[headDims.length];
+    this.keyCaches = new Tensor[headDims.length];
+    this.valueCaches = new Tensor[headDims.length];
     for (int i = 0; i < headDims.length; i++) {
       if (allocateLayer[i]) {
-        this.kCaches[i] = Tensor.zeros(numBlocks, blockSize, numKvHeads, headDims[i]);
-        this.vCaches[i] = Tensor.zeros(numBlocks, blockSize, numKvHeads, headDims[i]);
+        this.keyCaches[i] = Tensor.zeros(numBlocks, blockSize, numKvHeads, headDims[i]);
+        this.valueCaches[i] = Tensor.zeros(numBlocks, blockSize, numKvHeads, headDims[i]);
       } else {
-        this.kCaches[i] = Tensor.zeros(1);
-        this.vCaches[i] = Tensor.zeros(1);
+        this.keyCaches[i] = Tensor.zeros(1);
+        this.valueCaches[i] = Tensor.zeros(1);
       }
     }
   }
@@ -108,8 +108,8 @@ public final class KvCacheArena implements AutoCloseable {
    * @return K pages (or dummy)
    * @throws IllegalArgumentException if {@code layerIndex} is out of range
    */
-  public Tensor k(final int layerIndex) {
-    return this.kCaches[this.requireLayer(layerIndex)];
+  public Tensor getKeyCache(final int layerIndex) {
+    return this.keyCaches[this.requireLayer(layerIndex)];
   }
 
   /**
@@ -119,24 +119,24 @@ public final class KvCacheArena implements AutoCloseable {
    * @return V pages (or dummy)
    * @throws IllegalArgumentException if {@code layerIndex} is out of range
    */
-  public Tensor v(final int layerIndex) {
-    return this.vCaches[this.requireLayer(layerIndex)];
+  public Tensor getValueCache(final int layerIndex) {
+    return this.valueCaches[this.requireLayer(layerIndex)];
   }
 
   /**
-   * Drops K/V tensor references so pages can be reclaimed. Further {@link #k(int)} / {@link #v(int)}
-   * calls still index the array (now {@code null} entries).
+   * Drops K/V tensor references so pages can be reclaimed. Further {@link #getKeyCache(int)} /
+   * {@link #getValueCache(int)} calls still index the array (now {@code null} entries).
    */
   @Override
   public void close() {
-    Arrays.fill(this.kCaches, null);
-    Arrays.fill(this.vCaches, null);
+    Arrays.fill(this.keyCaches, null);
+    Arrays.fill(this.valueCaches, null);
   }
 
   private int requireLayer(final int layerIndex) {
-    if (layerIndex < 0 || layerIndex >= this.kCaches.length) {
+    if (layerIndex < 0 || layerIndex >= this.keyCaches.length) {
       throw new IllegalArgumentException(
-        "layerIndex out of range: " + layerIndex + " (layers=" + this.kCaches.length + ")");
+        "layerIndex out of range: " + layerIndex + " (layers=" + this.keyCaches.length + ")");
     }
     return layerIndex;
   }
@@ -148,9 +148,9 @@ public final class KvCacheArena implements AutoCloseable {
    */
   @Override
   public String toString() {
-    Tensor first = this.kCaches.length == 0 ? null : this.kCaches[0];
+    Tensor first = this.keyCaches.length == 0 ? null : this.keyCaches[0];
     return "KvCacheArena[layers=%d, blocks=%d]".formatted(
-      this.kCaches.length,
+      this.keyCaches.length,
       first != null && first.ndim() >= 2 ? first.size(0) : 0);
   }
 }

@@ -156,7 +156,7 @@ public final class DenseRagIndex implements RagIndex {
    * @since 1.1.0
    */
   public static DenseRagIndex of(final List<TextChunk> chunks, final LlmModel embeddingModel) {
-    return indexChunks(chunks, embeddingModel, DenseRagIndex::ignorePassageProgress, null);
+    return indexChunks(chunks, embeddingModel, null, null);
   }
 
   /**
@@ -180,7 +180,8 @@ public final class DenseRagIndex implements RagIndex {
     final LlmModel embeddingModel,
     final IntConsumer onPassageEmbedded
   ) {
-    return indexChunks(chunks, embeddingModel, onPassageEmbedded, null);
+    return indexChunks(
+      chunks, embeddingModel, requireNonNull(onPassageEmbedded, "onPassageEmbedded"), null);
   }
 
   /**
@@ -202,11 +203,7 @@ public final class DenseRagIndex implements RagIndex {
     final LlmModel embeddingModel,
     final Executor executor
   ) {
-    return indexChunks(
-      chunks,
-      embeddingModel,
-      DenseRagIndex::ignorePassageProgress,
-      requireNonNull(executor, "executor"));
+    return indexChunks(chunks, embeddingModel, null, requireNonNull(executor, "executor"));
   }
 
   /**
@@ -233,11 +230,8 @@ public final class DenseRagIndex implements RagIndex {
     return indexChunks(
       chunks,
       embeddingModel,
-      onPassageEmbedded,
+      requireNonNull(onPassageEmbedded, "onPassageEmbedded"),
       requireNonNull(executor, "executor"));
-  }
-
-  private static void ignorePassageProgress(final int ignored) {
   }
 
   private static DenseRagIndex indexChunks(
@@ -247,7 +241,6 @@ public final class DenseRagIndex implements RagIndex {
     final Executor executor
   ) {
     requireNonNull(chunks, "chunks");
-    requireNonNull(onPassageEmbedded, "onPassageEmbedded");
     requireEmbeddingModel(embeddingModel);
     if (chunks.isEmpty()) {
       throw new IllegalArgumentException("chunks must not be empty");
@@ -267,7 +260,7 @@ public final class DenseRagIndex implements RagIndex {
     float[][] vectors = new float[chunks.size()][];
     for (int i = 0; i < chunks.size(); i++) {
       vectors[i] = embeddingModel.embed(embedText(chunks.get(i)));
-      onPassageEmbedded.accept(i + 1);
+      reportPassageProgress(onPassageEmbedded, i + 1);
     }
     return vectors;
   }
@@ -285,7 +278,7 @@ public final class DenseRagIndex implements RagIndex {
       int index = i;
       jobs[i] = CompletableFuture.runAsync(() -> {
         vectors[index] = embeddingModel.embed(embedText(chunks.get(index)));
-        onPassageEmbedded.accept(completed.incrementAndGet());
+        reportPassageProgress(onPassageEmbedded, completed.incrementAndGet());
       }, executor);
     }
     awaitEmbeds(jobs);
@@ -315,6 +308,13 @@ public final class DenseRagIndex implements RagIndex {
   private static void cancelEmbeds(final CompletableFuture<?>[] jobs) {
     for (CompletableFuture<?> job : jobs) {
       job.cancel(true);
+    }
+  }
+
+  private static void reportPassageProgress(final IntConsumer onPassageEmbedded,
+                                            final int completed) {
+    if (onPassageEmbedded != null) {
+      onPassageEmbedded.accept(completed);
     }
   }
 

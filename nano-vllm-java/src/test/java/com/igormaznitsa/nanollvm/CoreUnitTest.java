@@ -613,11 +613,11 @@ class CoreUnitTest {
   void kvAndConvArenasCloseDropState() {
     try (KvCacheArena kv = new KvCacheArena(1, 2, 256, 1, 8);
          ConvStateArena conv = new ConvStateArena(1, 4, 3)) {
-      assertNotNull(kv.k(0));
+      assertNotNull(kv.getKeyCache(0));
       conv.state(7, 0)[0] = 1.5f;
       kv.close();
       conv.close();
-      assertNull(kv.k(0));
+      assertNull(kv.getKeyCache(0));
       assertTrue(conv.toString().contains("seqs=0"));
     }
   }

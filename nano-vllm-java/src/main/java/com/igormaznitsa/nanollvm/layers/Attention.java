@@ -151,8 +151,8 @@ public final class Attention {
    */
   public Tensor forward(final Tensor q, final Tensor k, final Tensor v, final Context ctx) {
     KvCacheArena arena = requireNonNull(ctx.kvCache(), "KV cache arena not bound in Context");
-    Tensor kCache = arena.k(this.kvLayerIndex);
-    Tensor vCache = arena.v(this.kvLayerIndex);
+    Tensor kCache = arena.getKeyCache(this.kvLayerIndex);
+    Tensor vCache = arena.getValueCache(this.kvLayerIndex);
     int[] slots = ctx.slotMapping();
     if (this.writeKv && kCache.numel() > 1 && vCache.numel() > 1 && slots != null
       && slots.length == k.size(0)) {
