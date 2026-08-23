@@ -47,6 +47,13 @@ public final class BundledModels {
   public static final String MULTILINGUAL_E5_SMALL =
     DEFAULT_MODELS_DIR + "/multilingual-e5-small";
   /**
+   * Bundled XLM-RoBERTa-base ONNX embedding folder under {@link #DEFAULT_MODELS_DIR}.
+   *
+   * @since 1.2.1
+   */
+  public static final String XLM_ROBERTA_BASE =
+    DEFAULT_MODELS_DIR + "/xlm-roberta-base";
+  /**
    * Bundled Tiny-LLM ONNX folder under {@link #DEFAULT_MODELS_DIR}.
    *
    * @since 1.1.0
@@ -105,6 +112,7 @@ public final class BundledModels {
         + "models/download-gemma4-e2b-qat-mobile.sh, "
         + "models/download-lfm2.5-2.6b-gguf.sh, models/download-gte-small-gguf.sh, "
         + "models/download-multilingual-e5-small.sh, "
+        + "models/download-xlm-roberta-base.sh, "
         + "or models/download-tiny-llm-onnx.sh, "
         + "models/download-smollm2-135m-instruct-onnx.sh, "
         + "or pass a model path / -D" + PROP_MODEL + "=… / " + ENV_MODEL + "."
@@ -117,7 +125,7 @@ public final class BundledModels {
    * @param modelPathOrName absolute/relative path, {@code Qwen3-0.6B}, {@code Gemma3-270M},
    *                        {@code Gemma4-E2B-IT-QAT-Mobile}, {@code Tiny-LLM-ONNX},
    *                        {@code SmolLM2-135M-Instruct-ONNX}, {@code LFM2.5-2.6B-Q4_K_M.gguf},
-   *                        {@code multilingual-e5-small}, or {@code models/…}
+   *                        {@code multilingual-e5-small}, {@code xlm-roberta-base}, or {@code models/…}
    */
   public static Optional<Path> find(final String modelPathOrName) {
     if (modelPathOrName == null || modelPathOrName.isBlank()) {

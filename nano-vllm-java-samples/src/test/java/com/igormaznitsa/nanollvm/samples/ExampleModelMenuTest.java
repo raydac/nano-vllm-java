@@ -92,6 +92,21 @@ class ExampleModelMenuTest {
   }
 
   @Test
+  void catalogIncludesXlmRobertaBase() {
+    assertTrue(Example.catalog().stream()
+      .anyMatch(choice -> choice.label().contains("xlm-roberta-base")));
+  }
+
+  @Test
+  void modelMenuSelectsXlmRobertaWhenPresent() throws Exception {
+    Path xlm = SampleModelAssumptions.requireXlmRobertaBase();
+    Path chosen = Example.resolveModel(
+      new String[0],
+      new BufferedReader(new StringReader((menuIndexOf(xlm) + 1) + "\n")));
+    assertEquals(xlm, chosen);
+  }
+
+  @Test
   void missingExplicitPathExits() throws Exception {
     assertTrue(
       Example.resolveModel(
@@ -120,6 +135,30 @@ class ExampleModelMenuTest {
       new String[] {qwen.toString(), "--debug"},
       new BufferedReader(new StringReader("2\n")));
     assertEquals(qwen.toAbsolutePath().normalize(), chosenAfter.toAbsolutePath().normalize());
+  }
+
+  @Test
+  void encoderMenuSelectsClassify() throws Exception {
+    Optional<Example.EncoderSession> session = Example.selectEncoderSession(
+      new BufferedReader(new StringReader("2\n")),
+      silentConsole());
+    assertEquals(Optional.of(Example.EncoderSession.CLASSIFY), session);
+  }
+
+  @Test
+  void encoderMenuEnterSelectsEmbed() throws Exception {
+    Optional<Example.EncoderSession> session = Example.selectEncoderSession(
+      new BufferedReader(new StringReader("\n")),
+      silentConsole());
+    assertEquals(Optional.of(Example.EncoderSession.EMBED), session);
+  }
+
+  @Test
+  void encoderMenuExit() throws Exception {
+    Optional<Example.EncoderSession> session = Example.selectEncoderSession(
+      new BufferedReader(new StringReader("3\n")),
+      silentConsole());
+    assertTrue(session.isEmpty());
   }
 
   @Test

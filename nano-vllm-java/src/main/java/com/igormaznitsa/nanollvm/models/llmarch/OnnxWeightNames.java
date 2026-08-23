@@ -45,10 +45,7 @@ public final class OnnxWeightNames {
    * @since 1.1.0
    */
   public static String normalizeBertName(final String rawName) {
-    String name = stripNoise(rawName);
-    if (name.startsWith("bert.")) {
-      name = name.substring("bert.".length());
-    }
+    String name = stripEncoderPrefix(stripNoise(rawName));
     return switch (name) {
       case "embeddings.word_embeddings.weight" -> GGUF_TOKEN_EMBD;
       case "embeddings.position_embeddings.weight" -> GGUF_POSITION_EMBD;
@@ -95,14 +92,27 @@ public final class OnnxWeightNames {
     while (name.startsWith("/")) {
       name = name.substring(1);
     }
-    int onnx = name.toLowerCase(ROOT).indexOf("onnx::");
-    if (onnx >= 0) {
+    if (name.toLowerCase(ROOT).contains("onnx::")) {
       return name;
     }
-    if (name.startsWith("model/") || name.startsWith("bert/")) {
-      name = name.replace('/', '.');
+    return name.replace('/', '.');
+  }
+
+  private static String stripEncoderPrefix(final String name) {
+    String embeddings = dropPrefixBefore(name, "embeddings.");
+    if (embeddings != null) {
+      return embeddings;
     }
-    return name;
+    String encoder = dropPrefixBefore(name, "encoder.");
+    return encoder != null ? encoder : name;
+  }
+
+  private static String dropPrefixBefore(final String name, final String root) {
+    int nested = name.indexOf("." + root);
+    if (nested >= 0) {
+      return name.substring(nested + 1);
+    }
+    return name.startsWith(root) ? name : null;
   }
 
   private static String requireNonBlank(final String rawName) {

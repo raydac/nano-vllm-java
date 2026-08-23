@@ -153,6 +153,34 @@ Do not use with `LLM.builder` / chat. Sample: `nano-vllm-java-samples` →
 `com.igormaznitsa.nanollvm.samples.EmbeddingsHelloWorld` (default folder; non-retrieval texts get
 `query: `).
 
+## xlm-roberta-base ONNX (optional, embeddings)
+
+[FacebookAI/xlm-roberta-base](https://huggingface.co/FacebookAI/xlm-roberta-base) — multilingual
+XLM-RoBERTa encoder (94 languages, fill-mask checkpoint). Hugging Face **safetensors is not
+loaded**; the scripts fetch Hub `model.onnx` (~1.9 GB fp32) and save it as `onnx/model.onnx` so
+the folder matches other ONNX layouts. MIT license; no HF gate. Optional `HF_TOKEN` if Hugging Face
+rate-limits the large file.
+
+```bash
+./models/download-xlm-roberta-base.sh
+```
+
+Windows: `.\models\download-xlm-roberta-base.ps1` or `models\download-xlm-roberta-base.cmd`.
+
+Creates `models/xlm-roberta-base/`. Context length up to 512 tokens. Mean-pooled embeddings via
+`LlmModel.embed` — not a dedicated sentence-embedding model like E5 (no `query:` / `passage:`
+prefixes). Raw cosine between unrelated strings is often ~0.99 (anisotropy). In `Example`, pick
+**Classify** after load, teach `label | text` (or `/demo` / `/load nano-vllm-java-samples/classify-labels.example.txt`), then predict — a centered prototype
+probe, not a sequence-classification head.
+
+```java
+try (LlmModel model = LlmModelFactory.make(Path.of("models/xlm-roberta-base"))) {
+  float[] v = model.embed("hello world");
+}
+```
+
+Do not use with `LLM.builder` / chat.
+
 ## Selecting a model
 
 | Mechanism          | Example                                                                                           |

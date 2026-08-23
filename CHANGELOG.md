@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased] — 1.2.1-SNAPSHOT
 
+### Added
+- Optional download scripts for [FacebookAI/xlm-roberta-base](https://huggingface.co/FacebookAI/xlm-roberta-base)
+  (`models/download-xlm-roberta-base.sh` / `.ps1` / `.cmd` → `models/xlm-roberta-base/`, ONNX fp32
+  saved as `onnx/model.onnx`, ~1.9 GB). BERT-encoder embeddings (`bert` / `roberta` / `xlm-roberta`,
+  and the same graph under those family names) load from GGUF or ONNX via `LlmModel.embed` — the
+  library keys off architecture, not a named Hub checkpoint. ONNX BERT weight names drop whatever
+  module sits in front of `embeddings.` / `encoder.` (not a fixed prefix list).
+  `ModelSupport.isEmbeddingCheckpoint` classifies a folder or GGUF from `config.json` / metadata
+  without loading weights. The `Example` demo lists the optional xlm-roberta-base download in its
+  menu, picks any BERT encoder under `models/` for dense/hybrid RAG (smallest by weight file), and
+  can few-shot classify on encoder vectors (centered prototypes: teach `label | text`, then predict).
+  `RagFactory.withEmbeddings` can report per-passage embed progress (and run those embeds on a
+  caller `Executor`). DistilBERT / ALBERT / DeBERTa / ELECTRA stay unsupported; safetensors
+  BERT-family folders are still rejected.
+
 ## [1.2.0] — 2026-08-22
 
 Public release of **nano-vllm-java** `1.2.0` (Maven coordinates `com.igormaznitsa:nano-vllm-java:1.2.0`).

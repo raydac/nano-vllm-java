@@ -144,8 +144,30 @@ class OnnxSupportUnitTest {
       WeightNames.GGUF_TOKEN_EMBD,
       OnnxWeightNames.normalizeBertName("embeddings.word_embeddings.weight"));
     assertEquals(
+      WeightNames.GGUF_TOKEN_EMBD,
+      OnnxWeightNames.normalizeBertName("roberta.embeddings.word_embeddings.weight"));
+    assertEquals(
+      WeightNames.GGUF_TOKEN_EMBD,
+      OnnxWeightNames.normalizeBertName("xlm-roberta.embeddings.word_embeddings.weight"));
+    assertEquals(
+      WeightNames.GGUF_TOKEN_EMBD,
+      OnnxWeightNames.normalizeBertName("roberta/embeddings/word_embeddings.weight"));
+    assertEquals(
       "blk.0.attn_q.weight",
       OnnxWeightNames.normalizeBertName("encoder.layer.0.attention.self.query.weight"));
+    assertEquals(
+      "blk.0.attn_q.weight",
+      OnnxWeightNames.normalizeBertName("roberta.encoder.layer.0.attention.self.query.weight"));
+    assertEquals(
+      WeightNames.GGUF_TOKEN_EMBD,
+      OnnxWeightNames.normalizeBertName("nomic_bert.embeddings.word_embeddings.weight"));
+    assertEquals(
+      "blk.2.attn_k.weight",
+      OnnxWeightNames.normalizeBertName(
+        "model.encoder.layer.2.attention.self.key.weight"));
+    assertEquals(
+      WeightNames.GGUF_TOKEN_EMBD,
+      OnnxWeightNames.normalizeBertName("model.bert.embeddings.word_embeddings.weight"));
     assertEquals(
       "blk.7.attn_output.weight",
       OnnxWeightNames.normalizeBertName("encoder.layer.7.attention.output.dense.weight"));

@@ -15,6 +15,7 @@ import com.igormaznitsa.nanollvm.llm.SamplingParams;
 import com.igormaznitsa.nanollvm.models.LlmModality;
 import com.igormaznitsa.nanollvm.models.LlmModel;
 import com.igormaznitsa.nanollvm.models.LlmModelFactory;
+import com.igormaznitsa.nanollvm.models.ModelSupport;
 import com.igormaznitsa.nanollvm.rag.DenseRagIndex;
 import com.igormaznitsa.nanollvm.rag.PreparedRag;
 import com.igormaznitsa.nanollvm.rag.RagFactory;
@@ -24,16 +25,23 @@ import com.igormaznitsa.nanollvm.rag.RagLoadOptions;
 import com.igormaznitsa.nanollvm.rag.RagSession;
 import com.igormaznitsa.nanollvm.samples.utils.BundledModels;
 import com.igormaznitsa.nanollvm.samples.utils.BundledRag;
+import com.igormaznitsa.nanollvm.samples.utils.EmbeddingClassifier;
+import com.igormaznitsa.nanollvm.samples.utils.EmbeddingClassifier.LabeledText;
+import com.igormaznitsa.nanollvm.samples.utils.EmbeddingClassifier.Prediction;
 import com.igormaznitsa.nanollvm.samples.utils.OrderedConsole;
 import com.igormaznitsa.nanollvm.samples.utils.SampleAdvisorPrompts;
 import com.igormaznitsa.nanollvm.samples.utils.SampleChatPrompts;
 import com.igormaznitsa.nanollvm.utils.NanoLlvmProps;
 import java.io.BufferedReader;
+import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
@@ -44,7 +52,7 @@ import java.util.stream.Stream;
 
 /**
  * Interactive terminal sample: pick a model, pick a RAG mode, pick how many advisors, then chat
- * (or embed).
+ * (or embed / few-shot classify).
  *
  * <p>Read {@link #main} top to bottom. Each RAG / embed path is a named method that shows the
  * matching library API in order.
@@ -66,7 +74,18 @@ public final class Example {
   private static final int RAG_CONTEXT_CHARS_DEFAULT = 3500;
   private static final int RAG_CONTEXT_CHARS_TURN_BASED = 900;
   private static final int EMBED_PREVIEW = 8;
+  private static final double CLASSIFY_CLOSE_MARGIN = 0.03;
+  private static final String CLASSIFY_LABELS_EXAMPLE =
+    "nano-vllm-java-samples/classify-labels.example.txt";
   private static final String DEBUG_FLAG = "--debug";
+  private static final List<LabeledText> CLASSIFY_DEMO = List.of(
+    new LabeledText("poem", "Однажды в студёную зимнюю пору"),
+    new LabeledText("poem", "Я из лесу вышел — был сильный мороз"),
+    new LabeledText("poem", "Мороз и солнце; день чудесный"),
+    new LabeledText("chat", "who are you?"),
+    new LabeledText("chat", "Oh my God"),
+    new LabeledText("chat", "привет, как дела?")
+  );
 
   private static final List<AdvisorRole> ADVISOR_ROLES = List.of(
     new AdvisorRole("Practical", SampleAdvisorPrompts.ROLE_PRACTICAL),
@@ -79,7 +98,7 @@ public final class Example {
 
   /**
    * Terminal flow: model → RAG mode → advisor count → load → session.
-   * Embedding checkpoints skip RAG and advisors and open {@link #runEmbeddingSession}.
+   * Embedding checkpoints skip RAG and advisors, then {@link #selectEncoderSession}.
    */
   public static void main(final String[] args) throws Exception {
     OrderedConsole console = new OrderedConsole(System.out, System.err);
@@ -96,7 +115,7 @@ public final class Example {
 
       Optional<RagMode> ragMode = Optional.of(RagMode.NONE);
       Optional<Integer> advisorCount = Optional.of(0);
-      if (!isBundledEmbeddingModel(modelPath)) {
+      if (!ModelSupport.isEmbeddingCheckpoint(modelPath)) {
         ragMode = selectRagMode(in, console);
         if (ragMode.isEmpty()) {
           return;
@@ -116,7 +135,14 @@ public final class Example {
       try (LlmModel model = LlmModelFactory.make(modelPath, status)) {
         printSupportedModalities(model, console);
         if (model.isEmbeddingModel()) {
-          runEmbeddingSession(model, in, console);
+          Optional<EncoderSession> encoderSession = selectEncoderSession(in, console);
+          if (encoderSession.isEmpty()) {
+            return;
+          }
+          switch (encoderSession.get()) {
+            case EMBED -> runEmbeddingSession(model, in, console);
+            case CLASSIFY -> runClassificationSession(model, in, console);
+          }
           return;
         }
 
@@ -217,7 +243,7 @@ public final class Example {
    * Step 2 — choose how (or whether) the local {@code rag/} corpus grounds each turn.
    *
    * <p>{@link RagMode#NONE} is always available. BM25 needs a corpus folder. Dense and hybrid also
-   * need the gte-small embedding GGUF.
+   * need a BERT-encoder checkpoint under {@code models/} (smallest matching GGUF or ONNX folder).
    *
    * @return the chosen mode, or empty if the user exits
    */
@@ -226,19 +252,21 @@ public final class Example {
     final OrderedConsole console
   ) throws Exception {
     boolean corpusPresent = BundledRag.find().isPresent();
-    boolean gtePresent = BundledModels.find(BundledModels.GTE_SMALL_GGUF).isPresent();
+    Optional<Path> ragEncoder = findRagEmbeddingModel();
+    String encoderLabel = ragEncoder.map(Example::ragEmbeddingLabel)
+      .orElse("BERT encoder under models/");
 
     while (true) {
       console.println("Select RAG index and use mode:");
       console.println("  1) None (plain chat)");
       console.println("  2) BM25 lexical" + missingMark(!corpusPresent, "no corpus at "
         + BundledRag.ragRoot()));
-      console.println("  3) Dense embeddings (gte-small)"
+      console.println("  3) Dense embeddings (" + encoderLabel + ")"
         + missingMark(!corpusPresent, "no corpus")
-        + missingMark(!gtePresent, "gte-small not downloaded"));
+        + missingMark(ragEncoder.isEmpty(), "no embedding model"));
       console.println("  4) Hybrid BM25 + dense"
         + missingMark(!corpusPresent, "no corpus")
-        + missingMark(!gtePresent, "gte-small not downloaded"));
+        + missingMark(ragEncoder.isEmpty(), "no embedding model"));
       console.println("  5) Exit");
       console.print("Choice [1-5, Enter=1]: ");
 
@@ -264,15 +292,15 @@ public final class Example {
           return Optional.of(RagMode.BM25);
         }
         case "3" -> {
-          if (!corpusPresent || !gtePresent) {
-            console.println(denseHybridHint(corpusPresent, gtePresent));
+          if (!corpusPresent || ragEncoder.isEmpty()) {
+            console.println(denseHybridHint(corpusPresent, ragEncoder.isPresent()));
             continue;
           }
           return Optional.of(RagMode.DENSE);
         }
         case "4" -> {
-          if (!corpusPresent || !gtePresent) {
-            console.println(denseHybridHint(corpusPresent, gtePresent));
+          if (!corpusPresent || ragEncoder.isEmpty()) {
+            console.println(denseHybridHint(corpusPresent, ragEncoder.isPresent()));
             continue;
           }
           return Optional.of(RagMode.HYBRID);
@@ -343,9 +371,8 @@ public final class Example {
   /**
    * Embedding REPL: each non-empty line is {@link LlmModel#embed(CharSequence)}.
    *
-   * <p>BERT-family checkpoints (e.g. gte-small GGUF) are not chat models — never
-   * {@code LLM.builder}. Prints dimension, L2 norm, a short preview, and cosine vs the previous
-   * vector.
+   * <p>BERT-encoder checkpoints are not chat models — never {@code LLM.builder}. Prints dimension, L2 norm, a short preview, and
+   * cosine vs the previous vector.
    */
   private static void runEmbeddingSession(
     final LlmModel model,
@@ -356,6 +383,7 @@ public final class Example {
       "Embedding model (" + model.architectureName()
         + ", " + model.modalities() + ") — each line → L2-normalized vector.");
     console.println("Type text and press Enter. Commands: /exit  /quit  /clear");
+    console.println("For labels, restart and choose Classify after the model loads.");
     console.println();
 
     float[] previous = null;
@@ -395,6 +423,223 @@ public final class Example {
       previous = vector;
       console.println();
     }
+  }
+
+  /**
+   * After an embedding checkpoint loads: vectors, or a few-shot label probe on those vectors.
+   *
+   * @return the session, or empty if the user exits
+   */
+  static Optional<EncoderSession> selectEncoderSession(
+    final BufferedReader in,
+    final OrderedConsole console
+  ) throws Exception {
+    while (true) {
+      console.println("Select encoder session:");
+      console.println("  1) Embed (vectors + cosine)");
+      console.println("  2) Classify (few-shot labels; use this for XLM-RoBERTa)");
+      console.println("  3) Exit");
+      console.print("Choice [1-3, Enter=1]: ");
+
+      String line = in.readLine();
+      if (line == null) {
+        return Optional.empty();
+      }
+
+      String choice = line.strip();
+      if (choice.isEmpty()) {
+        choice = "1";
+      }
+      switch (choice) {
+        case "1" -> {
+          console.printlnInfo("Encoder: embed.");
+          return Optional.of(EncoderSession.EMBED);
+        }
+        case "2" -> {
+          console.printlnInfo("Encoder: classify.");
+          return Optional.of(EncoderSession.CLASSIFY);
+        }
+        case "3", "q", "quit", "exit" -> {
+          console.println("Bye.");
+          return Optional.empty();
+        }
+        default -> console.println("Enter 1, 2, or 3, or press Enter for 1.");
+      }
+    }
+  }
+
+  /**
+   * Few-shot classify: teach {@code label | text} (or {@code /load} a TSV), then unlabeled lines
+   * predict. Uses {@link EmbeddingClassifier} on {@link LlmModel#embed} — not a classification head.
+   */
+  private static void runClassificationSession(
+    final LlmModel model,
+    final BufferedReader in,
+    final OrderedConsole console
+  ) throws Exception {
+    console.printlnInfo(
+      "Classify with " + model.architectureName()
+        + " vectors (centered prototypes, not a Hub classification head).");
+    printClassifyHelp(console);
+    console.println();
+
+    EmbeddingClassifier.Trainer trainer = EmbeddingClassifier.trainer();
+    List<LabeledText> taught = new ArrayList<>();
+    EmbeddingClassifier fitted = null;
+
+    while (true) {
+      console.print(fitted == null ? "teach?> " : "classify?> ");
+      String line = in.readLine();
+      if (line == null) {
+        console.println();
+        return;
+      }
+
+      String user = line.strip();
+      if (user.isEmpty()) {
+        continue;
+      }
+      if (isQuitCommand(user)) {
+        return;
+      }
+
+      Optional<ClassifyCommand> command = ClassifyCommand.parse(user);
+      if (command.isPresent()) {
+        switch (command.get()) {
+          case HELP -> printClassifyHelp(console);
+          case FORGET -> {
+            trainer.clear();
+            taught.clear();
+            fitted = null;
+            console.println("(examples cleared)");
+          }
+          case LABELS -> printTaughtLabels(taught, console);
+          case DEMO -> {
+            fitted = teachAll(CLASSIFY_DEMO, model, trainer, taught, console);
+          }
+          case LOAD -> fitted = loadLabelFile(user, model, trainer, taught, console).orElse(fitted);
+        }
+        continue;
+      }
+
+      Optional<LabeledText> labeled = EmbeddingClassifier.parseLabeledLine(user);
+      if (labeled.isPresent()) {
+        fitted = teachOne(labeled.get(), model, trainer, taught, console);
+        continue;
+      }
+
+      if (fitted == null) {
+        console.println("Need two labels first. Example:  poem | frosty winter   or  /demo");
+        continue;
+      }
+      long started = System.nanoTime();
+      printPrediction(fitted, model.embed(user), (System.nanoTime() - started) / 1e9, console);
+      console.println();
+    }
+  }
+
+  private static void printClassifyHelp(final OrderedConsole console) {
+    console.println(
+      "Teach:  label | text     or tab-separated. Then type unlabeled text to predict.");
+    console.println("Commands: /demo  /load <file>  /labels  /forget  /help  /exit  /quit");
+    console.println("Example file (from repo root):  /load " + CLASSIFY_LABELS_EXAMPLE);
+  }
+
+  private static void printTaughtLabels(
+    final List<LabeledText> taught,
+    final OrderedConsole console
+  ) {
+    if (taught.isEmpty()) {
+      console.println("(no examples yet)");
+      return;
+    }
+    taught.forEach(example ->
+      console.println(example.label() + " | " + example.text()));
+  }
+
+  private static Optional<EmbeddingClassifier> loadLabelFile(
+    final String user,
+    final LlmModel model,
+    final EmbeddingClassifier.Trainer trainer,
+    final List<LabeledText> taught,
+    final OrderedConsole console
+  ) {
+    String pathText = user.length() > 5 ? user.substring(5).strip() : "";
+    if (pathText.isEmpty()) {
+      console.println("Usage: /load path/to/labels.txt");
+      return Optional.empty();
+    }
+    Path path = Path.of(pathText);
+    if (!Files.isRegularFile(path)) {
+      console.println("File not found: " + path.toAbsolutePath().normalize());
+      return Optional.empty();
+    }
+    try {
+      List<LabeledText> loaded = Files.readAllLines(path, StandardCharsets.UTF_8).stream()
+        .map(EmbeddingClassifier::parseLabeledLine)
+        .flatMap(Optional::stream)
+        .toList();
+      if (loaded.isEmpty()) {
+        console.println("No labeled lines in " + path);
+        return Optional.empty();
+      }
+      return Optional.ofNullable(teachAll(loaded, model, trainer, taught, console));
+    } catch (IOException e) {
+      console.println("Could not read " + path + ": " + e.getMessage());
+      return Optional.empty();
+    }
+  }
+
+  private static EmbeddingClassifier teachAll(
+    final List<LabeledText> examples,
+    final LlmModel model,
+    final EmbeddingClassifier.Trainer trainer,
+    final List<LabeledText> taught,
+    final OrderedConsole console
+  ) {
+    examples.forEach(example -> teachOne(example, model, trainer, taught, console));
+    return trainer.canFit() ? trainer.fit() : null;
+  }
+
+  private static EmbeddingClassifier teachOne(
+    final LabeledText example,
+    final LlmModel model,
+    final EmbeddingClassifier.Trainer trainer,
+    final List<LabeledText> taught,
+    final OrderedConsole console
+  ) {
+    long started = System.nanoTime();
+    trainer.add(example.label(), model.embed(example.text()));
+    taught.add(example);
+    EmbeddingClassifier fitted = trainer.canFit() ? trainer.fit() : null;
+    console.printf(
+      Locale.ROOT,
+      "+ %s  (%d examples, %d labels, %.3fs)%n",
+      example.label(),
+      trainer.size(),
+      trainer.labels().size(),
+      (System.nanoTime() - started) / 1e9);
+    if (fitted == null) {
+      console.println("  add another label to start predicting");
+    }
+    return fitted;
+  }
+
+  private static void printPrediction(
+    final EmbeddingClassifier classifier,
+    final float[] vector,
+    final double seconds,
+    final OrderedConsole console
+  ) {
+    Prediction prediction = classifier.classify(vector);
+    console.printf(
+      Locale.ROOT,
+      "%s%s  %.3fs%n",
+      prediction.label(),
+      prediction.isClose(CLASSIFY_CLOSE_MARGIN) ? "  (close scores — add more examples)" : "",
+      seconds);
+    prediction.scores().forEach(score ->
+      console.printf(Locale.ROOT, "  %-12s  %.4f%n", score.label(), score.cosine()));
   }
 
   /**
@@ -452,7 +697,7 @@ public final class Example {
   }
 
   /**
-   * Dense RAG: embed every BM25 chunk with gte-small, retrieve by cosine similarity.
+   * Dense RAG: embed every BM25 chunk with the bundled encoder, retrieve by cosine similarity.
    *
    * <p>{@link DenseRagIndex#of(PreparedRag, LlmModel)} builds passage vectors; {@link LLM#rag}
    * then ranks the question against those vectors. The embedding model is a second
@@ -467,19 +712,20 @@ public final class Example {
     final OrderedConsole console
   ) throws Exception {
     Optional<PreparedRag> lexical = prepareLexicalIndex(model, status, console);
-    Path gtePath = BundledModels.find(BundledModels.GTE_SMALL_GGUF).orElse(null);
-    if (lexical.isEmpty() || gtePath == null) {
+    Path encoderPath = findRagEmbeddingModel().orElse(null);
+    if (lexical.isEmpty() || encoderPath == null) {
       console.printlnInfo("Dense RAG unavailable — falling back to plain chat.");
       runPlainChatSession(model, advisorCount, debug, status, in, console);
       return;
     }
 
-    console.printlnInfo("Loading RAG embedding model from " + gtePath);
-    try (LlmModel embed = LlmModelFactory.make(gtePath, status)) {
+    console.printlnInfo("Loading RAG embedding model from " + encoderPath);
+    try (LlmModel embed = LlmModelFactory.make(encoderPath, status)) {
       DenseRagIndex index = DenseRagIndex.of(lexical.get(), embed);
       console.printlnInfo(
         "RAG: dense embeddings over " + BundledRag.ragRoot()
-          + " (" + index.size() + " chunks; encoder " + embed.architectureName() + ")");
+          + " (" + index.size() + " chunks; encoder " + ragEmbeddingLabel(encoderPath)
+          + " / " + embed.architectureName() + ")");
 
       try (LLM llm = openEngine(model, advisorCount, status, console)) {
         converseWithRag(llm, index, debug, in, console);
@@ -500,19 +746,20 @@ public final class Example {
     final OrderedConsole console
   ) throws Exception {
     Optional<PreparedRag> lexical = prepareLexicalIndex(model, status, console);
-    Path gtePath = BundledModels.find(BundledModels.GTE_SMALL_GGUF).orElse(null);
-    if (lexical.isEmpty() || gtePath == null) {
+    Path encoderPath = findRagEmbeddingModel().orElse(null);
+    if (lexical.isEmpty() || encoderPath == null) {
       console.printlnInfo("Hybrid RAG unavailable — falling back to plain chat.");
       runPlainChatSession(model, advisorCount, debug, status, in, console);
       return;
     }
 
-    console.printlnInfo("Loading RAG embedding model from " + gtePath);
-    try (LlmModel embed = LlmModelFactory.make(gtePath, status)) {
+    console.printlnInfo("Loading RAG embedding model from " + encoderPath);
+    try (LlmModel embed = LlmModelFactory.make(encoderPath, status)) {
       RagIndex index = RagFactory.withEmbeddings(lexical.get(), embed);
       console.printlnInfo(
         "RAG: hybrid BM25+dense over " + BundledRag.ragRoot()
-          + " (" + index.size() + " chunks; encoder " + embed.architectureName() + ")");
+          + " (" + index.size() + " chunks; encoder " + ragEmbeddingLabel(encoderPath)
+          + " / " + embed.architectureName() + ")");
 
       try (LLM llm = openEngine(model, advisorCount, status, console)) {
         converseWithRag(llm, index, debug, in, console);
@@ -790,7 +1037,11 @@ public final class Example {
       choice(
         "multilingual-e5-small (embeddings, onnx)",
         BundledModels.MULTILINGUAL_E5_SMALL,
-        "Run models/download-multilingual-e5-small.sh")
+        "Run models/download-multilingual-e5-small.sh"),
+      choice(
+        "xlm-roberta-base (embeddings, onnx, ~1.9GB)",
+        BundledModels.XLM_ROBERTA_BASE,
+        "Run models/download-xlm-roberta-base.sh")
     );
   }
 
@@ -862,6 +1113,7 @@ public final class Example {
     console.println("  ./models/download-tiny-llm-onnx.sh");
     console.println("  ./models/download-gte-small-gguf.sh    (embeddings)");
     console.println("  ./models/download-multilingual-e5-small.sh  (multilingual embeddings)");
+    console.println("  ./models/download-xlm-roberta-base.sh  (XLM-RoBERTa ONNX embeddings)");
     console.println();
     console.println("Windows: matching .ps1 / .cmd scripts in models/.");
     console.println(
@@ -907,6 +1159,10 @@ public final class Example {
       console.printlnInfo(
         "SmolLM2 Instruct is a compact ONNX demo (~135M) — useful to smoke-test ONNX chat, "
           + "weaker dialog than Qwen3 / Gemma3.");
+    }
+    if (ModelSupport.isEmbeddingCheckpoint(path)) {
+      console.printlnInfo(
+        "This checkpoint is a BERT-family embedding encoder — LlmModel.embed, not LLM.builder.");
     }
     if (isGgufPath(path)) {
       console.printlnInfo(
@@ -982,17 +1238,73 @@ public final class Example {
     return path.toString().toLowerCase(Locale.ROOT).contains("smollm2");
   }
 
-  private static boolean isBundledEmbeddingModel(final Path path) {
-    Path normalized = path.toAbsolutePath().normalize();
+  private static Optional<Path> findRagEmbeddingModel() {
+    Path root = BundledModels.modelsRoot();
+    if (!Files.isDirectory(root)) {
+      return Optional.empty();
+    }
+    try (Stream<Path> children = Files.list(root)) {
+      return children
+        .flatMap(Example::checkpointPaths)
+        .filter(ModelSupport::isEmbeddingCheckpoint)
+        .min(Comparator.comparingLong(Example::checkpointWeightBytes));
+    } catch (IOException ignored) {
+      return Optional.empty();
+    }
+  }
+
+  private static Stream<Path> checkpointPaths(final Path path) {
+    if (Files.isRegularFile(path) && isGgufPath(path)) {
+      return Stream.of(path);
+    }
+    if (!Files.isDirectory(path)) {
+      return Stream.empty();
+    }
+    if (Files.isRegularFile(path.resolve("config.json"))) {
+      return Stream.of(path);
+    }
+    try (Stream<Path> nested = Files.list(path)) {
+      return nested.filter(p -> Files.isRegularFile(p) && isGgufPath(p)).toList().stream();
+    } catch (IOException ignored) {
+      return Stream.empty();
+    }
+  }
+
+  private static String ragEmbeddingLabel(final Path path) {
+    Path fileName = path.getFileName();
+    return fileName == null ? path.toString() : fileName.toString();
+  }
+
+  private static long checkpointWeightBytes(final Path path) {
+    try {
+      if (Files.isRegularFile(path)) {
+        return Files.size(path);
+      }
+      try (Stream<Path> walk = Files.walk(path, 2)) {
+        return walk.filter(Example::isWeightFile)
+          .mapToLong(Example::fileSizeOrMax)
+          .min()
+          .orElse(Long.MAX_VALUE);
+      }
+    } catch (IOException ignored) {
+      return Long.MAX_VALUE;
+    }
+  }
+
+  private static boolean isWeightFile(final Path path) {
+    if (!Files.isRegularFile(path) || path.getFileName() == null) {
+      return false;
+    }
     String name = path.getFileName().toString().toLowerCase(Locale.ROOT);
-    return BundledModels.find(BundledModels.GTE_SMALL_GGUF)
-      .map(gte -> gte.equals(normalized))
-      .orElse(false)
-      || BundledModels.find(BundledModels.MULTILINGUAL_E5_SMALL)
-      .map(e5 -> e5.equals(normalized))
-      .orElse(false)
-      || name.contains("gte-small")
-      || name.contains("multilingual-e5");
+    return name.endsWith(".onnx") || name.endsWith(".gguf");
+  }
+
+  private static long fileSizeOrMax(final Path path) {
+    try {
+      return Files.size(path);
+    } catch (IOException ignored) {
+      return Long.MAX_VALUE;
+    }
   }
 
   private static boolean isQuitCommand(final String user) {
@@ -1012,14 +1324,16 @@ public final class Example {
     return missing ? "  [" + reason + "]" : "";
   }
 
-  private static String denseHybridHint(final boolean corpusPresent, final boolean gtePresent) {
-    if (!corpusPresent && !gtePresent) {
-      return "Need a rag/ corpus and models/download-gte-small-gguf.sh";
+  private static String denseHybridHint(final boolean corpusPresent, final boolean encoderPresent) {
+    if (!corpusPresent && !encoderPresent) {
+      return "Need a rag/ corpus and a BERT-encoder checkpoint under models/ "
+        + "(GGUF or ONNX; e.g. models/download-gte-small-gguf.sh)";
     }
     if (!corpusPresent) {
       return "No RAG corpus. Create rag/ or set -Dnanollvm.rag.dir=…";
     }
-    return "gte-small GGUF not found. Run models/download-gte-small-gguf.sh";
+    return "No BERT-encoder checkpoint under models/. "
+      + "Download a GGUF or ONNX encoder (e.g. models/download-gte-small-gguf.sh).";
   }
 
   private static boolean useColor() {
@@ -1071,6 +1385,39 @@ public final class Example {
     BM25,
     DENSE,
     HYBRID
+  }
+
+  enum EncoderSession {
+    EMBED,
+    CLASSIFY
+  }
+
+  private enum ClassifyCommand {
+    HELP,
+    FORGET,
+    LABELS,
+    DEMO,
+    LOAD;
+
+    static Optional<ClassifyCommand> parse(final String user) {
+      String command = user.toLowerCase(Locale.ROOT);
+      if (command.equals("/help") || command.equals("help")) {
+        return Optional.of(HELP);
+      }
+      if (command.equals("/forget") || command.equals("/clear")) {
+        return Optional.of(FORGET);
+      }
+      if (command.equals("/labels")) {
+        return Optional.of(LABELS);
+      }
+      if (command.equals("/demo")) {
+        return Optional.of(DEMO);
+      }
+      if (command.equals("/load") || command.startsWith("/load ")) {
+        return Optional.of(LOAD);
+      }
+      return Optional.empty();
+    }
   }
 
   record ModelChoice(String label, Optional<Path> path, String missingHint, boolean missing) {

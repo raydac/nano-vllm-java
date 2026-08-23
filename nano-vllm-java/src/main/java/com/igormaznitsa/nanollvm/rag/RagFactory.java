@@ -12,6 +12,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.Executor;
+import java.util.function.IntConsumer;
 
 /**
  * Loads and preprocesses documents into a shareable {@link PreparedRag}.
@@ -255,6 +256,27 @@ public final class RagFactory {
   }
 
   /**
+   * {@link #withEmbeddings(PreparedRag, LlmModel)} and invokes {@code onPassageEmbedded} after each
+   * dense vector with the 1-based completed count.
+   *
+   * @param lexical           BM25 corpus whose chunks are embedded; must not be {@code null}
+   * @param embeddingModel    embedding encoder kept open for query-time embed; must not be {@code null}
+   * @param onPassageEmbedded called with {@code 1..N} after each dense vector; must not be {@code null}
+   * @return hybrid index over the same passages
+   * @since 1.2.1
+   */
+  public static HybridRagIndex withEmbeddings(
+    final PreparedRag lexical,
+    final LlmModel embeddingModel,
+    final IntConsumer onPassageEmbedded
+  ) {
+    requireNonNull(lexical, "lexical");
+    requireNonNull(embeddingModel, "embeddingModel");
+    return HybridRagIndex.of(
+      lexical, embeddingModel, requireNonNull(onPassageEmbedded, "onPassageEmbedded"));
+  }
+
+  /**
    * {@link #withEmbeddings(PreparedRag, LlmModel)} with dense passage embeds submitted on
    * {@code executor}. The caller owns the executor; it is not shut down here.
    *
@@ -276,6 +298,32 @@ public final class RagFactory {
     requireNonNull(lexical, "lexical");
     requireNonNull(embeddingModel, "embeddingModel");
     return HybridRagIndex.of(lexical, embeddingModel, requireNonNull(executor, "executor"));
+  }
+
+  /**
+   * {@link #withEmbeddings(PreparedRag, LlmModel, Executor)} and invokes {@code onPassageEmbedded}
+   * after each dense vector with the 1-based completed count (may run on executor threads).
+   *
+   * @param lexical           BM25 corpus whose chunks are embedded; must not be {@code null}
+   * @param embeddingModel    embedding encoder kept open for query-time embed; must not be {@code null}
+   * @param executor          runs each dense passage embed; must not be {@code null}
+   * @param onPassageEmbedded called with {@code 1..N} after each dense vector; must not be {@code null}
+   * @return hybrid index over the same passages
+   * @since 1.2.1
+   */
+  public static HybridRagIndex withEmbeddings(
+    final PreparedRag lexical,
+    final LlmModel embeddingModel,
+    final Executor executor,
+    final IntConsumer onPassageEmbedded
+  ) {
+    requireNonNull(lexical, "lexical");
+    requireNonNull(embeddingModel, "embeddingModel");
+    return HybridRagIndex.of(
+      lexical,
+      embeddingModel,
+      requireNonNull(executor, "executor"),
+      requireNonNull(onPassageEmbedded, "onPassageEmbedded"));
   }
 
   /**

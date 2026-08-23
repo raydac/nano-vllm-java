@@ -1,5 +1,6 @@
 package com.igormaznitsa.nanollvm.models;
 
+import static java.nio.charset.StandardCharsets.UTF_8;
 import static java.util.Locale.ROOT;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -11,7 +12,14 @@ import com.igormaznitsa.nanollvm.llm.Config;
 import com.igormaznitsa.nanollvm.models.internal.CausalLMFactory;
 import com.igormaznitsa.nanollvm.models.internal.EmbeddingEncoderFactory;
 import com.igormaznitsa.nanollvm.models.internal.WeightNames;
+import com.igormaznitsa.nanollvm.models.llmcontainer.GgufReader;
+import java.io.IOException;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 class ModelSupportTest {
 
@@ -40,22 +48,25 @@ class ModelSupportTest {
       """)));
   }
 
-  @Test
-  void detectsBertEmbeddingsWithoutTreatingRobertaAsBert() {
-    Config.HfConfig bert = parse("""
-      {"model_type":"bert","architectures":["BertModel"]}
-      """);
-    assertTrue(ModelSupport.isEmbedding(bert));
-    assertEquals(WeightNames.ARCH_BERT, EmbeddingEncoderFactory.detect(bert));
+  private static byte[] tinyGguf(final String architecture) {
+    ByteBuffer buf = ByteBuffer.allocate(256).order(ByteOrder.LITTLE_ENDIAN);
+    buf.putInt(0x46554747);
+    buf.putInt(3);
+    buf.putLong(0);
+    buf.putLong(1);
+    putGgufString(buf, "general.architecture");
+    buf.putInt(8);
+    putGgufString(buf, architecture);
+    buf.flip();
+    byte[] bytes = new byte[buf.remaining()];
+    buf.get(bytes);
+    return bytes;
+  }
 
-    Config.HfConfig roberta = parse("""
-      {"model_type":"roberta","architectures":["RobertaModel"]}
-      """);
-    assertFalse(ModelSupport.isEmbedding(roberta));
-    UnsupportedModelException ex = assertThrows(
-      UnsupportedModelException.class, () -> ModelSupport.resolve(roberta));
-    assertTrue(ex.getMessage().contains("roberta"));
-    assertTrue(ex.getMessage().contains("bert"));
+  private static void putGgufString(final ByteBuffer buf, final String value) {
+    byte[] bytes = value.getBytes(UTF_8);
+    buf.putLong(bytes.length);
+    buf.put(bytes);
   }
 
   @Test
@@ -169,9 +180,40 @@ class ModelSupportTest {
   }
 
   @Test
-  void acceptsGgufLfm2AndBert() {
-    assertEquals(WeightNames.ARCH_LFM2, ModelSupport.requireGguf("lfm2").architectureId());
-    assertTrue(ModelSupport.requireGguf("bert").isEmbedding());
+  void detectsBertEncoderFamilyFromConfig() {
+    Config.HfConfig bert = parse("""
+      {"model_type":"bert","architectures":["BertModel"]}
+      """);
+    assertTrue(ModelSupport.isEmbedding(bert));
+    assertEquals(WeightNames.ARCH_BERT, EmbeddingEncoderFactory.detect(bert));
+
+    Config.HfConfig roberta = parse("""
+      {"model_type":"roberta","architectures":["RobertaModel"]}
+      """);
+    assertTrue(ModelSupport.isEmbedding(roberta));
+    assertEquals(WeightNames.ARCH_BERT, EmbeddingEncoderFactory.detect(roberta));
+    assertTrue(ModelSupport.require(roberta, ModelSupport.Source.ONNX).isEmbedding());
+  }
+
+  @Test
+  void detectsXlmRobertaOnnxAsBertEmbeddings() {
+    Config.HfConfig xlm = parse("""
+      {"model_type":"xlm-roberta","architectures":["XLMRobertaModel"]}
+      """);
+    assertTrue(ModelSupport.isEmbedding(xlm));
+    assertEquals(WeightNames.ARCH_BERT, EmbeddingEncoderFactory.detect(xlm));
+    assertTrue(ModelSupport.require(xlm, ModelSupport.Source.ONNX).isEmbedding());
+
+    UnsupportedModelException safetensors = assertThrows(
+      UnsupportedModelException.class,
+      () -> ModelSupport.require(xlm, ModelSupport.Source.HF_SAFETENSORS));
+    assertTrue(safetensors.getMessage().contains("safetensors"));
+
+    Config.HfConfig masked = parse("""
+      {"model_type":"xlm-roberta","architectures":["XLMRobertaForMaskedLM"]}
+      """);
+    assertTrue(ModelSupport.isEmbedding(masked));
+    assertEquals(WeightNames.ARCH_BERT, EmbeddingEncoderFactory.detect(masked));
   }
 
   @Test
@@ -198,5 +240,56 @@ class ModelSupportTest {
       () -> ModelSupport.resolve(parse("{\"model_type\":\"totally_unknown_arch\"}")));
     assertTrue(ex.getMessage().contains("totally_unknown_arch"));
     assertTrue(ex.getMessage().contains("Supported by this library"));
+  }
+
+  @Test
+  void acceptsGgufLfm2AndBert() {
+    assertEquals(WeightNames.ARCH_LFM2, ModelSupport.requireGguf("lfm2").architectureId());
+    assertTrue(ModelSupport.requireGguf("bert").isEmbedding());
+    assertTrue(ModelSupport.requireGguf("roberta").isEmbedding());
+    assertTrue(ModelSupport.requireGguf("xlm-roberta").isEmbedding());
+  }
+
+  @Test
+  void rejectsNonBertEmbeddingLookalikes() {
+    assertRejected("deberta", "not implemented");
+    assertRejected("distilbert", "not implemented");
+    assertRejected("albert", "not implemented");
+    assertRejected("electra", "not implemented");
+    assertRejected("modernbert", "not implemented");
+  }
+
+  @Test
+  void isEmbeddingCheckpointReadsConfigWithoutLoadingWeights(@TempDir final Path dir)
+    throws IOException {
+    Path config = dir.resolve("config.json");
+    Files.writeString(config, """
+      {"model_type":"roberta","architectures":["RobertaModel"]}
+      """, UTF_8);
+    assertTrue(ModelSupport.isEmbeddingCheckpoint(dir));
+    assertTrue(ModelSupport.isEmbeddingCheckpoint(config));
+
+    Files.writeString(config, """
+      {"model_type":"qwen3","architectures":["Qwen3ForCausalLM"]}
+      """, UTF_8);
+    assertFalse(ModelSupport.isEmbeddingCheckpoint(dir));
+
+    Files.writeString(config, """
+      {"model_type":"deberta","architectures":["DebertaModel"]}
+      """, UTF_8);
+    assertFalse(ModelSupport.isEmbeddingCheckpoint(dir));
+  }
+
+  @Test
+  void isEmbeddingCheckpointPeeksGgufMetadata(@TempDir final Path dir) throws IOException {
+    Path bert = dir.resolve("encoder.gguf");
+    Files.write(bert, tinyGguf("bert"));
+    assertEquals("bert", GgufReader.peekArchitecture(bert));
+    assertTrue(ModelSupport.isEmbeddingCheckpoint(bert));
+
+    Path chat = dir.resolve("chat.gguf");
+    Files.write(chat, tinyGguf("qwen3"));
+    assertEquals("qwen3", GgufReader.peekArchitecture(chat));
+    assertFalse(ModelSupport.isEmbeddingCheckpoint(chat));
   }
 }

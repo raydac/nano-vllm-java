@@ -7,13 +7,18 @@ import static com.igormaznitsa.nanollvm.models.internal.WeightNames.ARCH_LFM2;
 import static com.igormaznitsa.nanollvm.models.internal.WeightNames.ARCH_LLAMA;
 import static com.igormaznitsa.nanollvm.models.internal.WeightNames.ARCH_QWEN3;
 import static com.igormaznitsa.nanollvm.utils.NanoLlvmProps.PROP_ARCH;
+import static java.nio.charset.StandardCharsets.UTF_8;
 import static java.util.Locale.ROOT;
 import static java.util.Objects.requireNonNull;
 
 import com.igormaznitsa.nanollvm.exceptions.UnsupportedModelException;
 import com.igormaznitsa.nanollvm.llm.Config;
+import com.igormaznitsa.nanollvm.models.llmcontainer.GgufReader;
 import com.igormaznitsa.nanollvm.utils.NanoLlvmProps;
 
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.List;
 import java.util.Optional;
 import java.util.regex.Pattern;
@@ -36,7 +41,7 @@ public final class ModelSupport {
       Chat from a Hugging Face folder (config.json + *.safetensors or *.onnx): qwen3, gemma3 / gemma3_text, \
     gemma4 (text / QAT mobile), llama
       Chat from a GGUF file: qwen3, lfm2
-      Embeddings from GGUF or ONNX: bert
+      Embeddings from GGUF or ONNX: bert encoder (bert / roberta / xlm-roberta)
     Not supported: Qwen2 / Qwen2.5, Qwen3.5 / Qwen3-Next / Fara, vision-language models, Gemma 1 / 2, \
     Gemma 4 vision/audio towers, Mistral / Mixtral, Phi, MoE, GGUF Llama / Gemma, Hugging Face BERT safetensors.""";
 
@@ -64,7 +69,7 @@ public final class ModelSupport {
 
   /**
    * Resolves a GGUF {@code general.architecture} string ({@code qwen3} / {@code lfm2} chat or
-   * {@code bert} embeddings).
+   * BERT-encoder embeddings).
    *
    * @param generalArchitecture GGUF metadata architecture; {@code null} treated as missing
    * @return selected backend id and {@link Kind}
@@ -107,7 +112,8 @@ public final class ModelSupport {
   }
 
   /**
-   * {@code true} when {@code config} is a supported embedding encoder ({@code bert}).
+   * {@code true} when {@code config} is a BERT encoder this library can run ({@code bert},
+   * {@code roberta}, {@code xlm-roberta}, and the same graph under those family names).
    * Unknown or chat families return {@code false} (they do not throw).
    *
    * @since 1.1.0
@@ -115,6 +121,51 @@ public final class ModelSupport {
   public static boolean isEmbedding(final Config.HfConfig config) {
     Verdict verdict = inspect(requireNonNull(config, "config"));
     return verdict.supported() && verdict.selection().isEmbedding();
+  }
+
+  /**
+   * {@code true} when {@code path} is a BERT-encoder checkpoint (HF {@code config.json} or GGUF
+   * metadata) without loading weights. Unknown, chat, or unreadable paths return {@code false}.
+   *
+   * @since 1.2.1
+   */
+  public static boolean isEmbeddingCheckpoint(final Path path) {
+    Path file = requireNonNull(path, "path").toAbsolutePath().normalize();
+    if (isGgufFile(file)) {
+      return isEmbeddingGguf(file);
+    }
+    Path config = configJson(file);
+    if (!Files.isRegularFile(config)) {
+      return false;
+    }
+    try {
+      return isEmbedding(Config.HfConfig.parse(Files.readString(config, UTF_8)));
+    } catch (IOException | RuntimeException ignored) {
+      return false;
+    }
+  }
+
+  private static Path configJson(final Path file) {
+    Path name = file.getFileName();
+    if (Files.isRegularFile(file) && name != null && "config.json".equals(name.toString())) {
+      return file;
+    }
+    return file.resolve("config.json");
+  }
+
+  private static boolean isGgufFile(final Path file) {
+    return Files.isRegularFile(file)
+      && file.getFileName() != null
+      && file.getFileName().toString().toLowerCase(ROOT).endsWith(".gguf");
+  }
+
+  private static boolean isEmbeddingGguf(final Path file) {
+    try {
+      Verdict verdict = classifyToken(normalize(GgufReader.peekArchitecture(file)));
+      return verdict != null && verdict.supported() && verdict.selection().isEmbedding();
+    } catch (IOException | RuntimeException ignored) {
+      return false;
+    }
   }
 
   /**
@@ -262,7 +313,7 @@ public final class ModelSupport {
     if (hfFolderOnlyChat && source == Source.GGUF) {
       throw unsupported(
         ("Architecture '%s' loads from a Hugging Face folder (config.json + *.safetensors or "
-          + "*.onnx), not from GGUF. GGUF chat is qwen3 and lfm2; embeddings are bert.")
+          + "*.onnx), not from GGUF. GGUF chat is qwen3 and lfm2; embeddings are the BERT encoder.")
           .formatted(id),
         modelType,
         architectures);
@@ -353,7 +404,7 @@ public final class ModelSupport {
       return Verdict.rejected(
         "Mixture-of-experts checkpoints ('%s') are not implemented.".formatted(token));
     }
-    if (isBert(token)) {
+    if (isBertEncoder(token)) {
       return Verdict.ok(ARCH_BERT, Kind.EMBEDDING);
     }
     String known = knownUnsupportedReason(token);
@@ -392,10 +443,9 @@ public final class ModelSupport {
       || token.contains("idefics") || token.equals("fara")) {
       return multimodalReason(token);
     }
-    if (token.contains("roberta") || token.contains("deberta") || token.contains("distilbert")
-      || token.contains("albert") || token.contains("electra") || token.contains("modernbert")) {
-      return ("Embedding architecture '%s' is not implemented. Supported embeddings are bert "
-        + "(GGUF or ONNX).").formatted(token);
+    if (isNonBertEmbeddingLookalike(token)) {
+      return ("Embedding architecture '%s' is not implemented. Supported embeddings are the BERT "
+        + "encoder (bert / roberta / xlm-roberta) from GGUF or ONNX.").formatted(token);
     }
     return null;
   }
@@ -411,8 +461,8 @@ public final class ModelSupport {
 
   private static String multimodalReason(final String label) {
     return ("Vision-language / multimodal checkpoint '%s' is not supported. This library runs "
-      + "text-only chat (qwen3, gemma3, gemma4, llama, lfm2) and bert embeddings.").formatted(
-      blank(label));
+      + "text-only chat (qwen3, gemma3, gemma4, llama, lfm2) and BERT-encoder embeddings.")
+      .formatted(blank(label));
   }
 
   private static boolean isQwen3Text(final String token) {
@@ -432,12 +482,22 @@ public final class ModelSupport {
       || token.startsWith("llama3_");
   }
 
-  private static boolean isBert(final String token) {
-    if (token.contains("roberta") || token.contains("deberta") || token.contains("distilbert")
-      || token.contains("albert") || token.contains("electra") || token.contains("modernbert")) {
+  private static boolean isBertEncoder(final String token) {
+    if (isNonBertEmbeddingLookalike(token)) {
       return false;
     }
-    return token.equals("bert") || token.startsWith("bert_") || token.endsWith("_bert");
+    return token.equals("bert")
+      || token.startsWith("bert_")
+      || token.endsWith("_bert")
+      || token.contains("roberta");
+  }
+
+  private static boolean isNonBertEmbeddingLookalike(final String token) {
+    return token.contains("deberta")
+      || token.contains("distilbert")
+      || token.contains("albert")
+      || token.contains("electra")
+      || token.contains("modernbert");
   }
 
   private static boolean isMultimodalClass(final String lower) {
@@ -477,7 +537,7 @@ public final class ModelSupport {
       case ARCH_GEMMA4, "gemma4_text" -> ARCH_GEMMA4;
       case ARCH_LLAMA, "llama2", "llama3" -> ARCH_LLAMA;
       case ARCH_LFM2, "lfm2.5", "lfm2_5" -> ARCH_LFM2;
-      case ARCH_BERT -> ARCH_BERT;
+      case ARCH_BERT, "roberta", "xlm-roberta", "xlm_roberta" -> ARCH_BERT;
       default -> null;
     };
   }

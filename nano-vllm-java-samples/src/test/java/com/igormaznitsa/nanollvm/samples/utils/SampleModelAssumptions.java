@@ -41,6 +41,12 @@ public final class SampleModelAssumptions {
       "models/download-multilingual-e5-small.sh");
   }
 
+  public static Path requireXlmRobertaBase() {
+    return require(BundledModels.find(BundledModels.XLM_ROBERTA_BASE),
+      "xlm-roberta-base ONNX",
+      "models/download-xlm-roberta-base.sh");
+  }
+
   public static Path requireRag() {
     return require(BundledRag.find(), "local RAG corpus at " + BundledRag.ragRoot(),
       "create ./rag with corpus files or set -Dnanollvm.rag.dir=…");

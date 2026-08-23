@@ -29,6 +29,8 @@ public final class GgufReader implements AutoCloseable, GgufTokenizerSource {
 
   private static final int GGUF_MAGIC = 0x46554747;
   private static final int DEFAULT_ALIGNMENT = 32;
+  private static final int ARCHITECTURE_PEEK_BYTES = 4 * 1024 * 1024;
+  private static final String META_ARCHITECTURE = "general.architecture";
   private static final ByteBuffer CLOSED_MAP = ByteBuffer.allocate(0).asReadOnlyBuffer();
 
   private final Path path;
@@ -78,6 +80,25 @@ public final class GgufReader implements AutoCloseable, GgufTokenizerSource {
     return new GgufReader(path);
   }
 
+  /**
+   * Reads {@code general.architecture} from a metadata prefix (at most 4 MiB). Does not copy tensor
+   * weights.
+   *
+   * @return architecture id, or empty when the key is absent from the prefix
+   * @since 1.2.1
+   */
+  public static String peekArchitecture(final Path path) throws IOException {
+    Path file = requireNonNull(path, "path").toAbsolutePath().normalize();
+    try (FileChannel channel = FileChannel.open(file)) {
+      long size = channel.size();
+      if (size < 16) {
+        throw new IOException("not a GGUF file (too small): " + file);
+      }
+      ByteBuffer prefix = ChannelBytes.readHeap(channel, Math.min(size, ARCHITECTURE_PEEK_BYTES));
+      return readArchitecture(prefix, file);
+    }
+  }
+
   private static int[] toJavaShape(final List<Long> ggmlDims) {
     if (ggmlDims.isEmpty()) {
       return new int[] {1};
@@ -107,6 +128,37 @@ public final class GgufReader implements AutoCloseable, GgufTokenizerSource {
     return rem == 0 ? offset : offset + (alignment - rem);
   }
 
+  private static String readArchitecture(final ByteBuffer map, final Path path) throws IOException {
+    int magic = map.getInt(0);
+    if (magic != GGUF_MAGIC) {
+      throw new IOException("not a GGUF file (bad magic): " + path);
+    }
+    int version = map.getInt(4);
+    if (version != 2 && version != 3) {
+      throw new IOException("unsupported GGUF version " + version + " in " + path);
+    }
+
+    Cursor cursor = new Cursor(map, ResourceLimits.current(), 8);
+    try {
+      long tensorCount = cursor.readU64();
+      long kvCount = cursor.readU64();
+      if (tensorCount < 0 || tensorCount > 1_000_000 || kvCount < 0 || kvCount > 1_000_000) {
+        throw new IOException("invalid GGUF counts in " + path);
+      }
+      for (long i = 0; i < kvCount; i++) {
+        String key = cursor.readString();
+        Object value = cursor.readValue(cursor.readU32AsInt());
+        if (META_ARCHITECTURE.equals(key) && value instanceof String architecture) {
+          return architecture;
+        }
+      }
+      return "";
+    } catch (IllegalStateException truncated) {
+      throw new IOException(
+        "GGUF metadata prefix too small to read general.architecture: " + path, truncated);
+    }
+  }
+
   private long parseContainer(final ByteBuffer map, final long size) throws IOException {
     int magic = map.getInt(0);
     if (magic != GGUF_MAGIC) {
@@ -117,7 +169,7 @@ public final class GgufReader implements AutoCloseable, GgufTokenizerSource {
       throw new IOException("unsupported GGUF version " + version + " in " + this.path);
     }
 
-    Cursor cursor = new Cursor(8);
+    Cursor cursor = new Cursor(map, this.limits, 8);
     long tensorCount = cursor.readU64();
     long kvCount = cursor.readU64();
     if (tensorCount < 0 || tensorCount > 1_000_000 || kvCount < 0 || kvCount > 1_000_000) {
@@ -316,45 +368,49 @@ public final class GgufReader implements AutoCloseable, GgufTokenizerSource {
     }
   }
 
-  private final class Cursor {
+  private static final class Cursor {
+    private final ByteBuffer map;
+    private final ResourceLimits limits;
     private long position;
 
-    Cursor(final long position) {
+    Cursor(final ByteBuffer map, final ResourceLimits limits, final long position) {
+      this.map = map;
+      this.limits = limits;
       this.position = position;
     }
 
     private void require(final int bytes) {
-      if (this.position + bytes > GgufReader.this.map.capacity()) {
+      if (this.position + bytes > this.map.capacity()) {
         throw new IllegalStateException("GGUF truncated at " + this.position);
       }
     }
 
     int readU32AsInt() {
       this.require(4);
-      int value = GgufReader.this.map.getInt((int) this.position);
+      int value = this.map.getInt((int) this.position);
       this.position += 4;
       return value;
     }
 
     long readU64() {
       this.require(8);
-      long value = GgufReader.this.map.getLong((int) this.position);
+      long value = this.map.getLong((int) this.position);
       this.position += 8;
       return value;
     }
 
     String readString() {
       long len = this.readU64();
-      if (len < 0 || len > GgufReader.this.limits.maxGgufStringBytes()) {
+      if (len < 0 || len > this.limits.maxGgufStringBytes()) {
         throw new IllegalStateException(
           "invalid GGUF string length " + len + " (maxGgufStringBytes="
-            + GgufReader.this.limits.maxGgufStringBytes() + ")");
+            + this.limits.maxGgufStringBytes() + ")");
       }
       this.require((int) len);
       byte[] bytes = new byte[(int) len];
       int pos = (int) this.position;
       for (int i = 0; i < bytes.length; i++) {
-        bytes[i] = GgufReader.this.map.get(pos + i);
+        bytes[i] = this.map.get(pos + i);
       }
       this.position += len;
       return new String(bytes, UTF_8);
@@ -364,44 +420,44 @@ public final class GgufReader implements AutoCloseable, GgufTokenizerSource {
       return switch (type) {
         case 0 -> {
           this.require(1);
-          byte v = GgufReader.this.map.get((int) this.position);
+          byte v = this.map.get((int) this.position);
           this.position += 1;
           yield Byte.toUnsignedInt(v);
         }
         case 1 -> {
           this.require(1);
-          byte v = GgufReader.this.map.get((int) this.position);
+          byte v = this.map.get((int) this.position);
           this.position += 1;
           yield (int) v;
         }
         case 2 -> {
           this.require(2);
-          int v = Short.toUnsignedInt(GgufReader.this.map.getShort((int) this.position));
+          int v = Short.toUnsignedInt(this.map.getShort((int) this.position));
           this.position += 2;
           yield v;
         }
         case 3 -> {
           this.require(2);
-          short v = GgufReader.this.map.getShort((int) this.position);
+          short v = this.map.getShort((int) this.position);
           this.position += 2;
           yield (int) v;
         }
         case 4 -> this.readU32AsInt();
         case 5 -> {
           this.require(4);
-          int v = GgufReader.this.map.getInt((int) this.position);
+          int v = this.map.getInt((int) this.position);
           this.position += 4;
           yield v;
         }
         case 6 -> {
           this.require(4);
-          float v = GgufReader.this.map.getFloat((int) this.position);
+          float v = this.map.getFloat((int) this.position);
           this.position += 4;
           yield v;
         }
         case 7 -> {
           this.require(1);
-          byte v = GgufReader.this.map.get((int) this.position);
+          byte v = this.map.get((int) this.position);
           this.position += 1;
           yield v != 0;
         }
@@ -410,13 +466,13 @@ public final class GgufReader implements AutoCloseable, GgufTokenizerSource {
         case 10 -> this.readU64();
         case 11 -> {
           this.require(8);
-          long v = GgufReader.this.map.getLong((int) this.position);
+          long v = this.map.getLong((int) this.position);
           this.position += 8;
           yield v;
         }
         case 12 -> {
           this.require(8);
-          double v = GgufReader.this.map.getDouble((int) this.position);
+          double v = this.map.getDouble((int) this.position);
           this.position += 8;
           yield v;
         }

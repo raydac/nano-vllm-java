@@ -92,8 +92,10 @@ class DenseRagIndexTest {
       .build();
 
     try (LlmModel embed = LlmModelFactory.make(gte)) {
-      HybridRagIndex hybrid = RagFactory.withEmbeddings(lexical, embed);
+      AtomicInteger completed = new AtomicInteger();
+      HybridRagIndex hybrid = RagFactory.withEmbeddings(lexical, embed, completed::set);
       assertEquals(lexical.size(), hybrid.size());
+      assertEquals(lexical.size(), completed.get());
 
       List<RagHit> hits = hybrid.retrieve("What city is France's capital?", 2);
       assertTrue(

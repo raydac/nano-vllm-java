@@ -385,10 +385,10 @@ A Gemma file adds things like `layer_types`, `sliding_window`, `hidden_activatio
 
 | Field           | Means                                                                                 | Used for                                              | If missing                                         |
 |-----------------|---------------------------------------------------------------------------------------|-------------------------------------------------------|----------------------------------------------------|
-| `model_type`    | Short family name (`qwen3`, `gemma3_text`, `gemma4`, `llama`, …)                    | Exact match via `ModelSupport` (Qwen3 / Gemma3 text / Gemma 4 text / Llama; GGUF `qwen3` / `lfm2`; embeddings `bert`) | Unsupported families fail with `UnsupportedModelException` and a support catalog. Optional `-Dnanollvm.arch=…` only when it **matches** the checkpoint. |
+| `model_type`    | Short family name (`qwen3`, `gemma3_text`, `gemma4`, `llama`, …)                    | Exact match via `ModelSupport` (Qwen3 / Gemma3 text / Gemma 4 text / Llama; GGUF `qwen3` / `lfm2`; embeddings BERT encoder: `bert` / `roberta` / `xlm-roberta`) | Unsupported families fail with `UnsupportedModelException` and a support catalog. Optional `-Dnanollvm.arch=…` only when it **matches** the checkpoint. |
 | `architectures` | List of class-style names from Hugging Face (`Qwen3ForCausalLM`, `LlamaForCausalLM`, …) | Same detection if `model_type` is unclear; `*ForConditionalGeneration` / vision classes are rejected | Optional                                           |
 
-You can override causal detection with `-Dnanollvm.arch=qwen3`, `gemma3`, `gemma4`, `llama`, or `lfm2` **only when that id matches the checkpoint**. A forced id cannot turn Qwen2 / Qwen3.5 / vision models into a supported graph. Look-alike names are rejected (`qwen3_5` is not `qwen3`; `gemma2` is not `gemma3`; `gemma4` is its own text graph, not Gemma 3; `roberta` is not `bert`). The error lists what this library actually loads (`ModelSupport.CATALOG`).
+You can override causal detection with `-Dnanollvm.arch=qwen3`, `gemma3`, `gemma4`, `llama`, or `lfm2` **only when that id matches the checkpoint**. A forced id cannot turn Qwen2 / Qwen3.5 / vision models into a supported graph. Look-alike names are rejected (`qwen3_5` is not `qwen3`; `gemma2` is not `gemma3`; `gemma4` is its own text graph, not Gemma 3). BERT-encoder families (`bert`, `roberta`, `xlm-roberta`) load as embeddings from GGUF or ONNX (**since 1.2.1** for RoBERTa / XLM-R); DistilBERT / ALBERT / DeBERTa / ELECTRA are still rejected. The error lists what this library actually loads (`ModelSupport.CATALOG`).
 Embedding GGUFs use a separate detector (`bert`) and never go through `LLM.builder` (chapter 7b). ONNX folders use the
 same `config.json` detection (chapter **7c**).
 
@@ -398,6 +398,7 @@ same `config.json` detection (chapter **7c**).
 - Gemma3-270M: `"model_type": "gemma3_text"`, `"architectures": ["Gemma3ForCausalLM"]`
 - Gemma 4 E2B QAT mobile: `"model_type": "gemma4"` / `"gemma4_text"` — text chat in this port (vision/audio towers skipped; see **Input and output modalities** below)
 - SmolLM2 / Tiny-LLM ONNX: `"model_type": "llama"`, `"architectures": ["LlamaForCausalLM"]`
+- xlm-roberta-base ONNX: `"model_type": "xlm-roberta"`, `"architectures": ["XLMRobertaForMaskedLM"]` — one BERT-encoder example via ONNX (**since 1.2.1**); any `bert` / `roberta` / `xlm-roberta` checkpoint with mapped names works the same
 
 ---
 
@@ -1395,7 +1396,7 @@ try (LlmModel model = LlmModelFactory.make(Path.of("models/gte-small.Q2_K.gguf")
 ```
 
 **In the code:** `LlmModelFactory` → `ArchitectureProcessor.createEmbedding` → `BertForEmbedding`; public surface `LlmModel.embed`;
-samples `EmbeddingsHelloWorld` (default multilingual-e5-small ONNX), `Example` menu items for gte-small and E5.
+samples `EmbeddingsHelloWorld` (default multilingual-e5-small ONNX), `Example` menu items for gte-small, E5, and xlm-roberta-base.
 
 ### Task prefixes (`query:` / `passage:`) — library vs checkpoint
 
@@ -1455,7 +1456,7 @@ There is **no** chat template, KV cache, or next-token sampler on this path. Lif
 
 ### Limits (honest)
 
-- **BERT embeddings:** GGUF (`bert` arch) and ONNX folders when names map — **not** a full Hugging Face safetensors
+- **BERT embeddings:** GGUF or ONNX BERT-encoder graphs (`bert` / `roberta` / `xlm-roberta` when names map) — **not** a full Hugging Face safetensors
   BERT directory load yet.
 - GGUF embedding files still need a **supported** GGML dtype (ch. 7a table); exotic quants fail at load.
 - Dense retrieval is an **in-process linear scan**, not an ANN index.
@@ -1518,7 +1519,7 @@ tensors). See the TensorProto table below.
 | Checkpoint family | Graph | Typical demo |
 |-------------------|-------|--------------|
 | Qwen3 / Gemma3 / **Llama** | Causal chat (`LLM.builder`) | [SmolLM2-135M-Instruct-ONNX](https://huggingface.co/onnx-community/SmolLM2-135M-Instruct-ONNX) (ChatML), [Tiny-LLM-ONNX](https://huggingface.co/onnx-community/Tiny-LLM-ONNX) (base / completion toy) |
-| BERT-style | Embeddings (`LlmModel.embed`) | [multilingual-e5-small](https://huggingface.co/intfloat/multilingual-e5-small) ONNX (`models/download-multilingual-e5-small.sh`; prepend `query:` / `passage:` — ch. **7b**) |
+| BERT-style | Embeddings (`LlmModel.embed`) | [multilingual-e5-small](https://huggingface.co/intfloat/multilingual-e5-small) ONNX (`models/download-multilingual-e5-small.sh`; prepend `query:` / `passage:` — ch. **7b**); [xlm-roberta-base](https://huggingface.co/FacebookAI/xlm-roberta-base) ONNX (`models/download-xlm-roberta-base.sh`) |
 
 **Llama** here means the Llama-style stack assembled by `LlamaForCausalLM`: RMSNorm, RoPE, GQA, SiLU MLP, **without**
 Qwen’s extra Q/K head norms. Tiny-LLM and SmolLM2 Instruct ONNX both declare `LlamaForCausalLM` in `config.json`.
@@ -1548,6 +1549,8 @@ live in protobuf field **9** (legacy) or **13**.
 - Base ONNX smoke test: `models/download-tiny-llm-onnx.sh` → `models/Tiny-LLM-ONNX/`
 - Multilingual embeddings: `models/download-multilingual-e5-small.sh` → `models/multilingual-e5-small/`
   (Unigram tokenizer; prepend `query:` / `passage:` — ch. **7b**)
+- XLM-RoBERTa-base ONNX: `models/download-xlm-roberta-base.sh` → `models/xlm-roberta-base/`
+  (`onnx/model.onnx`; mean-pooled encoder, no E5 prefixes)
 
 ```java
 // Instruct / ChatML folder (same factory as safetensors)
@@ -3296,12 +3299,14 @@ try (LlmModel model = LlmModelFactory.open(Path.of("models/Qwen3-0.6B")).make();
 Interactive CLI wiring lives in `nano-vllm-java-samples` → `samples.Example.main`: load status and chat share
 `samples.utils.OrderedConsole` (millis-stamped queue → stdout vs stderr), then **model menu**
 (downloaded first, Qwen3-0.6B preferred for chat quality; Enter = first; empty disk → download instructions),
-**RAG-mode menu** (none / BM25 / dense / hybrid — dense needs gte-small; **since 1.1.0**; Enter =
+**RAG-mode menu** (none / BM25 / dense / hybrid — dense needs a BERT-encoder checkpoint under `models/`; **since 1.1.0**; Enter =
 none), **advisor-count menu** (`0`–`3`; Enter = none), then `llm.chat(…).streamTo(…)` or
 `llm.rag(index).streamTo(…)`. Prepared-prompt
 `TEXT_DEBUG` lines are off by default (`ChatSession.emitDebugPrompts(true)` to enable; `Example`
 opts in with `--debug`, chapter 17). Embedding
-checkpoints skip RAG/advisors and open an embed REPL. Each mode is a named method in `Example`.
+checkpoints skip RAG/advisors, then an encoder-session menu: embed REPL, or few-shot classify
+(`label | text` / `/demo` / `/load`, centered prototypes on `LlmModel.embed` — not a Hub
+classification head). Each mode is a named method in `Example`.
 
 ### Sample A1 — classpath / stream sources (**since 1.1.0**)
 
@@ -3859,8 +3864,9 @@ Think of the layers again:
 The repository folder `rag/` holds sample Markdown (fairy-tale / Grimm demos). `samples.Example` loads it through
 `samples.utils.BundledRag` when present (`-Dnanollvm.rag.dir` / `NANOLLVM_RAG_DIR` override the path). **Since 1.1.0**
 the sample asks for a **RAG mode** after you pick a chat model: none (plain chat; **Enter**), BM25, dense, or hybrid
-(dense and hybrid need `models/gte-small.Q2_K.gguf`), then **how many advisors** (`0`–`3`; **Enter** = none). Choosing
-gte-small alone still opens the embedding REPL (`samples.EmbeddingsHelloWorld` defaults to multilingual-e5-small
+(dense and hybrid need a BERT-encoder GGUF or ONNX folder under `models/`), then **how many advisors** (`0`–`3`; **Enter** = none). Choosing
+an embedding checkpoint still opens an encoder-session menu: embed REPL, or few-shot classify on
+`LlmModel.embed` vectors (`samples.EmbeddingsHelloWorld` defaults to multilingual-e5-small
 ONNX and adds `query: ` for that family).
 `samples.AdvisorRagHelloWorld` is the non-interactive BM25 + custom-advisor path (Gemma3-270M, advisor Alex,
 Grimm names and father). `samples.RagTunerHelloWorld` extracts a bundled EPUB of Čapek's *R.U.R.* with

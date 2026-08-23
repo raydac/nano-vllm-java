@@ -1,0 +1,20 @@
+# Example labels for nano-vllm-java Example Classify session.
+# Format:  label | text     or     label<TAB>text
+# Blank lines and # comments are skipped.
+# From the repository root, after loading an embedding model and choosing Classify:
+#   /load nano-vllm-java-samples/classify-labels.example.txt
+
+poem | Однажды в студёную зимнюю пору
+poem | Я из лесу вышел — был сильный мороз
+poem | Мороз и солнце; день чудесный
+poem | The woods are lovely, dark and deep
+
+chat | who are you?
+chat | Oh my God
+chat | привет, как дела?
+chat | What's your name?
+
+news | NASA launched a rocket toward the Moon
+news | The central bank raised interest rates
+news | ЦБ повысил ключевую ставку
+news | A storm knocked out power across the region
