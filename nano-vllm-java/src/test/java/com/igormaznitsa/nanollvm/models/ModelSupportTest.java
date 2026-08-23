@@ -12,6 +12,7 @@ import com.igormaznitsa.nanollvm.llm.Config;
 import com.igormaznitsa.nanollvm.models.internal.CausalLMFactory;
 import com.igormaznitsa.nanollvm.models.internal.EmbeddingEncoderFactory;
 import com.igormaznitsa.nanollvm.models.internal.WeightNames;
+import com.igormaznitsa.nanollvm.models.internal.WeightSchema;
 import com.igormaznitsa.nanollvm.models.llmcontainer.GgufReader;
 import java.io.IOException;
 import java.nio.ByteBuffer;
@@ -291,5 +292,106 @@ class ModelSupportTest {
     Files.write(chat, tinyGguf("qwen3"));
     assertEquals("qwen3", GgufReader.peekArchitecture(chat));
     assertFalse(ModelSupport.isEmbeddingCheckpoint(chat));
+  }
+
+  @Test
+  void acceptsWhisperSafetensorsAndRejectsOnnxGguf() {
+    Config.HfConfig whisper = parse("""
+      {
+        "model_type": "whisper",
+        "architectures": ["WhisperForConditionalGeneration"],
+        "d_model": 512,
+        "encoder_layers": 6,
+        "decoder_layers": 6,
+        "encoder_attention_heads": 8,
+        "decoder_attention_heads": 8,
+        "encoder_ffn_dim": 2048,
+        "num_mel_bins": 80,
+        "max_source_positions": 1500,
+        "max_target_positions": 448,
+        "vocab_size": 51865
+      }
+      """);
+
+    assertTrue(whisper.isWhisper());
+    assertEquals(512, whisper.hiddenSize());
+    assertEquals(6, whisper.numHiddenLayers());
+    assertEquals(6, whisper.whisper().decoderLayers());
+    assertEquals(80, whisper.whisper().numMelBins());
+    assertEquals(1500, whisper.whisper().maxSourcePositions());
+    assertEquals(448, whisper.whisper().maxTargetPositions());
+
+    ModelSupport.Selection selected =
+      ModelSupport.require(whisper, ModelSupport.Source.HF_SAFETENSORS);
+    assertEquals(WeightNames.ARCH_WHISPER, selected.architectureId());
+    assertTrue(selected.isSpeech());
+    assertFalse(selected.isEmbedding());
+
+    UnsupportedModelException onnx = assertThrows(
+      UnsupportedModelException.class,
+      () -> ModelSupport.require(whisper, ModelSupport.Source.ONNX));
+    assertTrue(onnx.getMessage().contains("safetensors"));
+    assertTrue(onnx.getMessage().contains("openai/whisper-base"));
+
+    UnsupportedModelException gguf = assertThrows(
+      UnsupportedModelException.class, () -> ModelSupport.requireGguf("whisper"));
+    assertTrue(gguf.getMessage().contains("safetensors"));
+
+    IllegalArgumentException chat = assertThrows(
+      IllegalArgumentException.class, () -> CausalLMFactory.detect(whisper));
+    assertEquals(ModelSupport.speechEngineMisuseMessage(WeightNames.ARCH_WHISPER),
+      chat.getMessage());
+
+    IllegalArgumentException embed = assertThrows(
+      IllegalArgumentException.class, () -> EmbeddingEncoderFactory.detect(whisper));
+    assertEquals(ModelSupport.speechEmbedMisuseMessage(WeightNames.ARCH_WHISPER),
+      embed.getMessage());
+
+    WeightSchema schema = WeightSchema.forArchitecture(WeightNames.ARCH_WHISPER, whisper);
+    assertTrue(schema.expects("model.encoder.conv1.weight"));
+    assertTrue(schema.optionalParameters().contains("proj_out.weight"));
+    assertTrue(
+      schema.optionalParameters().contains("model.encoder.layers.0.self_attn.k_proj.bias"));
+    assertTrue(schema.expects("model.decoder.layers.0.encoder_attn_layer_norm.weight"));
+    assertFalse(schema.expects("model.encoder.layers.0.encoder_attn_layer_norm.weight"));
+  }
+
+  @Test
+  void isSpeechCheckpointReadsConfigWithoutLoadingWeights(@TempDir final Path dir)
+    throws IOException {
+    Path config = dir.resolve("config.json");
+    Files.writeString(config, """
+      {"model_type":"whisper","architectures":["WhisperForConditionalGeneration"]}
+      """, UTF_8);
+    assertTrue(ModelSupport.isSpeechCheckpoint(dir));
+    assertFalse(ModelSupport.isEmbeddingCheckpoint(dir));
+
+    Files.writeString(config, """
+      {"model_type":"qwen3","architectures":["Qwen3ForCausalLM"]}
+      """, UTF_8);
+    assertFalse(ModelSupport.isSpeechCheckpoint(dir));
+  }
+
+  @Test
+  void catalogMentionsWhisperAndRejectsCtranslate2() {
+    assertTrue(ModelSupport.CATALOG.contains("whisper"));
+    assertTrue(ModelSupport.CATALOG.contains("openai/whisper-"));
+    assertTrue(ModelSupport.CATALOG.contains("CTranslate2"));
+  }
+
+  @Test
+  void factoryRejectsCtranslate2FolderWithoutSafetensors(@TempDir final Path dir)
+    throws IOException {
+    Files.writeString(dir.resolve("config.json"), """
+      {"model_type":"whisper","architectures":["WhisperForConditionalGeneration"]}
+      """, UTF_8);
+    Files.write(dir.resolve("model.bin"), new byte[] {1, 2, 3, 4});
+
+    UnsupportedModelException ex = assertThrows(
+      UnsupportedModelException.class, () -> LlmModelFactory.make(dir));
+    assertEquals("ctranslate2", ex.modelType());
+    assertTrue(ex.getMessage().contains("CTranslate2"));
+    assertTrue(ex.getMessage().contains("openai/whisper-base"));
+    assertTrue(ex.getMessage().contains("model.bin"));
   }
 }

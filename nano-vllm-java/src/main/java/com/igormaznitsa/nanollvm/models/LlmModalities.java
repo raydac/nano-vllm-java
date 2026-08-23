@@ -14,8 +14,9 @@ import java.util.Set;
  * <p>Chat graphs declare at least {@link LlmModality#TEXT} in and out. Embedding encoders are
  * {@link #TEXT_TO_EMBEDDING}. Extra input types ({@link LlmModality#IMAGE}, {@link LlmModality#AUDIO},
  * {@link LlmModality#VIDEO}) come from checkpoint keys such as {@code vision_config} /
- * {@code audio_config} / {@code video_token_id}. This library currently <em>runs</em> only
- * {@link #TEXT_TO_TEXT} or {@link #TEXT_TO_EMBEDDING} — see {@link LlmModel#usableModalities()}.
+ * {@code audio_config} / {@code video_token_id}. This library currently <em>runs</em>
+ * {@link #TEXT_TO_TEXT}, {@link #TEXT_TO_EMBEDDING}, or {@link #AUDIO_TO_TEXT} — see
+ * {@link LlmModel#usableModalities()}.
  *
  * @param input  content types the checkpoint consumes; never empty
  * @param output content types the checkpoint produces; may be empty
@@ -32,6 +33,13 @@ public record LlmModalities(Set<LlmModality> input, Set<LlmModality> output) {
    * Embedding encoder: text in, vector out.
    */
   public static final LlmModalities TEXT_TO_EMBEDDING = of(LlmModality.TEXT, LlmModality.EMBEDDING);
+
+  /**
+   * Whisper speech-to-text: audio in, text out.
+   *
+   * @since 1.3.0
+   */
+  public static final LlmModalities AUDIO_TO_TEXT = of(LlmModality.AUDIO, LlmModality.TEXT);
 
   /**
    * Canonical constructor: copies both sides, rejects a null or empty input set.
@@ -98,6 +106,9 @@ public record LlmModalities(Set<LlmModality> input, Set<LlmModality> output) {
     if (embedding) {
       return TEXT_TO_EMBEDDING;
     }
+    if (config.isWhisper()) {
+      return AUDIO_TO_TEXT;
+    }
     EnumSet<LlmModality> input = EnumSet.of(LlmModality.TEXT);
     if (config.imageConfigPresent()) {
       input.add(LlmModality.IMAGE);
@@ -119,6 +130,21 @@ public record LlmModalities(Set<LlmModality> input, Set<LlmModality> output) {
    * @since 1.2.0
    */
   public static LlmModalities usable(final boolean embedding) {
+    return usable(embedding, false);
+  }
+
+  /**
+   * Modalities this library actually consumes and produces for a loaded graph.
+   *
+   * @param embedding {@code true} for BERT-style encoders
+   * @param speech    {@code true} for Whisper speech-to-text
+   * @return {@link #AUDIO_TO_TEXT}, {@link #TEXT_TO_EMBEDDING}, or {@link #TEXT_TO_TEXT}
+   * @since 1.3.0
+   */
+  public static LlmModalities usable(final boolean embedding, final boolean speech) {
+    if (speech) {
+      return AUDIO_TO_TEXT;
+    }
     return embedding ? TEXT_TO_EMBEDDING : TEXT_TO_TEXT;
   }
 

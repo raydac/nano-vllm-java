@@ -22,6 +22,7 @@ function Get-Curl {
 }
 
 $Curl = Get-Curl
+. (Join-Path $ModelsRoot '_curl_resume.ps1')
 
 Write-Host 'Downloading config / tokenizer sidecars ...'
 foreach ($f in @(
@@ -31,14 +32,12 @@ foreach ($f in @(
     'special_tokens_map.json'
 )) {
     $out = Join-Path $Dest $f
-    & $Curl -L --fail --retry 3 -C - -o $out "$Base/$f"
-    if ($LASTEXITCODE -ne 0) { throw "Download failed for $f (exit $LASTEXITCODE)" }
+    Invoke-CurlResume -Curl $Curl -OutFile $out -Url "$Base/$f"
 }
 
 Write-Host 'Downloading onnx\model.onnx (~470MB fp32) ...'
 $OnnxFile = Join-Path $OnnxDir 'model.onnx'
-& $Curl -L --fail --retry 3 -C - -o $OnnxFile "$Base/onnx/model.onnx"
-if ($LASTEXITCODE -ne 0) { throw "Download failed for model.onnx (exit $LASTEXITCODE)" }
+Invoke-CurlResume -Curl $Curl -OutFile $OnnxFile -Url "$Base/onnx/model.onnx"
 
 Write-Host "Installed to $Dest"
 Get-ChildItem $Dest | Format-Table Name, Length, LastWriteTime

@@ -5,6 +5,8 @@
 set -euo pipefail
 
 MODELS_ROOT="$(cd "$(dirname "$0")" && pwd)"
+# shellcheck source=./_curl_resume.sh
+. "$MODELS_ROOT/_curl_resume.sh"
 DEST="$MODELS_ROOT/Gemma4-E2B-IT-QAT-Mobile"
 BASE="https://huggingface.co/google/gemma-4-E2B-it-qat-mobile-transformers/resolve/main"
 
@@ -23,7 +25,7 @@ cd "$DEST"
 download() {
   local f="$1"
   echo "Downloading $f ..."
-  if ! curl -L --fail --retry 3 -C - "${AUTH[@]}" -o "$f" "$BASE/$f"; then
+  if ! curl_resume "$f" "$BASE/$f" "${AUTH[@]}"; then
     echo "Download failed for $f." >&2
     echo "Retry, or export HF_TOKEN=… / huggingface-cli login if Hugging Face rate-limits you." >&2
     echo "Model card: https://huggingface.co/google/gemma-4-E2B-it-qat-mobile-transformers" >&2

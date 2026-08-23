@@ -5,12 +5,14 @@
 set -euo pipefail
 
 MODELS_ROOT="$(cd "$(dirname "$0")" && pwd)"
+# shellcheck source=./_curl_resume.sh
+. "$MODELS_ROOT/_curl_resume.sh"
 FILE="gte-small.Q2_K.gguf"
 DEST="$MODELS_ROOT/$FILE"
 BASE="https://huggingface.co/ChristianAzinn/gte-small-gguf/resolve/main"
 
 echo "Downloading $FILE (~25MB, smallest GTE-small GGUF) into $MODELS_ROOT ..."
-curl -L --fail --retry 3 -C - -o "$DEST" "$BASE/$FILE"
+curl_resume "$DEST" "$BASE/$FILE"
 
 echo "Installed to $DEST"
 ls -lh "$DEST"

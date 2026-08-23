@@ -19,6 +19,7 @@ function Get-Curl {
 }
 
 $Curl = Get-Curl
+. (Join-Path $ModelsRoot '_curl_resume.ps1')
 
 $SmallFiles = @(
     'config.json',
@@ -32,18 +33,12 @@ $SmallFiles = @(
 foreach ($f in $SmallFiles) {
     Write-Host "Downloading $f ..."
     $out = Join-Path $Dest $f
-    & $Curl -L --fail --retry 3 -C - -o $out "$Base/$f"
-    if ($LASTEXITCODE -ne 0) {
-        throw "Download failed for $f (exit $LASTEXITCODE)"
-    }
+    Invoke-CurlResume -Curl $Curl -OutFile $out -Url "$Base/$f"
 }
 
 Write-Host 'Downloading model.safetensors (~1.4GB) ...'
 $Weights = Join-Path $Dest 'model.safetensors'
-& $Curl -L --fail --retry 3 -C - -o $Weights "$Base/model.safetensors"
-if ($LASTEXITCODE -ne 0) {
-    throw "Download failed for model.safetensors (exit $LASTEXITCODE)"
-}
+Invoke-CurlResume -Curl $Curl -OutFile $Weights -Url "$Base/model.safetensors"
 
 Write-Host "Installed to $Dest"
 Get-ChildItem $Dest | Format-Table Name, Length, LastWriteTime

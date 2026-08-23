@@ -500,6 +500,7 @@ public final class Config {
    *                              is present
    * @param nestedTextConfig      {@code true} when {@code text_config} is a nested object
    * @param gemma4                Gemma 4 text extras; {@code null} for other families
+   * @param whisper               Whisper encoder/decoder extras; {@code null} for other families
    */
   public record HfConfig(
     int vocabSize,
@@ -530,7 +531,8 @@ public final class Config {
     boolean audioConfigPresent,
     boolean videoConfigPresent,
     boolean nestedTextConfig,
-    Gemma4Text gemma4
+    Gemma4Text gemma4,
+    WhisperSpec whisper
   ) {
     public HfConfig {
       ropeScaling = freezeStringKeyedMap(ropeScaling);
@@ -625,21 +627,63 @@ public final class Config {
       float rmsEps = m.containsKey("rms_norm_eps")
         ? Json.asFloat(m.get("rms_norm_eps"), 1e-6f)
         : Json.asFloat(m.get("norm_eps"), 1e-6f);
+      int vocabSize = Json.asInt(m.get("vocab_size"), 0);
+      int intermediateSize = Json.asInt(m.get("intermediate_size"), 0);
+      int numHiddenLayers = Json.asInt(m.get("num_hidden_layers"), 0);
+      int maxPositionEmbeddings = Json.asInt(m.get("max_position_embeddings"), 32768);
+      boolean attentionBias = Json.asBoolean(m.get("attention_bias"), false);
+      WhisperSpec whisper = null;
+      if (isWhisperFamily(modelType, architectures)) {
+        if (hiddenSize <= 0) {
+          hiddenSize = Json.asInt(m.get("d_model"), 0);
+        }
+        if (numAttentionHeads <= 0) {
+          numAttentionHeads = Json.asInt(m.get("encoder_attention_heads"), 0);
+        }
+        if (numHiddenLayers <= 0) {
+          numHiddenLayers = Json.asInt(m.get("encoder_layers"), 0);
+        }
+        if (intermediateSize <= 0) {
+          intermediateSize = Json.asInt(m.get("encoder_ffn_dim"), 0);
+        }
+        if (headDim <= 0 && numAttentionHeads > 0) {
+          headDim = hiddenSize / numAttentionHeads;
+        }
+        int maxSource = Json.asInt(m.get("max_source_positions"), 1500);
+        int maxTarget = Json.asInt(m.get("max_target_positions"), 448);
+        if (maxPositionEmbeddings == 32768) {
+          maxPositionEmbeddings = maxSource;
+        }
+        rmsEps = Json.asFloat(m.get("layer_norm_eps"), 1e-5f);
+        String activation = Json.asString(m.get("activation_function"));
+        if (activation != null && !activation.isBlank()) {
+          hiddenAct = activation;
+        }
+        attentionBias = true;
+        int decoderLayers = Json.asInt(m.get("decoder_layers"), numHiddenLayers);
+        if (decoderLayers > 0) {
+          whisper = new WhisperSpec(
+            Json.asInt(m.get("num_mel_bins"), 80),
+            decoderLayers,
+            maxSource,
+            maxTarget);
+        }
+      }
       RopeBases rope = resolveRopeBases(m);
       return new HfConfig(
-        Json.asInt(m.get("vocab_size"), 0),
+        vocabSize,
         hiddenSize,
-        Json.asInt(m.get("intermediate_size"), 0),
-        Json.asInt(m.get("num_hidden_layers"), 0),
+        intermediateSize,
+        numHiddenLayers,
         numAttentionHeads,
         Json.asInt(m.get("num_key_value_heads"), numAttentionHeads),
         headDim,
-        Json.asInt(m.get("max_position_embeddings"), 32768),
+        maxPositionEmbeddings,
         rmsEps,
         hiddenAct,
         Json.asBoolean(m.get("tie_word_embeddings"),
           Json.asBoolean(root.get("tie_word_embeddings"), false)),
-        Json.asBoolean(m.get("attention_bias"), false),
+        attentionBias,
         rope.theta(),
         Json.asObject(m.get("rope_scaling")),
         Json.asString(m.getOrDefault("torch_dtype", "float16")),
@@ -656,7 +700,8 @@ public final class Config {
         flags.audio(),
         flags.video(),
         nestedText,
-        isGemma4Family(modelType) ? parseGemma4Text(m, rope.partialRotaryFactor()) : null
+        isGemma4Family(modelType) ? parseGemma4Text(m, rope.partialRotaryFactor()) : null,
+        whisper
       );
     }
 
@@ -675,6 +720,19 @@ public final class Config {
 
     static boolean isGemma4Family(final String modelType) {
       return "gemma4".equals(modelType) || "gemma4_text".equals(modelType);
+    }
+
+    private static boolean isWhisperFamily(
+      final String modelType,
+      final List<String> architectures
+    ) {
+      if ("whisper".equals(modelType)) {
+        return true;
+      }
+      return architectures != null && architectures.stream()
+        .filter(name -> name != null && !name.isBlank())
+        .map(name -> name.toLowerCase(Locale.ROOT))
+        .anyMatch(name -> name.contains("whisper"));
     }
 
     private static Map<String, Object> flattenGemma4Text(final Map<String, Object> root) {
@@ -800,6 +858,15 @@ public final class Config {
     }
 
     /**
+     * {@code true} when this blueprint includes {@link WhisperSpec} (OpenAI Whisper ASR).
+     *
+     * @since 1.3.0
+     */
+    public boolean isWhisper() {
+      return this.whisper != null;
+    }
+
+    /**
      * Attention head dim at {@code layerIndex}. Non-Gemma-4 models use {@link #headDim()} for
      * every layer. Gemma 4 global (non-sliding) layers may use {@link Gemma4Text#globalHeadDim()}.
      *
@@ -905,6 +972,29 @@ public final class Config {
         return (layerIndex + 1) % 6 != 0;
       }
       return false;
+    }
+  }
+
+  /**
+   * Whisper encoder/decoder sizes not covered by the causal {@link HfConfig} fields.
+   *
+   * @param numMelBins         log-mel channels ({@code num_mel_bins}, usually 80)
+   * @param decoderLayers      decoder depth ({@code decoder_layers})
+   * @param maxSourcePositions encoder time after conv stride ({@code max_source_positions})
+   * @param maxTargetPositions decoder context ({@code max_target_positions})
+   * @since 1.3.0
+   */
+  public record WhisperSpec(
+    int numMelBins,
+    int decoderLayers,
+    int maxSourcePositions,
+    int maxTargetPositions
+  ) {
+    public WhisperSpec {
+      if (numMelBins <= 0 || decoderLayers <= 0
+        || maxSourcePositions <= 0 || maxTargetPositions <= 0) {
+        throw new IllegalArgumentException("whisper spec sizes must be > 0");
+      }
     }
   }
 

@@ -42,16 +42,18 @@ function Get-HfAuthHeaders {
 }
 
 $Curl = Get-Curl
+. (Join-Path $ModelsRoot '_curl_resume.ps1')
 $Auth = Get-HfAuthHeaders
 
 function Download-File([string]$Name) {
     Write-Host "Downloading $Name ..."
     $out = Join-Path $Dest $Name
-    & $Curl -L --fail --retry 3 -C - @Auth -o $out "$Base/$Name"
-    if ($LASTEXITCODE -ne 0) {
+    try {
+        Invoke-CurlResume -Curl $Curl -OutFile $out -Url "$Base/$Name" -ExtraArgs $Auth
+    } catch {
         Write-Host 'Download failed. Retry, or set HF_TOKEN / huggingface-cli login if rate-limited.' -ForegroundColor Red
         Write-Host 'https://huggingface.co/google/gemma-4-E2B-it-qat-mobile-transformers' -ForegroundColor Red
-        throw "Download failed for $Name (exit $LASTEXITCODE)"
+        throw
     }
 }
 

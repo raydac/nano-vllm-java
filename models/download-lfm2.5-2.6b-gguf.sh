@@ -4,12 +4,14 @@
 set -euo pipefail
 
 MODELS_ROOT="$(cd "$(dirname "$0")" && pwd)"
+# shellcheck source=./_curl_resume.sh
+. "$MODELS_ROOT/_curl_resume.sh"
 FILE="LFM2.5-2.6B-Q4_K_M.gguf"
 DEST="$MODELS_ROOT/$FILE"
 BASE="https://huggingface.co/LiquidAI/LFM2.5-2.6B-GGUF/resolve/main"
 
 echo "Downloading $FILE (~1.67GB) into $MODELS_ROOT ..."
-curl -L --fail --retry 3 -C - -o "$DEST" "$BASE/$FILE"
+curl_resume "$DEST" "$BASE/$FILE"
 
 echo "Installed to $DEST"
 ls -lh "$DEST"

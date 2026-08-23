@@ -20,6 +20,7 @@ final class ArchitectureProcessorTest {
     assertSame(LlamaProcessor.INSTANCE, ArchitectureProcessors.of(WeightNames.ARCH_LLAMA));
     assertSame(Lfm2Processor.INSTANCE, ArchitectureProcessors.of(WeightNames.ARCH_LFM2));
     assertSame(BertProcessor.INSTANCE, ArchitectureProcessors.of(WeightNames.ARCH_BERT));
+    assertSame(WhisperProcessor.INSTANCE, ArchitectureProcessors.of(WeightNames.ARCH_WHISPER));
   }
 
   @Test
@@ -30,6 +31,10 @@ final class ArchitectureProcessorTest {
     assertFalse(ArchitectureProcessors.of(WeightNames.ARCH_LLAMA).isEmbedding());
     assertFalse(ArchitectureProcessors.of(WeightNames.ARCH_LFM2).isEmbedding());
     assertTrue(ArchitectureProcessors.of(WeightNames.ARCH_BERT).isEmbedding());
+    assertFalse(ArchitectureProcessors.of(WeightNames.ARCH_WHISPER).isEmbedding());
+    assertTrue(ArchitectureProcessors.of(WeightNames.ARCH_WHISPER).isSpeech());
+    assertFalse(ArchitectureProcessors.of(WeightNames.ARCH_QWEN3).isSpeech());
+    assertFalse(ArchitectureProcessors.of(WeightNames.ARCH_BERT).isSpeech());
   }
 
   @Test
@@ -47,6 +52,7 @@ final class ArchitectureProcessorTest {
     assertInstanceOf(CausalArchitecture.class, ArchitectureProcessors.of(WeightNames.ARCH_LLAMA));
     assertInstanceOf(CausalArchitecture.class, ArchitectureProcessors.of(WeightNames.ARCH_LFM2));
     assertInstanceOf(EmbeddingArchitecture.class, ArchitectureProcessors.of(WeightNames.ARCH_BERT));
+    assertInstanceOf(SpeechArchitecture.class, ArchitectureProcessors.of(WeightNames.ARCH_WHISPER));
   }
 
   @Test
@@ -61,5 +67,25 @@ final class ArchitectureProcessorTest {
     assertThrows(
       IllegalStateException.class,
       () -> Qwen3Processor.INSTANCE.createEmbedding(null, null));
+  }
+
+  @Test
+  void speechProcessorRejectsChatAndEmbeddingGraphs() {
+    assertThrows(
+      IllegalStateException.class,
+      () -> WhisperProcessor.INSTANCE.createCausal(null, null));
+    assertThrows(
+      IllegalStateException.class,
+      () -> WhisperProcessor.INSTANCE.createEmbedding(null, null));
+  }
+
+  @Test
+  void chatAndEmbeddingProcessorsRejectSpeechGraph() {
+    assertThrows(
+      IllegalStateException.class,
+      () -> Qwen3Processor.INSTANCE.createSpeech(null, null));
+    assertThrows(
+      IllegalStateException.class,
+      () -> BertProcessor.INSTANCE.createSpeech(null, null));
   }
 }

@@ -5,9 +5,17 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased] — 1.2.1-SNAPSHOT
+## [Unreleased] — 1.3.0-SNAPSHOT
 
 ### Added
+- Whisper speech-to-text from Hugging Face safetensors (`openai/whisper-*`). Load with
+  `LlmModelFactory.make` and call `LlmModel.transcribe` on uncompressed WAV or 16 kHz-resampled
+  PCM. `LLM.builder` rejects speech checkpoints the same way it rejects embeddings. CTranslate2 /
+  faster-whisper `model.bin` folders, Whisper GGUF, and Whisper ONNX are refused. Optional
+  `models/download-whisper-base.sh` / `.ps1` / `.cmd` (~290 MB) and `download-whisper-tiny.sh`
+  (~150 MB). Sample `TranscribeHelloWorld`; `Example` lists Whisper in the menu and opens a WAV
+  transcribe session.
+
 - Optional download scripts for [FacebookAI/xlm-roberta-base](https://huggingface.co/FacebookAI/xlm-roberta-base)
   (`models/download-xlm-roberta-base.sh` / `.ps1` / `.cmd` → `models/xlm-roberta-base/`, ONNX fp32
   saved as `onnx/model.onnx`, ~1.9 GB). BERT-encoder embeddings (`bert` / `roberta` / `xlm-roberta`,
@@ -21,6 +29,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `RagFactory.withEmbeddings` can report per-passage embed progress (and run those embeds on a
   caller `Executor`). DistilBERT / ALBERT / DeBERTa / ELECTRA stay unsupported; safetensors
   BERT-family folders are still rejected.
+
+### Fixed
+- Model download scripts treat HTTP 416 on resume as "already complete", so re-running a script
+  after a sidecar such as `config.json` finished no longer fails (`curl: (22) ... 416`).
 
 ## [1.2.0] — 2026-08-22
 

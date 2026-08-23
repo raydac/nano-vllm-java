@@ -6,6 +6,8 @@
 set -euo pipefail
 
 MODELS_ROOT="$(cd "$(dirname "$0")" && pwd)"
+# shellcheck source=./_curl_resume.sh
+. "$MODELS_ROOT/_curl_resume.sh"
 DEST="$MODELS_ROOT/Gemma3-270M"
 BASE="https://huggingface.co/google/gemma-3-270m-it/resolve/main"
 
@@ -24,7 +26,7 @@ cd "$DEST"
 download() {
   local f="$1"
   echo "Downloading $f ..."
-  if ! curl -L --fail --retry 3 -C - "${AUTH[@]}" -o "$f" "$BASE/$f"; then
+  if ! curl_resume "$f" "$BASE/$f" "${AUTH[@]}"; then
     echo "Download failed for $f." >&2
     echo "Gemma is gated: accept the license at https://huggingface.co/google/gemma-3-270m-it" >&2
     echo "Then: huggingface-cli login  (or export HF_TOKEN=…)" >&2

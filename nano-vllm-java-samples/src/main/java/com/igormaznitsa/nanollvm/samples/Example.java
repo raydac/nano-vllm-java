@@ -36,6 +36,8 @@ import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.PrintStream;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -115,7 +117,8 @@ public final class Example {
 
       Optional<RagMode> ragMode = Optional.of(RagMode.NONE);
       Optional<Integer> advisorCount = Optional.of(0);
-      if (!ModelSupport.isEmbeddingCheckpoint(modelPath)) {
+      if (!ModelSupport.isEmbeddingCheckpoint(modelPath)
+        && !ModelSupport.isSpeechCheckpoint(modelPath)) {
         ragMode = selectRagMode(in, console);
         if (ragMode.isEmpty()) {
           return;
@@ -134,6 +137,10 @@ public final class Example {
 
       try (LlmModel model = LlmModelFactory.make(modelPath, status)) {
         printSupportedModalities(model, console);
+        if (model.isSpeechModel()) {
+          runTranscribeSession(model, in, console);
+          return;
+        }
         if (model.isEmbeddingModel()) {
           Optional<EncoderSession> encoderSession = selectEncoderSession(in, console);
           if (encoderSession.isEmpty()) {
@@ -197,7 +204,7 @@ public final class Example {
       console.println("Select model to load:");
       console.println(
         "  Kind: chat = instruct Q&A · base = plain completion (not chat-tuned)"
-          + " · embeddings = vectors");
+          + " · embeddings = vectors · speech = audio→text");
       for (int i = 0; i < menu.size(); i++) {
         console.println("  " + (i + 1) + ") " + menu.get(i).display());
       }
@@ -366,6 +373,101 @@ public final class Example {
 
       console.println("Enter 0 … " + (ADVISOR_ROLES.size() + 1) + ", or press Enter for 0.");
     }
+  }
+
+  /**
+   * Speech REPL: each non-empty line is a WAV path passed to {@link LlmModel#transcribe(Path)}.
+   *
+   * <p>{@code /tone} writes a short 440 Hz beep and transcribes it. {@code /lang xx} sets a
+   * language hint; {@code /lang auto} clears it. Whisper checkpoints are not chat models.
+   */
+  private static void runTranscribeSession(
+    final LlmModel model,
+    final BufferedReader in,
+    final OrderedConsole console
+  ) throws Exception {
+    console.printlnInfo(
+      "Speech model (" + model.architectureName()
+        + ", " + model.modalities() +
+        ") — enter a WAV path. Commands: /tone  /lang <code>|auto  /exit");
+    console.println();
+
+    String language = null;
+    while (true) {
+      console.print("wav?> ");
+      String line = in.readLine();
+      if (line == null) {
+        console.println();
+        return;
+      }
+
+      String user = line.strip();
+      if (user.isEmpty()) {
+        continue;
+      }
+      if (isQuitCommand(user)) {
+        return;
+      }
+      if (user.equalsIgnoreCase("/tone")) {
+        Path tone = Files.createTempFile("nanollvm-example-tone-", ".wav");
+        Files.write(tone, toneWavBytes());
+        transcribePath(model, tone, language, console);
+        continue;
+      }
+      if (user.regionMatches(true, 0, "/lang ", 0, 6)) {
+        String code = user.substring(6).strip();
+        language = code.isEmpty() || "auto".equalsIgnoreCase(code) ? null : code;
+        console.println(language == null ? "language=auto" : "language=" + language);
+        continue;
+      }
+
+      transcribePath(model, Path.of(user), language, console);
+    }
+  }
+
+  private static void transcribePath(
+    final LlmModel model,
+    final Path wav,
+    final String language,
+    final OrderedConsole console
+  ) {
+    try {
+      long started = System.nanoTime();
+      String text = language == null
+        ? model.transcribe(wav)
+        : model.transcribe(wav, language);
+      console.printf(
+        Locale.ROOT,
+        "%.3fs  %s%n%n",
+        (System.nanoTime() - started) / 1e9,
+        text.isBlank() ? "(empty)" : text);
+    } catch (Exception ex) {
+      console.println("transcribe failed: " + ex.getMessage());
+      console.println();
+    }
+  }
+
+  private static byte[] toneWavBytes() {
+    int n = 8_000;
+    ByteBuffer pcm = ByteBuffer.allocate(44 + n * 2).order(ByteOrder.LITTLE_ENDIAN);
+    pcm.put("RIFF".getBytes(StandardCharsets.US_ASCII));
+    pcm.putInt(36 + n * 2);
+    pcm.put("WAVE".getBytes(StandardCharsets.US_ASCII));
+    pcm.put("fmt ".getBytes(StandardCharsets.US_ASCII));
+    pcm.putInt(16);
+    pcm.putShort((short) 1);
+    pcm.putShort((short) 1);
+    pcm.putInt(16_000);
+    pcm.putInt(32_000);
+    pcm.putShort((short) 2);
+    pcm.putShort((short) 16);
+    pcm.put("data".getBytes(StandardCharsets.US_ASCII));
+    pcm.putInt(n * 2);
+    for (int i = 0; i < n; i++) {
+      double sample = 0.2 * Math.sin(2.0 * Math.PI * 440.0 * i / 16_000.0);
+      pcm.putShort((short) Math.round(sample * 32767.0));
+    }
+    return pcm.array();
   }
 
   /**
@@ -1041,7 +1143,15 @@ public final class Example {
       choice(
         "xlm-roberta-base (embeddings, onnx, ~1.9GB)",
         BundledModels.XLM_ROBERTA_BASE,
-        "Run models/download-xlm-roberta-base.sh")
+        "Run models/download-xlm-roberta-base.sh"),
+      choice(
+        "whisper-base (speech, safetensors, ~290MB)",
+        BundledModels.WHISPER_BASE,
+        "Run models/download-whisper-base.sh"),
+      choice(
+        "whisper-tiny (speech, safetensors, ~150MB)",
+        BundledModels.WHISPER_TINY,
+        "Run models/download-whisper-tiny.sh")
     );
   }
 
@@ -1114,6 +1224,8 @@ public final class Example {
     console.println("  ./models/download-gte-small-gguf.sh    (embeddings)");
     console.println("  ./models/download-multilingual-e5-small.sh  (multilingual embeddings)");
     console.println("  ./models/download-xlm-roberta-base.sh  (XLM-RoBERTa ONNX embeddings)");
+    console.println("  ./models/download-whisper-base.sh      (speech-to-text, ~290MB)");
+    console.println("  ./models/download-whisper-tiny.sh      (smaller speech-to-text, ~150MB)");
     console.println();
     console.println("Windows: matching .ps1 / .cmd scripts in models/.");
     console.println(
@@ -1146,7 +1258,7 @@ public final class Example {
     console.printlnInfo("Loading model from " + path);
     console.printlnInfo(
       "Architecture auto-detects from config.json / GGUF metadata "
-        + "(override: -Dnanollvm.arch=qwen3|gemma3|llama|lfm2|bert).");
+        + "(override: -Dnanollvm.arch=qwen3|gemma3|llama|lfm2|bert|whisper).");
     console.printlnInfo(
       "CPU matmul: " + Runtime.getRuntime().availableProcessors()
         + " threads from Runtime (override: -Dnanollvm.cpu.threads=N).");
@@ -1163,6 +1275,10 @@ public final class Example {
     if (ModelSupport.isEmbeddingCheckpoint(path)) {
       console.printlnInfo(
         "This checkpoint is a BERT-family embedding encoder — LlmModel.embed, not LLM.builder.");
+    }
+    if (ModelSupport.isSpeechCheckpoint(path)) {
+      console.printlnInfo(
+        "This checkpoint is Whisper speech-to-text — LlmModel.transcribe, not LLM.builder.");
     }
     if (isGgufPath(path)) {
       console.printlnInfo(

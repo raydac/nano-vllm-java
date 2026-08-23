@@ -181,6 +181,32 @@ try (LlmModel model = LlmModelFactory.make(Path.of("models/xlm-roberta-base"))) 
 
 Do not use with `LLM.builder` / chat.
 
+## whisper-base / whisper-tiny (optional, speech-to-text)
+
+[openai/whisper-base](https://huggingface.co/openai/whisper-base) (~290 MB) and
+[openai/whisper-tiny](https://huggingface.co/openai/whisper-tiny) (~150 MB) — Hugging Face
+**safetensors** Whisper (`config.json` + `model.safetensors` + tokenizer). MIT license; no HF gate.
+CTranslate2 / faster-whisper `model.bin`, Whisper GGUF, and Whisper ONNX are not loaded.
+
+```bash
+./models/download-whisper-base.sh
+```
+
+Windows: `.\models\download-whisper-base.ps1` or `models\download-whisper-base.cmd`.
+
+Tiny: `./models/download-whisper-tiny.sh` (or `.ps1` / `.cmd`). Creates `models/whisper-base/` or
+`models/whisper-tiny/`. Audio is uncompressed WAV or 16 kHz mono PCM. Greedy multilingual decode;
+optional language; 30 s chunking. No MP3, VAD, beam search, or word timestamps.
+
+```java
+try (LlmModel model = LlmModelFactory.make(Path.of("models/whisper-base"))) {
+  String text = model.transcribe(Path.of("clip.wav"));
+}
+```
+
+Do not use with `LLM.builder` / chat. Sample: `nano-vllm-java-samples` →
+`com.igormaznitsa.nanollvm.samples.TranscribeHelloWorld`.
+
 ## Selecting a model
 
 | Mechanism          | Example                                                                                           |
@@ -192,5 +218,5 @@ Do not use with `LLM.builder` / chat.
 | Models root        | `-Dnanollvm.models.dir=/other/models` or `NANOLLVM_MODELS_DIR` (default loads `<dir>/Qwen3-0.6B`) |
 
 Architecture is detected exactly from `config.json` / GGUF `general.architecture` (`ModelSupport`).
-`-Dnanollvm.arch` may only confirm a matching family (`qwen3`, `gemma3`, `gemma4`, `llama`, `lfm2`, `bert`);
+`-Dnanollvm.arch` may only confirm a matching family (`qwen3`, `gemma3`, `gemma4`, `llama`, `lfm2`, `bert`, `whisper`);
 look-alike checkpoints fail with `UnsupportedModelException`.

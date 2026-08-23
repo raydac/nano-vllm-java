@@ -6,6 +6,7 @@ import static com.igormaznitsa.nanollvm.models.internal.WeightNames.ARCH_GEMMA4;
 import static com.igormaznitsa.nanollvm.models.internal.WeightNames.ARCH_LFM2;
 import static com.igormaznitsa.nanollvm.models.internal.WeightNames.ARCH_LLAMA;
 import static com.igormaznitsa.nanollvm.models.internal.WeightNames.ARCH_QWEN3;
+import static com.igormaznitsa.nanollvm.models.internal.WeightNames.ARCH_WHISPER;
 import static com.igormaznitsa.nanollvm.utils.NanoLlvmProps.PROP_ARCH;
 import static java.nio.charset.StandardCharsets.UTF_8;
 import static java.util.Locale.ROOT;
@@ -42,8 +43,10 @@ public final class ModelSupport {
     gemma4 (text / QAT mobile), llama
       Chat from a GGUF file: qwen3, lfm2
       Embeddings from GGUF or ONNX: bert encoder (bert / roberta / xlm-roberta)
+      Speech from a Hugging Face folder (config.json + *.safetensors): whisper (openai/whisper-*)
     Not supported: Qwen2 / Qwen2.5, Qwen3.5 / Qwen3-Next / Fara, vision-language models, Gemma 1 / 2, \
-    Gemma 4 vision/audio towers, Mistral / Mixtral, Phi, MoE, GGUF Llama / Gemma, Hugging Face BERT safetensors.""";
+    Gemma 4 vision/audio towers, Mistral / Mixtral, Phi, MoE, GGUF Llama / Gemma, Hugging Face BERT safetensors, \
+    CTranslate2 / faster-whisper model.bin, Whisper GGUF / ONNX.""";
 
   private static final Pattern HF_CLASS_SUFFIX = Pattern.compile(
     "(ForCausalLM|ForConditionalGeneration|ForSequenceClassification|ForMaskedLM"
@@ -154,15 +157,49 @@ public final class ModelSupport {
   }
 
   private static boolean isGgufFile(final Path file) {
+    Path name = file.getFileName();
     return Files.isRegularFile(file)
-      && file.getFileName() != null
-      && file.getFileName().toString().toLowerCase(ROOT).endsWith(".gguf");
+      && name != null
+      && name.toString().toLowerCase(ROOT).endsWith(".gguf");
   }
 
   private static boolean isEmbeddingGguf(final Path file) {
     try {
       Verdict verdict = classifyToken(normalize(GgufReader.peekArchitecture(file)));
       return verdict != null && verdict.supported() && verdict.selection().isEmbedding();
+    } catch (IOException | RuntimeException ignored) {
+      return false;
+    }
+  }
+
+  /**
+   * {@code true} when {@code config} is OpenAI Whisper speech-to-text this library can run.
+   * Unknown or chat/embedding families return {@code false} (they do not throw).
+   *
+   * @since 1.3.0
+   */
+  public static boolean isSpeech(final Config.HfConfig config) {
+    Verdict verdict = inspect(requireNonNull(config, "config"));
+    return verdict.supported() && verdict.selection().isSpeech();
+  }
+
+  /**
+   * {@code true} when {@code path} is a Whisper safetensors folder, without loading weights.
+   * GGUF, ONNX, CTranslate2, unknown, and chat/embedding paths return {@code false}.
+   *
+   * @since 1.3.0
+   */
+  public static boolean isSpeechCheckpoint(final Path path) {
+    Path file = requireNonNull(path, "path").toAbsolutePath().normalize();
+    if (isGgufFile(file)) {
+      return false;
+    }
+    Path config = configJson(file);
+    if (!Files.isRegularFile(config)) {
+      return false;
+    }
+    try {
+      return isSpeech(Config.HfConfig.parse(Files.readString(config, UTF_8)));
     } catch (IOException | RuntimeException ignored) {
       return false;
     }
@@ -186,6 +223,36 @@ public final class ModelSupport {
   public static String embedMisuseMessage(final String architectureName) {
     return ("This checkpoint is a %s chat model, not an embedding encoder. Use LLM.builder(model) "
       + "for generate / chat.%n%n%s").formatted(blank(architectureName), CATALOG);
+  }
+
+  /**
+   * Message when {@link com.igormaznitsa.nanollvm.llm.LLM#builder} is used on a speech checkpoint.
+   *
+   * @since 1.3.0
+   */
+  public static String speechEngineMisuseMessage(final String architectureName) {
+    return ("This checkpoint is a %s speech model, not a chat model. Call LlmModel.transcribe(...) "
+      + "instead of LLM.builder / generate.%n%n%s").formatted(blank(architectureName), CATALOG);
+  }
+
+  /**
+   * Message when {@link LlmModel#embed} is used on a speech checkpoint.
+   *
+   * @since 1.3.0
+   */
+  public static String speechEmbedMisuseMessage(final String architectureName) {
+    return ("This checkpoint is a %s speech model, not an embedding encoder. Call "
+      + "LlmModel.transcribe(...).%n%n%s").formatted(blank(architectureName), CATALOG);
+  }
+
+  /**
+   * Message when {@link LlmModel#transcribe} is used on a chat or embedding checkpoint.
+   *
+   * @since 1.3.0
+   */
+  public static String transcribeMisuseMessage(final String architectureName) {
+    return ("This checkpoint is a %s model, not Whisper speech-to-text. Chat uses LLM.builder; "
+      + "embeddings use LlmModel.embed.%n%n%s").formatted(blank(architectureName), CATALOG);
   }
 
   private static Verdict inspect(final Config.HfConfig config) {
@@ -223,7 +290,8 @@ public final class ModelSupport {
         return fromName;
       }
       if (isMultimodalClass(raw.toLowerCase(ROOT))) {
-        if (fromName != null && ARCH_GEMMA4.equals(fromName.selection().architectureId())) {
+        if (fromName != null && (ARCH_GEMMA4.equals(fromName.selection().architectureId())
+          || ARCH_WHISPER.equals(fromName.selection().architectureId()))) {
           if (firstSupported == null) {
             firstSupported = fromName;
           }
@@ -278,7 +346,7 @@ public final class ModelSupport {
     String forcedId = normalizeForcedAlias(forced);
     if (forcedId == null) {
       throw unsupported(
-        "'%s' is not a valid -D%s value (use qwen3, gemma3, gemma4, llama, lfm2, or bert)."
+        "'%s' is not a valid -D%s value (use qwen3, gemma3, gemma4, llama, lfm2, bert, or whisper)."
           .formatted(forced, PROP_ARCH),
         modelType,
         architectures);
@@ -327,6 +395,13 @@ public final class ModelSupport {
     if (ARCH_BERT.equals(id) && source == Source.HF_SAFETENSORS) {
       throw unsupported(
         "BERT embeddings load from GGUF or ONNX, not from Hugging Face safetensors.",
+        modelType,
+        architectures);
+    }
+    if (ARCH_WHISPER.equals(id) && source != Source.HF_SAFETENSORS) {
+      throw unsupported(
+        "Whisper speech recognition loads from a Hugging Face folder (config.json + *.safetensors), "
+          + "not from GGUF, ONNX, or CTranslate2 model.bin. Use openai/whisper-base (or tiny).",
         modelType,
         architectures);
     }
@@ -406,6 +481,9 @@ public final class ModelSupport {
     }
     if (isBertEncoder(token)) {
       return Verdict.ok(ARCH_BERT, Kind.EMBEDDING);
+    }
+    if (token.equals("whisper")) {
+      return Verdict.ok(ARCH_WHISPER, Kind.SPEECH);
     }
     String known = knownUnsupportedReason(token);
     if (known != null) {
@@ -501,6 +579,9 @@ public final class ModelSupport {
   }
 
   private static boolean isMultimodalClass(final String lower) {
+    if (lower.contains("whisper")) {
+      return false;
+    }
     return lower.contains("conditionalgeneration")
       || lower.contains("vision")
       || lower.contains("imagetext")
@@ -538,6 +619,7 @@ public final class ModelSupport {
       case ARCH_LLAMA, "llama2", "llama3" -> ARCH_LLAMA;
       case ARCH_LFM2, "lfm2.5", "lfm2_5" -> ARCH_LFM2;
       case ARCH_BERT, "roberta", "xlm-roberta", "xlm_roberta" -> ARCH_BERT;
+      case ARCH_WHISPER -> ARCH_WHISPER;
       default -> null;
     };
   }
@@ -568,7 +650,13 @@ public final class ModelSupport {
      */
     CHAT,
     /** BERT-style encoder used with {@link LlmModel#embed}. */
-    EMBEDDING
+    EMBEDDING,
+    /**
+     * Speech-to-text encoder-decoder used with {@link LlmModel#transcribe}.
+     *
+     * @since 1.3.0
+     */
+    SPEECH
   }
 
   /**
@@ -592,10 +680,10 @@ public final class ModelSupport {
    * {@link ModelSupport#requireGguf}. Use {@link #isEmbedding()} to decide
    * {@link LlmModel#embed} vs {@link com.igormaznitsa.nanollvm.llm.LLM#builder}.
    * {@link #architectureId()} is the canonical key ({@code qwen3}, {@code gemma3}, {@code gemma4},
-   * {@code llama}, {@code lfm2}, {@code bert}).
+   * {@code llama}, {@code lfm2}, {@code bert}, {@code whisper}).
    *
    * @param architectureId canonical backend id; never {@code null}
-   * @param kind           chat vs embedding; never {@code null}
+   * @param kind           chat, embedding, or speech; never {@code null}
    * @since 1.1.0
    */
   public record Selection(String architectureId, Kind kind) {
@@ -611,6 +699,15 @@ public final class ModelSupport {
      */
     public boolean isEmbedding() {
       return this.kind == Kind.EMBEDDING;
+    }
+
+    /**
+     * {@code true} when this checkpoint is Whisper speech-to-text.
+     *
+     * @since 1.3.0
+     */
+    public boolean isSpeech() {
+      return this.kind == Kind.SPEECH;
     }
   }
 

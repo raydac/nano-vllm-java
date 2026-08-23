@@ -7,6 +7,7 @@ import com.igormaznitsa.nanollvm.llm.Config;
 import com.igormaznitsa.nanollvm.llm.LLM;
 import com.igormaznitsa.nanollvm.models.internal.LlmModelImpl;
 import com.igormaznitsa.nanollvm.tokenizer.Tokenizer;
+import java.io.IOException;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
@@ -20,11 +21,12 @@ import java.util.Set;
  * options ({@link #options()}, including {@link #OPTION_THINK_TAGS} and
  * {@link #OPTION_CHAT_SPECIALS}) are frozen at
  * {@link LlmModelFactory#make} and never change. Embedding models expose
- * {@link #embed(CharSequence)} instead of chat/generate.
+ * {@link #embed(CharSequence)} instead of chat/generate. Speech models expose
+ * {@link #transcribe} instead of chat/generate.
  *
  * <p>{@link #modalities()} is what the checkpoint file declares (Gemma 4 QAT mobile includes
  * image, audio, and video keys). {@link #usableModalities()} is what this library actually
- * runs: text→text chat or text→embedding. Extra towers are skipped at load.
+ * runs: text→text chat, text→embedding, or audio→text Whisper. Extra towers are skipped at load.
  *
  * <p>GGUF models keep quantized weights packed by default. Prefer unpacking at load with
  * {@link LlmModelFactory#make(Path, LlmListener, boolean)} ({@code true}) so float32 is built
@@ -112,8 +114,9 @@ public abstract sealed class LlmModel implements AutoCloseable permits LlmModelI
   /**
    * Content types declared by the checkpoint. Chat graphs always include text; Gemma 4 QAT mobile
    * also declares image, audio, and video input. Embedding encoders are
-   * {@link LlmModalities#TEXT_TO_EMBEDDING}. This library does not yet consume image / audio /
-   * video — see {@link #usableModalities()}. Safe to call after {@link #close()}.
+   * {@link LlmModalities#TEXT_TO_EMBEDDING}. Whisper speech models are
+   * {@link LlmModalities#AUDIO_TO_TEXT}. Gemma 4 extra towers are skipped at load — see
+   * {@link #usableModalities()}. Safe to call after {@link #close()}.
    *
    * @since 1.2.0
    */
@@ -121,7 +124,7 @@ public abstract sealed class LlmModel implements AutoCloseable permits LlmModelI
 
   /**
    * Content types this library actually consumes and produces for the loaded graph: text→text
-   * chat, or text→embedding. Safe to call after {@link #close()}.
+   * chat, text→embedding, or audio→text speech. Safe to call after {@link #close()}.
    *
    * @since 1.2.0
    */
@@ -159,6 +162,14 @@ public abstract sealed class LlmModel implements AutoCloseable permits LlmModelI
    * @since 1.1.0
    */
   public abstract boolean isEmbeddingModel();
+
+  /**
+   * {@code true} when this file is Whisper speech-to-text — call {@link #transcribe},
+   * not {@link LLM#builder(LlmModel)} (that {@code build()} rejects speech models).
+   *
+   * @since 1.3.0
+   */
+  public abstract boolean isSpeechModel();
 
   /**
    * {@code true} when GGUF/QAT weights are still packed (not widened to float32).
@@ -206,6 +217,36 @@ public abstract sealed class LlmModel implements AutoCloseable permits LlmModelI
    * @since 1.1.0
    */
   public abstract float[] embed(final int[] tokenIds);
+
+  /**
+   * Transcribes an uncompressed WAV file (PCM or IEEE float, mixed to mono). Speech models only.
+   *
+   * @since 1.3.0
+   */
+  public abstract String transcribe(final Path wav) throws IOException;
+
+  /**
+   * Transcribes an uncompressed WAV file with an optional language hint ({@code en}, {@code de},
+   * …). {@code null} or blank language selects automatically. Speech models only.
+   *
+   * @since 1.3.0
+   */
+  public abstract String transcribe(final Path wav, final String language) throws IOException;
+
+  /**
+   * Transcribes mono PCM. {@code sampleRate} is Hertz; other rates are resampled to 16 kHz.
+   * Speech models only.
+   *
+   * @since 1.3.0
+   */
+  public abstract String transcribe(final float[] pcm, final int sampleRate);
+
+  /**
+   * Transcribes mono PCM with an optional language hint. Speech models only.
+   *
+   * @since 1.3.0
+   */
+  public abstract String transcribe(final float[] pcm, final int sampleRate, final String language);
 
   /**
    * Releases packed payloads, closes weight file channels (&gt; 2 GiB shards), and drops

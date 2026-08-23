@@ -47,16 +47,18 @@ function Get-HfAuthHeaders {
 }
 
 $Curl = Get-Curl
+. (Join-Path $ModelsRoot '_curl_resume.ps1')
 $Auth = Get-HfAuthHeaders
 
 function Download-HfFile([string]$DestRel, [string]$SrcRel) {
     Write-Host "Downloading $SrcRel -> $DestRel ..."
     $out = Join-Path $Dest $DestRel
-    & $Curl -L --fail --retry 3 -C - @Auth -o $out "$Base/$SrcRel"
-    if ($LASTEXITCODE -ne 0) {
+    try {
+        Invoke-CurlResume -Curl $Curl -OutFile $out -Url "$Base/$SrcRel" -ExtraArgs $Auth
+    } catch {
         Write-Host 'Download failed. Retry, or set HF_TOKEN / huggingface-cli login if rate-limited.' -ForegroundColor Red
         Write-Host 'https://huggingface.co/FacebookAI/xlm-roberta-base' -ForegroundColor Red
-        throw "Download failed for $SrcRel (exit $LASTEXITCODE)"
+        throw
     }
 }
 

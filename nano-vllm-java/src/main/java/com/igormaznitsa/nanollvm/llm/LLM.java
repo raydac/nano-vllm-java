@@ -1872,13 +1872,18 @@ public final class LLM implements AutoCloseable {
      * @return new engine instance; caller should {@link LLM#close()} when finished
      * @throws ModelLoadException       if the model directory, config, or weights are unusable
      * @throws IllegalArgumentException if builder/config constraints fail (bad KV block size, …)
-     * @throws IllegalStateException    if the model is closed or is an embedding checkpoint, or if
+     * @throws IllegalStateException    if the model is closed or is an embedding or speech
+     *                                  checkpoint, or if
      *                                  {@link #matmulExecutor(ExecutorService)} and
      *                                  {@link #dedicatedMatmulPool()} were both set
      */
     public LLM build() {
       if (this.sharedModel.isClosed()) {
         throw new IllegalStateException("LlmModel is closed");
+      }
+      if (this.sharedModel.isSpeechModel()) {
+        throw new IllegalStateException(
+          ModelSupport.speechEngineMisuseMessage(this.sharedModel.architectureName()));
       }
       if (this.sharedModel.isEmbeddingModel()) {
         throw new IllegalStateException(

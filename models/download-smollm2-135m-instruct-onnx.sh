@@ -4,6 +4,8 @@
 set -euo pipefail
 
 MODELS_ROOT="$(cd "$(dirname "$0")" && pwd)"
+# shellcheck source=./_curl_resume.sh
+. "$MODELS_ROOT/_curl_resume.sh"
 DEST="$MODELS_ROOT/SmolLM2-135M-Instruct-ONNX"
 BASE="https://huggingface.co/onnx-community/SmolLM2-135M-Instruct-ONNX/resolve/main"
 
@@ -11,16 +13,16 @@ mkdir -p "$DEST/onnx"
 cd "$DEST"
 
 echo "Downloading config / generation_config ..."
-curl -L --fail --retry 3 -C - -o config.json "$BASE/config.json"
-curl -L --fail --retry 3 -C - -o generation_config.json "$BASE/generation_config.json"
+curl_resume config.json "$BASE/config.json"
+curl_resume generation_config.json "$BASE/generation_config.json"
 
 echo "Downloading tokenizer sidecars ..."
 for f in tokenizer.json tokenizer_config.json special_tokens_map.json vocab.json merges.txt; do
-  curl -L --fail --retry 3 -C - -o "$f" "$BASE/$f"
+  curl_resume "$f" "$BASE/$f"
 done
 
 echo "Downloading onnx/model_fp16.onnx (~270 MiB) ..."
-curl -L --fail --retry 3 -C - -o onnx/model_fp16.onnx "$BASE/onnx/model_fp16.onnx"
+curl_resume onnx/model_fp16.onnx "$BASE/onnx/model_fp16.onnx"
 
 echo "Installed to $DEST"
 ls -lh

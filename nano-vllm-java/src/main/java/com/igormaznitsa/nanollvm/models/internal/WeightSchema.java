@@ -6,6 +6,7 @@ import static com.igormaznitsa.nanollvm.models.internal.WeightNames.ARCH_GEMMA4;
 import static com.igormaznitsa.nanollvm.models.internal.WeightNames.ARCH_LFM2;
 import static com.igormaznitsa.nanollvm.models.internal.WeightNames.ARCH_LLAMA;
 import static com.igormaznitsa.nanollvm.models.internal.WeightNames.ARCH_QWEN3;
+import static com.igormaznitsa.nanollvm.models.internal.WeightNames.ARCH_WHISPER;
 import static com.igormaznitsa.nanollvm.models.internal.WeightNames.DOWN_PROJ_WEIGHT;
 import static com.igormaznitsa.nanollvm.models.internal.WeightNames.EMBED_TOKENS;
 import static com.igormaznitsa.nanollvm.models.internal.WeightNames.GATE_UP_PROJ_WEIGHT;
@@ -66,6 +67,7 @@ public final class WeightSchema {
       case ARCH_LLAMA -> llama(config);
       case ARCH_LFM2 -> lfm2(config);
       case ARCH_BERT -> bert(config);
+      case ARCH_WHISPER -> whisper(config);
       default -> throw new IllegalArgumentException("unsupported architecture '" + arch + "'");
     };
   }
@@ -294,6 +296,69 @@ public final class WeightSchema {
       expected.add(blk + "layer_output_norm.bias");
     }
     return new WeightSchema(Map.of(), expected, Set.of());
+  }
+
+  /**
+   * OpenAI Whisper encoder-decoder ASR (Hugging Face {@code model.encoder.*} / {@code model.decoder.*}).
+   *
+   * @since 1.3.0
+   */
+  public static WeightSchema whisper(final Config.HfConfig config) {
+    Config.WhisperSpec spec = requireNonNull(config.whisper(), "whisper spec");
+    Set<String> expected = new LinkedHashSet<>();
+    Set<String> optional = new LinkedHashSet<>();
+    expected.add("model.encoder.conv1.weight");
+    expected.add("model.encoder.conv1.bias");
+    expected.add("model.encoder.conv2.weight");
+    expected.add("model.encoder.conv2.bias");
+    expected.add("model.encoder.embed_positions.weight");
+    expected.add("model.encoder.layer_norm.weight");
+    expected.add("model.encoder.layer_norm.bias");
+    expected.add("model.decoder.embed_tokens.weight");
+    expected.add("model.decoder.embed_positions.weight");
+    expected.add("model.decoder.layer_norm.weight");
+    expected.add("model.decoder.layer_norm.bias");
+    optional.add("proj_out.weight");
+    for (int i = 0; i < config.numHiddenLayers(); i++) {
+      addWhisperAttn(expected, optional, "model.encoder.layers." + i + ".self_attn");
+      addWhisperMlp(expected, "model.encoder.layers." + i);
+    }
+    for (int i = 0; i < spec.decoderLayers(); i++) {
+      addWhisperAttn(expected, optional, "model.decoder.layers." + i + ".self_attn");
+      addWhisperAttn(expected, optional, "model.decoder.layers." + i + ".encoder_attn");
+      addWhisperMlp(expected, "model.decoder.layers." + i);
+    }
+    return new WeightSchema(Map.of(), expected, optional);
+  }
+
+  private static void addWhisperAttn(
+    final Set<String> expected,
+    final Set<String> optional,
+    final String prefix
+  ) {
+    expected.add(prefix + ".q_proj.weight");
+    expected.add(prefix + ".q_proj.bias");
+    expected.add(prefix + ".k_proj.weight");
+    optional.add(prefix + ".k_proj.bias");
+    expected.add(prefix + ".v_proj.weight");
+    expected.add(prefix + ".v_proj.bias");
+    expected.add(prefix + ".out_proj.weight");
+    expected.add(prefix + ".out_proj.bias");
+  }
+
+  private static void addWhisperMlp(final Set<String> expected, final String prefix) {
+    expected.add(prefix + ".self_attn_layer_norm.weight");
+    expected.add(prefix + ".self_attn_layer_norm.bias");
+    expected.add(prefix + ".fc1.weight");
+    expected.add(prefix + ".fc1.bias");
+    expected.add(prefix + ".fc2.weight");
+    expected.add(prefix + ".fc2.bias");
+    expected.add(prefix + ".final_layer_norm.weight");
+    expected.add(prefix + ".final_layer_norm.bias");
+    if (prefix.contains("decoder.layers")) {
+      expected.add(prefix + ".encoder_attn_layer_norm.weight");
+      expected.add(prefix + ".encoder_attn_layer_norm.bias");
+    }
   }
 
   public Map<String, Object[]> packedModulesMapping() {

@@ -24,6 +24,10 @@ public final class CausalLMFactory {
 
   public static String detect(final Config.HfConfig config) {
     ModelSupport.Selection selected = ModelSupport.resolve(config);
+    if (selected.isSpeech()) {
+      throw new IllegalArgumentException(
+        ModelSupport.speechEngineMisuseMessage(selected.architectureId()));
+    }
     if (selected.isEmbedding()) {
       throw new IllegalArgumentException(ModelSupport.chatMisuseMessage(selected.architectureId()));
     }

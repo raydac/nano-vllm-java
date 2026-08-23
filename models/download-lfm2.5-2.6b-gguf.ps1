@@ -18,12 +18,10 @@ function Get-Curl {
 }
 
 $Curl = Get-Curl
+. (Join-Path $ModelsRoot '_curl_resume.ps1')
 
 Write-Host "Downloading $File (~1.67GB) into $ModelsRoot ..."
-& $Curl -L --fail --retry 3 -C - -o $Dest "$Base/$File"
-if ($LASTEXITCODE -ne 0) {
-    throw "Download failed for $File (exit $LASTEXITCODE)"
-}
+Invoke-CurlResume -Curl $Curl -OutFile $Dest -Url "$Base/$File"
 
 Write-Host "Installed to $Dest"
 Get-Item -LiteralPath $Dest | Format-Table Name, Length, LastWriteTime

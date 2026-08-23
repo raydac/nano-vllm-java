@@ -29,6 +29,8 @@ public final class OptionalModelAssumptions {
   private static final String GTE_SMALL_GGUF = "gte-small.Q2_K.gguf";
   private static final String MULTILINGUAL_E5_SMALL = "multilingual-e5-small";
   private static final String SMOLLM2_135M_INSTRUCT_ONNX = "SmolLM2-135M-Instruct-ONNX";
+  private static final String WHISPER_BASE = "whisper-base";
+  private static final String WHISPER_TINY = "whisper-tiny";
 
   private OptionalModelAssumptions() {
   }
@@ -80,6 +82,17 @@ public final class OptionalModelAssumptions {
       findModel(SMOLLM2_135M_INSTRUCT_ONNX),
       "SmolLM2-135M-Instruct-ONNX",
       "models/download-smollm2-135m-instruct-onnx.sh");
+  }
+
+  public static Path requireWhisper() {
+    Optional<Path> base = findModel(WHISPER_BASE);
+    if (base.isPresent()) {
+      return base.get();
+    }
+    return require(
+      findModel(WHISPER_TINY),
+      "whisper-base or whisper-tiny",
+      "models/download-whisper-base.sh or models/download-whisper-tiny.sh");
   }
 
   public static Path requireLocalRag() {

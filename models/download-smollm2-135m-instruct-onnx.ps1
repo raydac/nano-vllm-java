@@ -20,12 +20,12 @@ function Get-Curl {
 }
 
 $Curl = Get-Curl
+. (Join-Path $ModelsRoot '_curl_resume.ps1')
 
 Write-Host 'Downloading config / generation_config ...'
 foreach ($f in @('config.json', 'generation_config.json')) {
     $out = Join-Path $Dest $f
-    & $Curl -L --fail --retry 3 -C - -o $out "$Base/$f"
-    if ($LASTEXITCODE -ne 0) { throw "Download failed for $f (exit $LASTEXITCODE)" }
+    Invoke-CurlResume -Curl $Curl -OutFile $out -Url "$Base/$f"
 }
 
 Write-Host 'Downloading tokenizer sidecars ...'
@@ -37,14 +37,12 @@ foreach ($f in @(
     'merges.txt'
 )) {
     $out = Join-Path $Dest $f
-    & $Curl -L --fail --retry 3 -C - -o $out "$Base/$f"
-    if ($LASTEXITCODE -ne 0) { throw "Download failed for $f (exit $LASTEXITCODE)" }
+    Invoke-CurlResume -Curl $Curl -OutFile $out -Url "$Base/$f"
 }
 
 Write-Host 'Downloading onnx\model_fp16.onnx (~270 MiB) ...'
 $OnnxFile = Join-Path $OnnxDir 'model_fp16.onnx'
-& $Curl -L --fail --retry 3 -C - -o $OnnxFile "$Base/onnx/model_fp16.onnx"
-if ($LASTEXITCODE -ne 0) { throw "Download failed for model_fp16.onnx (exit $LASTEXITCODE)" }
+Invoke-CurlResume -Curl $Curl -OutFile $OnnxFile -Url "$Base/onnx/model_fp16.onnx"
 
 Write-Host "Installed to $Dest"
 Get-ChildItem $Dest | Format-Table Name, Length, LastWriteTime

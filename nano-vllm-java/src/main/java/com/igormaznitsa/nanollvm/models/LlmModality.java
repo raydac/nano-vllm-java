@@ -12,8 +12,9 @@ import java.util.Optional;
  * <p>Chat graphs in this library currently <em>run</em> {@link #TEXT} on both sides. Embedding
  * encoders accept {@link #TEXT} and produce {@link #EMBEDDING}. {@link #IMAGE}, {@link #AUDIO},
  * and {@link #VIDEO} appear on {@link LlmModel#modalities()} when the checkpoint declares those
- * towers (Gemma 4 QAT mobile does). {@link LlmModel#usableModalities()} stays text-only until
- * those towers are wired.
+ * towers (Gemma 4 QAT mobile does). Whisper speech graphs run {@link #AUDIO} in and
+ * {@link #TEXT} out. {@link LlmModel#usableModalities()} stays text-only for chat
+ * checkpoints until vision/audio towers are wired.
  *
  * @since 1.2.0
  */

@@ -3,6 +3,8 @@
 set -euo pipefail
 
 MODELS_ROOT="$(cd "$(dirname "$0")" && pwd)"
+# shellcheck source=./_curl_resume.sh
+. "$MODELS_ROOT/_curl_resume.sh"
 DEST="$MODELS_ROOT/Qwen3-0.6B"
 BASE="https://huggingface.co/Qwen/Qwen3-0.6B/resolve/main"
 
@@ -11,11 +13,11 @@ cd "$DEST"
 
 for f in config.json generation_config.json tokenizer.json tokenizer_config.json merges.txt vocab.json; do
   echo "Downloading $f ..."
-  curl -L --fail --retry 3 -C - -o "$f" "$BASE/$f"
+  curl_resume "$f" "$BASE/$f"
 done
 
 echo "Downloading model.safetensors (~1.4GB) ..."
-curl -L --fail --retry 3 -C - -o model.safetensors "$BASE/model.safetensors"
+curl_resume model.safetensors "$BASE/model.safetensors"
 
 echo "Installed to $DEST"
 ls -lh

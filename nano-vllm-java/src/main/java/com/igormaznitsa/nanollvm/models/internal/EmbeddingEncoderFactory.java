@@ -28,6 +28,10 @@ public final class EmbeddingEncoderFactory {
 
   public static String detect(final Config.HfConfig config) {
     ModelSupport.Selection selected = ModelSupport.resolve(config);
+    if (selected.isSpeech()) {
+      throw new IllegalArgumentException(
+        ModelSupport.speechEmbedMisuseMessage(selected.architectureId()));
+    }
     if (!selected.isEmbedding()) {
       throw new IllegalArgumentException(
         ModelSupport.embedMisuseMessage(selected.architectureId()));

@@ -6,6 +6,8 @@
 set -euo pipefail
 
 MODELS_ROOT="$(cd "$(dirname "$0")" && pwd)"
+# shellcheck source=./_curl_resume.sh
+. "$MODELS_ROOT/_curl_resume.sh"
 DEST="$MODELS_ROOT/multilingual-e5-small"
 BASE="https://huggingface.co/intfloat/multilingual-e5-small/resolve/main"
 
@@ -14,11 +16,11 @@ cd "$DEST"
 
 echo "Downloading config / tokenizer sidecars ..."
 for f in config.json tokenizer.json tokenizer_config.json special_tokens_map.json; do
-  curl -L --fail --retry 3 -C - -o "$f" "$BASE/$f"
+  curl_resume "$f" "$BASE/$f"
 done
 
 echo "Downloading onnx/model.onnx (~470MB fp32) ..."
-curl -L --fail --retry 3 -C - -o onnx/model.onnx "$BASE/onnx/model.onnx"
+curl_resume onnx/model.onnx "$BASE/onnx/model.onnx"
 
 echo "Installed to $DEST"
 ls -lh

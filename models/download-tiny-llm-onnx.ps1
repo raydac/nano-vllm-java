@@ -21,6 +21,7 @@ function Get-Curl {
 }
 
 $Curl = Get-Curl
+. (Join-Path $ModelsRoot '_curl_resume.ps1')
 
 Write-Host 'Downloading config / generation_config ...'
 foreach ($pair in @(
@@ -28,8 +29,7 @@ foreach ($pair in @(
     @{ Name = 'generation_config.json'; Url = "$OnnxBase/generation_config.json" }
 )) {
     $out = Join-Path $Dest $pair.Name
-    & $Curl -L --fail --retry 3 -C - -o $out $pair.Url
-    if ($LASTEXITCODE -ne 0) { throw "Download failed for $($pair.Name) (exit $LASTEXITCODE)" }
+    Invoke-CurlResume -Curl $Curl -OutFile $out -Url $pair.Url
 }
 
 Write-Host 'Downloading tokenizer from arnir0/Tiny-LLM ...'
@@ -40,8 +40,9 @@ foreach ($f in @(
     'tokenizer.model'
 )) {
     $out = Join-Path $Dest $f
-    & $Curl -L --fail --retry 3 -C - -o $out "$TokBase/$f"
-    if ($LASTEXITCODE -ne 0) {
+    try {
+        Invoke-CurlResume -Curl $Curl -OutFile $out -Url "$TokBase/$f"
+    } catch {
         Write-Host "Optional tokenizer file skipped: $f"
         if (Test-Path -LiteralPath $out) {
             Remove-Item -LiteralPath $out -Force -ErrorAction SilentlyContinue
@@ -51,8 +52,7 @@ foreach ($f in @(
 
 Write-Host 'Downloading onnx\model.onnx (fp32) ...'
 $OnnxFile = Join-Path $OnnxDir 'model.onnx'
-& $Curl -L --fail --retry 3 -C - -o $OnnxFile "$OnnxBase/onnx/model.onnx"
-if ($LASTEXITCODE -ne 0) { throw "Download failed for model.onnx (exit $LASTEXITCODE)" }
+Invoke-CurlResume -Curl $Curl -OutFile $OnnxFile -Url "$OnnxBase/onnx/model.onnx"
 
 Write-Host "Installed to $Dest"
 Get-ChildItem $Dest | Format-Table Name, Length, LastWriteTime

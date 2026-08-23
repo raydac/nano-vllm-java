@@ -9,6 +9,7 @@ import com.igormaznitsa.nanollvm.llm.Config;
 import com.igormaznitsa.nanollvm.models.ModelSupport;
 import com.igormaznitsa.nanollvm.models.internal.CausalLM;
 import com.igormaznitsa.nanollvm.models.internal.EmbeddingEncoder;
+import com.igormaznitsa.nanollvm.models.internal.SpeechToText;
 import com.igormaznitsa.nanollvm.models.internal.WeightBag;
 import com.igormaznitsa.nanollvm.models.internal.WeightSchema;
 import com.igormaznitsa.nanollvm.models.llmarch.ModelBinding.BoundModel;
@@ -25,13 +26,13 @@ import java.util.function.Function;
  * fill a {@link WeightBag} from transport payloads, and construct the target graph.
  *
  * <p>Chat families share {@link CausalArchitecture}; embedding families share
- * {@link EmbeddingArchitecture}. Application code loads through
- * {@link com.igormaznitsa.nanollvm.models.LlmModelFactory}.
+ * {@link EmbeddingArchitecture}; speech families share {@link SpeechArchitecture}. Application
+ * code loads through {@link com.igormaznitsa.nanollvm.models.LlmModelFactory}.
  *
  * @since 1.1.0
  */
 public sealed interface ArchitectureProcessor
-  permits CausalArchitecture, EmbeddingArchitecture {
+  permits CausalArchitecture, EmbeddingArchitecture, SpeechArchitecture {
 
   /**
    * Parses {@code config.json} stored on an HF / ONNX catalog.
@@ -52,18 +53,27 @@ public sealed interface ArchitectureProcessor
 
   /**
    * Canonical backend id ({@code qwen3}, {@code gemma3}, {@code gemma4}, {@code llama},
-   * {@code lfm2}, {@code bert}).
+   * {@code lfm2}, {@code bert}, {@code whisper}).
    *
    * @since 1.1.0
    */
   String architectureId();
 
   /**
-   * {@code true} for sentence-embedding encoders; {@code false} for causal chat.
+   * {@code true} for sentence-embedding encoders; {@code false} for chat and speech.
    *
    * @since 1.1.0
    */
   boolean isEmbedding();
+
+  /**
+   * {@code true} for speech-to-text graphs.
+   *
+   * @since 1.3.0
+   */
+  default boolean isSpeech() {
+    return false;
+  }
 
   /**
    * Decodes {@code catalog} into config + weight schema for {@code selected}.
@@ -129,6 +139,19 @@ public sealed interface ArchitectureProcessor
    */
   default EmbeddingEncoder createEmbedding(final Config.HfConfig config, final WeightBag weights) {
     throw new IllegalStateException(this.architectureId() + " is not an embedding architecture");
+  }
+
+  /**
+   * Builds the speech-to-text graph. Chat and embedding processors throw.
+   *
+   * @param config  bound Hugging Face config
+   * @param weights filled parameter bag
+   * @return immutable ASR graph
+   * @throws IllegalStateException if this family is not speech
+   * @since 1.3.0
+   */
+  default SpeechToText createSpeech(final Config.HfConfig config, final WeightBag weights) {
+    throw new IllegalStateException(this.architectureId() + " is not a speech architecture");
   }
 
   /**

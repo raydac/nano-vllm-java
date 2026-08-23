@@ -28,6 +28,12 @@ public final class WeightNames {
    * @since 1.1.0
    */
   public static final String ARCH_BERT = "bert";
+  /**
+   * Hugging Face {@code model_type} for OpenAI Whisper speech-to-text.
+   *
+   * @since 1.3.0
+   */
+  public static final String ARCH_WHISPER = "whisper";
 
   public static final String EMBED_TOKENS = "model.embed_tokens.weight";
   public static final String MODEL_NORM = "model.norm.weight";

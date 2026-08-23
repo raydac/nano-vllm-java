@@ -9,12 +9,14 @@ import com.igormaznitsa.nanollvm.chat.LlmListener;
 import com.igormaznitsa.nanollvm.chat.LlmListeners;
 import com.igormaznitsa.nanollvm.chat.ThinkTags;
 import com.igormaznitsa.nanollvm.exceptions.ModelLoadException;
+import com.igormaznitsa.nanollvm.exceptions.UnsupportedModelException;
 import com.igormaznitsa.nanollvm.internal.ModelFileBundle;
 import com.igormaznitsa.nanollvm.llm.Config;
 import com.igormaznitsa.nanollvm.llm.LLM;
 import com.igormaznitsa.nanollvm.models.internal.CausalLM;
 import com.igormaznitsa.nanollvm.models.internal.EmbeddingEncoder;
 import com.igormaznitsa.nanollvm.models.internal.LlmModelImpl;
+import com.igormaznitsa.nanollvm.models.internal.SpeechToText;
 import com.igormaznitsa.nanollvm.models.internal.WeightBag;
 import com.igormaznitsa.nanollvm.models.llmarch.GgufModelLoader;
 import com.igormaznitsa.nanollvm.models.llmarch.GgufModelLoader.LoadedGguf;
@@ -31,6 +33,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 
@@ -42,7 +45,8 @@ import java.util.Map;
  * <p>One {@link LlmModel} may be reused by any number of {@link LLM} instances until
  * {@link LlmModel#close()}. Load is blocking I/O on the calling thread; the returned model is safe
  * to share across threads while open. BERT embedding GGUFs load through the same entry points and
- * expose {@link LlmModel#embed(CharSequence)}.
+ * expose {@link LlmModel#embed(CharSequence)}. Whisper speech checkpoints expose
+ * {@link LlmModel#transcribe} (Hugging Face safetensors only; not CTranslate2 {@code model.bin}).
  *
  * <p>GGUF stays packed by default. Pass {@code allowUnpackParameters=true} to dequantize to float32
  * during load (file bytes or in-memory buffer → float tensors; no packed heap residency).
@@ -576,6 +580,7 @@ public final class LlmModelFactory {
     String configJson = Files.readString(modelFolder.resolve(CONFIG_JSON), UTF_8);
     boolean hasSafetensors = SafetensorsTransport.present(modelFolder);
     boolean hasOnnx = OnnxTransport.present(modelFolder);
+    rejectCtranslate2Folder(modelFolder, hasSafetensors, hasOnnx);
     ModelSupport.Source source = resolveHfSource(
       hasSafetensors, hasOnnx, Config.HfConfig.parse(configJson), modelFolder.toString());
     try (ContainerTransport transport = openHfTransport(source, modelFolder, configJson)) {
@@ -667,6 +672,16 @@ public final class LlmModelFactory {
   ) {
     String arch = bound.selection().architectureId();
     Config.HfConfig hfConfig = bound.config();
+    if (bound.processor().isSpeech()) {
+      LlmListeners.info(io, null, "Building " + arch + " speech graph…");
+      long tGraph = System.nanoTime();
+      SpeechToText speech = bound.processor().createSpeech(hfConfig, weights);
+      LlmListeners.infof(io, null, "Speech graph ready (%s) in %.1fs%n",
+        speech.architectureName(), (System.nanoTime() - tGraph) / 1e9);
+      LlmListeners.infof(io, null, "Model loaded in %.1fs%n",
+        (System.nanoTime() - startedAtNanos) / 1e9);
+      return new LlmModelImpl(modelPath, hfConfig, weights, speech, tokenizer, options);
+    }
     if (bound.processor().isEmbedding()) {
       LlmListeners.info(io, null, "Building " + arch + " embedding graph…");
       long tGraph = System.nanoTime();
@@ -686,6 +701,25 @@ public final class LlmModelFactory {
     LlmListeners.infof(io, null, "Model loaded in %.1fs%n",
       (System.nanoTime() - startedAtNanos) / 1e9);
     return new LlmModelImpl(modelPath, hfConfig, weights, network, tokenizer, options);
+  }
+
+  private static void rejectCtranslate2Folder(
+    final Path modelFolder,
+    final boolean hasSafetensors,
+    final boolean hasOnnx
+  ) {
+    if (hasSafetensors || hasOnnx) {
+      return;
+    }
+    if (!Files.isRegularFile(modelFolder.resolve("model.bin"))) {
+      return;
+    }
+    throw new UnsupportedModelException(
+      "This folder is a CTranslate2 / faster-whisper export (model.bin), not Hugging Face "
+        + "Whisper safetensors. Use openai/whisper-base (config.json + model.safetensors)."
+        + System.lineSeparator() + System.lineSeparator() + ModelSupport.CATALOG,
+      "ctranslate2",
+      List.of());
   }
 
   private static ModelSupport.Source resolveHfSource(

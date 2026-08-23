@@ -7,6 +7,8 @@
 set -euo pipefail
 
 MODELS_ROOT="$(cd "$(dirname "$0")" && pwd)"
+# shellcheck source=./_curl_resume.sh
+. "$MODELS_ROOT/_curl_resume.sh"
 DEST="$MODELS_ROOT/xlm-roberta-base"
 BASE="https://huggingface.co/FacebookAI/xlm-roberta-base/resolve/main"
 
@@ -26,7 +28,7 @@ download() {
   local dest="$1"
   local src="${2:-$1}"
   echo "Downloading $src -> $dest ..."
-  if ! curl -L --fail --retry 3 -C - "${AUTH[@]}" -o "$dest" "$BASE/$src"; then
+  if ! curl_resume "$dest" "$BASE/$src" "${AUTH[@]}"; then
     echo "Download failed for $src." >&2
     echo "Retry, or export HF_TOKEN=… / huggingface-cli login if Hugging Face rate-limits you." >&2
     echo "Model card: https://huggingface.co/FacebookAI/xlm-roberta-base" >&2
