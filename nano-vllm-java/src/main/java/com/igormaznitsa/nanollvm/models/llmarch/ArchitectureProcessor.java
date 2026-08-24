@@ -10,6 +10,7 @@ import com.igormaznitsa.nanollvm.models.ModelSupport;
 import com.igormaznitsa.nanollvm.models.internal.CausalLM;
 import com.igormaznitsa.nanollvm.models.internal.EmbeddingEncoder;
 import com.igormaznitsa.nanollvm.models.internal.SpeechToText;
+import com.igormaznitsa.nanollvm.models.internal.TextToSpeech;
 import com.igormaznitsa.nanollvm.models.internal.WeightBag;
 import com.igormaznitsa.nanollvm.models.internal.WeightSchema;
 import com.igormaznitsa.nanollvm.models.llmarch.ModelBinding.BoundModel;
@@ -26,13 +27,14 @@ import java.util.function.Function;
  * fill a {@link WeightBag} from transport payloads, and construct the target graph.
  *
  * <p>Chat families share {@link CausalArchitecture}; embedding families share
- * {@link EmbeddingArchitecture}; speech families share {@link SpeechArchitecture}. Application
- * code loads through {@link com.igormaznitsa.nanollvm.models.LlmModelFactory}.
+ * {@link EmbeddingArchitecture}; speech families share {@link SpeechArchitecture}; synthesis
+ * families share {@link SynthesisArchitecture}. Application code loads through
+ * {@link com.igormaznitsa.nanollvm.models.LlmModelFactory}.
  *
  * @since 1.1.0
  */
 public sealed interface ArchitectureProcessor
-  permits CausalArchitecture, EmbeddingArchitecture, SpeechArchitecture {
+  permits CausalArchitecture, EmbeddingArchitecture, SpeechArchitecture, SynthesisArchitecture {
 
   /**
    * Parses {@code config.json} stored on an HF / ONNX catalog.
@@ -72,6 +74,15 @@ public sealed interface ArchitectureProcessor
    * @since 1.3.0
    */
   default boolean isSpeech() {
+    return false;
+  }
+
+  /**
+   * {@code true} for text-to-speech graphs.
+   *
+   * @since 1.3.0
+   */
+  default boolean isSynthesis() {
     return false;
   }
 
@@ -152,6 +163,19 @@ public sealed interface ArchitectureProcessor
    */
   default SpeechToText createSpeech(final Config.HfConfig config, final WeightBag weights) {
     throw new IllegalStateException(this.architectureId() + " is not a speech architecture");
+  }
+
+  /**
+   * Builds the text-to-speech graph. Chat, embedding, and speech processors throw.
+   *
+   * @param config  bound Hugging Face / Piper config
+   * @param weights filled parameter bag
+   * @return immutable TTS graph
+   * @throws IllegalStateException if this family is not synthesis
+   * @since 1.3.0
+   */
+  default TextToSpeech createSynthesis(final Config.HfConfig config, final WeightBag weights) {
+    throw new IllegalStateException(this.architectureId() + " is not a synthesis architecture");
   }
 
   /**

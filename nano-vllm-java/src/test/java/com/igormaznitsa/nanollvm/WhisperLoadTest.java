@@ -13,6 +13,7 @@ import com.igormaznitsa.nanollvm.models.ModelSupport;
 import com.igormaznitsa.nanollvm.models.internal.WeightNames;
 import com.igormaznitsa.nanollvm.testsupport.OptionalModelAssumptions;
 import com.igormaznitsa.nanollvm.testsupport.TestWavs;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Locale;
 import org.junit.jupiter.api.Test;
@@ -37,20 +38,22 @@ final class WhisperLoadTest {
       assertEquals(WeightNames.ARCH_WHISPER, model.architectureName());
       assertEquals(LlmModalities.AUDIO_TO_TEXT, model.usableModalities());
 
-      IllegalStateException engine = assertThrows(
-        IllegalStateException.class, () -> LLM.builder(model).build());
-      assertEquals(
-        ModelSupport.speechEngineMisuseMessage(model.architectureName()), engine.getMessage());
-
       IllegalStateException embed = assertThrows(
         IllegalStateException.class, () -> model.embed("hello"));
       assertTrue(embed.getMessage().contains("speech"));
 
-      String transcript = model.transcribe(wav, "en");
-      String normalized = lettersAndSpaces(transcript);
-      assertTrue(
-        normalized.contains(lettersAndSpaces(CALL_PROMPT)),
-        () -> "transcript was: " + transcript);
+      try (LLM llm = LLM.builder(model).build()) {
+        IllegalStateException chat = assertThrows(IllegalStateException.class, llm::chat);
+        assertEquals(
+          ModelSupport.speechEngineMisuseMessage(model.architectureName()), chat.getMessage());
+        assertEquals(0, llm.config().numKvcacheBlocks());
+
+        String transcript = llm.transcribe(Files.readAllBytes(wav), Locale.ENGLISH);
+        String normalized = lettersAndSpaces(transcript);
+        assertTrue(
+          normalized.contains(lettersAndSpaces(CALL_PROMPT)),
+          () -> "transcript was: " + transcript);
+      }
     }
   }
 }

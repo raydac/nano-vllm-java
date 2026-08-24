@@ -32,6 +32,10 @@ public final class EmbeddingEncoderFactory {
       throw new IllegalArgumentException(
         ModelSupport.speechEmbedMisuseMessage(selected.architectureId()));
     }
+    if (selected.isSynthesis()) {
+      throw new IllegalArgumentException(
+        ModelSupport.synthesisEmbedMisuseMessage(selected.architectureId()));
+    }
     if (!selected.isEmbedding()) {
       throw new IllegalArgumentException(
         ModelSupport.embedMisuseMessage(selected.architectureId()));

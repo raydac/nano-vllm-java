@@ -15,6 +15,7 @@ import com.igormaznitsa.nanollvm.llm.SamplingParams;
 import com.igormaznitsa.nanollvm.models.LlmModality;
 import com.igormaznitsa.nanollvm.models.LlmModel;
 import com.igormaznitsa.nanollvm.models.LlmModelFactory;
+import com.igormaznitsa.nanollvm.models.LlmOptionalData;
 import com.igormaznitsa.nanollvm.models.ModelSupport;
 import com.igormaznitsa.nanollvm.rag.DenseRagIndex;
 import com.igormaznitsa.nanollvm.rag.PreparedRag;
@@ -118,7 +119,8 @@ public final class Example {
       Optional<RagMode> ragMode = Optional.of(RagMode.NONE);
       Optional<Integer> advisorCount = Optional.of(0);
       if (!ModelSupport.isEmbeddingCheckpoint(modelPath)
-        && !ModelSupport.isSpeechCheckpoint(modelPath)) {
+        && !ModelSupport.isSpeechCheckpoint(modelPath)
+        && !ModelSupport.isSynthesisCheckpoint(modelPath)) {
         ragMode = selectRagMode(in, console);
         if (ragMode.isEmpty()) {
           return;
@@ -135,10 +137,22 @@ public final class Example {
         console.printlnInfo("Debug on: prepared model-user prompts print on stderr.");
       }
 
-      try (LlmModel model = LlmModelFactory.make(modelPath, status)) {
+      LlmModelFactory.Builder load = LlmModelFactory.open(modelPath).listen(status);
+      if (ModelSupport.isSynthesisCheckpoint(modelPath)) {
+        load.optionalData(LlmOptionalData.ESPEAK_DATA, modelPath.resolve("espeak-ng-data"));
+      }
+      try (LlmModel model = load.make()) {
         printSupportedModalities(model, console);
         if (model.isSpeechModel()) {
-          runTranscribeSession(model, in, console);
+          try (LLM llm = LLM.builder(model).listen(status).build()) {
+            runTranscribeSession(llm, in, console);
+          }
+          return;
+        }
+        if (model.isSynthesisModel()) {
+          try (LLM llm = LLM.builder(model).listen(status).build()) {
+            runSynthesizeSession(llm, in, console);
+          }
           return;
         }
         if (model.isEmbeddingModel()) {
@@ -146,9 +160,11 @@ public final class Example {
           if (encoderSession.isEmpty()) {
             return;
           }
-          switch (encoderSession.get()) {
-            case EMBED -> runEmbeddingSession(model, in, console);
-            case CLASSIFY -> runClassificationSession(model, in, console);
+          try (LLM llm = LLM.builder(model).listen(status).build()) {
+            switch (encoderSession.get()) {
+              case EMBED -> runEmbeddingSession(llm, in, console);
+              case CLASSIFY -> runClassificationSession(llm, in, console);
+            }
           }
           return;
         }
@@ -376,23 +392,23 @@ public final class Example {
   }
 
   /**
-   * Speech REPL: each non-empty line is a WAV path passed to {@link LlmModel#transcribe(Path)}.
+   * Speech REPL: each non-empty line is a WAV path passed to {@link LLM#transcribe(Path)}.
    *
    * <p>{@code /tone} writes a short 440 Hz beep and transcribes it. {@code /lang xx} sets a
-   * language hint; {@code /lang auto} clears it. Whisper checkpoints are not chat models.
+   * {@link Locale} hint ({@code en}, {@code en-US}, {@code yue}); {@code /lang auto} clears it.
    */
   private static void runTranscribeSession(
-    final LlmModel model,
+    final LLM llm,
     final BufferedReader in,
     final OrderedConsole console
   ) throws Exception {
     console.printlnInfo(
-      "Speech model (" + model.architectureName()
-        + ", " + model.modalities() +
-        ") — enter a WAV path. Commands: /tone  /lang <code>|auto  /exit");
+      "Speech model (" + llm.model().architectureName()
+        + ", " + llm.model().modalities() +
+        ") — enter a WAV path. Commands: /tone  /lang <tag>|auto  /exit");
     console.println();
 
-    String language = null;
+    Locale language = null;
     while (true) {
       console.print("wav?> ");
       String line = in.readLine();
@@ -411,31 +427,38 @@ public final class Example {
       if (user.equalsIgnoreCase("/tone")) {
         Path tone = Files.createTempFile("nanollvm-example-tone-", ".wav");
         Files.write(tone, toneWavBytes());
-        transcribePath(model, tone, language, console);
+        transcribePath(llm, tone, language, console);
         continue;
       }
       if (user.regionMatches(true, 0, "/lang ", 0, 6)) {
-        String code = user.substring(6).strip();
-        language = code.isEmpty() || "auto".equalsIgnoreCase(code) ? null : code;
-        console.println(language == null ? "language=auto" : "language=" + language);
+        language = speechLanguage(user.substring(6).strip());
+        console.println(
+          language == null ? "language=auto" : "language=" + language.toLanguageTag());
         continue;
       }
 
-      transcribePath(model, Path.of(user), language, console);
+      transcribePath(llm, Path.of(user), language, console);
     }
   }
 
+  private static Locale speechLanguage(final String tag) {
+    if (tag.isEmpty() || "auto".equalsIgnoreCase(tag)) {
+      return null;
+    }
+    return Locale.forLanguageTag(tag);
+  }
+
   private static void transcribePath(
-    final LlmModel model,
+    final LLM llm,
     final Path wav,
-    final String language,
+    final Locale language,
     final OrderedConsole console
   ) {
     try {
       long started = System.nanoTime();
       String text = language == null
-        ? model.transcribe(wav)
-        : model.transcribe(wav, language);
+        ? llm.transcribe(wav)
+        : llm.transcribe(wav, language);
       console.printf(
         Locale.ROOT,
         "%.3fs  %s%n%n",
@@ -471,19 +494,68 @@ public final class Example {
   }
 
   /**
-   * Embedding REPL: each non-empty line is {@link LlmModel#embed(CharSequence)}.
-   *
-   * <p>BERT-encoder checkpoints are not chat models — never {@code LLM.builder}. Prints dimension, L2 norm, a short preview, and
-   * cosine vs the previous vector.
+   * Synthesis REPL: each non-empty line is {@link LLM#synthesize(CharSequence)} written as WAV.
    */
-  private static void runEmbeddingSession(
-    final LlmModel model,
+  private static void runSynthesizeSession(
+    final LLM llm,
     final BufferedReader in,
     final OrderedConsole console
   ) throws Exception {
     console.printlnInfo(
-      "Embedding model (" + model.architectureName()
-        + ", " + model.modalities() + ") — each line → L2-normalized vector.");
+      "Synthesis model (" + llm.model().architectureName()
+        + ", " + llm.model().modalities() +
+        ") — enter text. Commands: /exit");
+    console.println("Try: Hello world");
+    console.println("     Привет, мир");
+    console.println();
+    Path outDir = Path.of(".").toAbsolutePath().normalize();
+    int n = 0;
+    while (true) {
+      console.print("tts?> ");
+      String line = in.readLine();
+      if (line == null) {
+        console.println();
+        return;
+      }
+      String user = line.strip();
+      if (user.isEmpty()) {
+        continue;
+      }
+      if (isQuitCommand(user)) {
+        return;
+      }
+      try {
+        long started = System.nanoTime();
+        byte[] wav = llm.synthesize(user);
+        Path wavPath = outDir.resolve("piper-%02d.wav".formatted(++n));
+        Files.write(wavPath, wav);
+        console.printf(
+          Locale.ROOT,
+          "%.3fs  %d bytes → %s%n%n",
+          (System.nanoTime() - started) / 1e9,
+          wav.length,
+          wavPath);
+      } catch (Exception ex) {
+        console.println("synthesize failed: " + ex.getMessage());
+        console.println();
+      }
+    }
+  }
+
+  /**
+   * Embedding REPL: each non-empty line is {@link LLM#embed(CharSequence)}.
+   *
+   * <p>BERT-encoder checkpoints use {@code LLM.builder} like chat. Prints dimension, L2 norm, a short preview, and
+   * cosine vs the previous vector.
+   */
+  private static void runEmbeddingSession(
+    final LLM llm,
+    final BufferedReader in,
+    final OrderedConsole console
+  ) throws Exception {
+    console.printlnInfo(
+      "Embedding model (" + llm.model().architectureName()
+        + ", " + llm.model().modalities() + ") — each line → L2-normalized vector.");
     console.println("Type text and press Enter. Commands: /exit  /quit  /clear");
     console.println("For labels, restart and choose Classify after the model loads.");
     console.println();
@@ -511,7 +583,7 @@ public final class Example {
       }
 
       long started = System.nanoTime();
-      float[] vector = model.embed(user);
+      float[] vector = llm.embed(user);
       console.printf(
         Locale.ROOT,
         "dim=%d  L2=%.4f  %.3fs  preview=%s%n",
@@ -572,15 +644,15 @@ public final class Example {
 
   /**
    * Few-shot classify: teach {@code label | text} (or {@code /load} a TSV), then unlabeled lines
-   * predict. Uses {@link EmbeddingClassifier} on {@link LlmModel#embed} — not a classification head.
+   * predict. Uses {@link EmbeddingClassifier} on {@link LLM#embed} — not a classification head.
    */
   private static void runClassificationSession(
-    final LlmModel model,
+    final LLM llm,
     final BufferedReader in,
     final OrderedConsole console
   ) throws Exception {
     console.printlnInfo(
-      "Classify with " + model.architectureName()
+      "Classify with " + llm.model().architectureName()
         + " vectors (centered prototypes, not a Hub classification head).");
     printClassifyHelp(console);
     console.println();
@@ -617,16 +689,16 @@ public final class Example {
           }
           case LABELS -> printTaughtLabels(taught, console);
           case DEMO -> {
-            fitted = teachAll(CLASSIFY_DEMO, model, trainer, taught, console);
+            fitted = teachAll(CLASSIFY_DEMO, llm, trainer, taught, console);
           }
-          case LOAD -> fitted = loadLabelFile(user, model, trainer, taught, console).orElse(fitted);
+          case LOAD -> fitted = loadLabelFile(user, llm, trainer, taught, console).orElse(fitted);
         }
         continue;
       }
 
       Optional<LabeledText> labeled = EmbeddingClassifier.parseLabeledLine(user);
       if (labeled.isPresent()) {
-        fitted = teachOne(labeled.get(), model, trainer, taught, console);
+        fitted = teachOne(labeled.get(), llm, trainer, taught, console);
         continue;
       }
 
@@ -635,7 +707,7 @@ public final class Example {
         continue;
       }
       long started = System.nanoTime();
-      printPrediction(fitted, model.embed(user), (System.nanoTime() - started) / 1e9, console);
+      printPrediction(fitted, llm.embed(user), (System.nanoTime() - started) / 1e9, console);
       console.println();
     }
   }
@@ -661,7 +733,7 @@ public final class Example {
 
   private static Optional<EmbeddingClassifier> loadLabelFile(
     final String user,
-    final LlmModel model,
+    final LLM llm,
     final EmbeddingClassifier.Trainer trainer,
     final List<LabeledText> taught,
     final OrderedConsole console
@@ -685,7 +757,7 @@ public final class Example {
         console.println("No labeled lines in " + path);
         return Optional.empty();
       }
-      return Optional.ofNullable(teachAll(loaded, model, trainer, taught, console));
+      return Optional.ofNullable(teachAll(loaded, llm, trainer, taught, console));
     } catch (IOException e) {
       console.println("Could not read " + path + ": " + e.getMessage());
       return Optional.empty();
@@ -694,24 +766,24 @@ public final class Example {
 
   private static EmbeddingClassifier teachAll(
     final List<LabeledText> examples,
-    final LlmModel model,
+    final LLM llm,
     final EmbeddingClassifier.Trainer trainer,
     final List<LabeledText> taught,
     final OrderedConsole console
   ) {
-    examples.forEach(example -> teachOne(example, model, trainer, taught, console));
+    examples.forEach(example -> teachOne(example, llm, trainer, taught, console));
     return trainer.canFit() ? trainer.fit() : null;
   }
 
   private static EmbeddingClassifier teachOne(
     final LabeledText example,
-    final LlmModel model,
+    final LLM llm,
     final EmbeddingClassifier.Trainer trainer,
     final List<LabeledText> taught,
     final OrderedConsole console
   ) {
     long started = System.nanoTime();
-    trainer.add(example.label(), model.embed(example.text()));
+    trainer.add(example.label(), llm.embed(example.text()));
     taught.add(example);
     EmbeddingClassifier fitted = trainer.canFit() ? trainer.fit() : null;
     console.printf(
@@ -1151,7 +1223,15 @@ public final class Example {
       choice(
         "whisper-tiny (speech, safetensors, ~150MB)",
         BundledModels.WHISPER_TINY,
-        "Run models/download-whisper-tiny.sh")
+        "Run models/download-whisper-tiny.sh"),
+      choice(
+        "piper-en-lessac-medium (TTS English, onnx, ~63MB + espeak-ng-data)",
+        BundledModels.PIPER_EN_LESSAC_MEDIUM,
+        "Run models/download-piper-en-lessac-medium.sh"),
+      choice(
+        "piper-ru-irina-medium (TTS Russian, onnx, ~63MB + espeak-ng-data)",
+        BundledModels.PIPER_RU_IRINA_MEDIUM,
+        "Run models/download-piper-ru-irina-medium.sh")
     );
   }
 
@@ -1226,6 +1306,10 @@ public final class Example {
     console.println("  ./models/download-xlm-roberta-base.sh  (XLM-RoBERTa ONNX embeddings)");
     console.println("  ./models/download-whisper-base.sh      (speech-to-text, ~290MB)");
     console.println("  ./models/download-whisper-tiny.sh      (smaller speech-to-text, ~150MB)");
+    console.println(
+      "  ./models/download-piper-en-lessac-medium.sh  (English TTS, ~63MB + espeak-ng-data)");
+    console.println(
+      "  ./models/download-piper-ru-irina-medium.sh  (Russian TTS, ~63MB + espeak-ng-data)");
     console.println();
     console.println("Windows: matching .ps1 / .cmd scripts in models/.");
     console.println(
@@ -1258,7 +1342,7 @@ public final class Example {
     console.printlnInfo("Loading model from " + path);
     console.printlnInfo(
       "Architecture auto-detects from config.json / GGUF metadata "
-        + "(override: -Dnanollvm.arch=qwen3|gemma3|llama|lfm2|bert|whisper).");
+        + "(override: -Dnanollvm.arch=qwen3|gemma3|llama|lfm2|bert|whisper|piper).");
     console.printlnInfo(
       "CPU matmul: " + Runtime.getRuntime().availableProcessors()
         + " threads from Runtime (override: -Dnanollvm.cpu.threads=N).");
@@ -1274,11 +1358,17 @@ public final class Example {
     }
     if (ModelSupport.isEmbeddingCheckpoint(path)) {
       console.printlnInfo(
-        "This checkpoint is a BERT-family embedding encoder — LlmModel.embed, not LLM.builder.");
+        "This checkpoint is a BERT-family embedding encoder — LLM.builder then LLM.embed.");
     }
     if (ModelSupport.isSpeechCheckpoint(path)) {
       console.printlnInfo(
-        "This checkpoint is Whisper speech-to-text — LlmModel.transcribe, not LLM.builder.");
+        "This checkpoint is Whisper speech-to-text — LLM.builder then LLM.transcribe.");
+    }
+    if (ModelSupport.isSynthesisCheckpoint(path)) {
+      console.printlnInfo(
+        "This checkpoint is Piper text-to-speech — LLM.builder then LLM.synthesize. "
+          + "espeak-ng-data is optional (.optionalData(LlmOptionalData.ESPEAK_DATA, path) "
+          + "or espeak-ng-data next to the voice); a missing folder is ignored.");
     }
     if (isGgufPath(path)) {
       console.printlnInfo(

@@ -2,6 +2,7 @@ package com.igormaznitsa.nanollvm.samples;
 
 import static java.util.stream.Collectors.joining;
 
+import com.igormaznitsa.nanollvm.llm.LLM;
 import com.igormaznitsa.nanollvm.models.LlmModel;
 import com.igormaznitsa.nanollvm.models.LlmModelFactory;
 import com.igormaznitsa.nanollvm.samples.utils.BundledModels;
@@ -17,8 +18,8 @@ import java.util.stream.IntStream;
  * L2-normalized vector, print dim / preview, then cosine vs the same text and an unrelated
  * sentence.
  *
- * <p>This is a BERT embedding checkpoint — call {@link LlmModel#embed(CharSequence)}, not
- * {@code LLM.builder}. Do not use a chat/completion model here. Non-retrieval E5 inputs use the
+ * <p>This is a BERT embedding checkpoint — {@link com.igormaznitsa.nanollvm.llm.LLM#builder} then
+ * {@link com.igormaznitsa.nanollvm.llm.LLM#embed}. Do not use a chat/completion model here. Non-retrieval E5 inputs use the
  * {@code query: } prefix.
  *
  * <p>Args: optional model folder (default {@code models/multilingual-e5-small}), optional text
@@ -44,31 +45,33 @@ public final class EmbeddingsHelloWorld {
 
     System.out.println("Loading embedding model from " + path);
     long started = System.currentTimeMillis();
-    try (LlmModel model = LlmModelFactory.make(path)) {
-      embedTexts(model, text, usesE5Prefix(path));
+    try (LlmModel model = LlmModelFactory.make(path);
+         LLM llm = LLM.builder(model).build()) {
+      embedTexts(llm, text, usesE5Prefix(path));
     } finally {
       System.out.println("Time taken: " + (System.currentTimeMillis() - started) + "ms");
     }
   }
 
   private static void embedTexts(
-    final LlmModel model,
+    final LLM llm,
     final String text,
     final boolean e5Prefix
   ) {
+    LlmModel model = llm.model();
     System.out.println("architecture=" + model.architectureName()
       + " embedding=" + model.isEmbeddingModel()
       + " modalities=" + model.modalities());
 
-    float[] vector = model.embed(embedInput(text, e5Prefix));
-    float[] same = model.embed(embedInput(text, e5Prefix));
-    float[] other = model.embed(embedInput(UNRELATED_TEXT, e5Prefix));
+    float[] vector = llm.embed(embedInput(text, e5Prefix));
+    float[] same = llm.embed(embedInput(text, e5Prefix));
+    float[] other = llm.embed(embedInput(UNRELATED_TEXT, e5Prefix));
 
     printVector(text, vector);
     System.out.printf(Locale.ROOT, "cos(same)=%.4f%n", cosine(vector, same));
 
     if (DEFAULT_TEXT.equals(text)) {
-      float[] related = model.embed(embedInput(RELATED_TEXT, e5Prefix));
+      float[] related = llm.embed(embedInput(RELATED_TEXT, e5Prefix));
       System.out.printf(Locale.ROOT, "cos(related)=%.4f  %s%n", cosine(vector, related),
         RELATED_TEXT);
     }

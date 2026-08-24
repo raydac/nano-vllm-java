@@ -23,7 +23,7 @@ import java.util.stream.IntStream;
 
 /**
  * OpenAI Whisper encoder-decoder ASR from Hugging Face safetensors. Greedy multilingual
- * transcribe, optional language, 30 s chunking.
+ * transcribe, optional {@link Locale} language, 30 s chunking.
  *
  * @since 1.3.0
  */
@@ -55,6 +55,12 @@ public final class WhisperForAsr implements SpeechToText {
   private final LayerNorm decoderNorm;
   private final Linear.Row logitsHead;
 
+  /**
+   * Binds encoder/decoder weights. {@code config.whisper()} must be present.
+   *
+   * @param config  Hugging Face blueprint; must not be {@code null}
+   * @param weights Whisper safetensors; must not be {@code null}
+   */
   public WhisperForAsr(final Config.HfConfig config, final WeightBag weights) {
     requireNonNull(config, "config");
     requireNonNull(weights, "weights");
@@ -166,16 +172,12 @@ public final class WhisperForAsr implements SpeechToText {
       .orElseThrow(() -> new IllegalStateException("tokenizer missing " + token));
   }
 
-  private static Integer resolveLanguageId(final Tokenizer tokenizer, final String language) {
-    if (language == null || language.isBlank()) {
-      return null;
-    }
-    String code = language.strip().toLowerCase(Locale.ROOT);
-    if (code.length() > 2 && code.charAt(2) == '-') {
-      code = code.substring(0, 2);
-    }
-    return tokenizer.tokenId("<|" + code + "|>")
-      .orElseThrow(() -> new IllegalArgumentException("unknown Whisper language: " + language));
+  private static Integer resolveLanguageId(final Tokenizer tokenizer, final Locale language) {
+    return WhisperLanguages.tokenCode(language)
+      .map(code -> tokenizer.tokenId("<|" + code + "|>")
+        .orElseThrow(() -> new IllegalArgumentException(
+          "unknown Whisper language: " + language.toLanguageTag())))
+      .orElse(null);
   }
 
   private static boolean[] suppressMask(
@@ -227,15 +229,20 @@ public final class WhisperForAsr implements SpeechToText {
     return ARCH_WHISPER;
   }
 
+  /**
+   * {@inheritDoc}
+   */
   @Override
   public String transcribe(
     final float[] pcm,
     final int sampleRate,
-    final String language,
-    final Tokenizer tokenizer
+    final Locale language,
+    final Tokenizer tokenizer,
+    final MatmulRuntime runtime
   ) {
     requireNonNull(pcm, "pcm");
     requireNonNull(tokenizer, "tokenizer");
+    requireNonNull(runtime, "runtime");
     if (sampleRate < 1) {
       throw new IllegalArgumentException("sampleRate must be >= 1");
     }
@@ -260,7 +267,8 @@ public final class WhisperForAsr implements SpeechToText {
         eot,
         transcribe,
         noTimestamps,
-        langId);
+        langId,
+        runtime);
       if (!piece.isBlank()) {
         if (!text.isEmpty()) {
           text.append(' ');
@@ -278,10 +286,11 @@ public final class WhisperForAsr implements SpeechToText {
     final int eot,
     final int transcribe,
     final int noTimestamps,
-    final Integer langId
+    final Integer langId,
+    final MatmulRuntime runtime
   ) {
     Context context = new Context();
-    context.bindMatmul(MatmulRuntime.sequential());
+    context.bindMatmul(runtime);
     Tensor encoderHidden = this.encode(
       WhisperLogMel.features(chunk, WhisperLogMel.SAMPLE_RATE), context);
     List<CrossCache> memory = this.decoderBlocks.stream()
@@ -308,8 +317,8 @@ public final class WhisperForAsr implements SpeechToText {
   }
 
   private Tensor encode(final Tensor logMel, final Context context) {
-    Tensor hidden = Ops.gelu(this.conv1.forward(logMel));
-    hidden = Ops.gelu(this.conv2.forward(hidden));
+    Tensor hidden = Ops.gelu(this.conv1.forward(logMel, context));
+    hidden = Ops.gelu(this.conv2.forward(hidden, context));
     hidden = transposeChannels(hidden);
     hidden = Ops.add(hidden, firstRows(this.encoderPositions, hidden.size(0)));
     for (EncoderBlock block : this.encoderBlocks) {

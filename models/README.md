@@ -207,6 +207,57 @@ try (LlmModel model = LlmModelFactory.make(Path.of("models/whisper-base"))) {
 Do not use with `LLM.builder` / chat. Sample: `nano-vllm-java-samples` →
 `com.igormaznitsa.nanollvm.samples.TranscribeHelloWorld`.
 
+## piper-en-lessac-medium (optional, English text-to-speech)
+
+[rhasspy/piper-voices Lessac medium](https://huggingface.co/rhasspy/piper-voices/tree/main/en/en_US/lessac/medium)
+— US English Piper VITS (`*.onnx` + `*.onnx.json`, ~63 MB) plus espeak-ng-data
+(`lang/` and `dictsource/` list+rules). Same load path as Irina.
+
+```bash
+./models/download-piper-en-lessac-medium.sh
+```
+
+Windows: `.\models\download-piper-en-lessac-medium.ps1` or `models\download-piper-en-lessac-medium.cmd`.
+
+Creates `models/piper-en-lessac-medium/`.
+
+```java
+try (LlmModel model = LlmModelFactory.open(Path.of("models/piper-en-lessac-medium"))
+    .optionalData(LlmOptionalData.ESPEAK_DATA, Path.of("models/piper-en-lessac-medium/espeak-ng-data"))
+    .make()) {
+  byte[] wav = model.synthesize("Hello world");
+}
+```
+
+Sample: `nano-vllm-java-samples` → `SynthesizeHelloWorld` (uses Lessac when that folder exists).
+In `Example`, pick the Lessac row, then at `tts?>` type `Hello world`.
+
+## piper-ru-irina-medium (optional, text-to-speech)
+
+[rhasspy/piper-voices Irina medium](https://huggingface.co/rhasspy/piper-voices/tree/main/ru/ru_RU/irina/medium)
+— Piper VITS voice (`*.onnx` + `*.onnx.json`, ~63 MB) plus espeak-ng-data (GPL data, downloaded
+next to the voice, not in the library JAR: `lang/` plus `dictsource/` lists and rules). Not a chat model. Not ONNX Runtime.
+
+```bash
+./models/download-piper-ru-irina-medium.sh
+```
+
+Windows: `.\models\download-piper-ru-irina-medium.ps1` or `models\download-piper-ru-irina-medium.cmd`.
+
+Creates `models/piper-ru-irina-medium/`. Point espeak-ng-data with typed load extras (or keep the
+default `{model}/espeak-ng-data`):
+
+```java
+try (LlmModel model = LlmModelFactory.open(Path.of("models/piper-ru-irina-medium"))
+    .optionalData(LlmOptionalData.ESPEAK_DATA, Path.of("models/piper-ru-irina-medium/espeak-ng-data"))
+    .make()) {
+  byte[] wav = model.synthesize("Привет, мир");
+}
+```
+
+Do not use with `LLM.builder` / chat. Sample: `nano-vllm-java-samples` →
+`com.igormaznitsa.nanollvm.samples.SynthesizeHelloWorld`.
+
 ## Selecting a model
 
 | Mechanism          | Example                                                                                           |
@@ -218,5 +269,5 @@ Do not use with `LLM.builder` / chat. Sample: `nano-vllm-java-samples` →
 | Models root        | `-Dnanollvm.models.dir=/other/models` or `NANOLLVM_MODELS_DIR` (default loads `<dir>/Qwen3-0.6B`) |
 
 Architecture is detected exactly from `config.json` / GGUF `general.architecture` (`ModelSupport`).
-`-Dnanollvm.arch` may only confirm a matching family (`qwen3`, `gemma3`, `gemma4`, `llama`, `lfm2`, `bert`, `whisper`);
+`-Dnanollvm.arch` may only confirm a matching family (`qwen3`, `gemma3`, `gemma4`, `llama`, `lfm2`, `bert`, `whisper`, `piper`);
 look-alike checkpoints fail with `UnsupportedModelException`.

@@ -373,10 +373,38 @@ class ModelSupportTest {
   }
 
   @Test
+  void isSynthesisCheckpointReadsPiperSidecarWithoutWeights(@TempDir final Path dir)
+    throws IOException {
+    Files.writeString(dir.resolve("ru_RU-irina-medium.onnx.json"), """
+      {"audio":{"sample_rate":22050},"espeak":{"voice":"ru"},"phoneme_id_map":{"_":[0],"^":[1]}}
+      """, UTF_8);
+    Files.write(dir.resolve("ru_RU-irina-medium.onnx"), new byte[] {1, 2, 3});
+    assertTrue(ModelSupport.isSynthesisCheckpoint(dir));
+    assertFalse(ModelSupport.isSpeechCheckpoint(dir));
+    assertFalse(ModelSupport.isEmbeddingCheckpoint(dir));
+
+    Config.HfConfig piper = Config.HfConfig.fromPiperJson(Files.readString(
+      dir.resolve("ru_RU-irina-medium.onnx.json"), UTF_8));
+    assertTrue(piper.isPiper());
+    assertEquals(WeightNames.ARCH_PIPER,
+      ModelSupport.require(piper, ModelSupport.Source.ONNX).architectureId());
+    assertTrue(ModelSupport.require(piper, ModelSupport.Source.ONNX).isSynthesis());
+    assertThrows(
+      UnsupportedModelException.class,
+      () -> ModelSupport.require(piper, ModelSupport.Source.HF_SAFETENSORS));
+    assertThrows(IllegalArgumentException.class, () -> CausalLMFactory.detect(piper));
+    assertThrows(IllegalArgumentException.class, () -> EmbeddingEncoderFactory.detect(piper));
+    WeightSchema schema = WeightSchema.forArchitecture(WeightNames.ARCH_PIPER, piper);
+    assertTrue(schema.expectedParameters().isEmpty());
+  }
+
+  @Test
   void catalogMentionsWhisperAndRejectsCtranslate2() {
     assertTrue(ModelSupport.CATALOG.contains("whisper"));
     assertTrue(ModelSupport.CATALOG.contains("openai/whisper-"));
     assertTrue(ModelSupport.CATALOG.contains("CTranslate2"));
+    assertTrue(ModelSupport.CATALOG.contains("piper"));
+    assertTrue(ModelSupport.CATALOG.contains("*.onnx.json"));
   }
 
   @Test

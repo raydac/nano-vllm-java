@@ -43,6 +43,12 @@ class LlmModalitiesTest {
     assertEquals("text->embedding", LlmModalities.TEXT_TO_EMBEDDING.toString());
     assertEquals(LlmModalities.TEXT_TO_TEXT, LlmModalities.usable(false));
     assertEquals(LlmModalities.TEXT_TO_EMBEDDING, LlmModalities.usable(true));
+
+    assertEquals(Set.of(LlmModality.TEXT), LlmModalities.TEXT_TO_AUDIO.input());
+    assertEquals(Set.of(LlmModality.AUDIO), LlmModalities.TEXT_TO_AUDIO.output());
+    assertTrue(LlmModalities.TEXT_TO_AUDIO.emits(LlmModality.AUDIO));
+    assertEquals("text->audio", LlmModalities.TEXT_TO_AUDIO.toString());
+    assertEquals(LlmModalities.TEXT_TO_AUDIO, LlmModalities.usable(false, false, true));
   }
 
   @Test
@@ -68,6 +74,11 @@ class LlmModalitiesTest {
       {"model_type":"qwen3","architectures":["Qwen3ForCausalLM"]}
       """);
     assertEquals(LlmModalities.TEXT_TO_TEXT, LlmModalities.ofCheckpoint(qwen, false));
+
+    Config.HfConfig piper = Config.HfConfig.fromPiperJson("""
+      {"audio":{"sample_rate":22050},"espeak":{"voice":"ru"},"phoneme_id_map":{"_":[0]}}
+      """);
+    assertEquals(LlmModalities.TEXT_TO_AUDIO, LlmModalities.ofCheckpoint(piper, false));
   }
 
   @Test

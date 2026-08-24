@@ -30,9 +30,11 @@ import java.util.List;
 public record ChatSpecials(List<String> markers) {
 
   /**
-   * ChatML, Gemma turn, Llama header/stop, and default {@link ThinkTags} strings, longest first.
+   * ChatML ({@code <|im_end|>} and the typed lookalike {@code <|im_ended|>}), Gemma turn,
+   * Llama header/stop, and default {@link ThinkTags} strings, longest first.
    */
   public static final ChatSpecials DEFAULT = new ChatSpecials(List.of(
+    "<|im_ended|>",
     "<|im_end|>",
     "<|im_start|>",
     "<|endoftext|>",

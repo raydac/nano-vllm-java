@@ -5,7 +5,9 @@ import static java.util.Objects.requireNonNull;
 import com.igormaznitsa.nanollvm.models.internal.PackedWeight;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.Callable;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -34,8 +36,7 @@ public final class MatmulRuntime implements AutoCloseable {
   private static final FloatKernels KERNELS = FloatKernels.get();
   private static final MatmulRuntime SEQUENTIAL = new MatmulRuntime(1, null, false, false, false);
   private static final AtomicReference<SharedPool> SHARED = new AtomicReference<>();
-  private static final ThreadLocal<Boolean> POOL_WORKER =
-    ThreadLocal.withInitial(() -> Boolean.FALSE);
+  private static final Set<Thread> POOL_WORKERS = ConcurrentHashMap.newKeySet();
   private final AtomicBoolean checkoutReleased = new AtomicBoolean();
   private final AtomicBoolean closed = new AtomicBoolean();
 
@@ -180,7 +181,8 @@ public final class MatmulRuntime implements AutoCloseable {
   }
 
   private boolean parallelEnabled() {
-    return this.pool != null && this.cpuThreads > 1 && !POOL_WORKER.get();
+    return this.pool != null && this.cpuThreads > 1 &&
+      !POOL_WORKERS.contains(Thread.currentThread());
   }
 
   /**
@@ -365,11 +367,12 @@ public final class MatmulRuntime implements AutoCloseable {
     List<Callable<Void>> wrapped = new ArrayList<>(tasks.size());
     for (Callable<Void> task : tasks) {
       wrapped.add(() -> {
-        POOL_WORKER.set(Boolean.TRUE);
+        Thread worker = Thread.currentThread();
+        POOL_WORKERS.add(worker);
         try {
           return task.call();
         } finally {
-          POOL_WORKER.remove();
+          POOL_WORKERS.remove(worker);
         }
       });
     }

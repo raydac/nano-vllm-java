@@ -8,9 +8,60 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased] — 1.3.0-SNAPSHOT
 
 ### Added
+- Load-time extras via typed keys: `LlmModelFactory.open(path).optionalData(key, value).make()`.
+  Unknown keys are kept and ignored by graphs that do not read them. Empty extras stay off
+  `LlmModel.options()` so existing think-tag / chat-special maps are unchanged. Piper voices
+  use `LlmOptionalData.ESPEAK_DATA` for the espeak-ng-data directory (default
+  `{model}/espeak-ng-data`). A missing or incomplete folder is ignored; Piper still
+  synthesizes. When the folder includes `dictsource` (`*_list` / `*_rules`) for the
+  voice language, Piper reads those files for G2P instead of the built-in letter tables.
+  Suffix and prefix `S`/`P` rules retranslate the stem; digits use the list's number
+  fragments (`_1`, `_2X`, `_0C`, …). Russian `*_rules` honor the A/B/C/F/G/H/Y letter
+  groups (so `и` after a hard consonant is `ы`, not after every consonant) and then
+  palatalize before `е`/`и`, reduce unstressed `о`/`е`, and place stress from
+  compiled `{lang}_dict` / `$1`–`$7` list flags (otherwise espeak's Russian
+  syllable-count guess, so two-syllable words like `это`/`мама` are not
+  end-stressed). That stops Irina stressing every unknown word on the final
+  syllable, which sounded Slavic but not Russian. If `dictsource` is missing but compiled
+  `phontab` and `{lang}_dict` are present, listed words still come from those files.
+
+- Piper text-to-speech from a voice folder (`*.onnx` + `*.onnx.json`). Load with
+  `LlmModelFactory.make`, then `LLM.builder(model).build()` and `LLM.synthesize` for
+  uncompressed WAV bytes (PCM16 LE mono) — write the array only if you need a file.
+  `LlmModel.synthesize` remains a sequential shortcut.
+  Official Piper ONNX exports (including ru_RU-irina-medium) load: the phoneme table exported as
+  `sid`, WaveNet kernels named `onnx::Conv_*`, and HiFi-GAN vocoder residual blocks. Conv and
+  ConvTranspose geometry (stride, padding, dilation, groups, output padding) comes from the ONNX
+  graph instead of vocoder-family guesses, so voices are not locked to Lessac/Irina kernel sizes.
+  Irina uses ResBlock2 (`convs.0`/`convs.1`) with those graph dilations, so output is speech rather
+  than a metallic buzz. Reverse synthesis follows VITS: all residual couplings with channel flips,
+  WaveNet skip paths, and stochastic duration (rational-quadratic conv flows).
+  espeak-ng-data is optional (compiled `phontab` / `{lang}_dict` are used when
+  `dictsource` is absent). Download scripts
+  install `lang/` plus `dictsource/` (`*_list` / `*_rules`) and, when a system
+  espeak-ng-data is present, compiled `phontab` / `phondata` / `{lang}_dict` so Russian
+  lexical stress is available. The dictionary is the G2P when
+  present. Otherwise a letter-to-sound fallback is used: Russian uses espeak phones for ш/ж/ы (`ʃ`/`ʒ`/`y`), so those
+  consonants stay audible (academic IPA `ʂ`/`ʐ`/`ɨ` are unused by this voice).
+  Russian letter G2P also destresses word-final obstruents, assimilates voicing across clusters
+  (including prepositions), and applies common orthoepic rewrites (жи/ши, -ого/-его, что, -ться)
+  while still emitting Piper espeak phones. Latin letter G2P uses a small English lexicon plus
+  letter/digraph rules so a US English Piper voice still works without dictionaries. Optional
+  `models/download-piper-en-lessac-medium.sh` / `.ps1` / `.cmd` (Lessac medium + espeak-ng-data)
+  and `models/download-piper-ru-irina-medium.sh` / `.ps1` / `.cmd` (Irina medium + espeak-ng-data).
+  Sample `SynthesizeHelloWorld` prefers Lessac when both folders exist; `Example` lists both
+  voices and the TTS session suggests `Hello world` / `Привет, мир`.
+  `LLM.builder` is the runtime for every graph kind: Piper uses the same `cpuThreads` / matmul
+  pool as chat, and 1-D conv / conv-transpose split independent output channels across that pool.
+  Non-chat engines skip KV paging (`numKvcacheBlocks` is 0), so Piper no longer fails to build
+  on a large heap (the chat auto-sizer treated a missing transformer as 1-byte pages and overflowed).
+
 - Whisper speech-to-text from Hugging Face safetensors (`openai/whisper-*`). Load with
-  `LlmModelFactory.make` and call `LlmModel.transcribe` on uncompressed WAV or 16 kHz-resampled
-  PCM. `LLM.builder` rejects speech checkpoints the same way it rejects embeddings. CTranslate2 /
+  `LlmModelFactory.make`, then `LLM.builder(model).build()` and `LLM.transcribe` on uncompressed
+  WAV bytes, a WAV file, or 16 kHz-resampled PCM (no file required when the payload is already
+  in memory). Optional language is a `Locale` (`null` / `Locale.ROOT` = auto; region ignored;
+  ISO aliases such as `jv` map to Whisper's `jw` token). `LlmModel.transcribe` remains a sequential shortcut. The builder
+  uses the same CPU matmul pool as chat (Linear, attention, and stem convs). CTranslate2 /
   faster-whisper `model.bin` folders, Whisper GGUF, and Whisper ONNX are refused. Optional
   `models/download-whisper-base.sh` / `.ps1` / `.cmd` (~290 MB) and `download-whisper-tiny.sh`
   (~150 MB). Sample `TranscribeHelloWorld`; `Example` lists Whisper in the menu and opens a WAV
@@ -19,7 +70,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Optional download scripts for [FacebookAI/xlm-roberta-base](https://huggingface.co/FacebookAI/xlm-roberta-base)
   (`models/download-xlm-roberta-base.sh` / `.ps1` / `.cmd` → `models/xlm-roberta-base/`, ONNX fp32
   saved as `onnx/model.onnx`, ~1.9 GB). BERT-encoder embeddings (`bert` / `roberta` / `xlm-roberta`,
-  and the same graph under those family names) load from GGUF or ONNX via `LlmModel.embed` — the
+  and the same graph under those family names) load from GGUF or ONNX via `LLM.builder` then
+  `LLM.embed` (or `LlmModel.embed` as a sequential shortcut) — the
   library keys off architecture, not a named Hub checkpoint. ONNX BERT weight names drop whatever
   module sits in front of `embeddings.` / `encoder.` (not a fixed prefix list).
   `ModelSupport.isEmbeddingCheckpoint` classifies a folder or GGUF from `config.json` / metadata
@@ -31,6 +83,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   BERT-family folders are still rejected.
 
 ### Fixed
+- Chat answers no longer keep a typed ChatML lookalike `<|im_ended|>` at the end of a turn
+  (`ChatSpecials.DEFAULT`). Generation still stops only on real EOS ids such as `<|im_end|>`.
+
 - Model download scripts treat HTTP 416 on resume as "already complete", so re-running a script
   after a sidecar such as `config.json` finished no longer fails (`curl: (22) ... 416`).
 

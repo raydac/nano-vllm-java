@@ -21,7 +21,8 @@ import java.util.Map;
  * <p>Applications rarely construct this directly. {@link LLM.Builder} copies its knobs into a
  * {@link Builder} and calls {@link Builder#build()}. EOS / stop ids come from the tokenizer
  * unless overridden. KV block count is estimated from heap ({@link #kvHeapFraction()}) when
- * unset. The object is read-only after construction; changing context or stops requires a new
+ * unset on a chat graph; embedding, Whisper, and Piper engines use {@code 0} (no pages).
+ * The object is read-only after construction; changing context or stops requires a new
  * {@link LLM}.
  *
  * @see LLM.Builder
@@ -97,13 +98,31 @@ public final class Config {
     final int blockSize,
     final float kvHeapFraction,
     final HfConfig hf) {
+    if (configured == 0) {
+      return 0;
+    }
     if (configured > 0) {
       return configured;
     }
 
-    int blocksPerSeq = (maxModelLen + blockSize - 1) / blockSize;
-    int estimated = Math.max(maxNumSeqs * blocksPerSeq, 128);
-    long free = Runtime.getRuntime().maxMemory();
+    long bytesPerBlock = Config.kvBytesPerBlock(hf, blockSize);
+    if (bytesPerBlock <= 0L) {
+      return 0;
+    }
+
+    int blocksPerSeq = (int) ((Math.max(0L, maxModelLen) + blockSize - 1L) / blockSize);
+    long estimated = Math.max((long) maxNumSeqs * Math.max(1, blocksPerSeq), 128L);
+    long heapCap = Math.max(
+      32L,
+      (long) (Runtime.getRuntime().maxMemory() * kvHeapFraction) / bytesPerBlock);
+    int resolved = (int) Math.min(estimated, Math.clamp(heapCap, 1L, Integer.MAX_VALUE));
+    if (resolved <= 0) {
+      throw new IllegalStateException("numKvcacheBlocks must be > 0");
+    }
+    return resolved;
+  }
+
+  private static long kvBytesPerBlock(final HfConfig hf, final int blockSize) {
     long bytesPerBlock = 0L;
     for (int layer = 0; layer < hf.numHiddenLayers(); layer++) {
       if (hf.isKvSharedLayer(layer)) {
@@ -112,16 +131,11 @@ public final class Config {
       bytesPerBlock +=
         2L * blockSize * hf.numKeyValueHeads() * hf.layerHeadDim(layer) * Float.BYTES;
     }
-    if (bytesPerBlock <= 0L) {
-      bytesPerBlock = 2L * hf.numHiddenLayers() * blockSize
-        * hf.numKeyValueHeads() * hf.headDim() * Float.BYTES;
+    if (bytesPerBlock > 0L) {
+      return bytesPerBlock;
     }
-    int heapCap = (int) Math.max(32, (long) (free * kvHeapFraction) / Math.max(1, bytesPerBlock));
-    int resolved = Math.min(estimated, heapCap);
-    if (resolved <= 0) {
-      throw new IllegalStateException("numKvcacheBlocks must be > 0");
-    }
-    return resolved;
+    return 2L * hf.numHiddenLayers() * blockSize
+      * hf.numKeyValueHeads() * hf.headDim() * Float.BYTES;
   }
 
   /**
@@ -139,7 +153,7 @@ public final class Config {
   /**
    * Starts a builder from an already-loaded checkpoint. Path and {@link LlmModel#hfConfig()} are
    * taken from the model so JSON is not re-read. Prefer this from {@link LLM.Builder}; the engine
-   * owns the resulting {@link Config}.
+   * owns the resulting {@link Config}. Non-chat graphs start with {@code numKvcacheBlocks(0)}.
    *
    * @param model loaded weights; must not be {@code null}
    * @return a new builder
@@ -147,7 +161,11 @@ public final class Config {
    */
   public static Builder builder(final LlmModel model) {
     requireNonNull(model, "model");
-    return new Builder(model.path(), model.hfConfig());
+    Builder builder = new Builder(model.path(), model.hfConfig());
+    if (!model.isCausalModel()) {
+      builder.numKvcacheBlocks(0);
+    }
+    return builder;
   }
 
   /**
@@ -258,10 +276,11 @@ public final class Config {
 
   /**
    * Number of KV blocks allocated for this engine. Auto-sized from heap, {@link #maxNumSeqs()},
-   * and {@link #maxModelLen()} when the builder left it at {@code -1}. Too few blocks fail long
-   * or highly concurrent generates.
+   * and {@link #maxModelLen()} when the builder left it at {@code -1}. {@code 0} when the graph
+   * has no chat KV (embeddings, Whisper, Piper). Too few blocks fail long or highly concurrent
+   * generates.
    *
-   * @return block count {@code > 0}
+   * @return block count {@code >= 0}
    */
   public int numKvcacheBlocks() {
     return this.numKvcacheBlocks;
@@ -431,9 +450,10 @@ public final class Config {
 
     /**
      * Explicit KV-block count. {@code -1} (default) auto-sizes from heap, sequence cap, and
-     * context length at {@link #build()}. The resolved count must be {@code > 0}.
+     * context length at {@link #build()}. {@code 0} skips paging (non-chat graphs). Chat
+     * auto-size must resolve to {@code > 0}.
      *
-     * @param v explicit block count, or {@code -1} to auto-size
+     * @param v explicit block count, {@code 0} for no KV, or {@code -1} to auto-size
      * @return {@code this}
      */
     public Builder numKvcacheBlocks(final int v) {
@@ -444,11 +464,11 @@ public final class Config {
     /**
      * Seals EOS / stop ids and KV-block count, then returns an immutable {@link Config}.
      * Fails if the model path is missing, KV block size is not a multiple of 256,
-     * {@code cpuThreads < 1}, or the KV heap estimate resolves to zero blocks.
+     * {@code cpuThreads < 1}, or a chat KV heap estimate resolves to zero blocks.
      *
      * @return a new {@link Config}
      * @throws IllegalArgumentException if path, block size, threads, or heap fraction is invalid
-     * @throws IllegalStateException    if auto-sized {@code numKvcacheBlocks} is not {@code > 0}
+     * @throws IllegalStateException    if chat auto-sized {@code numKvcacheBlocks} is not {@code > 0}
      */
     public Config build() {
       return new Config(this);
@@ -501,6 +521,7 @@ public final class Config {
    * @param nestedTextConfig      {@code true} when {@code text_config} is a nested object
    * @param gemma4                Gemma 4 text extras; {@code null} for other families
    * @param whisper               Whisper encoder/decoder extras; {@code null} for other families
+   * @param piper                 Piper VITS extras; {@code null} for other families
    */
   public record HfConfig(
     int vocabSize,
@@ -532,7 +553,8 @@ public final class Config {
     boolean videoConfigPresent,
     boolean nestedTextConfig,
     Gemma4Text gemma4,
-    WhisperSpec whisper
+    WhisperSpec whisper,
+    PiperSpec piper
   ) {
     public HfConfig {
       ropeScaling = freezeStringKeyedMap(ropeScaling);
@@ -628,6 +650,18 @@ public final class Config {
         ? Json.asFloat(m.get("rms_norm_eps"), 1e-6f)
         : Json.asFloat(m.get("norm_eps"), 1e-6f);
       int vocabSize = Json.asInt(m.get("vocab_size"), 0);
+      PiperSpec piper = parsePiper(root, modelType);
+      if (piper != null) {
+        if (modelType == null || modelType.isBlank()) {
+          modelType = "piper";
+        }
+        if (architectures == null || architectures.isEmpty()) {
+          architectures = List.of("Piper");
+        }
+        if (vocabSize <= 0) {
+          vocabSize = piper.numSymbols();
+        }
+      }
       int intermediateSize = Json.asInt(m.get("intermediate_size"), 0);
       int numHiddenLayers = Json.asInt(m.get("num_hidden_layers"), 0);
       int maxPositionEmbeddings = Json.asInt(m.get("max_position_embeddings"), 32768);
@@ -701,7 +735,8 @@ public final class Config {
         flags.video(),
         nestedText,
         isGemma4Family(modelType) ? parseGemma4Text(m, rope.partialRotaryFactor()) : null,
-        whisper
+        whisper,
+        piper
       );
     }
 
@@ -867,6 +902,52 @@ public final class Config {
     }
 
     /**
+     * Parses a Piper {@code *.onnx.json} sidecar into an {@link HfConfig}.
+     *
+     * @param json sidecar text; must not be {@code null}
+     * @return blueprint with {@link #piper()} set
+     * @throws NullPointerException     if {@code json} is {@code null}
+     * @throws IllegalArgumentException if required sidecar fields are missing
+     * @since 1.3.0
+     */
+    public static HfConfig fromPiperJson(final String json) {
+      Map<String, Object> root = Json.parseObject(requireNonNull(json, "json"));
+      PiperSpec spec = piperFromRoot(root);
+      return new HfConfig(
+        spec.numSymbols(),
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        1e-5f,
+        "relu",
+        false,
+        false,
+        0f,
+        null,
+        "float32",
+        "piper",
+        List.of("Piper"),
+        "relu",
+        0,
+        List.of(),
+        0f,
+        0f,
+        0,
+        false,
+        false,
+        false,
+        false,
+        false,
+        null,
+        null,
+        spec);
+    }
+
+    /**
      * Attention head dim at {@code layerIndex}. Non-Gemma-4 models use {@link #headDim()} for
      * every layer. Gemma 4 global (non-sliding) layers may use {@link Gemma4Text#globalHeadDim()}.
      *
@@ -973,6 +1054,89 @@ public final class Config {
       }
       return false;
     }
+
+    private static PiperSpec parsePiper(final Map<String, Object> root, final String modelType) {
+      if (Json.asObject(root.get("phoneme_id_map")) == null) {
+        return null;
+      }
+      if (!"piper".equals(modelType) && Json.asString(root.get("espeak")) == null
+        && Json.asObject(root.get("espeak")) == null) {
+        return null;
+      }
+      return piperFromRoot(root);
+    }
+
+    private static PiperSpec piperFromRoot(final Map<String, Object> root) {
+      Map<String, Object> audio = Json.asObject(root.get("audio"));
+      Map<String, Object> espeak = Json.asObject(root.get("espeak"));
+      Map<String, Object> inference = Json.asObject(root.get("inference"));
+      int sampleRate = audio == null
+        ? Json.asInt(root.get("sample_rate"), 22_050)
+        : Json.asInt(audio.get("sample_rate"), 22_050);
+      String quality = audio == null ? "" : Json.asString(audio.get("quality"));
+      String voice = espeak == null ? "" : Json.asString(espeak.get("voice"));
+      if (voice == null || voice.isBlank()) {
+        voice = espeak == null ? "" : Json.asString(espeak.get("language"));
+      }
+      float noise = 0.667f;
+      float length = 1f;
+      float noiseW = 0.8f;
+      if (inference != null) {
+        noise = Json.asFloat(inference.get("noise_scale"), noise);
+        length = Json.asFloat(inference.get("length_scale"), length);
+        noiseW = Json.asFloat(inference.get("noise_w"), noiseW);
+      }
+      return new PiperSpec(
+        sampleRate,
+        quality == null ? "" : quality,
+        voice == null ? "" : voice,
+        Json.asInt(root.get("num_speakers"), 1),
+        Json.asInt(root.get("num_symbols"), 256),
+        noise,
+        length,
+        noiseW,
+        intListMap(Json.asObject(root.get("phoneme_id_map"))),
+        stringListMap(Json.asObject(root.get("phoneme_map"))));
+    }
+
+    private static Map<String, List<Integer>> intListMap(final Map<String, Object> raw) {
+      if (raw == null || raw.isEmpty()) {
+        return Map.of();
+      }
+      Map<String, List<Integer>> out = new LinkedHashMap<>();
+      raw.forEach((key, value) -> {
+        List<Object> list = Json.asArray(value);
+        if (list == null) {
+          return;
+        }
+        out.put(key, list.stream().map(item -> Json.asInt(item, 0)).toList());
+      });
+      return out;
+    }
+
+    private static Map<String, List<String>> stringListMap(final Map<String, Object> raw) {
+      if (raw == null || raw.isEmpty()) {
+        return Map.of();
+      }
+      Map<String, List<String>> out = new LinkedHashMap<>();
+      raw.forEach((key, value) -> {
+        List<Object> list = Json.asArray(value);
+        if (list == null) {
+          return;
+        }
+        out.put(key, list.stream().map(Json::asString).toList());
+      });
+      return out;
+    }
+
+    /**
+     * {@code true} when this blueprint is a Piper VITS voice.
+     *
+     * @since 1.3.0
+     */
+    public boolean isPiper() {
+      return this.piper != null;
+    }
   }
 
   /**
@@ -995,6 +1159,44 @@ public final class Config {
         || maxSourcePositions <= 0 || maxTargetPositions <= 0) {
         throw new IllegalArgumentException("whisper spec sizes must be > 0");
       }
+    }
+  }
+
+  /**
+   * Piper voice sidecar ({@code *.onnx.json}).
+   *
+   * @param sampleRate   waveform Hertz
+   * @param quality      voice quality tag from the sidecar (informational)
+   * @param espeakVoice  espeak voice name ({@code en-us}, {@code ru}, …)
+   * @param numSpeakers  speaker embeddings; {@code 1} for a single-speaker voice
+   * @param numSymbols   phoneme table size
+   * @param noiseScale   VITS posterior noise
+   * @param lengthScale  duration stretch ({@code 1} = trained tempo)
+   * @param noiseW       duration-predictor noise
+   * @param phonemeIdMap grapheme/phoneme → id lists
+   * @param phonemeMap   optional phoneme aliases
+   * @since 1.3.0
+   */
+  public record PiperSpec(
+    int sampleRate,
+    String quality,
+    String espeakVoice,
+    int numSpeakers,
+    int numSymbols,
+    float noiseScale,
+    float lengthScale,
+    float noiseW,
+    Map<String, List<Integer>> phonemeIdMap,
+    Map<String, List<String>> phonemeMap
+  ) {
+    public PiperSpec {
+      if (sampleRate < 1 || numSymbols < 1) {
+        throw new IllegalArgumentException("piper sampleRate and numSymbols must be >= 1");
+      }
+      espeakVoice = espeakVoice == null ? "" : espeakVoice;
+      quality = quality == null ? "" : quality;
+      phonemeIdMap = phonemeIdMap == null ? Map.of() : Map.copyOf(phonemeIdMap);
+      phonemeMap = phonemeMap == null ? Map.of() : Map.copyOf(phonemeMap);
     }
   }
 

@@ -10,7 +10,9 @@ import com.igormaznitsa.nanollvm.tokenizer.Tokenizer;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 
 /**
@@ -21,12 +23,15 @@ import java.util.Set;
  * options ({@link #options()}, including {@link #OPTION_THINK_TAGS} and
  * {@link #OPTION_CHAT_SPECIALS}) are frozen at
  * {@link LlmModelFactory#make} and never change. Embedding models expose
- * {@link #embed(CharSequence)} instead of chat/generate. Speech models expose
- * {@link #transcribe} instead of chat/generate.
+ * {@link #embed(CharSequence)} instead of chat/generate (or {@link LLM#embed} after
+ * {@link LLM#builder} for the shared CPU pool). Speech models expose
+ * {@link #transcribe} / {@link LLM#transcribe}. Synthesis models expose
+ * {@link #synthesize} / {@link LLM#synthesize}.
  *
  * <p>{@link #modalities()} is what the checkpoint file declares (Gemma 4 QAT mobile includes
  * image, audio, and video keys). {@link #usableModalities()} is what this library actually
- * runs: text→text chat, text→embedding, or audio→text Whisper. Extra towers are skipped at load.
+ * runs: text→text chat, text→embedding, audio→text Whisper, or text→audio Piper. Extra towers
+ * are skipped at load.
  *
  * <p>GGUF models keep quantized weights packed by default. Prefer unpacking at load with
  * {@link LlmModelFactory#make(Path, LlmListener, boolean)} ({@code true}) so float32 is built
@@ -60,6 +65,15 @@ public abstract sealed class LlmModel implements AutoCloseable permits LlmModelI
    * @since 1.1.0
    */
   public static final String OPTION_CHAT_SPECIALS = "chatSpecials";
+
+  /**
+   * Factory option: a {@code Map<String, Object>} of {@link LlmOptionalData} values (for example
+   * {@link LlmOptionalData#ESPEAK_DATA}). Prefer
+   * {@link LlmModelFactory.Builder#optionalData(LlmOptionalData.Key, Object)}. Omitted when empty.
+   *
+   * @since 1.3.0
+   */
+  public static final String OPTION_OPTIONAL_DATA = "optionalData";
 
   protected LlmModel() {
   }
@@ -106,6 +120,17 @@ public abstract sealed class LlmModel implements AutoCloseable permits LlmModelI
   public abstract ChatSpecials chatSpecials();
 
   /**
+   * Load-time extra for {@code key} (Piper espeak-ng-data folder, or an application key). Empty
+   * when the caller did not set it. Safe to call after {@link #close()}.
+   *
+   * @param key typed extra; must not be {@code null}
+   * @return the stored value, or empty
+   * @throws NullPointerException if {@code key} is {@code null}
+   * @since 1.3.0
+   */
+  public abstract <T> Optional<T> optionalData(LlmOptionalData.Key<T> key);
+
+  /**
    * Architecture id (e.g. {@code qwen3}, {@code gemma3}, {@code bert}). Safe to call after
    * {@link #close()}.
    */
@@ -124,7 +149,8 @@ public abstract sealed class LlmModel implements AutoCloseable permits LlmModelI
 
   /**
    * Content types this library actually consumes and produces for the loaded graph: text→text
-   * chat, text→embedding, or audio→text speech. Safe to call after {@link #close()}.
+   * chat, text→embedding, audio→text speech, or text→audio synthesis. Safe to call after
+   * {@link #close()}.
    *
    * @since 1.2.0
    */
@@ -156,20 +182,28 @@ public abstract sealed class LlmModel implements AutoCloseable permits LlmModelI
   public abstract boolean isCausalModel();
 
   /**
-   * {@code true} when this file turns text into number vectors — call {@link #embed(CharSequence)},
-   * not {@link LLM#builder(LlmModel)} (that {@code build()} rejects embedding models).
+   * {@code true} when this file turns text into number vectors — use {@link LLM#builder(LlmModel)}
+   * then {@link LLM#embed}. {@link #embed(CharSequence)} remains a sequential shortcut.
    *
    * @since 1.1.0
    */
   public abstract boolean isEmbeddingModel();
 
   /**
-   * {@code true} when this file is Whisper speech-to-text — call {@link #transcribe},
-   * not {@link LLM#builder(LlmModel)} (that {@code build()} rejects speech models).
+   * {@code true} when this file is Whisper speech-to-text — use {@link LLM#builder(LlmModel)}
+   * then {@link LLM#transcribe}. {@link #transcribe} remains a sequential shortcut.
    *
    * @since 1.3.0
    */
   public abstract boolean isSpeechModel();
+
+  /**
+   * {@code true} when this file is Piper (or other) text-to-speech — use {@link LLM#builder(LlmModel)}
+   * then {@link LLM#synthesize}. {@link #synthesize} remains a sequential shortcut.
+   *
+   * @since 1.3.0
+   */
+  public abstract boolean isSynthesisModel();
 
   /**
    * {@code true} when GGUF/QAT weights are still packed (not widened to float32).
@@ -220,23 +254,73 @@ public abstract sealed class LlmModel implements AutoCloseable permits LlmModelI
 
   /**
    * Transcribes an uncompressed WAV file (PCM or IEEE float, mixed to mono). Speech models only.
+   * Prefer {@link #transcribe(byte[])} when the payload is already in memory. Sequential matmul
+   * unless you go through {@link LLM#transcribe}.
    *
+   * @param wav path to a {@code .wav} file; must not be {@code null}
+   * @return transcript text; never {@code null}
+   * @throws NullPointerException     if {@code wav} is {@code null}
+   * @throws IOException              if the file cannot be read
+   * @throws IllegalArgumentException if the container is compressed or malformed
+   * @throws IllegalStateException    if this model is closed or is not speech
    * @since 1.3.0
    */
   public abstract String transcribe(final Path wav) throws IOException;
 
   /**
-   * Transcribes an uncompressed WAV file with an optional language hint ({@code en}, {@code de},
-   * …). {@code null} or blank language selects automatically. Speech models only.
+   * Transcribes an uncompressed WAV file with an optional language hint. {@code null} or
+   * {@link Locale#ROOT} selects automatically; region is ignored ({@link Locale#US} is English).
+   * Speech models only.
    *
+   * @param wav      path to a {@code .wav} file; must not be {@code null}
+   * @param language hint, or {@code null}/{@link Locale#ROOT} for auto
+   * @return transcript text; never {@code null}
+   * @throws NullPointerException     if {@code wav} is {@code null}
+   * @throws IOException              if the file cannot be read
+   * @throws IllegalArgumentException if the container is compressed or malformed, or the language
+   *                                  is not a Whisper token
+   * @throws IllegalStateException    if this model is closed or is not speech
    * @since 1.3.0
    */
-  public abstract String transcribe(final Path wav, final String language) throws IOException;
+  public abstract String transcribe(final Path wav, final Locale language) throws IOException;
+
+  /**
+   * Transcribes an uncompressed WAV payload already in memory (same container as a {@code .wav}
+   * file). Speech models only. Does not touch the filesystem.
+   *
+   * @param wav RIFF/WAVE bytes; must not be {@code null}
+   * @return transcript text; never {@code null}
+   * @throws NullPointerException     if {@code wav} is {@code null}
+   * @throws IllegalArgumentException if the container is compressed or malformed
+   * @throws IllegalStateException    if this model is closed or is not speech
+   * @since 1.3.0
+   */
+  public abstract String transcribe(final byte[] wav);
+
+  /**
+   * Transcribes in-memory WAV bytes with an optional language hint. Speech models only.
+   *
+   * @param wav      RIFF/WAVE bytes; must not be {@code null}
+   * @param language hint, or {@code null}/{@link Locale#ROOT} for auto
+   * @return transcript text; never {@code null}
+   * @throws NullPointerException     if {@code wav} is {@code null}
+   * @throws IllegalArgumentException if the container is compressed or malformed, or the language
+   *                                  is not a Whisper token
+   * @throws IllegalStateException    if this model is closed or is not speech
+   * @since 1.3.0
+   */
+  public abstract String transcribe(final byte[] wav, final Locale language);
 
   /**
    * Transcribes mono PCM. {@code sampleRate} is Hertz; other rates are resampled to 16 kHz.
    * Speech models only.
    *
+   * @param pcm        mono samples in {@code [-1, 1]}; must not be {@code null}
+   * @param sampleRate Hertz of {@code pcm}; must be {@code >= 1}
+   * @return transcript text; never {@code null}
+   * @throws NullPointerException     if {@code pcm} is {@code null}
+   * @throws IllegalArgumentException if {@code sampleRate < 1}
+   * @throws IllegalStateException    if this model is closed or is not speech
    * @since 1.3.0
    */
   public abstract String transcribe(final float[] pcm, final int sampleRate);
@@ -244,9 +328,31 @@ public abstract sealed class LlmModel implements AutoCloseable permits LlmModelI
   /**
    * Transcribes mono PCM with an optional language hint. Speech models only.
    *
+   * @param pcm        mono samples in {@code [-1, 1]}; must not be {@code null}
+   * @param sampleRate Hertz of {@code pcm}; must be {@code >= 1}
+   * @param language   hint, or {@code null}/{@link Locale#ROOT} for auto
+   * @return transcript text; never {@code null}
+   * @throws NullPointerException     if {@code pcm} is {@code null}
+   * @throws IllegalArgumentException if {@code sampleRate < 1}, or the language is not a Whisper
+   *                                  token
+   * @throws IllegalStateException    if this model is closed or is not speech
    * @since 1.3.0
    */
-  public abstract String transcribe(final float[] pcm, final int sampleRate, final String language);
+  public abstract String transcribe(final float[] pcm, final int sampleRate, final Locale language);
+
+  /**
+   * Synthesizes uncompressed WAV bytes (PCM16 little-endian, mono) from {@code text}.
+   * The payload is the file contents — write it only if you need a {@code .wav} on disk.
+   * Synthesis models only. Sequential matmul unless you go through {@link LLM#synthesize}.
+   *
+   * @param text text to speak; must not be {@code null} or blank
+   * @return RIFF/WAVE bytes; never {@code null}
+   * @throws NullPointerException     if {@code text} is {@code null}
+   * @throws IllegalArgumentException if {@code text} is blank
+   * @throws IllegalStateException    if this model is closed or is not synthesis
+   * @since 1.3.0
+   */
+  public abstract byte[] synthesize(final CharSequence text);
 
   /**
    * Releases packed payloads, closes weight file channels (&gt; 2 GiB shards), and drops

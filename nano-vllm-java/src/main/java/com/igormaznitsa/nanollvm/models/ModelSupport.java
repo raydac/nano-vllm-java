@@ -5,6 +5,7 @@ import static com.igormaznitsa.nanollvm.models.internal.WeightNames.ARCH_GEMMA3;
 import static com.igormaznitsa.nanollvm.models.internal.WeightNames.ARCH_GEMMA4;
 import static com.igormaznitsa.nanollvm.models.internal.WeightNames.ARCH_LFM2;
 import static com.igormaznitsa.nanollvm.models.internal.WeightNames.ARCH_LLAMA;
+import static com.igormaznitsa.nanollvm.models.internal.WeightNames.ARCH_PIPER;
 import static com.igormaznitsa.nanollvm.models.internal.WeightNames.ARCH_QWEN3;
 import static com.igormaznitsa.nanollvm.models.internal.WeightNames.ARCH_WHISPER;
 import static com.igormaznitsa.nanollvm.utils.NanoLlvmProps.PROP_ARCH;
@@ -16,7 +17,6 @@ import com.igormaznitsa.nanollvm.exceptions.UnsupportedModelException;
 import com.igormaznitsa.nanollvm.llm.Config;
 import com.igormaznitsa.nanollvm.models.llmcontainer.GgufReader;
 import com.igormaznitsa.nanollvm.utils.NanoLlvmProps;
-
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -44,9 +44,10 @@ public final class ModelSupport {
       Chat from a GGUF file: qwen3, lfm2
       Embeddings from GGUF or ONNX: bert encoder (bert / roberta / xlm-roberta)
       Speech from a Hugging Face folder (config.json + *.safetensors): whisper (openai/whisper-*)
+      Speech synthesis from a Piper voice folder (*.onnx + *.onnx.json): piper
     Not supported: Qwen2 / Qwen2.5, Qwen3.5 / Qwen3-Next / Fara, vision-language models, Gemma 1 / 2, \
     Gemma 4 vision/audio towers, Mistral / Mixtral, Phi, MoE, GGUF Llama / Gemma, Hugging Face BERT safetensors, \
-    CTranslate2 / faster-whisper model.bin, Whisper GGUF / ONNX.""";
+    CTranslate2 / faster-whisper model.bin, Whisper GGUF / ONNX, ONNX Runtime Piper execution.""";
 
   private static final Pattern HF_CLASS_SUFFIX = Pattern.compile(
     "(ForCausalLM|ForConditionalGeneration|ForSequenceClassification|ForMaskedLM"
@@ -206,13 +207,64 @@ public final class ModelSupport {
   }
 
   /**
+   * {@code true} when {@code config} is Piper text-to-speech this library can run.
+   *
+   * @since 1.3.0
+   */
+  public static boolean isSynthesis(final Config.HfConfig config) {
+    Verdict verdict = inspect(requireNonNull(config, "config"));
+    return verdict.supported() && verdict.selection().isSynthesis();
+  }
+
+  /**
+   * {@code true} when {@code path} is a Piper voice folder ({@code *.onnx} + {@code *.onnx.json}),
+   * without loading weights.
+   *
+   * @since 1.3.0
+   */
+  public static boolean isSynthesisCheckpoint(final Path path) {
+    Path file = requireNonNull(path, "path").toAbsolutePath().normalize();
+    if (isGgufFile(file) || !Files.isDirectory(file)) {
+      return false;
+    }
+    return findPiperSidecar(file).isPresent();
+  }
+
+  static Optional<Path> findPiperSidecar(final Path folder) {
+    try (var stream = Files.list(folder)) {
+      return stream
+        .filter(Files::isRegularFile)
+        .filter(ModelSupport::isPiperSidecarName)
+        .filter(ModelSupport::looksLikePiperJson)
+        .findFirst();
+    } catch (IOException ignored) {
+      return Optional.empty();
+    }
+  }
+
+  private static boolean isPiperSidecarName(final Path candidate) {
+    Path name = candidate.getFileName();
+    return name != null && name.toString().toLowerCase(ROOT).endsWith(".onnx.json");
+  }
+
+  private static boolean looksLikePiperJson(final Path jsonFile) {
+    try {
+      String text = Files.readString(jsonFile, UTF_8);
+      return text.contains("\"phoneme_id_map\"") && text.contains("\"espeak\"");
+    } catch (IOException ignored) {
+      return false;
+    }
+  }
+
+  /**
    * Message when {@link com.igormaznitsa.nanollvm.llm.LLM#builder} is used on an embedding checkpoint.
    *
    * @since 1.1.0
    */
   public static String chatMisuseMessage(final String architectureName) {
-    return ("This checkpoint is a %s embedding encoder, not a chat model. Call LlmModel.embed(...) "
-      + "instead of LLM.builder / generate.%n%n%s").formatted(blank(architectureName), CATALOG);
+    return (
+      "This checkpoint is a %s embedding encoder, not a chat model. Use LLM.builder(model).build() "
+        + "then LLM.embed(...).%n%n%s").formatted(blank(architectureName), CATALOG);
   }
 
   /**
@@ -231,8 +283,9 @@ public final class ModelSupport {
    * @since 1.3.0
    */
   public static String speechEngineMisuseMessage(final String architectureName) {
-    return ("This checkpoint is a %s speech model, not a chat model. Call LlmModel.transcribe(...) "
-      + "instead of LLM.builder / generate.%n%n%s").formatted(blank(architectureName), CATALOG);
+    return (
+      "This checkpoint is a %s speech model, not a chat model. Use LLM.builder(model).build() "
+        + "then LLM.transcribe(...).%n%n%s").formatted(blank(architectureName), CATALOG);
   }
 
   /**
@@ -242,7 +295,7 @@ public final class ModelSupport {
    */
   public static String speechEmbedMisuseMessage(final String architectureName) {
     return ("This checkpoint is a %s speech model, not an embedding encoder. Call "
-      + "LlmModel.transcribe(...).%n%n%s").formatted(blank(architectureName), CATALOG);
+      + "LLM.transcribe(...).%n%n%s").formatted(blank(architectureName), CATALOG);
   }
 
   /**
@@ -251,8 +304,41 @@ public final class ModelSupport {
    * @since 1.3.0
    */
   public static String transcribeMisuseMessage(final String architectureName) {
-    return ("This checkpoint is a %s model, not Whisper speech-to-text. Chat uses LLM.builder; "
-      + "embeddings use LlmModel.embed.%n%n%s").formatted(blank(architectureName), CATALOG);
+    return ("This checkpoint is a %s model, not Whisper speech-to-text. Chat uses LLM.chat; "
+      + "embeddings use LLM.embed; Piper TTS uses LLM.synthesize.%n%n%s")
+      .formatted(blank(architectureName), CATALOG);
+  }
+
+  /**
+   * Message when {@link com.igormaznitsa.nanollvm.llm.LLM#builder} is used on a synthesis checkpoint.
+   *
+   * @since 1.3.0
+   */
+  public static String synthesisEngineMisuseMessage(final String architectureName) {
+    return ("This checkpoint is a %s text-to-speech model, not a chat model. Use "
+      + "LLM.builder(model).build() then LLM.synthesize(...).%n%n%s")
+      .formatted(blank(architectureName), CATALOG);
+  }
+
+  /**
+   * Message when {@link LlmModel#embed} is used on a synthesis checkpoint.
+   *
+   * @since 1.3.0
+   */
+  public static String synthesisEmbedMisuseMessage(final String architectureName) {
+    return ("This checkpoint is a %s text-to-speech model, not an embedding encoder. Call "
+      + "LLM.synthesize(...).%n%n%s").formatted(blank(architectureName), CATALOG);
+  }
+
+  /**
+   * Message when {@link LlmModel#synthesize} is used on a chat, embedding, or speech checkpoint.
+   *
+   * @since 1.3.0
+   */
+  public static String synthesizeMisuseMessage(final String architectureName) {
+    return ("This checkpoint is a %s model, not Piper text-to-speech. Chat uses LLM.chat; "
+      + "embeddings use LLM.embed; Whisper uses LLM.transcribe.%n%n%s")
+      .formatted(blank(architectureName), CATALOG);
   }
 
   private static Verdict inspect(final Config.HfConfig config) {
@@ -346,7 +432,7 @@ public final class ModelSupport {
     String forcedId = normalizeForcedAlias(forced);
     if (forcedId == null) {
       throw unsupported(
-        "'%s' is not a valid -D%s value (use qwen3, gemma3, gemma4, llama, lfm2, bert, or whisper)."
+        "'%s' is not a valid -D%s value (use qwen3, gemma3, gemma4, llama, lfm2, bert, whisper, or piper)."
           .formatted(forced, PROP_ARCH),
         modelType,
         architectures);
@@ -402,6 +488,13 @@ public final class ModelSupport {
       throw unsupported(
         "Whisper speech recognition loads from a Hugging Face folder (config.json + *.safetensors), "
           + "not from GGUF, ONNX, or CTranslate2 model.bin. Use openai/whisper-base (or tiny).",
+        modelType,
+        architectures);
+    }
+    if (ARCH_PIPER.equals(id) && source != Source.ONNX) {
+      throw unsupported(
+        "Piper text-to-speech loads from a voice folder (*.onnx + *.onnx.json), not from GGUF or "
+          + "Hugging Face safetensors.",
         modelType,
         architectures);
     }
@@ -484,6 +577,10 @@ public final class ModelSupport {
     }
     if (token.equals("whisper")) {
       return Verdict.ok(ARCH_WHISPER, Kind.SPEECH);
+    }
+    if (token.equals("piper") || token.equals("piper_vits") || token.equals("pipervits")
+      || token.equals("vits")) {
+      return Verdict.ok(ARCH_PIPER, Kind.SYNTHESIS);
     }
     String known = knownUnsupportedReason(token);
     if (known != null) {
@@ -620,6 +717,7 @@ public final class ModelSupport {
       case ARCH_LFM2, "lfm2.5", "lfm2_5" -> ARCH_LFM2;
       case ARCH_BERT, "roberta", "xlm-roberta", "xlm_roberta" -> ARCH_BERT;
       case ARCH_WHISPER -> ARCH_WHISPER;
+      case ARCH_PIPER -> ARCH_PIPER;
       default -> null;
     };
   }
@@ -656,7 +754,13 @@ public final class ModelSupport {
      *
      * @since 1.3.0
      */
-    SPEECH
+    SPEECH,
+    /**
+     * Text-to-speech used with {@link LlmModel#synthesize}.
+     *
+     * @since 1.3.0
+     */
+    SYNTHESIS
   }
 
   /**
@@ -708,6 +812,15 @@ public final class ModelSupport {
      */
     public boolean isSpeech() {
       return this.kind == Kind.SPEECH;
+    }
+
+    /**
+     * {@code true} when this checkpoint is Piper (or other) text-to-speech.
+     *
+     * @since 1.3.0
+     */
+    public boolean isSynthesis() {
+      return this.kind == Kind.SYNTHESIS;
     }
   }
 

@@ -17,6 +17,7 @@ import com.igormaznitsa.nanollvm.models.internal.CausalLM;
 import com.igormaznitsa.nanollvm.models.internal.EmbeddingEncoder;
 import com.igormaznitsa.nanollvm.models.internal.LlmModelImpl;
 import com.igormaznitsa.nanollvm.models.internal.SpeechToText;
+import com.igormaznitsa.nanollvm.models.internal.TextToSpeech;
 import com.igormaznitsa.nanollvm.models.internal.WeightBag;
 import com.igormaznitsa.nanollvm.models.llmarch.GgufModelLoader;
 import com.igormaznitsa.nanollvm.models.llmarch.GgufModelLoader.LoadedGguf;
@@ -77,10 +78,12 @@ import java.util.Map;
  * Existing {@link #make} / {@link #fromClasspath} overloads remain.
  *
  * <p>Optional load-time settings go in a {@code Map} (frozen as {@link java.util.Map#copyOf} on
- * the model). Known keys: {@link LlmModel#OPTION_THINK_TAGS} ({@link ThinkTags}) and
- * {@link LlmModel#OPTION_CHAT_SPECIALS} ({@link ChatSpecials}). Omitted keys receive library
- * defaults. Unknown keys and wrong value types fail before weights are read.
- * {@link Builder#thinkTags} / {@link Builder#chatSpecials} set those keys without a map.
+ * the model). Known keys: {@link LlmModel#OPTION_THINK_TAGS} ({@link ThinkTags}),
+ * {@link LlmModel#OPTION_CHAT_SPECIALS} ({@link ChatSpecials}), and
+ * {@link LlmModel#OPTION_OPTIONAL_DATA} (a nested map of {@link LlmOptionalData} values).
+ * Omitted keys receive library defaults; {@code optionalData} is omitted when empty.
+ * Unknown option keys and wrong value types fail before weights are read. Typed extras such as
+ * {@link LlmOptionalData#ESPEAK_DATA} are set with {@link Builder#optionalData}.
  *
  * <p>Filesystem {@link #make(Path)} overloads load directly from disk and do not route through
  * {@link ModelFileSource}.
@@ -510,7 +513,11 @@ public final class LlmModelFactory {
       }
       if (!Files.isDirectory(path)) {
         throw new ModelLoadException(
-          "model path is not an HF model folder (safetensors/ONNX) or .gguf file: " + path);
+          "model path is not an HF model folder (safetensors/ONNX), a Piper voice folder, or a .gguf file: "
+            + path);
+      }
+      if (ModelSupport.isSynthesisCheckpoint(path)) {
+        return loadPiperFolder(path, streams, frozen);
       }
       return loadHfFolder(path, streams, frozen);
     } catch (ModelLoadException e) {
@@ -588,6 +595,28 @@ public final class LlmModelFactory {
       LlmListeners.info(io, null, "Loading " + bound.selection().architectureId() + " weights…");
       WeightBag weights = ModelFill.fill(transport, bound, io, false);
       Tokenizer tokenizer = Tokenizer.fromPretrained(modelFolder);
+      return finishLoadedModel(
+        modelFolder, bound, weights, tokenizer, io, t0, options);
+    }
+  }
+
+  private static LlmModel loadPiperFolder(
+    final Path modelFolder,
+    final LlmListener io,
+    final Map<String, Object> options
+  ) throws IOException {
+    long t0 = System.nanoTime();
+    LlmListeners.info(io, null, "CPU backend: " + MatmulRuntime.sequential().backendInfo());
+    Path sidecar = ModelSupport.findPiperSidecar(modelFolder).orElseThrow(
+      () -> new ModelLoadException("no Piper *.onnx.json sidecar in " + modelFolder));
+    String sidecarJson = Files.readString(sidecar, UTF_8);
+    try (OnnxTransport transport = OnnxTransport.open(modelFolder, sidecarJson)) {
+      ModelBinding.BoundModel bound = ModelBinding.bind(transport.catalog());
+      LlmListeners.info(io, null, "Loading " + bound.selection().architectureId() + " weights…");
+      WeightBag weights = ModelFill.fill(transport, bound, io, false);
+      int vocab = bound.config().vocabSize();
+      Tokenizer tokenizer = Tokenizer.fromJsonDocuments(
+        null, null, null, "{\"vocab_size\":" + Math.max(vocab, 1) + "}");
       return finishLoadedModel(
         modelFolder, bound, weights, tokenizer, io, t0, options);
     }
@@ -681,6 +710,16 @@ public final class LlmModelFactory {
       LlmListeners.infof(io, null, "Model loaded in %.1fs%n",
         (System.nanoTime() - startedAtNanos) / 1e9);
       return new LlmModelImpl(modelPath, hfConfig, weights, speech, tokenizer, options);
+    }
+    if (bound.processor().isSynthesis()) {
+      LlmListeners.info(io, null, "Building " + arch + " synthesis graph…");
+      long tGraph = System.nanoTime();
+      TextToSpeech synthesis = bound.processor().createSynthesis(hfConfig, weights);
+      LlmListeners.infof(io, null, "Synthesis graph ready (%s) in %.1fs%n",
+        synthesis.architectureName(), (System.nanoTime() - tGraph) / 1e9);
+      LlmListeners.infof(io, null, "Model loaded in %.1fs%n",
+        (System.nanoTime() - startedAtNanos) / 1e9);
+      return new LlmModelImpl(modelPath, hfConfig, weights, synthesis, tokenizer, options);
     }
     if (bound.processor().isEmbedding()) {
       LlmListeners.info(io, null, "Building " + arch + " embedding graph…");
@@ -837,6 +876,7 @@ public final class LlmModelFactory {
     private LlmListener io = LlmListeners.silent();
     private boolean allowUnpackParameters;
     private Map<String, ?> options = Map.of();
+    private final Map<String, Object> optionalData = new LinkedHashMap<>();
 
     private Builder(final Path modelPath, final ModelFileSource source) {
       this.modelPath = modelPath;
@@ -898,6 +938,24 @@ public final class LlmModelFactory {
     }
 
     /**
+     * Stores a typed extra for families that need sidecars or data directories (for example
+     * {@link LlmOptionalData#ESPEAK_DATA} for Piper). A missing Piper data folder is ignored.
+     * Unknown keys are kept and ignored by graphs that do not read them. Nested under
+     * {@link LlmModel#OPTION_OPTIONAL_DATA} only when at least one value is set.
+     *
+     * @param key   typed key; never {@code null}
+     * @param value value; never {@code null}
+     * @return this builder
+     * @since 1.3.0
+     */
+    public <T> Builder optionalData(final LlmOptionalData.Key<T> key, final T value) {
+      requireNonNull(key, "key");
+      requireNonNull(value, "value");
+      this.optionalData.put(key.id(), LlmOptionalData.cast(key, value));
+      return this;
+    }
+
+    /**
      * Replaces the load-time options map (omitted known keys receive library defaults).
      *
      * @since 1.1.0
@@ -920,10 +978,24 @@ public final class LlmModelFactory {
      * @since 1.1.0
      */
     public LlmModel make() {
-      if (this.source != null) {
-        return loadSource(this.source, this.io, this.allowUnpackParameters, this.options);
+      Map<String, Object> merged = new LinkedHashMap<>(this.options);
+      if (!this.optionalData.isEmpty()) {
+        Object existing = merged.get(LlmModel.OPTION_OPTIONAL_DATA);
+        Map<String, Object> data = new LinkedHashMap<>();
+        if (existing instanceof Map<?, ?> raw) {
+          raw.forEach((dataKey, dataValue) -> {
+            if (dataKey != null && dataValue != null) {
+              data.put(dataKey.toString(), dataValue);
+            }
+          });
+        }
+        data.putAll(this.optionalData);
+        merged.put(LlmModel.OPTION_OPTIONAL_DATA, Map.copyOf(data));
       }
-      return loadPath(this.modelPath, this.io, this.allowUnpackParameters, this.options);
+      if (this.source != null) {
+        return loadSource(this.source, this.io, this.allowUnpackParameters, merged);
+      }
+      return loadPath(this.modelPath, this.io, this.allowUnpackParameters, merged);
     }
   }
 }

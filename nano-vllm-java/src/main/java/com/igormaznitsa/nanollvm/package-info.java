@@ -2,9 +2,9 @@
  * Library module root. Start here, then open the type that matches what you want to do.
  *
  * <p><b>Load a checkpoint</b> — {@link com.igormaznitsa.nanollvm.models.LlmModelFactory}
- * ({@code make(path)} or {@code open(path).…make()}). Chat models go to
- * {@link com.igormaznitsa.nanollvm.llm.LLM#builder}; embedding models use
- * {@link com.igormaznitsa.nanollvm.models.LlmModel#embed} (do not call {@code LLM.builder}).
+ * ({@code make(path)} or {@code open(path).…make()}). Every kind then goes through
+ * {@link com.igormaznitsa.nanollvm.llm.LLM#builder}: chat, {@code embed}, {@code transcribe},
+ * or {@code synthesize}.
  *
  * <p><b>Talk to the model</b> — {@link com.igormaznitsa.nanollvm.llm.LLM}: {@code chat()} for a
  * conversation, {@code chatOnce} for one question, {@code complete} to continue a raw string,

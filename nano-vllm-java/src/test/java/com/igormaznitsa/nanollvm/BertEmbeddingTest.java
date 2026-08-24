@@ -34,7 +34,7 @@ final class BertEmbeddingTest {
   }
 
   @Test
-  void gteSmallEmbedsAndRejectsLlmBuilder() {
+  void gteSmallEmbedsThroughLlmBuilder() {
     Path path = OptionalModelAssumptions.requireGteSmallGguf();
 
     try (LlmModel model = LlmModelFactory.make(path)) {
@@ -60,7 +60,11 @@ final class BertEmbeddingTest {
       assertEquals(1.0f, cosine(a, b), 1e-5f);
       assertTrue(cosine(a, c) < 0.95f);
 
-      assertThrows(IllegalStateException.class, () -> LLM.builder(model).build());
+      try (LLM llm = LLM.builder(model).build()) {
+        assertThrows(IllegalStateException.class, llm::chat);
+        assertEquals(0, llm.config().numKvcacheBlocks());
+        assertEquals(1.0f, cosine(a, llm.embed("hello world")), 1e-5f);
+      }
 
       int cls = model.tokenizer().tokenId("[CLS]").orElseThrow();
       int sep = model.tokenizer().tokenId("[SEP]").orElseThrow();
@@ -77,7 +81,7 @@ final class BertEmbeddingTest {
   }
 
   @Test
-  void multilingualE5SmallEmbedsAndRejectsLlmBuilder() {
+  void multilingualE5SmallEmbedsThroughLlmBuilder() {
     Path path = OptionalModelAssumptions.requireMultilingualE5Small();
 
     try (LlmModel model = LlmModelFactory.make(path)) {
@@ -101,7 +105,11 @@ final class BertEmbeddingTest {
       assertEquals(1.0f, cosine(a, b), 1e-5f);
       assertTrue(cosine(a, c) < 0.99f);
 
-      assertThrows(IllegalStateException.class, () -> LLM.builder(model).build());
+      try (LLM llm = LLM.builder(model).build()) {
+        assertThrows(IllegalStateException.class, llm::chat);
+        assertEquals(0, llm.config().numKvcacheBlocks());
+        assertEquals(1.0f, cosine(a, llm.embed("query: hello world")), 1e-5f);
+      }
 
       int cls = model.tokenizer().tokenId("<s>").orElseThrow();
       int sep = model.tokenizer().tokenId("</s>").orElseThrow();

@@ -6,6 +6,7 @@ import com.igormaznitsa.nanollvm.tensor.Tensor;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 
 /**
  * Immutable name → weight map. Entries are either dense float {@link Tensor}s (HF safetensors
@@ -15,9 +16,15 @@ import java.util.Optional;
 public final class WeightBag {
 
   private final Map<String, Object> byName;
+  private final Map<String, ConvLayout> convLayouts;
 
   public WeightBag(final Map<String, ?> byName) {
+    this(byName, Map.of());
+  }
+
+  public WeightBag(final Map<String, ?> byName, final Map<String, ConvLayout> convLayouts) {
     this.byName = Map.copyOf(requireNonNull(byName, "byName"));
+    this.convLayouts = Map.copyOf(requireNonNull(convLayouts, "convLayouts"));
     for (Map.Entry<String, Object> entry : this.byName.entrySet()) {
       Object value = entry.getValue();
       if (!(value instanceof Tensor)
@@ -27,6 +34,15 @@ public final class WeightBag {
           "weight '" + entry.getKey() + "' must be Tensor, PackedWeight, or GemmaQatWeight");
       }
     }
+  }
+
+  public Optional<ConvLayout> convLayout(final String weightName) {
+    return Optional.ofNullable(this.convLayouts.get(requireNonNull(weightName, "weightName")));
+  }
+
+  public int convDilation(final String weightName, final int fallback) {
+    ConvLayout layout = this.convLayouts.get(requireNonNull(weightName, "weightName"));
+    return layout == null ? fallback : layout.dilationOr(fallback);
   }
 
   private static boolean isPackedValue(final Object value) {
@@ -121,11 +137,15 @@ public final class WeightBag {
         entry.getKey(),
         value instanceof PackedWeight packed ? packed.materialize() : value);
     }
-    return new WeightBag(dense);
+    return new WeightBag(dense, this.convLayouts);
   }
 
   public int size() {
     return this.byName.size();
+  }
+
+  public Set<String> names() {
+    return this.byName.keySet();
   }
 
   /**
@@ -151,7 +171,7 @@ public final class WeightBag {
         dense.put(entry.getKey(), value);
       }
     }
-    return new WeightBag(dense);
+    return new WeightBag(dense, this.convLayouts);
   }
 
   private Object requireRaw(final String name) {

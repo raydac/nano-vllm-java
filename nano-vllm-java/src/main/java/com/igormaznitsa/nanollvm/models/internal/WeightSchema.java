@@ -5,6 +5,7 @@ import static com.igormaznitsa.nanollvm.models.internal.WeightNames.ARCH_GEMMA3;
 import static com.igormaznitsa.nanollvm.models.internal.WeightNames.ARCH_GEMMA4;
 import static com.igormaznitsa.nanollvm.models.internal.WeightNames.ARCH_LFM2;
 import static com.igormaznitsa.nanollvm.models.internal.WeightNames.ARCH_LLAMA;
+import static com.igormaznitsa.nanollvm.models.internal.WeightNames.ARCH_PIPER;
 import static com.igormaznitsa.nanollvm.models.internal.WeightNames.ARCH_QWEN3;
 import static com.igormaznitsa.nanollvm.models.internal.WeightNames.ARCH_WHISPER;
 import static com.igormaznitsa.nanollvm.models.internal.WeightNames.DOWN_PROJ_WEIGHT;
@@ -35,7 +36,6 @@ import static com.igormaznitsa.nanollvm.models.internal.WeightNames.selfAttn;
 import static java.util.Objects.requireNonNull;
 
 import com.igormaznitsa.nanollvm.llm.Config;
-
 import java.util.LinkedHashSet;
 import java.util.Map;
 import java.util.Set;
@@ -68,6 +68,7 @@ public final class WeightSchema {
       case ARCH_LFM2 -> lfm2(config);
       case ARCH_BERT -> bert(config);
       case ARCH_WHISPER -> whisper(config);
+      case ARCH_PIPER -> piper(config);
       default -> throw new IllegalArgumentException("unsupported architecture '" + arch + "'");
     };
   }
@@ -329,6 +330,16 @@ public final class WeightSchema {
       addWhisperMlp(expected, "model.decoder.layers." + i);
     }
     return new WeightSchema(Map.of(), expected, optional);
+  }
+
+  /**
+   * Piper VITS generator (ONNX initializers kept under export names; fill does not remap).
+   *
+   * @since 1.3.0
+   */
+  public static WeightSchema piper(final Config.HfConfig config) {
+    requireNonNull(config.piper(), "piper spec");
+    return new WeightSchema(Map.of(), Set.of(), Set.of());
   }
 
   private static void addWhisperAttn(

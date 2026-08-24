@@ -39,6 +39,22 @@ final class WavPcmTest {
   }
 
   @Test
+  void wav16RoundTrip(@TempDir final Path dir) throws Exception {
+    float[] samples = {0.25f, -0.5f, 0f};
+    byte[] bytes = WavPcm.toWav16Le(samples, 22_050);
+    WavPcm.MonoPcm fromBytes = WavPcm.read(bytes);
+    assertEquals(22_050, fromBytes.sampleRate());
+    assertArrayEquals(samples, fromBytes.samples(), 1e-4f);
+
+    Path wav = dir.resolve("round.wav");
+    Files.write(wav, bytes);
+    WavPcm.MonoPcm pcm = WavPcm.read(wav);
+
+    assertEquals(22_050, pcm.sampleRate());
+    assertArrayEquals(fromBytes.samples(), pcm.samples(), 1e-4f);
+  }
+
+  @Test
   void readsIeeeFloat32(@TempDir final Path dir) throws Exception {
     Path wav = dir.resolve("float.wav");
     Files.write(wav, TestWavs.float32Mono(new float[] {0.25f, -0.25f}, 16_000));
@@ -51,12 +67,16 @@ final class WavPcmTest {
 
   @Test
   void readsBundledCallWav() throws Exception {
-    WavPcm.MonoPcm pcm = WavPcm.read(TestWavs.classpathFile("wav/call1.wav"));
+    Path wav = TestWavs.classpathFile("wav/call1.wav");
+    WavPcm.MonoPcm fromFile = WavPcm.read(wav);
+    WavPcm.MonoPcm fromBytes = WavPcm.read(Files.readAllBytes(wav));
 
-    assertEquals(48_000, pcm.sampleRate());
-    assertEquals(303_000, pcm.samples().length);
+    assertEquals(48_000, fromFile.sampleRate());
+    assertEquals(fromFile.sampleRate(), fromBytes.sampleRate());
+    assertEquals(303_000, fromFile.samples().length);
+    assertArrayEquals(fromFile.samples(), fromBytes.samples());
     float peak = 0f;
-    for (float sample : pcm.samples()) {
+    for (float sample : fromFile.samples()) {
       peak = Math.max(peak, Math.abs(sample));
     }
     assertTrue(peak > 0.05f);
@@ -67,6 +87,7 @@ final class WavPcmTest {
     Path truncated = dir.resolve("short.wav");
     Files.write(truncated, new byte[] {1, 2, 3, 4});
     assertThrows(IllegalArgumentException.class, () -> WavPcm.read(truncated));
+    assertThrows(IllegalArgumentException.class, () -> WavPcm.read(new byte[] {1, 2, 3, 4}));
 
     Path compressed = dir.resolve("adpcm.wav");
     byte[] bytes = TestWavs.pcm16Mono(new float[] {0f}, 8_000);

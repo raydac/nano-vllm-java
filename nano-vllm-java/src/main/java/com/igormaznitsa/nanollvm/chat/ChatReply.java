@@ -11,8 +11,8 @@ import com.igormaznitsa.nanollvm.models.LlmModel;
  *
  * <p>Some chat models emit a tagged scratchpad (by default {@code <think>…</think>}) before the
  * user-visible reply. {@link #parse(String)} splits decoded assistant text into those two channels
- * and strips chat specials ({@link ChatSpecials#DEFAULT}: {@code <|im_end|>}, {@code <end_of_turn>},
- * …). Override scratchpad markers with {@link ThinkTags} via
+ * and strips chat specials ({@link ChatSpecials#DEFAULT}: {@code <|im_end|>}, {@code <|im_ended|>},
+ * {@code <end_of_turn>}, …). Override scratchpad markers with {@link ThinkTags} via
  * {@link com.igormaznitsa.nanollvm.models.LlmModel#OPTION_THINK_TAGS} and the strip list with
  * {@link ChatSpecials} via {@link com.igormaznitsa.nanollvm.models.LlmModel#OPTION_CHAT_SPECIALS} at
  * {@link com.igormaznitsa.nanollvm.models.LlmModelFactory#make} /

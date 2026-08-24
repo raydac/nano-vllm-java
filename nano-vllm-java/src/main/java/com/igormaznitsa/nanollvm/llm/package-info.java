@@ -4,8 +4,11 @@
  *
  * <p><b>Load vs run.</b> Weights live on a shareable {@link com.igormaznitsa.nanollvm.models.LlmModel}
  * from {@link com.igormaznitsa.nanollvm.models.LlmModelFactory}. Each {@link LLM} is one engine
- * (KV cache, scheduler, matmul). Close the engine first, then the model. Embedding checkpoints
- * use {@code LlmModel.embed}; {@link LLM#builder} rejects them.
+ * (KV cache and scheduler for chat; matmul pool for every kind). Close the engine first, then
+ * the model. Chat uses {@link LLM#chat}; embeddings {@link LLM#embed}; Whisper
+ * {@link LLM#transcribe} ({@code byte[]} WAV or a file); Piper
+ * {@link LLM#synthesize} (WAV {@code byte[]}). All of those go through
+ * {@link LLM#builder}.
  *
  * <p><b>Which call.</b> {@link LLM#chat()} / {@link LLM#chatOnce(String)} apply the tokenizer chat
  * template and parse thinking/answer. {@link LLM#complete(String)} continues a raw string with no

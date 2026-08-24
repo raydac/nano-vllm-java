@@ -10,6 +10,7 @@ import com.igormaznitsa.nanollvm.chat.ThinkTags;
 import com.igormaznitsa.nanollvm.llm.Config;
 import com.igormaznitsa.nanollvm.models.LlmModalities;
 import com.igormaznitsa.nanollvm.models.LlmModel;
+import com.igormaznitsa.nanollvm.models.LlmOptionalData;
 import com.igormaznitsa.nanollvm.models.ModelSupport;
 import com.igormaznitsa.nanollvm.models.internal.audio.WavPcm;
 import com.igormaznitsa.nanollvm.tensor.MatmulRuntime;
@@ -18,7 +19,9 @@ import java.io.IOException;
 import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -26,14 +29,15 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.locks.ReentrantLock;
 
 /**
- * Library {@link LlmModel}: weights, causal graph, embedding encoder, or speech graph, unpack,
- * and engine lease.
+ * Library {@link LlmModel}: weights, causal graph, embedding encoder, speech graph, or
+ * synthesis graph, unpack, and engine lease.
  */
 public final class LlmModelImpl extends LlmModel {
 
   private static final Set<String> KNOWN_OPTIONS = Set.of(
     LlmModel.OPTION_THINK_TAGS,
-    LlmModel.OPTION_CHAT_SPECIALS
+    LlmModel.OPTION_CHAT_SPECIALS,
+    LlmModel.OPTION_OPTIONAL_DATA
   );
 
   private final Path path;
@@ -42,12 +46,14 @@ public final class LlmModelImpl extends LlmModel {
   private final Map<String, Object> options;
   private final boolean embeddingModel;
   private final boolean speechModel;
+  private final boolean synthesisModel;
   private final LlmModalities modalities;
   private final LlmModalities usableModalities;
   private final AtomicReference<WeightBag> weights;
   private final AtomicReference<CausalLM> network;
   private final AtomicReference<EmbeddingEncoder> encoder;
   private final AtomicReference<SpeechToText> speech;
+  private final AtomicReference<TextToSpeech> synthesis;
   private final ReentrantLock unpackLock = new ReentrantLock();
   private final AtomicBoolean closed = new AtomicBoolean();
   private final AtomicInteger liveEngines = new AtomicInteger();
@@ -60,7 +66,7 @@ public final class LlmModelImpl extends LlmModel {
     final Tokenizer tokenizer,
     final Map<String, ?> options
   ) {
-    this(path, hfConfig, weights, network, null, null, tokenizer, options);
+    this(path, hfConfig, weights, network, null, null, null, tokenizer, options);
   }
 
   public LlmModelImpl(
@@ -71,7 +77,7 @@ public final class LlmModelImpl extends LlmModel {
     final Tokenizer tokenizer,
     final Map<String, ?> options
   ) {
-    this(path, hfConfig, weights, null, encoder, null, tokenizer, options);
+    this(path, hfConfig, weights, null, encoder, null, null, tokenizer, options);
   }
 
   public LlmModelImpl(
@@ -82,7 +88,18 @@ public final class LlmModelImpl extends LlmModel {
     final Tokenizer tokenizer,
     final Map<String, ?> options
   ) {
-    this(path, hfConfig, weights, null, null, speech, tokenizer, options);
+    this(path, hfConfig, weights, null, null, speech, null, tokenizer, options);
+  }
+
+  public LlmModelImpl(
+    final Path path,
+    final Config.HfConfig hfConfig,
+    final WeightBag weights,
+    final TextToSpeech synthesis,
+    final Tokenizer tokenizer,
+    final Map<String, ?> options
+  ) {
+    this(path, hfConfig, weights, null, null, null, synthesis, tokenizer, options);
   }
 
   private LlmModelImpl(
@@ -92,12 +109,15 @@ public final class LlmModelImpl extends LlmModel {
     final CausalLM network,
     final EmbeddingEncoder encoder,
     final SpeechToText speech,
+    final TextToSpeech synthesis,
     final Tokenizer tokenizer,
     final Map<String, ?> options
   ) {
-    int graphs = (network != null ? 1 : 0) + (encoder != null ? 1 : 0) + (speech != null ? 1 : 0);
+    int graphs = (network != null ? 1 : 0) + (encoder != null ? 1 : 0)
+      + (speech != null ? 1 : 0) + (synthesis != null ? 1 : 0);
     if (graphs != 1) {
-      throw new IllegalArgumentException("exactly one of network, encoder, or speech must be set");
+      throw new IllegalArgumentException(
+        "exactly one of network, encoder, speech, or synthesis must be set");
     }
     this.path = requireNonNull(path, "path").toAbsolutePath().normalize();
     this.hfConfig = requireNonNull(hfConfig, "hfConfig");
@@ -105,12 +125,15 @@ public final class LlmModelImpl extends LlmModel {
     this.network = new AtomicReference<>(network);
     this.encoder = new AtomicReference<>(encoder);
     this.speech = new AtomicReference<>(speech);
+    this.synthesis = new AtomicReference<>(synthesis);
     this.embeddingModel = encoder != null;
     this.speechModel = speech != null;
+    this.synthesisModel = synthesis != null;
     this.tokenizer = requireNonNull(tokenizer, "tokenizer");
     this.options = copyAndValidateOptions(options);
     this.modalities = LlmModalities.ofCheckpoint(this.hfConfig, this.embeddingModel);
-    this.usableModalities = LlmModalities.usable(this.embeddingModel, this.speechModel);
+    this.usableModalities = LlmModalities.usable(
+      this.embeddingModel, this.speechModel, this.synthesisModel);
   }
 
   public static LlmModelImpl peer(final LlmModel model) {
@@ -133,13 +156,33 @@ public final class LlmModelImpl extends LlmModel {
       if (!KNOWN_OPTIONS.contains(key)) {
         throw new IllegalArgumentException("unknown model option: " + key);
       }
-      copy.put(key, value);
+      copy.put(key, LlmModel.OPTION_OPTIONAL_DATA.equals(key) ? freezeOptionalData(value) : value);
     });
     requireOptionType(copy, LlmModel.OPTION_THINK_TAGS, ThinkTags.class);
     requireOptionType(copy, LlmModel.OPTION_CHAT_SPECIALS, ChatSpecials.class);
     copy.putIfAbsent(LlmModel.OPTION_THINK_TAGS, ThinkTags.DEFAULT);
     copy.putIfAbsent(LlmModel.OPTION_CHAT_SPECIALS, ChatSpecials.DEFAULT);
     return Map.copyOf(copy);
+  }
+
+  private static Map<String, Object> freezeOptionalData(final Object value) {
+    if (!(value instanceof Map<?, ?> raw)) {
+      throw new IllegalArgumentException(
+        LlmModel.OPTION_OPTIONAL_DATA + " must be a Map, got " + value.getClass().getName());
+    }
+    Map<String, Object> frozen = new LinkedHashMap<>();
+    raw.forEach((dataKey, dataValue) -> {
+      if (dataKey == null || dataKey.toString().isBlank()) {
+        throw new IllegalArgumentException("optionalData key must not be blank");
+      }
+      requireNonNull(dataValue, "optionalData value for " + dataKey);
+      String id = dataKey.toString();
+      frozen.put(
+        id,
+        LlmOptionalData.ESPEAK_DATA.id().equals(id) ? LlmOptionalData.asPath(dataValue) :
+          dataValue);
+    });
+    return Map.copyOf(frozen);
   }
 
   private static void requireOptionType(
@@ -201,6 +244,16 @@ public final class LlmModelImpl extends LlmModel {
   }
 
   @Override
+  public <T> Optional<T> optionalData(final LlmOptionalData.Key<T> key) {
+    requireNonNull(key, "key");
+    Object bag = this.options.get(LlmModel.OPTION_OPTIONAL_DATA);
+    if (!(bag instanceof Map<?, ?> data) || !data.containsKey(key.id())) {
+      return Optional.empty();
+    }
+    return Optional.of(LlmOptionalData.cast(key, data.get(key.id())));
+  }
+
+  @Override
   public String architectureName() {
     EmbeddingEncoder encoder = this.encoder.get();
     if (encoder != null) {
@@ -213,6 +266,10 @@ public final class LlmModelImpl extends LlmModel {
     SpeechToText speech = this.speech.get();
     if (speech != null) {
       return speech.architectureName();
+    }
+    TextToSpeech synthesis = this.synthesis.get();
+    if (synthesis != null) {
+      return synthesis.architectureName();
     }
     return this.hfConfig.modelType();
   }
@@ -243,6 +300,12 @@ public final class LlmModelImpl extends LlmModel {
   public boolean isSpeechModel() {
     this.assertNotClosed();
     return this.speech.get() != null;
+  }
+
+  @Override
+  public boolean isSynthesisModel() {
+    this.assertNotClosed();
+    return this.synthesis.get() != null;
   }
 
   @Override
@@ -290,6 +353,9 @@ public final class LlmModelImpl extends LlmModel {
   }
 
   private String kindLabel() {
+    if (this.synthesisModel) {
+      return "synthesis";
+    }
     if (this.speechModel) {
       return "speech";
     }
@@ -342,15 +408,49 @@ public final class LlmModelImpl extends LlmModel {
     return this.requireEncoder().encode(tokenIds.clone(), MatmulRuntime.sequential());
   }
 
+  public float[] embed(final int[] tokenIds, final MatmulRuntime runtime) {
+    requireNonNull(tokenIds, "tokenIds");
+    requireNonNull(runtime, "runtime");
+    if (tokenIds.length == 0) {
+      throw new IllegalArgumentException("tokenIds must not be empty");
+    }
+    return this.requireEncoder().encode(tokenIds.clone(), runtime);
+  }
+
   @Override
   public String transcribe(final Path wav) throws IOException {
     return this.transcribe(wav, null);
   }
 
   @Override
-  public String transcribe(final Path wav, final String language) throws IOException {
+  public String transcribe(final Path wav, final Locale language) throws IOException {
     WavPcm.MonoPcm audio = WavPcm.read(wav);
     return this.transcribe(audio.samples(), audio.sampleRate(), language);
+  }
+
+  public String transcribe(final Path wav, final Locale language, final MatmulRuntime runtime)
+    throws IOException {
+    WavPcm.MonoPcm audio = WavPcm.read(wav);
+    return this.transcribe(audio.samples(), audio.sampleRate(), language, runtime);
+  }
+
+  @Override
+  public String transcribe(final byte[] wav) {
+    return this.transcribe(wav, null);
+  }
+
+  @Override
+  public String transcribe(final byte[] wav, final Locale language) {
+    requireNonNull(wav, "wav");
+    WavPcm.MonoPcm audio = WavPcm.read(wav);
+    return this.transcribe(audio.samples(), audio.sampleRate(), language);
+  }
+
+  public String transcribe(final byte[] wav, final Locale language, final MatmulRuntime runtime) {
+    requireNonNull(wav, "wav");
+    requireNonNull(runtime, "runtime");
+    WavPcm.MonoPcm audio = WavPcm.read(wav);
+    return this.transcribe(audio.samples(), audio.sampleRate(), language, runtime);
   }
 
   @Override
@@ -359,23 +459,58 @@ public final class LlmModelImpl extends LlmModel {
   }
 
   @Override
-  public String transcribe(final float[] pcm, final int sampleRate, final String language) {
+  public String transcribe(final float[] pcm, final int sampleRate, final Locale language) {
     requireNonNull(pcm, "pcm");
-    return this.requireSpeech().transcribe(pcm, sampleRate, language, this.tokenizer);
+    return this.requireSpeech().transcribe(
+      pcm, sampleRate, language, this.tokenizer, MatmulRuntime.sequential());
   }
 
-  private float[][] embedAll(final List<? extends CharSequence> texts) {
+  public String transcribe(
+    final float[] pcm,
+    final int sampleRate,
+    final Locale language,
+    final MatmulRuntime runtime
+  ) {
+    requireNonNull(pcm, "pcm");
+    requireNonNull(runtime, "runtime");
+    return this.requireSpeech().transcribe(pcm, sampleRate, language, this.tokenizer, runtime);
+  }
+
+  @Override
+  public byte[] synthesize(final CharSequence text) {
+    requireNonNull(text, "text");
+    TextToSpeech tts = this.requireSynthesis();
+    Path espeakData = this.optionalData(LlmOptionalData.ESPEAK_DATA)
+      .orElseGet(() -> this.path.resolve("espeak-ng-data"));
+    return WavPcm.toWav16Le(
+      tts.synthesize(text, espeakData, MatmulRuntime.sequential()), tts.sampleRate());
+  }
+
+  public byte[] synthesize(final CharSequence text, final MatmulRuntime runtime) {
+    requireNonNull(text, "text");
+    requireNonNull(runtime, "runtime");
+    TextToSpeech tts = this.requireSynthesis();
+    Path espeakData = this.optionalData(LlmOptionalData.ESPEAK_DATA)
+      .orElseGet(() -> this.path.resolve("espeak-ng-data"));
+    return WavPcm.toWav16Le(tts.synthesize(text, espeakData, runtime), tts.sampleRate());
+  }
+
+  public float[][] embedAll(final List<? extends CharSequence> texts, final MatmulRuntime runtime) {
+    requireNonNull(runtime, "runtime");
     EmbeddingEncoder active = this.requireEncoder();
     if (texts.isEmpty()) {
       return new float[0][];
     }
-    MatmulRuntime runtime = MatmulRuntime.sequential();
     float[][] out = new float[texts.size()][];
     for (int i = 0; i < texts.size(); i++) {
       CharSequence text = requireNonNull(texts.get(i), "texts[" + i + "]");
       out[i] = active.encode(this.wrapClsSep(this.tokenizer.encode(text.toString())), runtime);
     }
     return out;
+  }
+
+  private float[][] embedAll(final List<? extends CharSequence> texts) {
+    return this.embedAll(texts, MatmulRuntime.sequential());
   }
 
   private int[] wrapClsSep(final List<Integer> pieces) {
@@ -417,6 +552,7 @@ public final class LlmModelImpl extends LlmModel {
       this.network.set(null);
       this.encoder.set(null);
       this.speech.set(null);
+      this.synthesis.set(null);
       if (bag != null) {
         bag.releaseResources();
       }
@@ -426,9 +562,11 @@ public final class LlmModelImpl extends LlmModel {
   }
 
   public CausalLM resolveNetwork(final boolean allowUnpackParameters, final LlmListener io) {
-    if (this.isEmbeddingModel() || this.isSpeechModel()) {
+    if (this.isEmbeddingModel() || this.isSpeechModel() || this.isSynthesisModel()) {
       throw new IllegalStateException(
-        this.isSpeechModel()
+        this.isSynthesisModel()
+          ? ModelSupport.synthesisEngineMisuseMessage(this.architectureName())
+          : this.isSpeechModel()
           ? ModelSupport.speechEngineMisuseMessage(this.architectureName())
           : ModelSupport.chatMisuseMessage(this.architectureName()));
     }
@@ -479,7 +617,9 @@ public final class LlmModelImpl extends LlmModel {
     CausalLM current = this.network.get();
     if (current == null) {
       throw new IllegalStateException(
-        this.speech.get() != null
+        this.synthesis.get() != null
+          ? ModelSupport.synthesisEngineMisuseMessage(this.architectureName())
+          : this.speech.get() != null
           ? ModelSupport.speechEngineMisuseMessage(this.architectureName())
           : this.encoder.get() != null
           ? ModelSupport.chatMisuseMessage(this.architectureName())
@@ -493,7 +633,9 @@ public final class LlmModelImpl extends LlmModel {
     EmbeddingEncoder current = this.encoder.get();
     if (current == null) {
       throw new IllegalStateException(
-        this.speech.get() != null
+        this.synthesis.get() != null
+          ? ModelSupport.synthesisEmbedMisuseMessage(this.architectureName())
+          : this.speech.get() != null
           ? ModelSupport.speechEmbedMisuseMessage(this.architectureName())
           : this.network.get() != null
           ? ModelSupport.embedMisuseMessage(this.architectureName())
@@ -508,6 +650,16 @@ public final class LlmModelImpl extends LlmModel {
     if (current == null) {
       throw new IllegalStateException(
         ModelSupport.transcribeMisuseMessage(this.architectureName()));
+    }
+    return current;
+  }
+
+  private TextToSpeech requireSynthesis() {
+    this.assertNotClosed();
+    TextToSpeech current = this.synthesis.get();
+    if (current == null) {
+      throw new IllegalStateException(
+        ModelSupport.synthesizeMisuseMessage(this.architectureName()));
     }
     return current;
   }

@@ -2,18 +2,21 @@ package com.igormaznitsa.nanollvm;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.igormaznitsa.nanollvm.exceptions.ModelLoadException;
 import com.igormaznitsa.nanollvm.llm.Config;
 import com.igormaznitsa.nanollvm.models.internal.CausalLMFactory;
+import com.igormaznitsa.nanollvm.models.internal.ConvLayout;
 import com.igormaznitsa.nanollvm.models.internal.EmbeddingEncoderFactory;
 import com.igormaznitsa.nanollvm.models.internal.WeightNames;
 import com.igormaznitsa.nanollvm.models.llmarch.OnnxWeightNames;
 import com.igormaznitsa.nanollvm.models.llmcontainer.OnnxDataTypes;
 import com.igormaznitsa.nanollvm.models.llmcontainer.OnnxDataTypes.Kind;
 import com.igormaznitsa.nanollvm.models.llmcontainer.OnnxProtoReader;
+import com.igormaznitsa.nanollvm.models.llmcontainer.OnnxProtoReader.OnnxGraphBundle;
 import com.igormaznitsa.nanollvm.models.llmcontainer.OnnxProtoReader.OnnxTensorProto;
 import com.igormaznitsa.nanollvm.models.llmcontainer.OnnxTransport;
 import com.igormaznitsa.nanollvm.models.llmcontainer.OnnxWeightReader;
@@ -29,6 +32,89 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 class OnnxSupportUnitTest {
+
+  private static byte[] encodeModelWithConvDilation(final String nodeName, final int dilation) {
+    ByteBuffer attr = ByteBuffer.allocate(64).order(ByteOrder.LITTLE_ENDIAN);
+    writeTag(attr, 1, 2);
+    writeBytes(attr, "dilations".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+    writeTag(attr, 8, 0);
+    writeVarint(attr, dilation);
+    attr.flip();
+    byte[] attrBytes = new byte[attr.remaining()];
+    attr.get(attrBytes);
+
+    ByteBuffer node = ByteBuffer.allocate(256).order(ByteOrder.LITTLE_ENDIAN);
+    writeTag(node, 1, 2);
+    writeBytes(node, "x".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+    writeTag(node, 1, 2);
+    writeBytes(node, "W".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+    writeTag(node, 3, 2);
+    writeBytes(node, nodeName.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+    writeTag(node, 4, 2);
+    writeBytes(node, "Conv".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+    writeTag(node, 5, 2);
+    writeBytes(node, attrBytes);
+    node.flip();
+    byte[] nodeBytes = new byte[node.remaining()];
+    node.get(nodeBytes);
+    return encodeLengthDelimited(7, encodeLengthDelimited(1, nodeBytes));
+  }
+
+  private static byte[] encodeModelWithConvTranspose(
+    final String nodeName,
+    final int stride,
+    final int padding,
+    final int outputPadding
+  ) {
+    ByteBuffer strides = ByteBuffer.allocate(64).order(ByteOrder.LITTLE_ENDIAN);
+    writeTag(strides, 1, 2);
+    writeBytes(strides, "strides".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+    writeTag(strides, 8, 0);
+    writeVarint(strides, stride);
+    strides.flip();
+    byte[] strideBytes = new byte[strides.remaining()];
+    strides.get(strideBytes);
+
+    ByteBuffer pads = ByteBuffer.allocate(64).order(ByteOrder.LITTLE_ENDIAN);
+    writeTag(pads, 1, 2);
+    writeBytes(pads, "pads".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+    writeTag(pads, 8, 0);
+    writeVarint(pads, padding);
+    writeTag(pads, 8, 0);
+    writeVarint(pads, padding);
+    pads.flip();
+    byte[] padBytes = new byte[pads.remaining()];
+    pads.get(padBytes);
+
+    ByteBuffer outPad = ByteBuffer.allocate(64).order(ByteOrder.LITTLE_ENDIAN);
+    writeTag(outPad, 1, 2);
+    writeBytes(outPad, "output_padding".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+    writeTag(outPad, 8, 0);
+    writeVarint(outPad, outputPadding);
+    outPad.flip();
+    byte[] outPadBytes = new byte[outPad.remaining()];
+    outPad.get(outPadBytes);
+
+    ByteBuffer node = ByteBuffer.allocate(512).order(ByteOrder.LITTLE_ENDIAN);
+    writeTag(node, 1, 2);
+    writeBytes(node, "x".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+    writeTag(node, 1, 2);
+    writeBytes(node, "W".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+    writeTag(node, 3, 2);
+    writeBytes(node, nodeName.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+    writeTag(node, 4, 2);
+    writeBytes(node, "ConvTranspose".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+    writeTag(node, 5, 2);
+    writeBytes(node, strideBytes);
+    writeTag(node, 5, 2);
+    writeBytes(node, padBytes);
+    writeTag(node, 5, 2);
+    writeBytes(node, outPadBytes);
+    node.flip();
+    byte[] nodeBytes = new byte[node.remaining()];
+    node.get(nodeBytes);
+    return encodeLengthDelimited(7, encodeLengthDelimited(1, nodeBytes));
+  }
 
   private static byte[] encodeModelWithFloatTensor(
     final String name,
@@ -229,6 +315,57 @@ class OnnxSupportUnitTest {
     assertEquals(
       "lm_head.weight",
       OnnxProtoReader.matMulNodeToWeightName("/lm_head/MatMul"));
+  }
+
+  @Test
+  void mapsConvAndEmbeddingGatherNodeNamesToPytorchWeights() {
+    assertEquals(
+      "flow.flows.0.enc.in_layers.0.weight",
+      OnnxProtoReader.convNodeToWeightName("/flow/flows.0/enc/in_layers.0/Conv"));
+    assertEquals(
+      "dec.ups.0.weight",
+      OnnxProtoReader.convTransposeNodeToWeightName("/dec/ups.0/ConvTranspose"));
+    assertEquals(
+      "enc_p.emb.weight",
+      OnnxProtoReader.gatherNodeToWeightName("/enc_p/emb/Gather"));
+  }
+
+  @Test
+  void readsConvDilationFromNodeAttributes() throws Exception {
+    byte[] onnx = encodeModelWithConvDilation("/dec/resblocks.0/convs.1/Conv", 2);
+    OnnxGraphBundle graph = OnnxProtoReader.readGraph(
+      ByteBuffer.wrap(onnx).order(ByteOrder.LITTLE_ENDIAN),
+      "conv-dil");
+    assertEquals(2, graph.convDilations().get("dec.resblocks.0.convs.1.weight"));
+    ConvLayout layout = graph.convLayouts().get("dec.resblocks.0.convs.1.weight");
+    assertEquals(ConvLayout.Kind.CONV, layout.kind());
+    assertEquals(2, layout.dilation());
+    assertEquals(1, layout.strideOr(1));
+    assertNull(layout.stride());
+    assertEquals(1, layout.paddingOr(1));
+  }
+
+  @Test
+  void readsConvTransposeGeometryFromNodeAttributes() throws Exception {
+    byte[] onnx = encodeModelWithConvTranspose(
+      "/dec/ups.0/ConvTranspose", 8, 4, 1);
+    OnnxGraphBundle graph = OnnxProtoReader.readGraph(
+      ByteBuffer.wrap(onnx).order(ByteOrder.LITTLE_ENDIAN),
+      "conv-transpose");
+    ConvLayout layout = graph.convLayouts().get("dec.ups.0.weight");
+    assertEquals(ConvLayout.Kind.CONV_TRANSPOSE, layout.kind());
+    assertEquals(8, layout.stride());
+    assertEquals(4, layout.padding());
+    assertEquals(1, layout.outputPadding());
+    assertTrue(layout.isTransposed());
+  }
+
+  @Test
+  void zeroOnnxPadsDoNotOverrideFusedPaddingFallback() {
+    ConvLayout omitted = new ConvLayout(ConvLayout.Kind.CONV, 1, 0, null, 1, 1);
+    assertEquals(1, omitted.paddingOr(1));
+    ConvLayout explicit = new ConvLayout(ConvLayout.Kind.CONV, 1, 3, null, 1, 1);
+    assertEquals(3, explicit.paddingOr(1));
   }
 
   @Test

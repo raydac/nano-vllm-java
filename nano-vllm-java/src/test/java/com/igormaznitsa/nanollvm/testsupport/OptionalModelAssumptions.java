@@ -7,6 +7,7 @@ import static com.igormaznitsa.nanollvm.utils.NanoLlvmProps.PROP_MODELS_DIR;
 import static com.igormaznitsa.nanollvm.utils.NanoLlvmProps.PROP_RAG_DIR;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
+import com.igormaznitsa.nanollvm.models.ModelSupport;
 import com.igormaznitsa.nanollvm.utils.NanoLlvmProps;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -31,6 +32,8 @@ public final class OptionalModelAssumptions {
   private static final String SMOLLM2_135M_INSTRUCT_ONNX = "SmolLM2-135M-Instruct-ONNX";
   private static final String WHISPER_BASE = "whisper-base";
   private static final String WHISPER_TINY = "whisper-tiny";
+  private static final String PIPER_RU_IRINA_MEDIUM = "piper-ru-irina-medium";
+  private static final String PIPER_EN_LESSAC_MEDIUM = "piper-en-lessac-medium";
 
   private OptionalModelAssumptions() {
   }
@@ -95,6 +98,21 @@ public final class OptionalModelAssumptions {
       "models/download-whisper-base.sh or models/download-whisper-tiny.sh");
   }
 
+  public static Path requirePiper() {
+    Optional<Path> english = findModel(PIPER_EN_LESSAC_MEDIUM);
+    if (english.isPresent()) {
+      return english.get();
+    }
+    return requirePiperRussian();
+  }
+
+  public static Path requirePiperRussian() {
+    return require(
+      findModel(PIPER_RU_IRINA_MEDIUM),
+      "piper-ru-irina-medium",
+      "models/download-piper-ru-irina-medium.sh");
+  }
+
   public static Path requireLocalRag() {
     return require(
       findRag(),
@@ -152,7 +170,8 @@ public final class OptionalModelAssumptions {
   }
 
   private static boolean isModel(final Path path) {
-    return isGgufFile(path) || isHfModelDir(path) || isDirWithGguf(path);
+    return isGgufFile(path) || isHfModelDir(path) || isDirWithGguf(path)
+      || ModelSupport.isSynthesisCheckpoint(path);
   }
 
   private static boolean isGgufFile(final Path path) {

@@ -34,6 +34,12 @@ public final class WeightNames {
    * @since 1.3.0
    */
   public static final String ARCH_WHISPER = "whisper";
+  /**
+   * Piper VITS text-to-speech ({@code *.onnx} + {@code *.onnx.json}).
+   *
+   * @since 1.3.0
+   */
+  public static final String ARCH_PIPER = "piper";
 
   public static final String EMBED_TOKENS = "model.embed_tokens.weight";
   public static final String MODEL_NORM = "model.norm.weight";

@@ -27,6 +27,7 @@ import com.igormaznitsa.nanollvm.rag.RagSession;
 import com.igormaznitsa.nanollvm.tensor.MatmulRuntime;
 import com.igormaznitsa.nanollvm.tokenizer.Tokenizer;
 import com.igormaznitsa.nanollvm.utils.NanoLlvmProps;
+import java.io.IOException;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -47,8 +48,9 @@ import java.util.function.Predicate;
 import java.util.stream.IntStream;
 
 /**
- * One engine bound to a loaded chat/completion {@link LlmModel}: conversation, raw continuation,
- * batch generate, and RAG. Embedding files use {@link LlmModel#embed}, not this type.
+ * One engine bound to a loaded {@link LlmModel}: conversation, raw continuation, batch generate,
+ * RAG, embeddings, Whisper transcribe, or Piper synthesize — depending on the checkpoint kind.
+ * {@link Builder} is the common construction path for every kind ({@code cpuThreads}, matmul pool).
  *
  * <h2>Typical use</h2>
  * <pre>{@code
@@ -90,8 +92,12 @@ import java.util.stream.IntStream;
  *   <li><b>Less RAM</b> — smaller {@link Builder#maxModelLen(int)} and
  *       {@link Builder#kvHeapFraction(float)}; keep GGUF packed (default).</li>
  *   <li><b>Stop a stuck generate</b> — {@link #cancel()} from another thread.</li>
- *   <li><b>A number vector for search / similarity</b> — {@link LlmModel#embed} on an embedding
- *       checkpoint; {@link Builder#build()} rejects those files.</li>
+ *   <li><b>A number vector for search / similarity</b> — {@link #embed} on an embedding
+ *       checkpoint after {@link Builder#build()}.</li>
+ *   <li><b>Speech to text</b> — {@link #transcribe} on a Whisper checkpoint
+ *       ({@code byte[]} WAV, a file {@link Path}, or mono PCM).</li>
+ *   <li><b>Text to speech</b> — {@link #synthesize} on a Piper checkpoint
+ *       (returns WAV bytes; no file write).</li>
  * </ul>
  * Prefer {@link #chat()} / {@link #complete} / {@link #chatOnce} unless you need a batch of prompts
  * or a token-id stream — that is {@link #generate} / {@link #generateTokenIds}.
@@ -104,8 +110,9 @@ import java.util.stream.IntStream;
  *
  * <h2>Thread safety</h2>
  * <ul>
- *   <li>One {@code LLM} must not run concurrent {@link #generate}, chat, RAG, or {@link #complete}
- *       — those share one generate lock / scheduler.</li>
+ *   <li>One {@code LLM} must not run concurrent {@link #generate}, chat, RAG, {@link #complete},
+ *       {@link #embed}, {@link #transcribe}, or {@link #synthesize} — those share one generate
+ *       lock.</li>
  *   <li>Prefer one instance per thread, or external locking. Share one immutable {@link LlmModel}
  *       across many {@code LLM}s.</li>
  *   <li>{@link #cancel()} is safe from another thread and aborts an in-flight generate with
@@ -209,12 +216,20 @@ public final class LLM implements AutoCloseable {
       this.advisorMixer = builder.advisorMixer;
       this.advisorNoteFilter = builder.advisorNoteFilter;
       this.defaultSampling = builder.resolveSampling();
-      createdTransformer = new Transformer(
-        this.model, this.config, this.matmul, this.listener, builder.allowUnpackParameters);
-      this.transformer = createdTransformer;
-      this.scheduler = new Scheduler(this.config, this.transformer::clearConvState);
-      if (builder.warmup) {
-        this.warmup();
+      if (this.model.isCausalModel()) {
+        createdTransformer = new Transformer(
+          this.model, this.config, this.matmul, this.listener, builder.allowUnpackParameters);
+        this.transformer = createdTransformer;
+        this.scheduler = new Scheduler(this.config, this.transformer::clearConvState);
+        if (builder.warmup) {
+          this.warmup();
+        }
+      } else {
+        this.transformer = null;
+        this.scheduler = null;
+        if (builder.warmup) {
+          LlmListeners.info(this.listener, this, "Warmup skipped (not a chat graph)");
+        }
       }
       LlmModelImpl.peer(this.model).acquireEngine();
       acquired = true;
@@ -253,8 +268,9 @@ public final class LLM implements AutoCloseable {
 
   /**
    * Starts a fluent configurator for a shared immutable {@link LlmModel}. This engine does not
-   * close the model — close {@link LLM} first, then the model. Embedding checkpoints are rejected
-   * at {@link Builder#build()}; use {@link LlmModel#embed} instead.
+   * close the model — close {@link LLM} first, then the model. Chat, embedding, speech, and
+   * synthesis checkpoints all use this builder; {@link Builder#cpuThreads(int)} / matmul pool apply to
+   * every kind.
    *
    * @param model loaded model to bind; not closed by this {@code LLM}; must be non-{@code null}
    * @return a new builder; call {@link Builder#build()} to construct the engine
@@ -272,6 +288,236 @@ public final class LLM implements AutoCloseable {
    */
   public LlmModel model() {
     return this.model;
+  }
+
+  /**
+   * Turns {@code text} into an L2-normalized embedding vector. Embedding checkpoints only.
+   * Uses this engine's {@link MatmulRuntime} (same CPU pool as chat). Exclusive on this instance
+   * (see class-level thread-safety).
+   *
+   * @param text input to encode; must not be {@code null}
+   * @return one L2-normalized vector; never {@code null}
+   * @throws NullPointerException  if {@code text} is {@code null}
+   * @throws IllegalStateException if this engine is closed or the checkpoint is not an embedding
+   *                               encoder
+   * @since 1.3.0
+   */
+  public float[] embed(final CharSequence text) {
+    requireNonNull(text, "text");
+    this.assertNotClosed();
+    this.requireEmbedding();
+    this.generateLock.lock();
+    try {
+      this.assertNotClosed();
+      return LlmModelImpl.peer(this.model).embedAll(List.of(text), this.matmul)[0];
+    } finally {
+      this.generateLock.unlock();
+    }
+  }
+
+  /**
+   * Encodes each text to an L2-normalized embedding. Embedding checkpoints only.
+   * Exclusive on this instance.
+   *
+   * @param texts one string per vector; must not be {@code null}; elements must not be {@code null}
+   * @return one vector per input, same order; never {@code null}
+   * @throws NullPointerException  if {@code texts} or an element is {@code null}
+   * @throws IllegalStateException if this engine is closed or the checkpoint is not an embedding
+   *                               encoder
+   * @since 1.3.0
+   */
+  public float[][] embed(final List<? extends CharSequence> texts) {
+    requireNonNull(texts, "texts");
+    this.assertNotClosed();
+    this.requireEmbedding();
+    this.generateLock.lock();
+    try {
+      this.assertNotClosed();
+      return LlmModelImpl.peer(this.model).embedAll(texts, this.matmul);
+    } finally {
+      this.generateLock.unlock();
+    }
+  }
+
+  /**
+   * Encodes already-tokenized ids to a single L2-normalized embedding. Embedding checkpoints
+   * only. Ids are used as-is — include specials such as {@code [CLS]} / {@code [SEP]} when the
+   * checkpoint expects them. Exclusive on this instance.
+   *
+   * @param tokenIds vocabulary ids; must not be {@code null} or empty
+   * @return one L2-normalized vector; never {@code null}
+   * @throws NullPointerException     if {@code tokenIds} is {@code null}
+   * @throws IllegalArgumentException if {@code tokenIds} is empty
+   * @throws IllegalStateException    if this engine is closed or the checkpoint is not an
+   *                                  embedding encoder
+   * @since 1.3.0
+   */
+  public float[] embed(final int[] tokenIds) {
+    requireNonNull(tokenIds, "tokenIds");
+    this.assertNotClosed();
+    this.requireEmbedding();
+    this.generateLock.lock();
+    try {
+      this.assertNotClosed();
+      return LlmModelImpl.peer(this.model).embed(tokenIds, this.matmul);
+    } finally {
+      this.generateLock.unlock();
+    }
+  }
+
+  /**
+   * Transcribes an uncompressed WAV file (PCM or IEEE float, mixed to mono). Speech checkpoints
+   * only. Prefer {@link #transcribe(byte[])} when the payload is already in memory. Exclusive on
+   * this instance.
+   *
+   * @param wav path to a {@code .wav} file; must not be {@code null}
+   * @return transcript text; empty when the clip is silent or too short; never {@code null}
+   * @throws NullPointerException     if {@code wav} is {@code null}
+   * @throws IOException              if the file cannot be read
+   * @throws IllegalArgumentException if the container is compressed or malformed
+   * @throws IllegalStateException    if this engine is closed or the checkpoint is not speech
+   * @since 1.3.0
+   */
+  public String transcribe(final Path wav) throws IOException {
+    return this.transcribe(wav, null);
+  }
+
+  /**
+   * Transcribes an uncompressed WAV file with an optional language hint. {@code null} or
+   * {@link Locale#ROOT} selects automatically; region is ignored ({@link Locale#US} is English).
+   * Speech checkpoints only. Exclusive on this instance.
+   *
+   * @param wav      path to a {@code .wav} file; must not be {@code null}
+   * @param language hint, or {@code null}/{@link Locale#ROOT} for auto
+   * @return transcript text; never {@code null}
+   * @throws NullPointerException     if {@code wav} is {@code null}
+   * @throws IOException              if the file cannot be read
+   * @throws IllegalArgumentException if the container is compressed or malformed, or the language
+   *                                  is not a Whisper token
+   * @throws IllegalStateException    if this engine is closed or the checkpoint is not speech
+   * @since 1.3.0
+   */
+  public String transcribe(final Path wav, final Locale language) throws IOException {
+    requireNonNull(wav, "wav");
+    this.assertNotClosed();
+    this.requireSpeech();
+    this.generateLock.lock();
+    try {
+      this.assertNotClosed();
+      return LlmModelImpl.peer(this.model).transcribe(wav, language, this.matmul);
+    } finally {
+      this.generateLock.unlock();
+    }
+  }
+
+  /**
+   * Transcribes an uncompressed WAV payload already in memory (same RIFF/WAVE bytes a
+   * {@code .wav} file would contain). Speech checkpoints only. Does not touch the filesystem.
+   * Exclusive on this instance.
+   *
+   * @param wav RIFF/WAVE bytes; must not be {@code null}
+   * @return transcript text; never {@code null}
+   * @throws NullPointerException     if {@code wav} is {@code null}
+   * @throws IllegalArgumentException if the container is compressed or malformed
+   * @throws IllegalStateException    if this engine is closed or the checkpoint is not speech
+   * @since 1.3.0
+   */
+  public String transcribe(final byte[] wav) {
+    return this.transcribe(wav, (Locale) null);
+  }
+
+  /**
+   * Transcribes in-memory WAV bytes with an optional language hint. Speech checkpoints only.
+   * Exclusive on this instance.
+   *
+   * @param wav      RIFF/WAVE bytes; must not be {@code null}
+   * @param language hint, or {@code null}/{@link Locale#ROOT} for auto
+   * @return transcript text; never {@code null}
+   * @throws NullPointerException     if {@code wav} is {@code null}
+   * @throws IllegalArgumentException if the container is compressed or malformed, or the language
+   *                                  is not a Whisper token
+   * @throws IllegalStateException    if this engine is closed or the checkpoint is not speech
+   * @since 1.3.0
+   */
+  public String transcribe(final byte[] wav, final Locale language) {
+    requireNonNull(wav, "wav");
+    this.assertNotClosed();
+    this.requireSpeech();
+    this.generateLock.lock();
+    try {
+      this.assertNotClosed();
+      return LlmModelImpl.peer(this.model).transcribe(wav, language, this.matmul);
+    } finally {
+      this.generateLock.unlock();
+    }
+  }
+
+  /**
+   * Transcribes mono PCM. {@code sampleRate} is Hertz; other rates are resampled to 16 kHz.
+   * Speech checkpoints only. Exclusive on this instance.
+   *
+   * @param pcm        mono samples in {@code [-1, 1]}; must not be {@code null}
+   * @param sampleRate Hertz of {@code pcm}; must be {@code >= 1}
+   * @return transcript text; never {@code null}
+   * @throws NullPointerException     if {@code pcm} is {@code null}
+   * @throws IllegalArgumentException if {@code sampleRate < 1}
+   * @throws IllegalStateException    if this engine is closed or the checkpoint is not speech
+   * @since 1.3.0
+   */
+  public String transcribe(final float[] pcm, final int sampleRate) {
+    return this.transcribe(pcm, sampleRate, null);
+  }
+
+  /**
+   * Transcribes mono PCM with an optional language hint. Speech checkpoints only. Exclusive on
+   * this instance.
+   *
+   * @param pcm        mono samples in {@code [-1, 1]}; must not be {@code null}
+   * @param sampleRate Hertz of {@code pcm}; must be {@code >= 1}
+   * @param language   hint, or {@code null}/{@link Locale#ROOT} for auto
+   * @return transcript text; never {@code null}
+   * @throws NullPointerException     if {@code pcm} is {@code null}
+   * @throws IllegalArgumentException if {@code sampleRate < 1}, or the language is not a Whisper
+   *                                  token
+   * @throws IllegalStateException    if this engine is closed or the checkpoint is not speech
+   * @since 1.3.0
+   */
+  public String transcribe(final float[] pcm, final int sampleRate, final Locale language) {
+    requireNonNull(pcm, "pcm");
+    this.assertNotClosed();
+    this.requireSpeech();
+    this.generateLock.lock();
+    try {
+      this.assertNotClosed();
+      return LlmModelImpl.peer(this.model).transcribe(pcm, sampleRate, language, this.matmul);
+    } finally {
+      this.generateLock.unlock();
+    }
+  }
+
+  /**
+   * Synthesizes uncompressed WAV bytes (PCM16 little-endian, mono). The return value is the file
+   * contents — write it only if you need a {@code .wav} on disk. Synthesis checkpoints only.
+   * Exclusive on this instance.
+   *
+   * @param text text to speak; must not be {@code null} or blank
+   * @return RIFF/WAVE bytes; never {@code null}
+   * @throws NullPointerException     if {@code text} is {@code null}
+   * @throws IllegalArgumentException if {@code text} is blank
+   * @throws IllegalStateException    if this engine is closed or the checkpoint is not synthesis
+   * @since 1.3.0
+   */
+  public byte[] synthesize(final CharSequence text) {
+    requireNonNull(text, "text");
+    this.assertNotClosed();
+    this.requireSynthesis();
+    this.generateLock.lock();
+    try {
+      this.assertNotClosed();
+      return LlmModelImpl.peer(this.model).synthesize(text, this.matmul);
+    } finally {
+      this.generateLock.unlock();
+    }
   }
 
   private void warmup() {
@@ -780,6 +1026,7 @@ public final class LLM implements AutoCloseable {
   ) {
     // Business: turn prompts into decoded completions under cancel / timeout / optional streaming
     this.assertNotClosed();
+    this.requireCausal();
     this.generateLock.lock();
     try {
       this.assertNotClosed();
@@ -1065,6 +1312,7 @@ public final class LLM implements AutoCloseable {
    */
   public ChatSession chat() {
     this.assertNotClosed();
+    this.requireCausal();
     return new ChatSession(this);
   }
 
@@ -1079,6 +1327,7 @@ public final class LLM implements AutoCloseable {
    */
   public ChatSession chat(final SamplingParams samplingParams) {
     this.assertNotClosed();
+    this.requireCausal();
     return new ChatSession(this, samplingParams);
   }
 
@@ -1093,6 +1342,7 @@ public final class LLM implements AutoCloseable {
    */
   public ChatSession chat(final int maxTokens) {
     this.assertNotClosed();
+    this.requireCausal();
     return ChatSession.open(this, maxTokens);
   }
 
@@ -1111,6 +1361,7 @@ public final class LLM implements AutoCloseable {
    */
   public RagSession rag(final RagIndex index) {
     this.assertNotClosed();
+    this.requireCausal();
     return RagSession.open(this, index);
   }
 
@@ -1127,6 +1378,7 @@ public final class LLM implements AutoCloseable {
    */
   public RagSession rag(final RagIndex index, final int maxTokens) {
     this.assertNotClosed();
+    this.requireCausal();
     return RagSession.open(this, index, maxTokens);
   }
 
@@ -1335,6 +1587,7 @@ public final class LLM implements AutoCloseable {
     final SamplingParams samplingParams
   ) {
     this.assertNotClosed();
+    this.requireCausal();
     return AdvisorRunner.enrich(this, modelUserText, priorDialog, samplingParams);
   }
 
@@ -1389,9 +1642,13 @@ public final class LLM implements AutoCloseable {
     this.generateLock.lock();
     try {
       if (this.closed.compareAndSet(false, true)) {
-        this.scheduler.clear();
+        if (this.scheduler != null) {
+          this.scheduler.clear();
+        }
         try {
-          this.transformer.close();
+          if (this.transformer != null) {
+            this.transformer.close();
+          }
         } finally {
           this.matmul.close();
           LlmModelImpl.peer(this.model).releaseEngine();
@@ -1405,6 +1662,41 @@ public final class LLM implements AutoCloseable {
   private void assertNotClosed() {
     if (this.closed.get()) {
       throw new IllegalStateException("LLM is closed");
+    }
+  }
+
+  private void requireCausal() {
+    if (!this.model.isCausalModel()) {
+      throw new IllegalStateException(this.model.isSpeechModel()
+        ? ModelSupport.speechEngineMisuseMessage(this.model.architectureName())
+        : this.model.isSynthesisModel()
+        ? ModelSupport.synthesisEngineMisuseMessage(this.model.architectureName())
+        : ModelSupport.chatMisuseMessage(this.model.architectureName()));
+    }
+  }
+
+  private void requireEmbedding() {
+    if (!this.model.isEmbeddingModel()) {
+      throw new IllegalStateException(
+        this.model.isSpeechModel()
+          ? ModelSupport.speechEmbedMisuseMessage(this.model.architectureName())
+          : this.model.isSynthesisModel()
+          ? ModelSupport.synthesisEmbedMisuseMessage(this.model.architectureName())
+          : ModelSupport.embedMisuseMessage(this.model.architectureName()));
+    }
+  }
+
+  private void requireSpeech() {
+    if (!this.model.isSpeechModel()) {
+      throw new IllegalStateException(
+        ModelSupport.transcribeMisuseMessage(this.model.architectureName()));
+    }
+  }
+
+  private void requireSynthesis() {
+    if (!this.model.isSynthesisModel()) {
+      throw new IllegalStateException(
+        ModelSupport.synthesizeMisuseMessage(this.model.architectureName()));
     }
   }
 
@@ -1424,7 +1716,7 @@ public final class LLM implements AutoCloseable {
    *       {@link #advisors}, {@link #deterministic}</li>
    *   <li><b>How much text one generate may hold</b> — {@link #maxModelLen}
    *       (prompt + new tokens; not the same as {@code maxTokens} on sampling)</li>
-   *   <li><b>CPU / speed</b> — {@link #cpuThreads}, {@link #allCpuThreads}, {@link #disableMultiCpu},
+   *   <li><b>CPU / speed</b> — {@link #cpuThreads(int)}, {@link #allCpuThreads}, {@link #disableMultiCpu},
    *       {@link #matmulExecutor}, {@link #dedicatedMatmulPool}, {@link #allowUnpackParameters},
    *       {@link #warmup}</li>
    *   <li><b>RAM for conversation memory</b> — {@link #kvHeapFraction}, {@link #numKvcacheBlocks},
@@ -1436,8 +1728,8 @@ public final class LLM implements AutoCloseable {
    * tuning memory under a large batch.
    *
    * <p><strong>Validation (enforced at {@link #build()} / {@link Config} construction):</strong>
-   * {@code kvcacheBlockSize} multiple of 256; {@code cpuThreads >= 1}; {@code numKvcacheBlocks}
-   * resolved to {@code > 0}. Advisor lists require a mixer plus non-blank
+   * {@code kvcacheBlockSize} multiple of 256; {@code cpuThreads >= 1}; chat
+   * {@code numKvcacheBlocks} resolved to {@code > 0} (non-chat graphs use {@code 0}). Advisor lists require a mixer plus non-blank
    * unique names ({@link #advisors(LlmAdvisorMixer, LlmAdvisor...)}).
    */
   public static final class Builder {
@@ -1796,8 +2088,9 @@ public final class LLM implements AutoCloseable {
 
     /**
      * How many working-memory pages to allocate. {@code -1} (default) sizes from heap and
-     * {@link #kvHeapFraction(float)}. Set an explicit count only when auto-size is wrong for
-     * your process. Build fails if the resolved count is not {@code > 0}.
+     * {@link #kvHeapFraction(float)}. Ignored on embedding, Whisper, and Piper engines (those
+     * graphs have no chat KV). Set an explicit count only when auto-size is wrong for your
+     * process. Chat build fails if the resolved count is not {@code > 0}.
      *
      * @param value explicit block count, or {@code -1} to auto-size
      * @return {@code this}
@@ -1872,8 +2165,8 @@ public final class LLM implements AutoCloseable {
      * @return new engine instance; caller should {@link LLM#close()} when finished
      * @throws ModelLoadException       if the model directory, config, or weights are unusable
      * @throws IllegalArgumentException if builder/config constraints fail (bad KV block size, …)
-     * @throws IllegalStateException    if the model is closed or is an embedding or speech
-     *                                  checkpoint, or if
+     * @throws IllegalStateException    if the model is closed, advisors are set on a non-chat
+     *                                  checkpoint, or
      *                                  {@link #matmulExecutor(ExecutorService)} and
      *                                  {@link #dedicatedMatmulPool()} were both set
      */
@@ -1881,13 +2174,8 @@ public final class LLM implements AutoCloseable {
       if (this.sharedModel.isClosed()) {
         throw new IllegalStateException("LlmModel is closed");
       }
-      if (this.sharedModel.isSpeechModel()) {
-        throw new IllegalStateException(
-          ModelSupport.speechEngineMisuseMessage(this.sharedModel.architectureName()));
-      }
-      if (this.sharedModel.isEmbeddingModel()) {
-        throw new IllegalStateException(
-          ModelSupport.chatMisuseMessage(this.sharedModel.architectureName()));
+      if (!this.sharedModel.isCausalModel() && !this.advisors.isEmpty()) {
+        throw new IllegalStateException("advisors require a chat model");
       }
       if (this.matmulExecutor != null && this.dedicatedMatmulPool) {
         throw new IllegalStateException("cannot combine matmulExecutor with dedicatedMatmulPool");
@@ -1924,8 +2212,12 @@ public final class LLM implements AutoCloseable {
         .kvHeapFraction(this.kvHeapFraction)
         .cpuThreads(cpuThreads)
         .kvcacheBlockSize(this.kvcacheBlockSize)
-        .numKvcacheBlocks(this.numKvcacheBlocks)
         .applyTokenizer(tokenizer);
+      if (model.isCausalModel()) {
+        config.numKvcacheBlocks(this.numKvcacheBlocks);
+      } else {
+        config.numKvcacheBlocks(0);
+      }
       if (this.stopTokenIds != null) {
         config.stopTokenIds(this.stopTokenIds);
       }

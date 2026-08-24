@@ -277,6 +277,7 @@ public final class EmbeddingClassifier {
       return new EmbeddingClassifier(labels, mean, prototypes, this.examples.size());
     }
 
+    @SuppressWarnings("ArrayRecordComponent")
     private record HeldExample(String label, float[] embedding) {
     }
   }

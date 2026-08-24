@@ -9,6 +9,7 @@ import com.igormaznitsa.nanollvm.chat.LlmListener;
 import com.igormaznitsa.nanollvm.chat.LlmListeners;
 import com.igormaznitsa.nanollvm.exceptions.ModelLoadException;
 import com.igormaznitsa.nanollvm.models.ModelSupport;
+import com.igormaznitsa.nanollvm.models.internal.ConvLayout;
 import com.igormaznitsa.nanollvm.models.llmcontainer.OnnxProtoReader.OnnxGraphBundle;
 import com.igormaznitsa.nanollvm.models.llmcontainer.OnnxProtoReader.OnnxTensorProto;
 import com.igormaznitsa.nanollvm.tensor.Tensor;
@@ -205,6 +206,18 @@ public final class OnnxTransport implements ContainerTransport {
 
   public Map<String, String> matMulAliases() {
     return this.requireGraph().matMulWeightAliases();
+  }
+
+  public Map<String, String> identityWeightAliases() {
+    return this.requireGraph().identityWeightAliases();
+  }
+
+  public Map<String, ConvLayout> convLayouts() {
+    return this.requireGraph().convLayouts();
+  }
+
+  public Map<String, Integer> convDilations() {
+    return this.requireGraph().convDilations();
   }
 
   public Map<String, Tensor> readFloatingTensors(final LlmListener io) throws IOException {

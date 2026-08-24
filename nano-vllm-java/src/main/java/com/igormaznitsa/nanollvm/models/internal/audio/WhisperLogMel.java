@@ -11,11 +11,19 @@ import com.igormaznitsa.nanollvm.tensor.Tensor;
  */
 public final class WhisperLogMel {
 
+  /**
+   * Encoder sample rate (Hz).
+   */
   public static final int SAMPLE_RATE = 16_000;
+  /** STFT window length in samples. */
   public static final int N_FFT = 400;
+  /** STFT hop in samples. */
   public static final int HOP_LENGTH = 160;
+  /** Slaney mel bands (Whisper-base). */
   public static final int N_MELS = 80;
+  /** 30 s of 16 kHz mono. */
   public static final int CHUNK_SAMPLES = 480_000;
+  /** Mel frames for one 30 s chunk. */
   public static final int N_FRAMES = 3_000;
 
   private static final int FREQ_BINS = N_FFT / 2;

@@ -3,6 +3,8 @@ package com.igormaznitsa.nanollvm.models.llmcontainer;
 import static java.nio.charset.StandardCharsets.UTF_8;
 import static java.util.Objects.requireNonNull;
 
+import com.igormaznitsa.nanollvm.models.internal.ConvLayout;
+import com.igormaznitsa.nanollvm.models.internal.ConvLayout.Kind;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
@@ -15,7 +17,7 @@ import java.util.Locale;
 import java.util.Map;
 
 /**
- * Minimal ONNX protobuf decoder for Tier A: graph initializers and MatMul weight aliases.
+ * Minimal ONNX protobuf decoder for Tier A: graph initializers and operator weight aliases.
  *
  * <p>Does not execute operators. Supports legacy {@code TensorProto.raw_data} field number
  * {@code 9} (pre-ONNX rename to {@code 13}), which transformers.js / onnx-community exports still
@@ -56,7 +58,7 @@ public final class OnnxProtoReader {
   }
 
   /**
-   * Reads the model graph from disk into initializers + MatMul aliases.
+   * Reads the model graph from disk into initializers + operator weight aliases.
    *
    * @since 1.1.0
    */
@@ -106,31 +108,50 @@ public final class OnnxProtoReader {
     buf.clear();
     List<OnnxTensorProto> initializers = new ArrayList<>();
     Map<String, String> matMulAliases = new LinkedHashMap<>();
+    Map<String, String> identityAliases = new LinkedHashMap<>();
+    Map<String, ConvLayout> convLayouts = new LinkedHashMap<>();
     while (buf.hasRemaining()) {
       long tag = readVarint(buf, label);
       int field = (int) (tag >>> 3);
       int wire = (int) (tag & 7L);
       if (field == 7 && wire == 2) {
-        parseGraph(readLengthDelimited(buf, label), label, initializers, matMulAliases);
+        parseGraph(
+          readLengthDelimited(buf, label),
+          label,
+          initializers,
+          matMulAliases,
+          identityAliases,
+          convLayouts);
       } else {
         skip(buf, wire, label);
       }
     }
-    return new OnnxGraphBundle(List.copyOf(initializers), Map.copyOf(matMulAliases));
+    return new OnnxGraphBundle(
+      List.copyOf(initializers),
+      Map.copyOf(matMulAliases),
+      Map.copyOf(identityAliases),
+      Map.copyOf(convLayouts));
   }
 
   private static void parseGraph(
     final ByteBuffer graph,
     final String label,
     final List<OnnxTensorProto> initializers,
-    final Map<String, String> matMulAliases
+    final Map<String, String> matMulAliases,
+    final Map<String, String> identityAliases,
+    final Map<String, ConvLayout> convLayouts
   ) throws IOException {
     while (graph.hasRemaining()) {
       long tag = readVarint(graph, label);
       int field = (int) (tag >>> 3);
       int wire = (int) (tag & 7L);
       if (field == 1 && wire == 2) {
-        parseMatMulAlias(readLengthDelimited(graph, label), label, matMulAliases);
+        parseNodeAlias(
+          readLengthDelimited(graph, label),
+          label,
+          matMulAliases,
+          identityAliases,
+          convLayouts);
       } else if (field == 5 && wire == 2) {
         initializers.add(parseTensor(readLengthDelimited(graph, label), label));
       } else {
@@ -139,12 +160,15 @@ public final class OnnxProtoReader {
     }
   }
 
-  private static void parseMatMulAlias(
+  private static void parseNodeAlias(
     final ByteBuffer node,
     final String label,
-    final Map<String, String> matMulAliases
+    final Map<String, String> matMulAliases,
+    final Map<String, String> identityAliases,
+    final Map<String, ConvLayout> convLayouts
   ) throws IOException {
     List<String> inputs = new ArrayList<>();
+    List<byte[]> attributes = new ArrayList<>();
     String name = "";
     String opType = "";
     while (node.hasRemaining()) {
@@ -153,6 +177,10 @@ public final class OnnxProtoReader {
       int wire = (int) (tag & 7L);
       if (wire != 2) {
         skip(node, wire, label);
+        continue;
+      }
+      if (field == 5) {
+        attributes.add(readBytes(node, label));
         continue;
       }
       String value = new String(readBytes(node, label), UTF_8);
@@ -164,17 +192,137 @@ public final class OnnxProtoReader {
         }
       }
     }
-    if (!"MatMul".equals(opType) || inputs.size() < 2 || name.isBlank()) {
+    if (name.isBlank()) {
       return;
     }
-    String weightInit = inputs.get(1);
-    if (weightInit.isBlank()) {
+    if ("MatMul".equals(opType) && inputs.size() >= 2) {
+      putAlias(matMulAliases, inputs.get(1), matMulNodeToWeightName(name));
       return;
     }
-    String hfName = matMulNodeToWeightName(name);
-    if (hfName != null) {
-      matMulAliases.putIfAbsent(weightInit, hfName);
+    if (isConvFamily(opType) && inputs.size() >= 2) {
+      String weightName = convFamilyNodeToWeightName(name, opType);
+      putAlias(identityAliases, inputs.get(1), weightName);
+      putConvLayout(convLayouts, inputs.get(1), weightName, convLayout(opType, attributes, label));
+      return;
     }
+    if ("Gather".equals(opType) && !inputs.isEmpty() && isEmbeddingGather(name)) {
+      putAlias(identityAliases, inputs.getFirst(), gatherNodeToWeightName(name));
+    }
+  }
+
+  private static boolean isConvFamily(final String opType) {
+    return "Conv".equals(opType) || "ConvTranspose".equals(opType);
+  }
+
+  private static String convFamilyNodeToWeightName(final String nodeName, final String opType) {
+    return "ConvTranspose".equals(opType)
+      ? convTransposeNodeToWeightName(nodeName)
+      : convNodeToWeightName(nodeName);
+  }
+
+  private static void putConvLayout(
+    final Map<String, ConvLayout> convLayouts,
+    final String onnxName,
+    final String canonical,
+    final ConvLayout layout
+  ) {
+    if (onnxName != null && !onnxName.isBlank()) {
+      convLayouts.putIfAbsent(onnxName, layout);
+    }
+    if (canonical != null && !canonical.isBlank()) {
+      convLayouts.putIfAbsent(canonical, layout);
+    }
+  }
+
+  private static ConvLayout convLayout(
+    final String opType,
+    final List<byte[]> attributes,
+    final String label
+  ) throws IOException {
+    Map<String, int[]> ints = intAttributes(attributes, label);
+    Kind kind = "ConvTranspose".equals(opType) ? Kind.CONV_TRANSPOSE : Kind.CONV;
+    return new ConvLayout(
+      kind,
+      optionalPositive(ints, "strides"),
+      optionalPadding(ints),
+      optionalNonNegative(ints, "output_padding"),
+      optionalPositive(ints, "dilations"),
+      optionalPositive(ints, "group"));
+  }
+
+  private static Integer optionalPositive(final Map<String, int[]> ints, final String name) {
+    int[] values = ints.get(name);
+    if (values == null || values.length == 0 || values[0] < 1) {
+      return null;
+    }
+    return values[0];
+  }
+
+  private static Integer optionalNonNegative(final Map<String, int[]> ints, final String name) {
+    int[] values = ints.get(name);
+    if (values == null || values.length == 0 || values[0] < 0) {
+      return null;
+    }
+    return values[0];
+  }
+
+  private static Integer optionalPadding(final Map<String, int[]> ints) {
+    int[] pads = ints.get("pads");
+    if (pads == null || pads.length == 0) {
+      return null;
+    }
+    int begin = pads.length <= 2 ? pads[0] : pads[pads.length / 2 - 1];
+    return begin < 0 ? null : begin;
+  }
+
+  private static Map<String, int[]> intAttributes(
+    final List<byte[]> attributes,
+    final String label
+  ) throws IOException {
+    Map<String, int[]> out = new LinkedHashMap<>();
+    for (byte[] payload : attributes) {
+      ByteBuffer attr = ByteBuffer.wrap(payload).order(ByteOrder.LITTLE_ENDIAN);
+      String attrName = "";
+      List<Integer> values = new ArrayList<>();
+      while (attr.hasRemaining()) {
+        long tag = readVarint(attr, label);
+        int field = (int) (tag >>> 3);
+        int wire = (int) (tag & 7L);
+        if (field == 1 && wire == 2) {
+          attrName = new String(readBytes(attr, label), UTF_8);
+        } else if (field == 3 && wire == 0) {
+          values.add((int) readVarint(attr, label));
+        } else if (field == 8 && wire == 0) {
+          values.add((int) readVarint(attr, label));
+        } else if ((field == 7 || field == 8) && wire == 2) {
+          ByteBuffer packed = readLengthDelimited(attr, label);
+          while (packed.hasRemaining()) {
+            values.add((int) readVarint(packed, label));
+          }
+        } else {
+          skip(attr, wire, label);
+        }
+      }
+      if (!attrName.isBlank() && !values.isEmpty()) {
+        out.putIfAbsent(attrName, values.stream().mapToInt(Integer::intValue).toArray());
+      }
+    }
+    return out;
+  }
+
+  private static void putAlias(
+    final Map<String, String> aliases,
+    final String onnxName,
+    final String canonical
+  ) {
+    if (onnxName == null || onnxName.isBlank() || canonical == null || canonical.equals(onnxName)) {
+      return;
+    }
+    aliases.putIfAbsent(onnxName, canonical);
+  }
+
+  private static boolean isEmbeddingGather(final String nodeName) {
+    return nodeName.toLowerCase(Locale.ROOT).contains("/emb/gather");
   }
 
   /**
@@ -183,15 +331,50 @@ public final class OnnxProtoReader {
    * @since 1.1.0
    */
   public static String matMulNodeToWeightName(final String nodeName) {
+    return operatorNodeToWeightName(nodeName, "/matmul", "matmul");
+  }
+
+  /**
+   * {@code /flow/flows.0/enc/in_layers.0/Conv} → {@code flow.flows.0.enc.in_layers.0.weight}
+   *
+   * @since 1.3.0
+   */
+  public static String convNodeToWeightName(final String nodeName) {
+    return operatorNodeToWeightName(nodeName, "/conv", "conv");
+  }
+
+  /**
+   * {@code /dec/ups.0/ConvTranspose} → {@code dec.ups.0.weight}
+   *
+   * @since 1.3.0
+   */
+  public static String convTransposeNodeToWeightName(final String nodeName) {
+    return operatorNodeToWeightName(nodeName, "/convtranspose", "convtranspose");
+  }
+
+  /**
+   * {@code /enc_p/emb/Gather} → {@code enc_p.emb.weight}
+   *
+   * @since 1.3.0
+   */
+  public static String gatherNodeToWeightName(final String nodeName) {
+    return operatorNodeToWeightName(nodeName, "/gather", "gather");
+  }
+
+  private static String operatorNodeToWeightName(
+    final String nodeName,
+    final String slashSuffix,
+    final String suffix
+  ) {
     String name = nodeName.strip();
     while (name.startsWith("/")) {
       name = name.substring(1);
     }
     String lower = name.toLowerCase(Locale.ROOT);
-    if (lower.endsWith("/matmul")) {
-      name = name.substring(0, name.length() - "/matmul".length());
-    } else if (lower.endsWith("matmul")) {
-      name = name.substring(0, name.length() - "matmul".length());
+    if (lower.endsWith(slashSuffix)) {
+      name = name.substring(0, name.length() - slashSuffix.length());
+    } else if (lower.endsWith(suffix)) {
+      name = name.substring(0, name.length() - suffix.length());
       while (name.endsWith("/") || name.endsWith(".")) {
         name = name.substring(0, name.length() - 1);
       }
@@ -400,15 +583,40 @@ public final class OnnxProtoReader {
   /**
    * Parsed graph slice for Tier A import.
    *
-   * @param initializers         named TensorProto weights / constants
-   * @param matMulWeightAliases  anonymous MatMul {@code B} initializer name → HF-style
-   *                             {@code ….weight} path derived from the MatMul node name
+   * @param initializers           named TensorProto weights / constants
+   * @param matMulWeightAliases    anonymous MatMul {@code B} initializer name → HF-style
+   *                               {@code ….weight} path derived from the MatMul node name
+   * @param identityWeightAliases  Conv / ConvTranspose / embedding-Gather initializer name →
+   *                               PyTorch-style {@code ….weight} path (no transpose)
+   * @param convLayouts            Conv / ConvTranspose weight name → spatial attributes from the
+   *                               consuming node (stride, pads, dilation, groups, output_padding)
    * @since 1.1.0
    */
   public record OnnxGraphBundle(
     List<OnnxTensorProto> initializers,
-    Map<String, String> matMulWeightAliases
+    Map<String, String> matMulWeightAliases,
+    Map<String, String> identityWeightAliases,
+    Map<String, ConvLayout> convLayouts
   ) {
+    public OnnxGraphBundle {
+      convLayouts = convLayouts == null ? Map.of() : Map.copyOf(convLayouts);
+    }
+
+    /**
+     * Dilations greater than 1, keyed like {@link #convLayouts()}.
+     *
+     * @since 1.3.0
+     */
+    public Map<String, Integer> convDilations() {
+      Map<String, Integer> out = new LinkedHashMap<>();
+      this.convLayouts.forEach((name, layout) -> {
+        int dilation = layout.dilationOr(1);
+        if (dilation > 1) {
+          out.put(name, dilation);
+        }
+      });
+      return Map.copyOf(out);
+    }
   }
 
   /**

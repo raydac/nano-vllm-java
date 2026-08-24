@@ -15,8 +15,8 @@ import java.util.Set;
  * {@link #TEXT_TO_EMBEDDING}. Extra input types ({@link LlmModality#IMAGE}, {@link LlmModality#AUDIO},
  * {@link LlmModality#VIDEO}) come from checkpoint keys such as {@code vision_config} /
  * {@code audio_config} / {@code video_token_id}. This library currently <em>runs</em>
- * {@link #TEXT_TO_TEXT}, {@link #TEXT_TO_EMBEDDING}, or {@link #AUDIO_TO_TEXT} — see
- * {@link LlmModel#usableModalities()}.
+ * {@link #TEXT_TO_TEXT}, {@link #TEXT_TO_EMBEDDING}, {@link #AUDIO_TO_TEXT}, or
+ * {@link #TEXT_TO_AUDIO} — see {@link LlmModel#usableModalities()}.
  *
  * @param input  content types the checkpoint consumes; never empty
  * @param output content types the checkpoint produces; may be empty
@@ -40,6 +40,13 @@ public record LlmModalities(Set<LlmModality> input, Set<LlmModality> output) {
    * @since 1.3.0
    */
   public static final LlmModalities AUDIO_TO_TEXT = of(LlmModality.AUDIO, LlmModality.TEXT);
+
+  /**
+   * Piper text-to-speech: text in, audio out.
+   *
+   * @since 1.3.0
+   */
+  public static final LlmModalities TEXT_TO_AUDIO = of(LlmModality.TEXT, LlmModality.AUDIO);
 
   /**
    * Canonical constructor: copies both sides, rejects a null or empty input set.
@@ -109,6 +116,9 @@ public record LlmModalities(Set<LlmModality> input, Set<LlmModality> output) {
     if (config.isWhisper()) {
       return AUDIO_TO_TEXT;
     }
+    if (config.isPiper()) {
+      return TEXT_TO_AUDIO;
+    }
     EnumSet<LlmModality> input = EnumSet.of(LlmModality.TEXT);
     if (config.imageConfigPresent()) {
       input.add(LlmModality.IMAGE);
@@ -142,6 +152,27 @@ public record LlmModalities(Set<LlmModality> input, Set<LlmModality> output) {
    * @since 1.3.0
    */
   public static LlmModalities usable(final boolean embedding, final boolean speech) {
+    return usable(embedding, speech, false);
+  }
+
+  /**
+   * Modalities this library actually consumes and produces for a loaded graph.
+   *
+   * @param embedding {@code true} for BERT-style encoders
+   * @param speech    {@code true} for Whisper speech-to-text
+   * @param synthesis {@code true} for Piper text-to-speech
+   * @return {@link #TEXT_TO_AUDIO}, {@link #AUDIO_TO_TEXT}, {@link #TEXT_TO_EMBEDDING},
+   * or {@link #TEXT_TO_TEXT}
+   * @since 1.3.0
+   */
+  public static LlmModalities usable(
+    final boolean embedding,
+    final boolean speech,
+    final boolean synthesis
+  ) {
+    if (synthesis) {
+      return TEXT_TO_AUDIO;
+    }
     if (speech) {
       return AUDIO_TO_TEXT;
     }

@@ -1,5 +1,6 @@
 package com.igormaznitsa.nanollvm.samples;
 
+import com.igormaznitsa.nanollvm.llm.LLM;
 import com.igormaznitsa.nanollvm.models.LlmModel;
 import com.igormaznitsa.nanollvm.models.LlmModelFactory;
 import com.igormaznitsa.nanollvm.samples.utils.BundledModels;
@@ -14,8 +15,9 @@ import java.util.Locale;
  * Minimal Whisper speech-to-text demo (default {@code models/whisper-base}): load a Hugging Face
  * safetensors checkpoint and transcribe an uncompressed WAV file.
  *
- * <p>This is a speech model — call {@link LlmModel#transcribe(Path)}, not {@code LLM.builder}.
- * CTranslate2 {@code model.bin} folders are rejected.
+ * <p>This is a speech model — {@link com.igormaznitsa.nanollvm.llm.LLM#builder} then
+ * {@link com.igormaznitsa.nanollvm.llm.LLM#transcribe(Path)}. CTranslate2 {@code model.bin}
+ * folders are rejected.
  *
  * <p>Args: optional model folder (default {@code models/whisper-base}), optional WAV path. When no
  * WAV is given, a 0.5s 440 Hz tone is synthesized (the transcript is usually empty or noise).
@@ -41,13 +43,14 @@ public final class TranscribeHelloWorld {
 
     System.out.println("Loading speech model from " + modelDir);
     long started = System.currentTimeMillis();
-    try (LlmModel model = LlmModelFactory.make(modelDir)) {
+    try (LlmModel model = LlmModelFactory.make(modelDir);
+         LLM llm = LLM.builder(model).build()) {
       System.out.println("architecture=" + model.architectureName()
         + " speech=" + model.isSpeechModel()
         + " modalities=" + model.modalities()
         + " usable=" + model.usableModalities());
       System.out.println("WAV " + wav);
-      String text = model.transcribe(wav);
+      String text = llm.transcribe(wav);
       System.out.printf(Locale.ROOT, "transcript: %s%n", text.isBlank() ? "(empty)" : text);
     } finally {
       System.out.println("Time taken: " + (System.currentTimeMillis() - started) + "ms");

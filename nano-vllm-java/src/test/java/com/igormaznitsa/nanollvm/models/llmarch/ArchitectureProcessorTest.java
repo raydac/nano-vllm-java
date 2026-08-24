@@ -8,6 +8,9 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.igormaznitsa.nanollvm.models.internal.WeightNames;
+import com.igormaznitsa.nanollvm.tensor.Tensor;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import org.junit.jupiter.api.Test;
 
 final class ArchitectureProcessorTest {
@@ -21,6 +24,7 @@ final class ArchitectureProcessorTest {
     assertSame(Lfm2Processor.INSTANCE, ArchitectureProcessors.of(WeightNames.ARCH_LFM2));
     assertSame(BertProcessor.INSTANCE, ArchitectureProcessors.of(WeightNames.ARCH_BERT));
     assertSame(WhisperProcessor.INSTANCE, ArchitectureProcessors.of(WeightNames.ARCH_WHISPER));
+    assertSame(PiperProcessor.INSTANCE, ArchitectureProcessors.of(WeightNames.ARCH_PIPER));
   }
 
   @Test
@@ -35,6 +39,9 @@ final class ArchitectureProcessorTest {
     assertTrue(ArchitectureProcessors.of(WeightNames.ARCH_WHISPER).isSpeech());
     assertFalse(ArchitectureProcessors.of(WeightNames.ARCH_QWEN3).isSpeech());
     assertFalse(ArchitectureProcessors.of(WeightNames.ARCH_BERT).isSpeech());
+    assertTrue(ArchitectureProcessors.of(WeightNames.ARCH_PIPER).isSynthesis());
+    assertFalse(ArchitectureProcessors.of(WeightNames.ARCH_WHISPER).isSynthesis());
+    assertFalse(ArchitectureProcessors.of(WeightNames.ARCH_QWEN3).isSynthesis());
   }
 
   @Test
@@ -53,6 +60,8 @@ final class ArchitectureProcessorTest {
     assertInstanceOf(CausalArchitecture.class, ArchitectureProcessors.of(WeightNames.ARCH_LFM2));
     assertInstanceOf(EmbeddingArchitecture.class, ArchitectureProcessors.of(WeightNames.ARCH_BERT));
     assertInstanceOf(SpeechArchitecture.class, ArchitectureProcessors.of(WeightNames.ARCH_WHISPER));
+    assertInstanceOf(SynthesisArchitecture.class,
+      ArchitectureProcessors.of(WeightNames.ARCH_PIPER));
   }
 
   @Test
@@ -87,5 +96,43 @@ final class ArchitectureProcessorTest {
     assertThrows(
       IllegalStateException.class,
       () -> BertProcessor.INSTANCE.createSpeech(null, null));
+  }
+
+  @Test
+  void chatSpeechAndEmbeddingProcessorsRejectSynthesisGraph() {
+    assertThrows(
+      IllegalStateException.class,
+      () -> Qwen3Processor.INSTANCE.createSynthesis(null, null));
+    assertThrows(
+      IllegalStateException.class,
+      () -> BertProcessor.INSTANCE.createSynthesis(null, null));
+    assertThrows(
+      IllegalStateException.class,
+      () -> WhisperProcessor.INSTANCE.createSynthesis(null, null));
+  }
+
+  @Test
+  void synthesisProcessorRejectsChatEmbeddingAndSpeechGraphs() {
+    assertThrows(
+      IllegalStateException.class,
+      () -> PiperProcessor.INSTANCE.createCausal(null, null));
+    assertThrows(
+      IllegalStateException.class,
+      () -> PiperProcessor.INSTANCE.createEmbedding(null, null));
+    assertThrows(
+      IllegalStateException.class,
+      () -> PiperProcessor.INSTANCE.createSpeech(null, null));
+  }
+
+  @Test
+  void piperDecoderResblockConvNamesPromoteToConvs1Convs2() {
+    Map<String, Tensor> tensors = new LinkedHashMap<>();
+    Tensor convs0 = Tensor.zeros(8, 8, 3);
+    Tensor convs1 = Tensor.zeros(8, 8, 3);
+    tensors.put("dec.resblocks.0.convs.0.weight", convs0);
+    tensors.put("dec.resblocks.0.convs.1.weight", convs1);
+    PiperOnnxNames.promoteDecoderResblocks(tensors, new LinkedHashMap<>());
+    assertSame(convs0, tensors.get("dec.resblocks.0.convs1.0.weight"));
+    assertSame(convs1, tensors.get("dec.resblocks.0.convs2.0.weight"));
   }
 }

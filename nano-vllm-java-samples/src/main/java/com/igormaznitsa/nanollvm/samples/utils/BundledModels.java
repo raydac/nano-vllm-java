@@ -6,6 +6,7 @@ import static com.igormaznitsa.nanollvm.utils.NanoLlvmProps.ENV_MODELS_DIR;
 import static com.igormaznitsa.nanollvm.utils.NanoLlvmProps.PROP_MODEL;
 import static com.igormaznitsa.nanollvm.utils.NanoLlvmProps.PROP_MODELS_DIR;
 
+import com.igormaznitsa.nanollvm.models.ModelSupport;
 import com.igormaznitsa.nanollvm.utils.NanoLlvmProps;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -65,6 +66,20 @@ public final class BundledModels {
    * @since 1.3.0
    */
   public static final String WHISPER_TINY = DEFAULT_MODELS_DIR + "/whisper-tiny";
+  /**
+   * Bundled Piper Russian Irina medium voice folder under {@link #DEFAULT_MODELS_DIR}.
+   *
+   * @since 1.3.0
+   */
+  public static final String PIPER_RU_IRINA_MEDIUM =
+    DEFAULT_MODELS_DIR + "/piper-ru-irina-medium";
+  /**
+   * Bundled Piper US English Lessac medium voice folder under {@link #DEFAULT_MODELS_DIR}.
+   *
+   * @since 1.3.0
+   */
+  public static final String PIPER_EN_LESSAC_MEDIUM =
+    DEFAULT_MODELS_DIR + "/piper-en-lessac-medium";
   /**
    * Bundled Tiny-LLM ONNX folder under {@link #DEFAULT_MODELS_DIR}.
    *
@@ -126,10 +141,32 @@ public final class BundledModels {
         + "models/download-multilingual-e5-small.sh, "
         + "models/download-xlm-roberta-base.sh, "
         + "models/download-whisper-base.sh, "
+        + "models/download-piper-en-lessac-medium.sh, "
+        + "models/download-piper-ru-irina-medium.sh, "
         + "or models/download-tiny-llm-onnx.sh, "
         + "models/download-smollm2-135m-instruct-onnx.sh, "
         + "or pass a model path / -D" + PROP_MODEL + "=… / " + ENV_MODEL + "."
     ));
+  }
+
+  /**
+   * English Lessac if present, otherwise Russian Irina.
+   */
+  public static Path requirePiperVoice() {
+    return find(PIPER_EN_LESSAC_MEDIUM)
+      .or(() -> find(PIPER_RU_IRINA_MEDIUM))
+      .orElseThrow(() -> new IllegalStateException(
+        "no Piper voice under " + modelsRoot()
+          + ". Run models/download-piper-en-lessac-medium.sh or "
+          + "models/download-piper-ru-irina-medium.sh"));
+  }
+
+  /**
+   * Default TTS prompt for a Piper folder ({@code Hello world} for Lessac, Russian otherwise).
+   */
+  public static String defaultPiperText(final Path modelDir) {
+    String name = modelDir.getFileName().toString().toLowerCase(Locale.ROOT);
+    return name.contains("-en-") || name.contains("lessac") ? "Hello world" : "Привет, мир";
   }
 
   /**
@@ -139,7 +176,9 @@ public final class BundledModels {
    *                        {@code Gemma4-E2B-IT-QAT-Mobile}, {@code Tiny-LLM-ONNX},
    *                        {@code SmolLM2-135M-Instruct-ONNX}, {@code LFM2.5-2.6B-Q4_K_M.gguf},
    *                        {@code multilingual-e5-small}, {@code xlm-roberta-base},
-   *                        {@code whisper-base}, {@code whisper-tiny}, or {@code models/…}
+   *                        {@code whisper-base}, {@code whisper-tiny},
+   *                        {@code piper-en-lessac-medium}, {@code piper-ru-irina-medium},
+   *                        or {@code models/…}
    */
   public static Optional<Path> find(final String modelPathOrName) {
     if (modelPathOrName == null || modelPathOrName.isBlank()) {
@@ -180,7 +219,8 @@ public final class BundledModels {
   }
 
   private static boolean isModel(final Path path) {
-    return isGgufFile(path) || isHfModelDir(path) || isDirWithGguf(path);
+    return isGgufFile(path) || isHfModelDir(path) || isDirWithGguf(path)
+      || ModelSupport.isSynthesisCheckpoint(path);
   }
 
   private static boolean isGgufFile(final Path path) {

@@ -12,7 +12,8 @@
  * (chat). {@link BidirectionalAttention} is full self-attention with no cache (BERT embeddings).
  * Independent attention jobs, RoPE tokens, and embedding rows may run on the step
  * {@link com.igormaznitsa.nanollvm.internal.Context#matmul()} pool. Decoder layers stay sequential
- * (residual stream).
+ * (residual stream). {@link Conv1d} / {@link ConvTranspose1d} split independent output channels
+ * on that same pool (Whisper stem and Piper vocoder).
  *
  * <p><b>Weights.</b> {@link Linear} and {@link VocabParallelEmbedding} bind a dense float32 table,
  * a packed GGUF weight, or Gemma QAT at construction. {@code VocabParallelEmbedding} keeps the vLLM

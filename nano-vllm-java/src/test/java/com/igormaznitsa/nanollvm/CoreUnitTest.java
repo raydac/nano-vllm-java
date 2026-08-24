@@ -48,6 +48,7 @@ import com.igormaznitsa.nanollvm.models.LlmModalities;
 import com.igormaznitsa.nanollvm.models.LlmModality;
 import com.igormaznitsa.nanollvm.models.LlmModel;
 import com.igormaznitsa.nanollvm.models.LlmModelFactory;
+import com.igormaznitsa.nanollvm.models.LlmOptionalData;
 import com.igormaznitsa.nanollvm.prompts.ChatPrompts;
 import com.igormaznitsa.nanollvm.tensor.FloatKernels;
 import com.igormaznitsa.nanollvm.tensor.FloatKernelsFactory;
@@ -157,6 +158,31 @@ class CoreUnitTest {
       () -> LlmModelFactory.make(path, Map.of(LlmModel.OPTION_THINK_TAGS, "</think>")));
     assertThrows(IllegalArgumentException.class,
       () -> LlmModelFactory.make(path, Map.of(LlmModel.OPTION_CHAT_SPECIALS, "<|im_end|>")));
+    assertThrows(IllegalArgumentException.class,
+      () -> LlmModelFactory.make(path, Map.of(LlmModel.OPTION_OPTIONAL_DATA, "x")));
+  }
+
+  @Test
+  void modelOptionalDataIsNestedAndOmittedWhenEmpty() {
+    Path path = OptionalModelAssumptions.requireQwen3();
+    Path espeak = Path.of("/tmp/espeak-ng-data");
+    LlmOptionalData.Key<String> note = LlmOptionalData.Key.of("app.note", String.class);
+    try (LlmModel model = LlmModelFactory.open(path)
+      .optionalData(LlmOptionalData.ESPEAK_DATA, espeak)
+      .optionalData(note, "keep")
+      .make()) {
+      assertEquals(3, model.options().size());
+      assertEquals(
+        espeak.toAbsolutePath().normalize(),
+        model.optionalData(LlmOptionalData.ESPEAK_DATA).orElseThrow());
+      assertEquals("keep", model.optionalData(note).orElseThrow());
+      assertTrue(model.optionalData(LlmOptionalData.Key.of("missing", String.class)).isEmpty());
+      @SuppressWarnings("unchecked")
+      Map<String, Object> nested =
+        (Map<String, Object>) model.options().get(LlmModel.OPTION_OPTIONAL_DATA);
+      assertEquals(2, nested.size());
+      assertThrows(UnsupportedOperationException.class, () -> nested.put("x", "y"));
+    }
   }
 
   @Test
@@ -809,6 +835,7 @@ class CoreUnitTest {
     assertEquals("Hello", ChatReply.streamDisplayText("<think>secret</think>Hello"));
     assertEquals("still thinking", ChatReply.streamDisplayText("<think>still thinking"));
     assertEquals("ok", ChatReply.streamDisplayText("ok<|im_end|>"));
+    assertEquals("ok", ChatReply.streamDisplayText("ok<|im_ended|>"));
   }
 
   @Test
@@ -907,7 +934,9 @@ class CoreUnitTest {
     assertEquals("visible", ChatReply.stripChatMarkup(
       "visible<|secret|>", ThinkTags.DEFAULT, specials));
     assertTrue(ChatSpecials.DEFAULT.markers().contains("<|im_end|>"));
+    assertTrue(ChatSpecials.DEFAULT.markers().contains("<|im_ended|>"));
     assertTrue(ChatSpecials.DEFAULT.markers().contains(ThinkTags.DEFAULT.open()));
+    assertEquals("Let me know!", ChatReply.parse("Let me know! <|im_ended|>").answer());
     assertEquals(ChatSpecials.DEFAULT, ChatSpecials.of(ChatSpecials.DEFAULT.markers()));
 
     assertThrows(IllegalArgumentException.class, () -> ChatSpecials.of("  "));
@@ -1208,7 +1237,7 @@ class CoreUnitTest {
                 1e6f, null, "float32", "gemma3_text",
                 List.of("Gemma3ForCausalLM"), "gelu_pytorch_tanh",
               512, List.of("sliding_attention"), 10_000f, 256f, 0, false, false, false, false,
-              false, null, null)));
+              false, null, null, null)));
 
     Path dir = createTempDirectory("gemma-tok");
     try {

@@ -28,6 +28,10 @@ public final class CausalLMFactory {
       throw new IllegalArgumentException(
         ModelSupport.speechEngineMisuseMessage(selected.architectureId()));
     }
+    if (selected.isSynthesis()) {
+      throw new IllegalArgumentException(
+        ModelSupport.synthesisEngineMisuseMessage(selected.architectureId()));
+    }
     if (selected.isEmbedding()) {
       throw new IllegalArgumentException(ModelSupport.chatMisuseMessage(selected.architectureId()));
     }
