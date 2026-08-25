@@ -106,7 +106,8 @@ import java.util.stream.IntStream;
  * Construction is <em>library-quiet</em> ({@link LlmListeners#silent()}). CLI tools should pass
  * {@link LlmListeners#toSystem()} via {@link Builder#listen(LlmListener)}. Architecture is auto-detected from
  * {@code config.json}
- * (override with {@code -Dnanollvm.arch=qwen3|gemma3|llama|lfm2}).
+ * (override with {@code -Dnanollvm.arch=qwen3|gemma3|gemma4|llama|lfm2} when that id matches
+ * the checkpoint; Whisper and Piper are detected from the crate, not this flag).
  *
  * <h2>Thread safety</h2>
  * <ul>

@@ -40,30 +40,51 @@ public record ConvLayout(
     }
   }
 
+  /**
+   * {@code true} when this weight is a {@code ConvTranspose} (upsample) kernel.
+   */
   public boolean isTransposed() {
     return this.kind == Kind.CONV_TRANSPOSE;
   }
 
+  /**
+   * ONNX stride, or {@code fallback} when the attribute was omitted.
+   */
   public int strideOr(final int fallback) {
     return this.stride == null ? fallback : this.stride;
   }
 
+  /**
+   * ONNX padding, or {@code fallback} when omitted or zero (Pad often lives in a sibling op).
+   */
   public int paddingOr(final int fallback) {
     return this.padding == null || this.padding == 0 ? fallback : this.padding;
   }
 
+  /**
+   * ConvTranspose {@code output_padding}, or {@code fallback} when omitted.
+   */
   public int outputPaddingOr(final int fallback) {
     return this.outputPadding == null ? fallback : this.outputPadding;
   }
 
+  /**
+   * Dilation, or {@code fallback} when omitted.
+   */
   public int dilationOr(final int fallback) {
     return this.dilation == null ? fallback : this.dilation;
   }
 
+  /**
+   * Group count, or {@code fallback} when omitted.
+   */
   public int groupsOr(final int fallback) {
     return this.groups == null ? fallback : this.groups;
   }
 
+  /**
+   * ONNX operator that owns this weight.
+   */
   public enum Kind {
     CONV,
     CONV_TRANSPOSE

@@ -140,7 +140,8 @@ public abstract sealed class LlmModel implements AutoCloseable permits LlmModelI
    * Content types declared by the checkpoint. Chat graphs always include text; Gemma 4 QAT mobile
    * also declares image, audio, and video input. Embedding encoders are
    * {@link LlmModalities#TEXT_TO_EMBEDDING}. Whisper speech models are
-   * {@link LlmModalities#AUDIO_TO_TEXT}. Gemma 4 extra towers are skipped at load — see
+   * {@link LlmModalities#AUDIO_TO_TEXT}. Piper synthesis models are
+   * {@link LlmModalities#TEXT_TO_AUDIO}. Gemma 4 extra towers are skipped at load — see
    * {@link #usableModalities()}. Safe to call after {@link #close()}.
    *
    * @since 1.2.0

@@ -57,6 +57,9 @@ final class UnigramCodec implements TokenCodec {
     tokenAt[end] = unkId;
   }
 
+  /**
+   * {@inheritDoc}
+   */
   @Override
   public List<Integer> encode(final String text) {
     List<Integer> ids = new ArrayList<>();
@@ -78,6 +81,9 @@ final class UnigramCodec implements TokenCodec {
     return ids;
   }
 
+  /**
+   * {@inheritDoc}
+   */
   @Override
   public String decode(final List<String> pieces) {
     return MetaspaceText.decode(MetaspaceText.concat(pieces));

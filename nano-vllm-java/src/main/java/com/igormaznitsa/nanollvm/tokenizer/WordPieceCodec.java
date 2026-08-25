@@ -83,6 +83,9 @@ final class WordPieceCodec implements TokenCodec {
       || (cp >= 123 && cp <= 126);
   }
 
+  /**
+   * {@inheritDoc}
+   */
   @Override
   public List<Integer> encode(final String text) {
     List<Integer> ids = new ArrayList<>();
@@ -111,6 +114,9 @@ final class WordPieceCodec implements TokenCodec {
     return ids;
   }
 
+  /**
+   * {@inheritDoc}
+   */
   @Override
   public String decode(final List<String> pieces) {
     if (this.bertSplit) {

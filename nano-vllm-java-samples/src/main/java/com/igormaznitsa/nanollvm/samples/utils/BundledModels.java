@@ -50,7 +50,7 @@ public final class BundledModels {
   /**
    * Bundled XLM-RoBERTa-base ONNX embedding folder under {@link #DEFAULT_MODELS_DIR}.
    *
-   * @since 1.2.1
+   * @since 1.3.0
    */
   public static final String XLM_ROBERTA_BASE =
     DEFAULT_MODELS_DIR + "/xlm-roberta-base";

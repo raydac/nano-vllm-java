@@ -20,6 +20,9 @@ final class WordLevelCodec implements TokenCodec {
     this.unkToken = unkToken == null || unkToken.isBlank() ? "[UNK]" : unkToken;
   }
 
+  /**
+   * {@inheritDoc}
+   */
   @Override
   public List<Integer> encode(final String text) {
     List<Integer> ids = new ArrayList<>();
@@ -57,6 +60,9 @@ final class WordLevelCodec implements TokenCodec {
     return ids;
   }
 
+  /**
+   * {@inheritDoc}
+   */
   @Override
   public String decode(final List<String> pieces) {
     return String.join(" ", pieces);

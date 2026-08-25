@@ -14,14 +14,29 @@ public final class CausalLMFactory {
   private CausalLMFactory() {
   }
 
+  /**
+   * Builds the causal graph for {@code config}'s architecture.
+   *
+   * @throws IllegalArgumentException if {@code config} is an embedding, speech, or synthesis
+   *                                  checkpoint
+   */
   public static CausalLM create(final Config.HfConfig config, final WeightBag weights) {
     return ArchitectureProcessors.of(detect(config)).createCausal(config, weights);
   }
 
+  /**
+   * Weight-name schema for the causal architecture in {@code config}.
+   */
   public static WeightSchema schema(final Config.HfConfig config) {
     return WeightSchema.forArchitecture(detect(config), config);
   }
 
+  /**
+   * Architecture id for a causal checkpoint ({@code qwen3}, {@code gemma3}, {@code gemma4},
+   * {@code llama}, {@code lfm2}).
+   *
+   * @throws IllegalArgumentException if {@code config} is not a supported causal family
+   */
   public static String detect(final Config.HfConfig config) {
     ModelSupport.Selection selected = ModelSupport.resolve(config);
     if (selected.isSpeech()) {

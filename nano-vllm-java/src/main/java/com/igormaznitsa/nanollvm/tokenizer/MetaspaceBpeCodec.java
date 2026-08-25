@@ -51,6 +51,9 @@ final class MetaspaceBpeCodec implements TokenCodec {
     this.byteFallback = byteFallback;
   }
 
+  /**
+   * {@inheritDoc}
+   */
   @Override
   public List<Integer> encode(final String text) {
     List<Integer> ids = new ArrayList<>();
@@ -79,6 +82,9 @@ final class MetaspaceBpeCodec implements TokenCodec {
     return ids;
   }
 
+  /**
+   * {@inheritDoc}
+   */
   @Override
   public String decode(final List<String> pieces) {
     return MetaspaceText.decode(MetaspaceText.concat(pieces));

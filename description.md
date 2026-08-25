@@ -9,9 +9,11 @@ You do not need fluency in Java. Linear algebra appears where it clarifies struc
 term is defined on first use. Occasional metaphors remain only as scaffolding, never as substitutes for the concepts.
 
 The subject is a small program that **loads a pretrained model** and runs **inference** on an ordinary CPU, without
-CUDA or other native backends: continuing text or short chat with a **causal** language model, and (**since 1.1.0**)
-encoding sentences to vectors with a **BERT-family embedding** GGUF or ONNX. Java package / JPMS module:
-`com.igormaznitsa.nanollvm`. This guide matches released library **1.2.0** (2026-08-22).
+CUDA or other native backends: continuing text or short chat with a **causal** language model; (**since 1.1.0**)
+encoding sentences to vectors with a **BERT-family embedding** GGUF or ONNX; (**since 1.3.0**) transcribing speech
+with **Whisper** safetensors; and synthesizing speech with **Piper** ONNX voices. Java package / JPMS module:
+`com.igormaznitsa.nanollvm`. This guide matches development line **1.3.0-SNAPSHOT** (after released **1.2.0**,
+2026-08-22).
 
 Where a topic has a standard paper or format specification, a short **Further reading** note lists links. Those are
 optional depth; the exposition here is self-contained. A curated **learning path** (what to read in which order) is
@@ -35,6 +37,8 @@ file paths.
 7a. [GGUF — quantized single-file models (Qwen3 and LFM2)](#7a-gguf--quantized-single-file-models-qwen3-and-lfm2)
 7b. [BERT embedding GGUFs — sentence vectors (**since 1.1.0**)](#7b-bert-embedding-ggufs--sentence-vectors-since-110)
 7c. [ONNX weight folders and Llama (**since 1.1.0**)](#7c-onnx-weight-folders-and-llama-since-110)
+7d. [Whisper speech-to-text (**since 1.3.0**)](#7d-whisper-speech-to-text-since-130)
+7e. [Piper text-to-speech (**since 1.3.0**)](#7e-piper-text-to-speech-since-130)
 8. [Attention: kinds of looking-back, and how they work](#8-attention-kinds-of-looking-back-and-how-they-work)
 9. [The thinking process: how it is organized and how it works with the model](#9-the-thinking-process-how-it-is-organized-and-how-it-works-with-the-model)
 10. [Tensors, embeddings, and the arithmetic of inference](#10-tensors-embeddings-and-the-arithmetic-of-inference) —
@@ -72,7 +76,7 @@ The rest of this guide unpacks that sentence without assuming prior ML coursewor
 
 **In the code:** front door is `LLM` / `LLM.Builder`; interactive demo is `samples.Example`; linear mains include
 `HelloWorld`, `NextTokenHelloWorld`, `LogTriageHelloWorld`, `AdvisorRagHelloWorld`,
-`RagTunerHelloWorld`, `EmbeddingsHelloWorld` (chapter 16).
+`RagTunerHelloWorld`, `EmbeddingsHelloWorld`, `TranscribeHelloWorld`, `SynthesizeHelloWorld` (chapter 16).
 
 ---
 
@@ -123,12 +127,16 @@ of reading process): **Qwen3** and **Gemma3**. **Since 1.1.0** the same causal p
 (including small ONNX demos) and **Gemma 4 text** (QAT mobile) — vision and audio towers in that crate are skipped.
 The same Qwen3 graph also loads from a **GGUF** file (**since 1.1.0**). A further GGUF path loads **LFM2**
 (hybrid short-convolution + GQA). Sentence embeddings use **BERT**-family GGUF or ONNX (**since 1.1.0**, chapter 7b).
-You usually need not care which; the program detects which files you pointed it at.
+**Since 1.3.0**, the same factory also loads **Whisper** speech-to-text (Hugging Face safetensors, chapter **7d**) and
+**Piper** text-to-speech (ONNX voice folder, chapter **7e**). You usually need not care which; the program detects
+which files you pointed it at.
 
 **In the code:** architecture pick is `ArchitectureProcessors.of` → `Qwen3ForCausalLM`,
 `Gemma3ForCausalLM`, `Gemma4ForCausalLM`, `LlamaForCausalLM`, or `Lfm2ForCausalLM`; GGUF entry is `LlmModelFactory` →
 `models.llmcontainer.GgufTransport` (container catalog) → `models.llmarch.ArchitectureProcessor.bind` / `fill` / `create`;
-ONNX folders use `models.llmcontainer.OnnxTransport` → the same architecture processor (chapter **7c**); one next-token
+ONNX folders use `models.llmcontainer.OnnxTransport` → the same architecture processor (chapter **7c**); Whisper uses
+`SpeechArchitecture` / `WhisperForAsr` (chapter **7d**); Piper uses `SynthesisArchitecture` / `PiperForTts`
+(chapter **7e**); one next-token
 step is `Transformer.step` → `CausalLM.forward` / `computeLogits` → `Sampler.forward` (chapter 16). Linear demo:
 `samples.NextTokenHelloWorld` (Tiny-LLM-ONNX) encodes a seed and prints the next sampled tokens.
 
@@ -183,12 +191,12 @@ You (or a download script in this project’s `models/` folder) fetch weights fr
 
 | Crate shape | What you point at | Typical cargo |
 |-------------|-------------------|---------------|
-| **Hugging Face folder** | A directory | `config.json` + tokenizer (`tokenizer.json`, else SentencePiece `tokenizer.model` **since 1.2.0**) + `*.safetensors` **or** supported `*.onnx` (Qwen3 / Gemma3 / **Gemma 4 text** / **Llama**; BERT embeddings from ONNX) — **since 1.1.0** for ONNX and Gemma 4 |
+| **Hugging Face folder** | A directory | `config.json` + tokenizer (`tokenizer.json`, else SentencePiece `tokenizer.model` **since 1.2.0**) + `*.safetensors` **or** supported `*.onnx` (Qwen3 / Gemma3 / **Gemma 4 text** / **Llama**; BERT embeddings from ONNX; **Whisper** speech safetensors **since 1.3.0**) — **since 1.1.0** for ONNX and Gemma 4. **Piper** voices are a folder of `*.onnx` + `*.onnx.json` (**since 1.3.0**, chapter **7e**). |
 | **Single GGUF file** | One `.gguf` | Metadata + embedded tokenizer + quantized weights (**Qwen3** or **LFM2** chat, or **BERT** embeddings — not Gemma/Llama GGUF) |
 | **Stream / classpath** (**since 1.1.0**) | A `ModelFileSource` (or `fromClasspath*` helpers) | Same roles as above, but bytes come from streams into **heap** (no disk cache); `make(Path)` stays direct disk I/O |
 
 **Format restrictions are real:** each crate shape accepts only a **subset** of hub files (dtypes, architectures,
-file-name filters). Chapters **7** / **7a** / **7c** spell out what loads and what fails.
+file-name filters). Chapters **7** / **7a** / **7c** / **7d** / **7e** spell out what loads and what fails.
 
 Hugging Face folder example:
 
@@ -205,9 +213,9 @@ Loading is that wiring.
 
 ### Three kinds of cargo (do not mix them up)
 
-**1. The blueprint (`config.json`)**  
+**1. The blueprint (`config.json` or Piper `*.onnx.json`)**  
 A list of measurements: how many stacked “reading rooms” (layers), how wide each stream of numbers is, how many
-attention heads, how long a passage may be, which recipe (Qwen vs Gemma), and similar.
+attention heads, how long a passage may be, which recipe (Qwen vs Gemma vs Whisper vs Piper), and similar.
 
 This is like an architect’s plan. It does **not** contain opinions about France or arithmetic. It only tells the program
 how large the furniture must be. **Chapter 5** explains every field this project reads, with real Qwen and Gemma
@@ -222,7 +230,8 @@ This is the spelling system and the stage-direction language — still not the �
 **3. The learned numbers (`*.safetensors` or supported `*.onnx`)**  
 The big cargo. Millions or billions of numbers shaped by training. These are what make one model sound different from
 another. **Chapter 7** (safetensors) and **chapter 7c** (ONNX **since 1.1.0**) explain layouts, dtypes, and what is
-*not* accepted. GGUF packs the same role into one file (**chapter 7a**).
+*not* accepted. GGUF packs the same role into one file (**chapter 7a**). Whisper uses the safetensors crate
+(chapter **7d**). Piper uses ONNX initializers plus a sidecar JSON (chapter **7e**).
 
 On disk they are often stored in a compact form (half-precision, GGUF block quants, or packed QAT). Hugging Face **float**
 crates are **widened to ordinary float32 in RAM**. **Gemma 4 text QAT** safetensors stay **packed** (int2/4/8 + SRQ) and
@@ -258,13 +267,14 @@ Think of a librarian preparing a reading desk:
    Tokenizer files (or the GGUF-embedded vocab) are loaded separately. They never become part of the neural arithmetic;
    they stand at the door, translating.
 
-Those six steps seal an immutable **`LlmModel`** (weights + tokenizer + blueprint). Opening a chat **engine** is a
+Those six steps seal an immutable **`LlmModel`** (weights + tokenizer + blueprint). Opening a runtime **engine** is a
 second, separate act:
 
-7. **Lay out blank notebooks** (when you build an `LLM`)  
-   Memory pages for Keys and Values during conversation are **created empty** on each `LLM`. They are not downloaded
+7. **Lay out blank notebooks** (when you build an `LLM` for **chat**)  
+   Memory pages for Keys and Values during conversation are **created empty** on each chat `LLM`. They are not downloaded
    knowledge; they are scratch paper for that engine’s current text. Share one `LlmModel` across many engines; each
-   engine gets its own notebooks.
+   engine gets its own notebooks. Embedding, Whisper, and Piper engines skip KV paging (`numKvcacheBlocks` is 0) and
+   still share the same CPU matmul pool.
 
 8. **Optional warm-up** (also on `LLM.Builder`, **off by default**)  
    A tiny pretend question may run once so the first real answer is not also paying start-up costs. Call
@@ -277,12 +287,16 @@ worksheets change while answering. Close order: close each **`LLM` first**, then
 `LlmModel.toString()` prints kind, modalities, architecture, container, sizes, and packed/dense/qat (safe after close).
 `LlmModel.modalities()` follows the checkpoint (`LlmModality` enum). Chat graphs are at least
 text→text; Gemma 4 QAT mobile also declares image, audio, and video input. Embedding encoders are
-text→embedding. `LlmModel.usableModalities()` is the text-only path this library actually runs
-(vision/audio towers stay skipped). Optional `Map` load options (**since 1.1.0**) include `LlmModel.OPTION_THINK_TAGS` (`ThinkTags`) and
+text→embedding. Whisper is audio→text; Piper is text→audio. `LlmModel.usableModalities()` is what this library
+actually runs (vision/audio towers on Gemma 4 stay skipped). Optional `Map` load options (**since 1.1.0**) include `LlmModel.OPTION_THINK_TAGS` (`ThinkTags`) and
 `LlmModel.OPTION_CHAT_SPECIALS` (`ChatSpecials`; both frozen on the model, library defaults when omitted).
+**Since 1.3.0**, `LlmModelFactory.open(path).optionalData(key, value)` stores typed extras (Piper
+`LlmOptionalData.ESPEAK_DATA`). Empty extras stay off `options()`.
 A non-silent `LlmListener` sees the same in-place percent/ETA bar while **safetensors**, **GGUF**, or **ONNX** weights
 are poured (`models.llmcontainer.LoadProgress`). Causal graphs use `ArchitectureProcessor.createCausal`; embedding GGUFs
-use `ArchitectureProcessor.createEmbedding`. Each `LLM.builder(model).build()` allocates its own KV arena via `Transformer`
+use `ArchitectureProcessor.createEmbedding`; Whisper uses `createSpeech`; Piper uses `createSynthesis`. Each
+`LLM.builder(model).build()` is the runtime for every kind — chat allocates a KV arena via `Transformer`;
+embed / transcribe / synthesize skip KV and still use the engine matmul pool
 (chapter 16).
 
 ```java
@@ -388,8 +402,8 @@ A Gemma file adds things like `layer_types`, `sliding_window`, `hidden_activatio
 | `model_type`    | Short family name (`qwen3`, `gemma3_text`, `gemma4`, `llama`, …)                    | Exact match via `ModelSupport` (Qwen3 / Gemma3 text / Gemma 4 text / Llama; GGUF `qwen3` / `lfm2`; embeddings BERT encoder: `bert` / `roberta` / `xlm-roberta`) | Unsupported families fail with `UnsupportedModelException` and a support catalog. Optional `-Dnanollvm.arch=…` only when it **matches** the checkpoint. |
 | `architectures` | List of class-style names from Hugging Face (`Qwen3ForCausalLM`, `LlamaForCausalLM`, …) | Same detection if `model_type` is unclear; `*ForConditionalGeneration` / vision classes are rejected | Optional                                           |
 
-You can override causal detection with `-Dnanollvm.arch=qwen3`, `gemma3`, `gemma4`, `llama`, or `lfm2` **only when that id matches the checkpoint**. A forced id cannot turn Qwen2 / Qwen3.5 / vision models into a supported graph. Look-alike names are rejected (`qwen3_5` is not `qwen3`; `gemma2` is not `gemma3`; `gemma4` is its own text graph, not Gemma 3). BERT-encoder families (`bert`, `roberta`, `xlm-roberta`) load as embeddings from GGUF or ONNX (**since 1.2.1** for RoBERTa / XLM-R); DistilBERT / ALBERT / DeBERTa / ELECTRA are still rejected. The error lists what this library actually loads (`ModelSupport.CATALOG`).
-Embedding GGUFs use a separate detector (`bert`) and never go through `LLM.builder` (chapter 7b). ONNX folders use the
+You can override causal detection with `-Dnanollvm.arch=qwen3`, `gemma3`, `gemma4`, `llama`, or `lfm2` **only when that id matches the checkpoint**. A forced id cannot turn Qwen2 / Qwen3.5 / vision models into a supported graph. Look-alike names are rejected (`qwen3_5` is not `qwen3`; `gemma2` is not `gemma3`; `gemma4` is its own text graph, not Gemma 3). BERT-encoder families (`bert`, `roberta`, `xlm-roberta`) load as embeddings from GGUF or ONNX (**since 1.3.0** for RoBERTa / XLM-R); DistilBERT / ALBERT / DeBERTa / ELECTRA are still rejected. Whisper is `whisper` from Hugging Face safetensors (**since 1.3.0**). Piper is detected from `*.onnx` + `*.onnx.json`. The error lists what this library actually loads (`ModelSupport.CATALOG`).
+Embedding GGUFs use a separate detector (`bert` / `roberta` / `xlm-roberta`). **Since 1.3.0**, `LLM.builder(model)` is the runtime for every kind — chat, `embed`, `transcribe`, and `synthesize`. `LlmModel.embed` / `transcribe` / `synthesize` remain sequential shortcuts (no engine pool). ONNX folders use the
 same `config.json` detection (chapter **7c**).
 
 **Examples from real folders**
@@ -398,7 +412,9 @@ same `config.json` detection (chapter **7c**).
 - Gemma3-270M: `"model_type": "gemma3_text"`, `"architectures": ["Gemma3ForCausalLM"]`
 - Gemma 4 E2B QAT mobile: `"model_type": "gemma4"` / `"gemma4_text"` — text chat in this port (vision/audio towers skipped; see **Input and output modalities** below)
 - SmolLM2 / Tiny-LLM ONNX: `"model_type": "llama"`, `"architectures": ["LlamaForCausalLM"]`
-- xlm-roberta-base ONNX: `"model_type": "xlm-roberta"`, `"architectures": ["XLMRobertaForMaskedLM"]` — one BERT-encoder example via ONNX (**since 1.2.1**); any `bert` / `roberta` / `xlm-roberta` checkpoint with mapped names works the same
+- xlm-roberta-base ONNX: `"model_type": "xlm-roberta"`, `"architectures": ["XLMRobertaForMaskedLM"]` — one BERT-encoder example via ONNX (**since 1.3.0**); any `bert` / `roberta` / `xlm-roberta` checkpoint with mapped names works the same
+- whisper-base: `"model_type": "whisper"` — audio→text (**since 1.3.0**, chapter **7d**)
+- Piper Lessac / Irina: folder of `*.onnx` + `*.onnx.json` — text→audio (**since 1.3.0**, chapter **7e**)
 
 ---
 
@@ -415,15 +431,16 @@ Detection looks at **keys on the root of `config.json`** (GGUF-mapped configs do
 | **video** | `video_config` **or** `video_token_id` | Gemma 4 QAT mobile (`video_token_id`) |
 
 Chat **output** is always **text**. BERT-style embedding files skip that scan and report **text → embedding**.
+Whisper reports **audio → text**. Piper reports **text → audio**.
 
-`LlmModel.usableModalities()` is the narrower set this Java engine actually runs: **text → text** for chat, or
-**text → embedding** for BERT. Gemma 4’s extra towers stay skipped (`Gemma4QatLoader` drops `vision_tower` /
+`LlmModel.usableModalities()` is the narrower set this Java engine actually runs: **text → text** for chat,
+**text → embedding** for BERT, **audio → text** for Whisper, or **text → audio** for Piper. Gemma 4’s extra towers stay skipped (`Gemma4QatLoader` drops `vision_tower` /
 `audio_tower` weights). The `Example` demo prints the checkpoint pair after load, then a second “this library runs”
 line when the two differ.
 
 **In the code:** `Config.HfConfig` sets `imageConfigPresent` / `audioConfigPresent` / `videoConfigPresent` from those
-keys; `LlmModalities.ofCheckpoint` builds the declared pair; `LlmModel.usableModalities()` is `TEXT_TO_TEXT` or
-`TEXT_TO_EMBEDDING`.
+keys; `LlmModalities.ofCheckpoint` builds the declared pair; `LlmModel.usableModalities()` is `TEXT_TO_TEXT`,
+`TEXT_TO_EMBEDDING`, `AUDIO_TO_TEXT`, or `TEXT_TO_AUDIO`.
 
 ---
 
@@ -1368,7 +1385,7 @@ ONNX (`models/download-multilingual-e5-small.sh`) — same `LlmModel.embed` API,
 |---|---|---|
 | Question it answers | “What token comes **next**?” | “What is a good **vector summary** of this whole input?” |
 | Attention | **Causal** — no peeking at future positions | **Bidirectional** — each token may look left **and** right |
-| Typical API here | `LLM.builder(model)` → `chat` / `generate` | `LlmModel.embed(text)` → `float[]` |
+| Typical API here | `LLM.builder(model)` → `chat` / `generate` | `LLM.builder(model)` → `embed` (or `LlmModel.embed` as a sequential shortcut) |
 | Output | Token ids / text | One L2-normalized vector of length `hidden_size` |
 
 People also say “BERT” for many descendants that keep that encoder shape (including small **sentence embedding** models
@@ -1382,20 +1399,21 @@ reread the whole finished card before writing a single summary number-line for t
 
 1. **Same factory as chat models:** `LlmModelFactory.make(pathToGguf)`.
 2. **Detect:** `model.isEmbeddingModel()` is true; `architectureName()` is typically `bert`.
-3. **Do not** call `LLM.builder(model)` — the builder **rejects** embedding-only graphs. Chat needs a causal `CausalLM`;
-   embeddings use an internal `EmbeddingEncoder`.
-4. **Encode:** `float[] v = model.embed("hello world");` (or `embed(List)` / already-tokenized ids).
+3. **Open an engine:** `LLM.builder(model).build()` then `llm.embed(text)` — same CPU pool as chat
+   (**since 1.3.0**). `LlmModel.embed` remains a sequential shortcut (no engine pool; that is what dense RAG indexing uses).
+4. **Encode:** `float[] v = llm.embed("hello world");` (or `embed(List)` / already-tokenized ids).
 5. **Compare:** vectors are **L2-normalized**, so cosine similarity is just the **dot product**.
 
 ```java
-try (LlmModel model = LlmModelFactory.make(Path.of("models/gte-small.Q2_K.gguf"))) {
-  float[] a = model.embed("Paris is the capital of France.");
-  float[] b = model.embed("What city is France's capital?");
+try (LlmModel model = LlmModelFactory.make(Path.of("models/gte-small.Q2_K.gguf"));
+     LLM llm = LLM.builder(model).build()) {
+  float[] a = llm.embed("Paris is the capital of France.");
+  float[] b = llm.embed("What city is France's capital?");
   // cosine ≈ sum_i a[i]*b[i]
 }
 ```
 
-**In the code:** `LlmModelFactory` → `ArchitectureProcessor.createEmbedding` → `BertForEmbedding`; public surface `LlmModel.embed`;
+**In the code:** `LlmModelFactory` → `ArchitectureProcessor.createEmbedding` → `BertForEmbedding`; public surface `LLM.embed` / `LlmModel.embed`;
 samples `EmbeddingsHelloWorld` (default multilingual-e5-small ONNX), `Example` menu items for gte-small, E5, and xlm-roberta-base.
 
 ### Task prefixes (`query:` / `passage:`) — library vs checkpoint
@@ -1465,9 +1483,9 @@ There is **no** chat template, KV cache, or next-token sampler on this path. Lif
 
 ### Summary
 
-> **Since 1.1.0, load a BERT-family embedding GGUF with `LlmModelFactory.make`, call `LlmModel.embed` for an
-> L2-normalized sentence vector (bidirectional encoder + mean pool), and optionally plug that encoder into dense or
-> hybrid RAG. Never attach an embedding model to `LLM.builder`. E5-style checkpoints still need their `query:` /
+> **Since 1.1.0, load a BERT-family embedding GGUF with `LlmModelFactory.make`. Since 1.3.0, `LLM.builder(model)` then
+> `LLM.embed` uses the shared CPU pool; `LlmModel.embed` remains a sequential shortcut (dense RAG indexing). Vectors are
+> L2-normalized (bidirectional encoder + mean pool). E5-style checkpoints still need their `query:` /
 > `passage:` text prefixes; the library does not insert them.**
 
 **Further reading:** original BERT — [Devlin et al. (arXiv)](https://arxiv.org/abs/1810.04805); sentence embeddings /
@@ -1495,7 +1513,8 @@ This is **weight import**, not an ONNX Runtime session:
 | Prefer **safetensors** if both formats are present | Treat every community `.onnx` as loadable (see filters below) |
 
 **In the code:** `models.llmcontainer.OnnxTransport` (file pick + protobuf + dtype decode) → `ArchitectureProcessor.bind` → `fill` (name remap / MatMul transpose) →
-`ModelLoader.assembleFromNamedTensors` → `ArchitectureProcessor.createCausal` / `createEmbedding`.
+`ModelLoader.assembleFromNamedTensors` → `ArchitectureProcessor.createCausal` / `createEmbedding`
+(Piper voices use `createSynthesis` — chapter **7e**).
 
 ### Supported formats / restrictions (ONNX)
 
@@ -1509,7 +1528,7 @@ This is **weight import**, not an ONNX Runtime session:
 | Float initializers: **FLOAT**, **FLOAT16**, **BFLOAT16**, **DOUBLE** → float32 | Filename contains `_q4`, `_int8`, `_uint8`, `_bnb4`, `_quantized`, or `with_past` (community quant / KV-past exports) |
 | `make(Path)` may follow **external_data** sidecars next to the `.onnx` | **`ModelFileSource` / classpath** loads: `external_data` → `ModelLoadException` (use `make(Path)`) |
 | File size up to **8 GiB** on disk; in-memory buffer path capped at **~2 GiB** | Empty initializer list; float8 / nibble / unknown TensorProto weight types (fail loud) |
-| Architectures that map to Qwen3 / Gemma3 / **Llama** / BERT embedding schemas | **LFM2-from-ONNX**; **Gemma 4** (safetensors QAT only, ch. 7); QDQ / int8 weight graphs; running the ONNX op graph |
+| Architectures that map to Qwen3 / Gemma3 / **Llama** / BERT embedding schemas | **LFM2-from-ONNX**; **Gemma 4** (safetensors QAT only, ch. 7); QDQ / int8 weight graphs; running the ONNX op graph. **Piper** voices are a separate synthesis path (ch. **7e**), not this chat/BERT remap. |
 
 INT/UINT/BOOL/STRING/COMPLEX initializers and float **scalars** are **skipped** as graph constants (not weight
 tensors). See the TensorProto table below.
@@ -1519,7 +1538,8 @@ tensors). See the TensorProto table below.
 | Checkpoint family | Graph | Typical demo |
 |-------------------|-------|--------------|
 | Qwen3 / Gemma3 / **Llama** | Causal chat (`LLM.builder`) | [SmolLM2-135M-Instruct-ONNX](https://huggingface.co/onnx-community/SmolLM2-135M-Instruct-ONNX) (ChatML), [Tiny-LLM-ONNX](https://huggingface.co/onnx-community/Tiny-LLM-ONNX) (base / completion toy) |
-| BERT-style | Embeddings (`LlmModel.embed`) | [multilingual-e5-small](https://huggingface.co/intfloat/multilingual-e5-small) ONNX (`models/download-multilingual-e5-small.sh`; prepend `query:` / `passage:` — ch. **7b**); [xlm-roberta-base](https://huggingface.co/FacebookAI/xlm-roberta-base) ONNX (`models/download-xlm-roberta-base.sh`) |
+| BERT-style | Embeddings (`LLM.embed` / `LlmModel.embed`) | [multilingual-e5-small](https://huggingface.co/intfloat/multilingual-e5-small) ONNX (`models/download-multilingual-e5-small.sh`; prepend `query:` / `passage:` — ch. **7b**); [xlm-roberta-base](https://huggingface.co/FacebookAI/xlm-roberta-base) ONNX (`models/download-xlm-roberta-base.sh`) |
+| **Piper** voice (**since 1.3.0**) | Text→audio (`LLM.synthesize`) | Official Piper `*.onnx` + `*.onnx.json` (chapter **7e**) — not a chat/BERT remap |
 
 **Llama** here means the Llama-style stack assembled by `LlamaForCausalLM`: RMSNorm, RoPE, GQA, SiLU MLP, **without**
 Qwen’s extra Q/K head norms. Tiny-LLM and SmolLM2 Instruct ONNX both declare `LlamaForCausalLM` in `config.json`.
@@ -1580,6 +1600,169 @@ with the same percent/ETA bar as safetensors and GGUF; `ModelLoader.assembleFrom
 
 **Further reading:** [ONNX](https://onnx.ai/); community exports such as
 [onnx-community/SmolLM2-135M-Instruct-ONNX](https://huggingface.co/onnx-community/SmolLM2-135M-Instruct-ONNX).
+
+
+---
+
+## 7d. Whisper speech-to-text (**since 1.3.0**)
+
+Chapters 7–7c were about **text in, text (or a vector) out**. **Since 1.3.0**, the same factory also loads a third
+kind of network: **Whisper**, which turns **audio** into **text**.
+
+The demo crate is Hugging Face safetensors for [openai/whisper-base](https://huggingface.co/openai/whisper-base)
+(`models/download-whisper-base.sh`) or the smaller `whisper-tiny`. CTranslate2 `model.bin` folders, Whisper GGUF, and
+Whisper ONNX are refused.
+
+### What “speech-to-text” means here
+
+| | Causal chat LM | Whisper ASR |
+|---|---|---|
+| Question it answers | “What token comes **next**?” | “What words were **spoken** in this clip?” |
+| Input | Token ids | 16 kHz mono PCM (WAV decoded, or already-resampled samples) |
+| Typical API here | `LLM.builder` → `chat` / `generate` | `LLM.builder` → `transcribe` |
+| Output | Token ids / text | Transcript string |
+| `usableModalities()` | text→text | audio→text |
+
+There is **no** chat template, KV cache, or next-token sampler on this path. Decode is **greedy** (highest logit),
+multilingual, with optional language. Clips longer than 30 s are split into 30 s chunks.
+
+### How this project loads and runs it
+
+1. **Same factory:** `LlmModelFactory.make(pathToWhisperFolder)`.
+2. **Detect:** `model.isSpeechModel()` is true; `architectureName()` is `whisper`.
+3. **Open an engine:** `LLM.builder(model).build()` — same `cpuThreads` / matmul pool as chat (Linear, attention, stem Conv1d).
+4. **Transcribe:** `llm.transcribe(wavBytes)` (in-memory RIFF/WAVE), `llm.transcribe(path)`, or `llm.transcribe(pcm, sampleRate)`.
+5. **Language:** pass a `Locale` (`null` / `Locale.ROOT` = auto-detect; region is ignored — `Locale.US` is English).
+
+```java
+try (LlmModel model = LlmModelFactory.make(Path.of("models/whisper-base"));
+     LLM llm = LLM.builder(model).build()) {
+  String text = llm.transcribe(wavBytes);                    // uncompressed WAV in memory
+  String en = llm.transcribe(wavBytes, Locale.ENGLISH);      // optional hint
+}
+```
+
+`LlmModel.transcribe` remains a sequential shortcut (no engine pool). Prefer `LLM.transcribe` when you already opened
+an engine.
+
+**In the code:** `LlmModelFactory` → `SpeechArchitecture` / `WhisperProcessor` → `WhisperForAsr`; public surface
+`LLM.transcribe` / `LlmModel.transcribe`; sample `TranscribeHelloWorld`; `Example` opens a WAV session (`/tone`, `/lang`).
+
+### Inside one `transcribe` call (pipeline)
+
+```text
+WAV bytes or PCM
+  → mix to mono, resample to 16 kHz
+  → log-mel spectrogram (30 s windows)
+  → encoder (bidirectional transformer)
+  → greedy decoder (language token, then text tokens)
+  → tokenizer decode → String
+```
+
+**Limits (honest)**
+
+- Uncompressed WAV or raw PCM only — no MP3, no streaming, no word timestamps, no VAD, no beam search.
+- Greedy decode only.
+- Gemma 4 audio towers in a chat crate are still skipped; this path is a dedicated Whisper checkpoint.
+
+### Summary
+
+> **Since 1.3.0, load Hugging Face Whisper safetensors with `LlmModelFactory.make`, then `LLM.builder` and
+> `LLM.transcribe` on WAV bytes, a WAV file, or 16 kHz PCM. Language is optional (`Locale`; `null`/`ROOT` = auto).
+> CTranslate2, Whisper GGUF, and Whisper ONNX are out of scope.**
+
+**Further reading:** [Radford et al., *Robust Speech Recognition via Large-Scale Weak Supervision*](https://arxiv.org/abs/2212.04356);
+Hub [openai/whisper-base](https://huggingface.co/openai/whisper-base).
+
+
+---
+
+## 7e. Piper text-to-speech (**since 1.3.0**)
+
+The fourth graph kind is the inverse of Whisper: **text in, audio out**. **Piper** voices ship as an ONNX file plus a
+sidecar `*.onnx.json` (phoneme ids, sample rate, speaker). This engine still reads **initializers only** — no ONNX
+Runtime, no JNI, no libespeak-ng.
+
+Demo crates: `models/download-piper-en-lessac-medium.sh` (US English) and
+`models/download-piper-ru-irina-medium.sh` (Russian). Sample `SynthesizeHelloWorld` prefers Lessac when both folders
+exist.
+
+### What “text-to-speech” means here
+
+| | Causal chat LM | Piper TTS |
+|---|---|---|
+| Question it answers | “What token comes **next**?” | “What **waveform** speaks this sentence?” |
+| Typical API here | `LLM.builder` → `chat` | `LLM.builder` → `synthesize` |
+| Output | Text | Uncompressed WAV bytes (PCM16 little-endian, mono) |
+| `usableModalities()` | text→text | text→audio |
+
+`synthesize` returns the file contents. Write the `byte[]` only if you need a `.wav` on disk.
+
+### How this project loads and runs it
+
+1. **Same factory:** `LlmModelFactory.make(voiceFolder)` (detects `*.onnx` + `*.onnx.json`).
+2. **Optional espeak-ng-data:** `LlmModelFactory.open(path).optionalData(LlmOptionalData.ESPEAK_DATA, dataDir).make()`.
+   Default directory is `{model}/espeak-ng-data`. A missing or incomplete folder is **ignored** — synthesize still runs.
+3. **Open an engine:** `LLM.builder(model).build()` — same CPU pool; 1-D conv / conv-transpose split output channels.
+   Non-chat engines skip KV paging (a large heap no longer overflows `int` when sizing chat KV for a voice with no
+   transformer layers).
+4. **Speak:** `byte[] wav = llm.synthesize("Hello world");`
+
+```java
+Path voice = Path.of("models/piper-en-lessac-medium");
+try (LlmModel model = LlmModelFactory.open(voice)
+         .optionalData(LlmOptionalData.ESPEAK_DATA, voice.resolve("espeak-ng-data"))
+         .make();
+     LLM llm = LLM.builder(model).build()) {
+  byte[] wav = llm.synthesize("Hello world");
+}
+```
+
+**In the code:** `SynthesisArchitecture` / `PiperProcessor` → `PiperForTts`; G2P in `models.internal` espeak readers;
+sample `SynthesizeHelloWorld`; `Example` lists Lessac and Irina.
+
+### Grapheme-to-phoneme (how letters become phones)
+
+Order of preference:
+
+1. **`dictsource`** (`*_list` / `*_rules`) when present for the voice language — including suffix/prefix `S`/`P` and
+   number fragments.
+2. **Compiled** `phontab` + `{lang}_dict` for listed words and `$N` stress-only entries (used together with source files
+   when both exist).
+3. **Letter-to-sound** fallback (English lexicon + digraphs; Russian palatalization, vowel reduction, destressing,
+   voicing assimilation). Russian letter G2P emits espeak phones for ш/ж/ы (`ʃ`/`ʒ`/`y`), not academic retroflex IPA.
+
+Download scripts copy compiled dicts from a system espeak-ng-data when present. Packaged `ru_dict` omits some
+high-frequency lemmas (`это`, `мама`).
+
+### Inside one `synthesize` call (pipeline)
+
+```text
+text
+  → G2P (dictsource / compiled dict / letter tables) → phoneme ids
+  → VITS reverse (duration, residual couplings with channel flips, WaveNet skips)
+  → HiFi-GAN vocoder (Conv / ConvTranspose geometry from the ONNX graph)
+  → PCM16 LE mono WAV bytes
+```
+
+Conv vs ConvTranspose weight axis order differs (`[out,in/g,k]` vs `[in,out/g,k]`). Spatial attributes (stride, pads,
+dilation, groups, output padding) come from the consuming ONNX node (`ConvLayout`), not from a voice-name guess. Irina
+uses ResBlock2 (`convs.0`/`convs.1`) with graph dilations.
+
+**Limits (honest)**
+
+- One utterance → one WAV; no streaming, no SSML, no multi-speaker picker beyond what the voice JSON already encodes.
+- Compiled espeak rules bytecode is not a full MatchRule VM.
+- Official Piper ONNX exports load; exotic renamed graphs may still need more aliases.
+
+### Summary
+
+> **Since 1.3.0, load a Piper voice folder (`*.onnx` + `*.onnx.json`) with `LlmModelFactory.make`, optionally point
+> `optionalData(ESPEAK_DATA)` at espeak-ng-data, then `LLM.builder` and `LLM.synthesize` for WAV bytes. Missing
+> espeak data is ignored. G2P prefers dictsource, then compiled phontab/dict, then letter-to-sound.**
+
+**Further reading:** [Piper](https://github.com/OHF-Voice/piper1-gpl); [Kim et al., VITS (arXiv)](https://arxiv.org/abs/2106.06103);
+[espeak-ng](https://github.com/espeak-ng/espeak-ng).
 
 
 ---
@@ -2839,11 +3022,14 @@ OPEN (once)
       → (HF ONNX, since 1.1.0) OnnxTransport → ArchitectureProcessor bind/fill/create → same CausalLM / EmbeddingEncoder graphs
       → (GGUF causal) GgufTransport → ArchitectureProcessor bind/fill
          → Qwen3ForCausalLM or Lfm2ForCausalLM + Tokenizer#fromGguf
-      → (GGUF bert) ArchitectureProcessor.createEmbedding → BertForEmbedding   // embed only; no LLM.builder
-  LLM#builder(LlmModel) → LLM.Builder#build → LLM.<init>         // causal models only
-      → Transformer.<init>                 (binds shared model; allocates KvCacheArena)
-      → Scheduler.<init>                   (owns BlockManager)
-      → optional LLM.Builder#warmup()      (off by default)
+      → (GGUF bert) ArchitectureProcessor.createEmbedding → BertForEmbedding
+      → (Whisper safetensors, since 1.3.0) SpeechArchitecture → WhisperForAsr
+      → (Piper ONNX + json, since 1.3.0) SynthesisArchitecture → PiperForTts
+  LLM#builder(LlmModel) → LLM.Builder#build → LLM.<init>         // every kind
+      → (chat) Transformer.<init>          (binds shared model; allocates KvCacheArena)
+      → (embed / speech / synthesis) skip KV; same MatmulRuntime
+      → Scheduler.<init>                   (owns BlockManager; unused on non-chat)
+      → optional LLM.Builder#warmup()      (off by default; chat)
 
 ONE TURN
   LLM#chat(maxTokens) → ChatSession#open → ChatSession#send("What is 2+2?")
@@ -2914,7 +3100,7 @@ try (LlmModel model = LlmModelFactory.make(modelDir);
 | Step            | Call                                                               | Role                                                      |
 |-----------------|--------------------------------------------------------------------|-----------------------------------------------------------|
 | Blueprint       | `Config.HfConfig#load` (via `LlmModelFactory`)                        | Read `config.json` (HF) or GGUF metadata              |
-| Empty graph     | `ArchitectureProcessor#createCausal` / `#createEmbedding`            | `Qwen3ForCausalLM`, `Gemma3ForCausalLM`, `Gemma4ForCausalLM`, `LlamaForCausalLM`, `Lfm2ForCausalLM`, or `BertForEmbedding` (all under `models.internal`) |
+| Empty graph     | `ArchitectureProcessor#createCausal` / `#createEmbedding` / `#createSpeech` / `#createSynthesis`            | `Qwen3ForCausalLM`, `Gemma3ForCausalLM`, `Gemma4ForCausalLM`, `LlamaForCausalLM`, `Lfm2ForCausalLM`, `BertForEmbedding`, `WhisperForAsr`, or `PiperForTts` (all under `models.internal`) |
 | Pour weights    | `ContainerTransport` + `ArchitectureProcessor#fill` → `WeightBag` | Merge shards / dequant path; construct immutable graph |
 | Seal            | (graph is immutable at construction)                               | No post-load weight mutation                              |
 | Dictionary      | `Tokenizer#fromPretrained` / `#fromGguf` / `#fromSentencePiece`     | HF JSON, SentencePiece `tokenizer.model` (**since 1.2.0**), or GGUF-embedded vocab + chat template / stop ids |
@@ -3191,11 +3377,11 @@ packages. Demos live in the separate Maven module `nano-vllm-java-samples`.
 
 | Folder / type                                                                          | Role in the story                                    | Exported? |
 |----------------------------------------------------------------------------------------|------------------------------------------------------|-----------|
-| `llm/` — `LLM`, `LLM.Builder`, `Config`, `SamplingParams`, `GenerationStats`, `LlmAdvisor`, `LlmAdvisorMixer`, `AdvisorResponse`, `AdvisorEnrichment` | Front door; named advisors + mixer; stats | yes |
-| `models/` — `LlmModel`, `LlmModelFactory`, `ModelSupport`, `ModelFileId`, `ModelFileSource`, `ModelFileSources` | Shared immutable loaded model + architecture catalog + stream/classpath sources (**since 1.1.0**) | yes |
-| `models.internal/` — `WeightBag`, `CausalLM*`, `BertForEmbedding`, `EmbeddingEncoder`, … | Graphs, weight bags, BERT encode (use `LlmModel.embed`) | **no** |
+| `llm/` — `LLM`, `LLM.Builder`, `Config`, `SamplingParams`, `GenerationStats`, `LlmAdvisor`, `LlmAdvisorMixer`, `AdvisorResponse`, `AdvisorEnrichment` | Front door; named advisors + mixer; stats; `embed` / `transcribe` / `synthesize` | yes |
+| `models/` — `LlmModel`, `LlmModelFactory`, `ModelSupport`, `LlmOptionalData`, `LlmModality` / `LlmModalities`, `ModelFileId`, `ModelFileSource`, `ModelFileSources` | Shared immutable loaded model + architecture catalog + load extras + stream/classpath sources | yes |
+| `models.internal/` — `WeightBag`, `CausalLM*`, `BertForEmbedding`, `EmbeddingEncoder`, `WhisperForAsr`, `PiperForTts`, … | Graphs, weight bags, BERT encode, Whisper ASR, Piper TTS | **no** |
 | `models.llmcontainer/` — `ContainerTransport`, `GgufTransport`, `SafetensorsTransport`, `OnnxTransport`, `LoadProgress` | Weight-file I/O and catalog | **no** |
-| `models.llmarch/` — `ArchitectureProcessor`, family processors, `ModelBinding` / `ModelFill` | Bind / fill / create per architecture | **no** |
+| `models.llmarch/` — `ArchitectureProcessor`, family processors, `ModelBinding` / `ModelFill` | Bind / fill / create per architecture (causal, embedding, speech, synthesis) | **no** |
 | `chat/` — `ChatSession`, `ChatHistory`, `ChatMessage`, `ChatMessages`, `ThinkTags`, `ChatSpecials`, `LlmListener`, `LlmTextKind`, `ChatReply`, `StreamPrinter` | Dialog + unified text/status events | yes |
 | `tokenizer/Tokenizer`, `GgufTokenizerSource`                                           | HF / GGUF / SentencePiece vocab → encode / decode / chat template (**`fromSentencePiece` since 1.2.0**) | yes |
 | `utils/NanoLlvmProps`, `ResourceLimits`                                                | Property/env knobs; process-wide parser/corpus caps (**since 1.0.0**) | yes |
@@ -3206,7 +3392,7 @@ packages. Demos live in the separate Maven module `nano-vllm-java-samples`.
 | `layers/` — `Attention`, `BidirectionalAttention`, `Sampler`, `Linear`, `Norms`, …     | Attention, sampling, projections, norms/RoPE         | **no** |
 | `tensor/` — `Tensor`, `Ops`, `MatmulRuntime`, `LinearKernel`, `EmbeddingKernel`, …     | Arrays, float ops, parallel GEMM                     | **no** |
 | `prompts/` — `ChatPrompts`, `RagPrompts`, `AdvisorPrompts`                             | Default system / RAG / advisor wording               | **no** |
-| *(Maven module `nano-vllm-java-samples`)* `Example`, `HelloWorld`, `NextTokenHelloWorld`, `Bench`, `EmbeddingsHelloWorld`, `LogTriageHelloWorld`, `AdvisorRagHelloWorld`, `RagTunerHelloWorld`, `utils/Bundled*` | Runnable demos (not in the library JAR) | n/a |
+| *(Maven module `nano-vllm-java-samples`)* `Example`, `HelloWorld`, `NextTokenHelloWorld`, `Bench`, `EmbeddingsHelloWorld`, `TranscribeHelloWorld`, `SynthesizeHelloWorld`, `LogTriageHelloWorld`, `AdvisorRagHelloWorld`, `RagTunerHelloWorld`, `utils/Bundled*` | Runnable demos (not in the library JAR) | n/a |
 
 `Config.HfConfig` (in `llm/Config`) holds the blueprint plus per-LLM engine knobs (`maxModelLen`, `kvHeapFraction`, …).
 
@@ -3214,9 +3400,11 @@ packages. Demos live in the separate Maven module `nano-vllm-java-samples`.
 
 | Story idea                       | Primary type                                                         | Methods / entry points to open                                                                                |
 |----------------------------------|----------------------------------------------------------------------|---------------------------------------------------------------------------------------------------------------|
-| Open a model                     | `LlmModelFactory`, `LlmModel`, `LLM.Builder`                               | `open(Path).make()` / `make(Path)` / `make(…, Map)` / `fromClasspath*` / `openClasspath*`; HF **safetensors or ONNX** (**since 1.1.0**); Gemma 4 **text QAT** packed safetensors; GGUF **`qwen3`** / **`lfm2`** chat + **`bert`** embed; `thinkTags(ThinkTags)` / `OPTION_THINK_TAGS`; `chatSpecials(ChatSpecials)` / `OPTION_CHAT_SPECIALS`; `LLM.builder(model)` for causal; `model.embed(…)` for BERT (**since 1.1.0**); `toString()` summarizes load |
+| Open a model                     | `LlmModelFactory`, `LlmModel`, `LLM.Builder`                               | `open(Path).make()` / `make(Path)` / `make(…, Map)` / `fromClasspath*` / `openClasspath*`; HF **safetensors or ONNX** (**since 1.1.0**); Gemma 4 **text QAT** packed safetensors; GGUF **`qwen3`** / **`lfm2`** chat + **`bert`** embed; Whisper safetensors / Piper ONNX **since 1.3.0**; `thinkTags(ThinkTags)` / `OPTION_THINK_TAGS`; `chatSpecials(ChatSpecials)` / `OPTION_CHAT_SPECIALS`; `optionalData` / `OPTION_OPTIONAL_DATA`; `LLM.builder(model)` for every kind; `toString()` summarizes load |
 | Custom scratchpad / answer specials | `ThinkTags`, `ChatSpecials`, `LlmModel`                                 | `open(path).thinkTags(tags).chatSpecials(specials).make()`; `ChatSession.thinkTags` / `RagSession.thinkTags` (**since 1.1.0**); omitted options get library defaults |
-| Sentence embedding (BERT GGUF)   | `LlmModel` (internal `BertForEmbedding`)                                   | `make(gteGguf)` → `isEmbeddingModel()` → `embed(text)` (chapter **7b**, **since 1.1.0**)                        |
+| Sentence embedding (BERT GGUF / ONNX) | `LLM` / `LlmModel` (internal `BertForEmbedding`)                                   | `make(gteGguf)` → `isEmbeddingModel()` → `LLM.builder` then `embed(text)` (**since 1.3.0**); `LlmModel.embed` sequential shortcut (chapter **7b**, **since 1.1.0**)                        |
+| Speech to text (Whisper)         | `LLM` / `LlmModel` (internal `WhisperForAsr`)                                      | `make(whisperDir)` → `isSpeechModel()` → `transcribe(wavBytes \| Path \| pcm)` (**since 1.3.0**, chapter **7d**) |
+| Text to speech (Piper)           | `LLM` / `LlmModel` (internal `PiperForTts`)                                        | `open(voice).optionalData(ESPEAK_DATA, dir).make()` → `synthesize(text)` → WAV bytes (**since 1.3.0**, chapter **7e**) |
 | Named advisors                   | `LlmAdvisor`, `LlmAdvisorMixer`, `AdvisorEnrichment`, `ChatHistory`        | `Builder.advisors(mixer, …)` — unique non-blank names; `LLM#runAdvisors` → `AdvisorEnrichment`; one batched `generate` |
 | Chat turn                        | `ChatSession`                                                        | `llm.chat(maxTokens)`, `.listen(…)`, `.streamTo(…)` (`TEXT_THINKING` / `TEXT_ASSISTANT`; ignores `TEXT_RAW`), `.send(user)`, `.clear()`; `emitDebugPrompts(true)` opts in `TEXT_DEBUG` (off by default); `recoverUnusableAnswers` / `unusableAnswer` opt-in |
 | Stream unparsed decode           | `LlmTextKind.TEXT_RAW`, `LlmListener`                                  | `ChatSession.listen`; deltas of tokenizer decode with think tags / chat specials kept (**since 1.1.0**) |
@@ -3292,7 +3480,9 @@ try (LlmModel model = LlmModelFactory.open(Path.of("models/Qwen3-0.6B")).make();
 // Unparsed streaming decode (think tags + chat specials kept):
 // llm.chat(256).listen((src, ev) -> { if (ev.kind() == LlmTextKind.TEXT_RAW) System.err.print(ev.text()); })
 
-// Embedding GGUF (since 1.1.0): never LLM.builder — call model.embed (chapter 7b)
+// Embedding GGUF (since 1.1.0): LLM.builder then llm.embed; model.embed is a sequential shortcut (chapter 7b)
+// Whisper (since 1.3.0): llm.transcribe(wavBytes) — chapter 7d
+// Piper (since 1.3.0): llm.synthesize(text) → WAV bytes — chapter 7e
 // Classpath / streams: see Sample A1 below
 ```
 
@@ -3306,7 +3496,8 @@ none), **advisor-count menu** (`0`–`3`; Enter = none), then `llm.chat(…).str
 opts in with `--debug`, chapter 17). Embedding
 checkpoints skip RAG/advisors, then an encoder-session menu: embed REPL, or few-shot classify
 (`label | text` / `/demo` / `/load`, centered prototypes on `LlmModel.embed` — not a Hub
-classification head). Each mode is a named method in `Example`.
+classification head). Speech checkpoints skip RAG and open a WAV transcribe session. Synthesis
+checkpoints skip RAG and open a text→WAV session. Each mode is a named method in `Example`.
 
 ### Sample A1 — classpath / stream sources (**since 1.1.0**)
 
@@ -3464,14 +3655,18 @@ LlmModelFactory.make(dir|gguf|ModelFileSource):
                   (Qwen3 / Gemma3 / Gemma 4 text / Llama)
                   tokenizer.json, else tokenizer.model (1.2.0), else config.json fallback
   HF ONNX (1.1.0): OnnxTransport → ArchitectureProcessor bind/fill/create → same causal / BERT graphs
+  Whisper (1.3.0): SpeechArchitecture → WhisperForAsr; LLM.transcribe
+  Piper (1.3.0): SynthesisArchitecture → PiperForTts; optionalData(ESPEAK_DATA); LLM.synthesize
   GGUF: GgufTransport → ArchitectureProcessor bind/fill/create
         → Qwen3ForCausalLM or Lfm2ForCausalLM or BertForEmbedding; Tokenizer.fromGguf
   Classpath / streams (1.1.0): ModelFileSources → heap bytes (no disk cache)
   Load status (all three weight formats): models.llmcontainer.LoadProgress — one in-place percent/ETA bar
   Optional Map (1.1.0): LlmModel.OPTION_THINK_TAGS → ThinkTags; OPTION_CHAT_SPECIALS → ChatSpecials
                         (frozen on the model; omitted keys get library defaults)
-LLM.builder(causalModel).build():   // rejected for embedding models
-  Transformer allocates KvCacheArena (per LLM); optional warmup / allowUnpackParameters
+  Optional (1.3.0): LlmModelFactory.Builder.optionalData / OPTION_OPTIONAL_DATA
+LLM.builder(model).build():   // every kind — chat / embed / transcribe / synthesize
+  chat: Transformer allocates KvCacheArena (per LLM); optional warmup / allowUnpackParameters
+  non-chat: numKvcacheBlocks 0; same cpuThreads / matmul pool
 ```
 
 ### Sample E — chat thinking path (Sense C)
@@ -3521,17 +3716,45 @@ LlmModelFactory.make(gte-small.Q2_K.gguf)
     → GgufModelLoader (arch bert) → BertForEmbedding
     → LlmModel (isEmbeddingModel == true)
 
-model.embed(text)   // E5: pass "query: …" or "passage: …" yourself; the library does not add it
+LLM.builder(model).build().embed(text)   // since 1.3.0; shared CPU pool
+model.embed(text)                        // sequential shortcut (dense RAG indexing)
+    // E5: pass "query: …" or "passage: …" yourself; the library does not add it
     → tokenize + [CLS]/[SEP] or <s>/</s>
     → token+pos+type emb → LayerNorm → bidirectional blocks
     → mean pool → L2 normalize → float[]
 
-// LLM.builder(model) throws — use embed, not chat
 // Dense RAG: DenseRagIndex.of(prepared, model) / RagFactory.withEmbeddings (ch. 17)
+//   still calls LlmModel.embed (sequential unless you pass an Executor)
 ```
 
 Narrative: **chapter 7b**. Demo: `samples.EmbeddingsHelloWorld` (default multilingual-e5-small ONNX), `Example` menu
 embeddings items.
+
+### Sample G0b — Whisper transcribe (**since 1.3.0**)
+
+```text
+LlmModelFactory.make(models/whisper-base)
+    → SpeechArchitecture / WhisperProcessor → WhisperForAsr
+    → LlmModel (isSpeechModel == true)
+
+LLM.builder(model).build().transcribe(wavBytes | Path | pcm, optional Locale)
+    → mix/resample 16 kHz → log-mel → encoder → greedy decode → String
+```
+
+Narrative: **chapter 7d**. Demo: `samples.TranscribeHelloWorld`.
+
+### Sample G0c — Piper synthesize (**since 1.3.0**)
+
+```text
+LlmModelFactory.open(voiceFolder).optionalData(ESPEAK_DATA, espeakDir).make()
+    → SynthesisArchitecture / PiperProcessor → PiperForTts
+    → LlmModel (isSynthesisModel == true)
+
+LLM.builder(model).build().synthesize(text)
+    → G2P → VITS reverse → HiFi-GAN → PCM16 LE mono WAV bytes
+```
+
+Narrative: **chapter 7e**. Demo: `samples.SynthesizeHelloWorld`.
 
 ### Sample G — text RAG (prepare once, ask many times)
 
@@ -3545,8 +3768,8 @@ RagFactory.make(docs|file) / .of(…) / .builder()… / makeResource(…)   // c
     → PreparedRag                     // shareable like LlmModel
 
 optional since 1.1.0:
-  LlmModel embed = LlmModelFactory.make(gteGguf)   // embedding encoder, not LLM.builder
-  DenseRagIndex.of(prepared, embed)                // cosine over L2 vectors (sequential)
+  LlmModel embed = LlmModelFactory.make(gteGguf)   // embedding encoder; LLM.builder optional for a pool
+  DenseRagIndex.of(prepared, embed)                // cosine over L2 vectors (sequential LlmModel.embed)
   DenseRagIndex.of(prepared, embed, executor)      // same, caller Executor
   HybridRagIndex / RagFactory.withEmbeddings(…)    // RRF over RagIndex sources (BM25+dense factory)
 
@@ -3578,10 +3801,11 @@ nano-vllm-java/src/main/java/com/igormaznitsa/nanollvm/
   engine/Transformer.java      ← forward + sample (not exported)
   engine/Scheduler.java        ← prefill/decode batches
   layers/Attention.java        ← QKV cache + attendRange (paged slots in place)
-  models/LlmModel.java / LlmModelFactory.java
+  models/LlmModel.java / LlmModelFactory.java / LlmOptionalData.java
   models/ModelFileId.java / ModelFileSource.java / ModelFileSources.java   ← since 1.1.0
   models/internal/CausalLMFactory.java / WeightBag.java
   models/internal/BertForEmbedding.java / EmbeddingEncoder.java   ← since 1.1.0
+  models/internal/WhisperForAsr.java / PiperForTts.java / TextToSpeech.java / SpeechToText.java   ← since 1.3.0
   models/internal/Qwen3ForCausalLM.java / Gemma3ForCausalLM.java / Gemma4ForCausalLM.java / LlamaForCausalLM.java / Lfm2ForCausalLM.java
   layers/BidirectionalAttention.java   ← BERT embed path (since 1.1.0)
   tokenizer/Tokenizer.java / GgufTokenizerSource.java   ← fromSentencePiece since 1.2.0; codecs package-private
@@ -3598,7 +3822,7 @@ nano-vllm-java/src/main/java/com/igormaznitsa/nanollvm/
   exceptions/…
 
 nano-vllm-java-samples/src/main/java/com/igormaznitsa/nanollvm/samples/
-  Example.java / HelloWorld.java / NextTokenHelloWorld.java / Bench.java / EmbeddingsHelloWorld.java / LogTriageHelloWorld.java / AdvisorRagHelloWorld.java / RagTunerHelloWorld.java
+  Example.java / HelloWorld.java / NextTokenHelloWorld.java / Bench.java / EmbeddingsHelloWorld.java / TranscribeHelloWorld.java / SynthesizeHelloWorld.java / LogTriageHelloWorld.java / AdvisorRagHelloWorld.java / RagTunerHelloWorld.java
   utils/BundledModels.java / BundledRag.java / OrderedConsole.java / EpubText.java
 ```
 
@@ -3772,7 +3996,8 @@ try (LLM llm = LLM.builder(chatModel).build()) {
 
 #### Dense and hybrid indexes (**since 1.1.0**)
 
-Load an embedding GGUF with the same factory as chat models, then call `embed` — never `LLM.builder` on an encoder:
+Load an embedding GGUF with the same factory as chat models, then `embed` — `LLM.builder` on the encoder is allowed
+for the shared CPU pool (**since 1.3.0**); dense RAG indexing still calls `LlmModel.embed`:
 
 ```java
 PreparedRag lexical = RagFactory.make(Path.of("docs"));
@@ -3880,7 +4105,8 @@ and asks questions from the play (`LLM.Builder.deterministic()` so repeats keep 
 - Not a query-time plugin — `RagTuner` runs only while the index is built.
 - Not a guarantee of factual truth — only a way to **offer** text; the generator may still mis-copy it.
 - Not a classifier of user intents or languages: preparation is about **documents**, not about scripting replies.
-- Dense retrieval is **not** available on `LLM.Builder` — keep the chat model and the embedding `LlmModel` separate.
+- Dense retrieval is **not** a second chat model — keep the chat `LLM` and the embedding `LlmModel` separate
+  (`LLM.builder` on the encoder is only for `embed` / a CPU pool, not for `chat`).
 
 ### A fair one-sentence summary
 
@@ -3921,7 +4147,10 @@ Short glossary. For the Java home of each idea, prefer the **In the code** notes
 | Inference             | Running the pretrained model to produce text (not training)                                      |
 | Token                 | A vocabulary unit with an integer id                                                             |
 | Embedding (token)     | Matrix $E \in \mathbb{R}^{V \times H}$; row lookup starts the forward pass                       |
-| BERT / embedding GGUF | Bidirectional encoder → mean-pool → L2 vector via `LlmModel.embed` (**since 1.1.0**; ch. 7b)     |
+| BERT / embedding GGUF | Bidirectional encoder → mean-pool → L2 vector via `LLM.embed` / `LlmModel.embed` (**since 1.1.0**; `LLM.builder` **since 1.3.0**; ch. 7b)     |
+| Whisper               | Audio→text from HF safetensors via `LLM.transcribe` (**since 1.3.0**; ch. 7d) |
+| Piper                 | Text→WAV from `*.onnx` + `*.onnx.json` via `LLM.synthesize` (**since 1.3.0**; ch. 7e) |
+| `LlmOptionalData`     | Typed load extras such as `ESPEAK_DATA` (**since 1.3.0**; `open(path).optionalData`) |
 | Sentence embedding    | One fixed-length vector summarizing a string (cosine ≈ dot product after L2)                    |
 | RoPE                  | Rotary Position Embedding: rotate pairs inside Q/K by angle(position); encodes relative distance |
 | Tied embeddings       | Same matrix for input lookup and LM-head scoring (`tie_word_embeddings`)                         |
@@ -3980,9 +4209,13 @@ This project is a **teaching instrument**, not a production cloud service.
   for Tiny-LLM.
 - **Gemma 4:** text-only QAT mobile loads (**since 1.1.0**). Vision/audio generation, Gemma 4 GGUF, and MoE
   (`enable_moe_block`) are out of scope.
+- **Whisper (**since 1.3.0**, ch. **7d**):** Hugging Face safetensors only; greedy multilingual decode; uncompressed
+  WAV or PCM; no MP3, timestamps, VAD, beam search, CTranslate2 `model.bin`, Whisper GGUF, or Whisper ONNX.
+- **Piper (**since 1.3.0**, ch. **7e**):** official `*.onnx` + `*.onnx.json`; Java VITS + optional espeak-ng-data;
+  no streaming / SSML / JNI. Missing dictionaries fall back to letter-to-sound.
 - **Weight formats are curated, not universal:** safetensors float dtypes plus packed Gemma 4 QAT (ch. 7); GGUF = `qwen3|lfm2|bert` + listed
   GGML quants (ch. 7a); ONNX = Tier A initializers, no ORT / no community `*_q4*`/`*_int8*`/`with_past` names, no
-  float8 weights, no LFM2-from-ONNX (ch. **7c**).
+  float8 weights, no LFM2-from-ONNX (ch. **7c**); Piper is a separate ONNX synthesis path (ch. **7e**).
 - **RAG binaries:** folder walks are UTF-8 text. There is no built-in PDF extractor; index PDF/EPUB with
   `RagTuner.extracting` (**since 1.2.0**, ch. 17).
 - “Understanding,” “knowing,” “thinking,” and “meaning” here are **metaphors** for statistical continuation and inner
@@ -3994,7 +4227,8 @@ If this guide did its job, you can now explain to another non-specialist:
 > page — causally, often with shared notebooks (GQA), sometimes through a sliding window. Thinking is organized as a
 > loop: silent layer-walks for every next token, and optionally written notes (even tagged ones) that later attention
 > can reuse. Text RAG prepares a separate box of document cards once, pulls a few into the prompt, then the same loop
-> continues. Then the program repeatedly draws the next scrap of text until the reply ends.
+> continues. Whisper transcribes audio; Piper speaks text as WAV. Then the program repeatedly draws the next scrap of
+> text until the reply ends — or returns a vector, a transcript, or a waveform.
 
 That is enough to understand what this Java program is doing — and what it is not.
 
@@ -4013,7 +4247,8 @@ A single list of the links woven into earlier chapters. Prefer the in-chapter no
 page.
 
 Implementation homes stay in the **In the code** notes, **chapter 16**, **chapter 7b** (BERT embeddings **since
-1.1.0**), **chapter 7c** (ONNX / Llama **since 1.1.0**), and **chapter 17** (RAG); this index is papers and format docs
+1.1.0**), **chapter 7c** (ONNX / Llama **since 1.1.0**), **chapter 7d** (Whisper **since 1.3.0**), **chapter 7e**
+(Piper **since 1.3.0**), and **chapter 17** (RAG); this index is papers and format docs
 only.
 
 | Topic                      | Link                                                                                                                               |
@@ -4029,6 +4264,8 @@ only.
 | ONNX weight folders        | [ONNX](https://onnx.ai/) · (this guide §7c — Tier A initializers, Llama, SmolLM2 / Tiny demos **since 1.1.0**)                    |
 | GGUF                       | [ggml GGUF docs](https://github.com/ggml-org/ggml/blob/master/docs/gguf.md) · (this guide §7a — layout, dtypes, Qwen3 / LFM2)              |
 | BERT (original paper)      | [Devlin et al. (arXiv)](https://arxiv.org/abs/1810.04805) · (this guide §7b — embedding GGUFs **since 1.1.0**)                    |
+| Whisper ASR                | [Radford et al. (arXiv)](https://arxiv.org/abs/2212.04356) · (this guide §7d **since 1.3.0**) |
+| VITS / Piper TTS           | [Kim et al. (arXiv)](https://arxiv.org/abs/2106.06103) · [Piper](https://github.com/OHF-Voice/piper1-gpl) · (this guide §7e **since 1.3.0**) |
 | LFM2                       | [Liquid LFM2 blog](https://www.liquid.ai/blog/liquid-foundation-models-v2-our-second-series-of-generative-ai-models) · [LFM2.5-2.6B-GGUF](https://huggingface.co/LiquidAI/LFM2.5-2.6B-GGUF) |
 | RoPE                       | [Su et al. / RoFormer (arXiv)](https://arxiv.org/abs/2104.09864)                                                                   |
 | Token / positional embeds  | (this guide ch. 10; RoPE paper above)                                                                                              |
@@ -4045,11 +4282,14 @@ only.
 | Softmax                    | [Wikipedia](https://en.wikipedia.org/wiki/Softmax_function)                                                                        |
 | BM25 / Okapi ranking       | [Robertson & Zaragoza survey (PDF)](https://www.staff.city.ac.uk/~sbrp622/papers/foundations_bm25_review.pdf)                      |
 | Text RAG in this project   | (this guide ch. 17 — BM25; dense/hybrid + classpath **since 1.1.0**; load-time tuners **since 1.2.0**) |
-| BERT embed + dense RAG     | (this guide §7b + ch. 17 — `LlmModel.embed`, E5 `query:` prefixes, `DenseRagIndex`, `withEmbeddings`) |
+| BERT embed + dense RAG     | (this guide §7b + ch. 17 — `LLM.embed` / `LlmModel.embed`, E5 `query:` prefixes, `DenseRagIndex`, `withEmbeddings`) |
+| Whisper speech             | (this guide §7d — `LLM.transcribe`, HF safetensors) |
+| Piper synthesis            | (this guide §7e — `LLM.synthesize`, `optionalData(ESPEAK_DATA)`) |
 
 For a **curated learning order** (what to read first, and why it helps this project), see **chapter 21**.
 
-**Link check:** every URL in chapters 20–21 was HTTP-checked against live hosts (2026-08-21). Prefer the arXiv abs page, the PDF host named here, or the project GitHub/docs URL — do not invent alternate slugs.
+**Link check:** every URL in chapters 20–21 was HTTP-checked against live hosts (2026-08-21); Whisper / Piper entries
+added with **1.3.0** (2026-08-25). Prefer the arXiv abs page, the PDF host named here, or the project GitHub/docs URL — do not invent alternate slugs.
 
 ---
 
@@ -4057,7 +4297,8 @@ For a **curated learning order** (what to read first, and why it helps this proj
 
 Chapter 20 is a **bookmark table** of links already cited in this guide. This chapter is a **reading list**: a small set
 of papers, format docs, and tutorials ordered so a careful reader can build intuition for *this* codebase — inference,
-not training; CPU; Qwen3 / Gemma3 / Gemma 4 text / Llama / LFM2 / BERT-GGUF; ONNX weight folders (**since 1.1.0**); BM25 and dense RAG.
+not training; CPU; Qwen3 / Gemma3 / Gemma 4 text / Llama / LFM2 / BERT-GGUF; ONNX weight folders (**since 1.1.0**);
+Whisper and Piper (**since 1.3.0**); BM25 and dense RAG.
 
 **Provenance:** every link below names a real paper, format doc, blog, Hub page, or video that was resolved live
 (HTTP 200 / valid PDF / arXiv title match / YouTube oEmbed) on **2026-08-21**. Titles match the cited work (e.g. arXiv
@@ -4130,7 +4371,7 @@ You do not need every item. Prefer the path that matches what felt foggy while r
 
 | Read | Why here | Guide |
 |------|----------|-------|
-| [Devlin et al., BERT](https://arxiv.org/abs/1810.04805) | Bidirectional encoder — ancestor of the GGUF embedding path (`LlmModel.embed`). | ch. 7b, 8 |
+| [Devlin et al., BERT](https://arxiv.org/abs/1810.04805) | Bidirectional encoder — ancestor of the GGUF embedding path (`LLM.embed` / `LlmModel.embed`). | ch. 7b, 8 |
 | [Reimers & Gurevych, Sentence-BERT](https://arxiv.org/abs/1908.10084) | Why mean-pooled encoders became practical **sentence vectors** for similarity search. | ch. 7b, 17 |
 | [Lewis et al., RAG](https://arxiv.org/abs/2005.11401) | Original retrieval-augmented generation framing (retrieve → condition generation). | ch. 17 |
 | [Robertson & Zaragoza, BM25 foundations (PDF)](https://www.staff.city.ac.uk/~sbrp622/papers/foundations_bm25_review.pdf) | Lexical ranking behind `PreparedRag`. | ch. 17 |
@@ -4152,6 +4393,8 @@ technical report.
 | **Llama** | HF safetensors or ONNX (Tiny-LLM / SmolLM2 Instruct demos) | ch. **7c** |
 | **LFM2** | Liquid blog + GGUF card linked in §C | ch. 7a |
 | **BERT / GTE / E5 embeddings** | Devlin + Sentence-BERT above; Hub **gte-small** GGUF; [multilingual-e5-small](https://huggingface.co/intfloat/multilingual-e5-small) ONNX | ch. 7b |
+| **Whisper** | [Radford et al.](https://arxiv.org/abs/2212.04356) · [openai/whisper-base](https://huggingface.co/openai/whisper-base) | ch. **7d** |
+| **Piper** | [VITS](https://arxiv.org/abs/2106.06103) · [Piper](https://github.com/OHF-Voice/piper1-gpl) | ch. **7e** |
 
 ### I. Java / platform notes (only as needed)
 

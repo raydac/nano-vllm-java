@@ -20,6 +20,9 @@ final class CharCodec implements TokenCodec {
     this.unkToken = unkToken == null || unkToken.isBlank() ? "<unk>" : unkToken;
   }
 
+  /**
+   * {@inheritDoc}
+   */
   @Override
   public List<Integer> encode(final String text) {
     List<Integer> ids = new ArrayList<>();
@@ -46,6 +49,9 @@ final class CharCodec implements TokenCodec {
     return ids;
   }
 
+  /**
+   * {@inheritDoc}
+   */
   @Override
   public String decode(final List<String> pieces) {
     return MetaspaceText.decode(MetaspaceText.concat(pieces));

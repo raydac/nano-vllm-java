@@ -7,11 +7,25 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
+/**
+ * Minimal JSON reader for Hugging Face {@code config.json}, tokenizer sidecars, and similar
+ * text catalogs. Caps input size with {@link ResourceLimits#maxJsonChars()}. Not a general
+ * JSON library — numbers, strings, objects, arrays, and the usual literals only.
+ */
 public final class Json {
 
   private Json() {
   }
 
+  /**
+   * Parses a JSON value (object, array, string, number, {@code true}/{@code false}/{@code null}).
+   *
+   * @param text JSON text; must not be {@code null}
+   * @return parsed tree ({@link Map}, {@link List}, {@link String}, {@link Number}, or
+   * {@link Boolean}); {@code null} for JSON {@code null}
+   * @throws IllegalArgumentException if {@code text} exceeds {@link ResourceLimits#maxJsonChars()}
+   *                                  or is not valid JSON
+   */
   public static Object parse(final String text) {
     ResourceLimits limits = ResourceLimits.current();
     if (text != null && text.length() > limits.maxJsonChars()) {
@@ -21,6 +35,13 @@ public final class Json {
     return new Parser(text, limits).parse();
   }
 
+  /**
+   * Parses a JSON object.
+   *
+   * @param text JSON object text; must not be {@code null}
+   * @return the object map; never {@code null}
+   * @throws IllegalArgumentException if the root is not an object, or parse fails
+   */
   public static Map<String, Object> parseObject(final String text) {
     Object parsed = parse(text);
     if (!(parsed instanceof Map<?, ?> map)) {
@@ -29,10 +50,18 @@ public final class Json {
     return castObjectMap(map);
   }
 
+  /**
+   * {@link String#valueOf(Object)} of {@code value}, or {@code null} when {@code value} is
+   * {@code null}.
+   */
   public static String asString(final Object value) {
     return value == null ? null : String.valueOf(value);
   }
 
+  /**
+   * Integer from a parsed number or decimal string; {@code defaultValue} when {@code value} is
+   * {@code null}.
+   */
   public static int asInt(final Object value, final int defaultValue) {
     if (value == null) {
       return defaultValue;
@@ -43,6 +72,10 @@ public final class Json {
     return Integer.parseInt(value.toString());
   }
 
+  /**
+   * Long from a parsed number or decimal string; {@code defaultValue} when {@code value} is
+   * {@code null}.
+   */
   public static long asLong(final Object value, final long defaultValue) {
     if (value == null) {
       return defaultValue;
@@ -53,6 +86,10 @@ public final class Json {
     return Long.parseLong(value.toString());
   }
 
+  /**
+   * Float from a parsed number or decimal string; {@code defaultValue} when {@code value} is
+   * {@code null}.
+   */
   public static float asFloat(final Object value, final float defaultValue) {
     if (value == null) {
       return defaultValue;
@@ -63,6 +100,10 @@ public final class Json {
     return Float.parseFloat(value.toString());
   }
 
+  /**
+   * Double from a parsed number or decimal string; {@code defaultValue} when {@code value} is
+   * {@code null}.
+   */
   public static double asDouble(final Object value, final double defaultValue) {
     if (value == null) {
       return defaultValue;
@@ -73,6 +114,10 @@ public final class Json {
     return Double.parseDouble(value.toString());
   }
 
+  /**
+   * Boolean from a parsed {@link Boolean} or {@link Boolean#parseBoolean(String)};
+   * {@code defaultValue} when {@code value} is {@code null}.
+   */
   public static boolean asBoolean(final Object value, final boolean defaultValue) {
     if (value == null) {
       return defaultValue;
@@ -83,11 +128,17 @@ public final class Json {
     return Boolean.parseBoolean(value.toString());
   }
 
+  /**
+   * Casts a parsed object, or {@code null} when {@code value} is not a map.
+   */
   @SuppressWarnings("unchecked")
   public static Map<String, Object> asObject(final Object value) {
     return value instanceof Map<?, ?> m ? (Map<String, Object>) m : null;
   }
 
+  /**
+   * Casts a parsed array, or {@code null} when {@code value} is not a list.
+   */
   @SuppressWarnings("unchecked")
   public static List<Object> asArray(final Object value) {
     return value instanceof List<?> l ? (List<Object>) l : null;

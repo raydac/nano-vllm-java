@@ -131,7 +131,7 @@ public final class ModelSupport {
    * {@code true} when {@code path} is a BERT-encoder checkpoint (HF {@code config.json} or GGUF
    * metadata) without loading weights. Unknown, chat, or unreadable paths return {@code false}.
    *
-   * @since 1.2.1
+   * @since 1.3.0
    */
   public static boolean isEmbeddingCheckpoint(final Path path) {
     Path file = requireNonNull(path, "path").toAbsolutePath().normalize();

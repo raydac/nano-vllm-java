@@ -9,6 +9,13 @@ import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+/**
+ * Piper ONNX initializer aliases: HiFi-GAN ResBlock2 {@code convs.0}/{@code convs.1} become
+ * the PyTorch {@code convs1}/{@code convs2} names this graph expects. Official voices such as
+ * Irina medium export the sequential residual pair that way.
+ *
+ * @since 1.3.0
+ */
 final class PiperOnnxNames {
 
   private static final Pattern RESBLOCK_CONVS = Pattern.compile(
@@ -17,6 +24,10 @@ final class PiperOnnxNames {
   private PiperOnnxNames() {
   }
 
+  /**
+   * Copies {@code convs.0}/{@code convs.1} residual weights onto {@code convs1}/{@code convs2}
+   * names when those canonical keys are absent.
+   */
   static void promoteDecoderResblocks(
     final Map<String, Tensor> tensors,
     final Map<String, ConvLayout> layouts

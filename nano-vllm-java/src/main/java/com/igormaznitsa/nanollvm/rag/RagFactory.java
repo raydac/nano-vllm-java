@@ -263,7 +263,7 @@ public final class RagFactory {
    * @param embeddingModel    embedding encoder kept open for query-time embed; must not be {@code null}
    * @param onPassageEmbedded called with {@code 1..N} after each dense vector; must not be {@code null}
    * @return hybrid index over the same passages
-   * @since 1.2.1
+   * @since 1.3.0
    */
   public static HybridRagIndex withEmbeddings(
     final PreparedRag lexical,
@@ -309,7 +309,7 @@ public final class RagFactory {
    * @param executor          runs each dense passage embed; must not be {@code null}
    * @param onPassageEmbedded called with {@code 1..N} after each dense vector; must not be {@code null}
    * @return hybrid index over the same passages
-   * @since 1.2.1
+   * @since 1.3.0
    */
   public static HybridRagIndex withEmbeddings(
     final PreparedRag lexical,

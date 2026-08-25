@@ -85,7 +85,7 @@ public final class GgufReader implements AutoCloseable, GgufTokenizerSource {
    * weights.
    *
    * @return architecture id, or empty when the key is absent from the prefix
-   * @since 1.2.1
+   * @since 1.3.0
    */
   public static String peekArchitecture(final Path path) throws IOException {
     Path file = requireNonNull(path, "path").toAbsolutePath().normalize();

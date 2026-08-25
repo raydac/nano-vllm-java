@@ -12,8 +12,8 @@
 
     <artifactId>nano-vllm-java</artifactId>
     <name>nano-vllm-java</name>
-    <description>Pure Java 21+ CPU LLM inference (continuous batching, paged KV cache, safetensors / GGUF / ONNX, chat
-        and BERT embeddings), inspired by
+    <description>Pure Java 21+ CPU inference (continuous batching, paged KV cache, safetensors / GGUF / ONNX):
+        chat, BERT embeddings, Whisper speech-to-text, and Piper text-to-speech. Inspired by
         GeeeekExplorer/nano-vllm
     </description>
 

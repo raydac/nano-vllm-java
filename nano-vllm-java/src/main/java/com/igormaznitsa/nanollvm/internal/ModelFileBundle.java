@@ -247,18 +247,33 @@ public final class ModelFileBundle {
     return out.toByteArray();
   }
 
+  /**
+   * {@code true} when this bundle is a single GGUF payload rather than an HF folder snapshot.
+   */
   public boolean isGguf() {
     return this.gguf != null;
   }
 
+  /**
+   * Human-readable name for logs (resource path or file name).
+   */
   public String displayName() {
     return this.displayName;
   }
 
+  /**
+   * Synthetic path used as {@link com.igormaznitsa.nanollvm.models.LlmModel#path()} for
+   * stream loads (not a real filesystem location).
+   */
   public Path virtualPath() {
     return this.virtualPath;
   }
 
+  /**
+   * Heap view of the GGUF bytes.
+   *
+   * @throws IllegalStateException if this is not a GGUF bundle
+   */
   public ByteBuffer ggufBuffer() {
     if (this.gguf == null) {
       throw new IllegalStateException("not a GGUF bundle");
@@ -266,6 +281,11 @@ public final class ModelFileBundle {
     return ByteBuffer.wrap(this.gguf);
   }
 
+  /**
+   * {@code config.json} text for an HF-style bundle.
+   *
+   * @throws IllegalStateException if this is not an HF bundle
+   */
   public String configJson() {
     if (this.configJson == null) {
       throw new IllegalStateException("not an HF bundle");
@@ -273,10 +293,16 @@ public final class ModelFileBundle {
     return this.configJson;
   }
 
+  /**
+   * UTF-8 sidecar text for a known {@link ModelFileId}, if present.
+   */
   public Optional<String> textFile(final ModelFileId id) {
     return Optional.ofNullable(this.textFiles.get(id.fileName()));
   }
 
+  /**
+   * UTF-8 sidecar text by file name (tokenizer JSON, Piper {@code *.onnx.json}, …).
+   */
   public Optional<String> textFile(final String fileName) {
     return Optional.ofNullable(this.textFiles.get(fileName));
   }
@@ -292,6 +318,9 @@ public final class ModelFileBundle {
       : Optional.of(this.sentencePieceModel.clone());
   }
 
+  /**
+   * Safetensors shard payloads captured at load (empty for GGUF / ONNX-only bundles).
+   */
   public List<NamedBytes> safetensors() {
     return this.safetensors;
   }
@@ -317,6 +346,9 @@ public final class ModelFileBundle {
       requireNonNull(bytes, "bytes");
     }
 
+    /**
+     * Little-endian view of {@code bytes} (no copy).
+     */
     public ByteBuffer buffer() {
       return ByteBuffer.wrap(this.bytes);
     }

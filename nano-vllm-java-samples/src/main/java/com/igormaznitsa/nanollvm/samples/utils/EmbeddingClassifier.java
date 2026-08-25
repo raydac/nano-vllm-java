@@ -18,7 +18,7 @@ import java.util.stream.IntStream;
  * That centering is what makes fill-mask XLM-RoBERTa / BERT vectors usable; raw cosine is not.
  * This is not a Hub sequence-classification head and does not train the encoder.
  *
- * @since 1.2.1
+ * @since 1.3.0
  */
 public final class EmbeddingClassifier {
 

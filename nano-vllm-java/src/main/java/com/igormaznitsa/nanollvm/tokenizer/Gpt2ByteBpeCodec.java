@@ -28,6 +28,9 @@ final class Gpt2ByteBpeCodec implements TokenCodec {
     this.byteFallback = byteFallback;
   }
 
+  /**
+   * {@inheritDoc}
+   */
   @Override
   public List<Integer> encode(final String text) {
     List<Integer> ids = new ArrayList<>();
@@ -60,6 +63,9 @@ final class Gpt2ByteBpeCodec implements TokenCodec {
     return ids;
   }
 
+  /**
+   * {@inheritDoc}
+   */
   @Override
   public String decode(final List<String> pieces) {
     String tokenString = MetaspaceText.concat(pieces);
