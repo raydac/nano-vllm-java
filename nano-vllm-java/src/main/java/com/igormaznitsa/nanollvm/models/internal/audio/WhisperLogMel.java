@@ -127,7 +127,9 @@ public final class WhisperLogMel {
       dftReal(padded, origin, re, im);
       int off = frame * FREQ_BINS;
       for (int f = 0; f < FREQ_BINS; f++) {
-        spec[off + f] = re[f] * re[f] + im[f] * im[f];
+        final float r = re[f];
+        final float i = im[f];
+        spec[off + f] = r * r + i * i;
       }
     }
     return spec;
@@ -165,8 +167,7 @@ public final class WhisperLogMel {
   private static float[][] slaneyMelFilters() {
     float fMin = 0f;
     float fMax = SAMPLE_RATE / 2f;
-    int nFft = N_FFT;
-    int nMels = N_MELS;
+    final int nMels = N_MELS;
     double minMel = hzToMel(fMin);
     double maxMel = hzToMel(fMax);
     double[] melPoints = new double[nMels + 2];
@@ -179,7 +180,7 @@ public final class WhisperLogMel {
     }
     double[] bins = new double[hzPoints.length];
     for (int i = 0; i < hzPoints.length; i++) {
-      bins[i] = hzPoints[i] * (nFft / 2.0) / (SAMPLE_RATE / 2.0);
+      bins[i] = hzPoints[i] * (N_FFT / 2.0) / (SAMPLE_RATE / 2.0);
     }
     float[][] filters = new float[nMels][FREQ_BINS];
     for (int m = 0; m < nMels; m++) {
