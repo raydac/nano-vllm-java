@@ -17,4 +17,15 @@ final class EspeakNgPhonemesTest {
     assertEquals("sʲ", EspeakNgPhonemes.toIpa("s;"));
     assertEquals("jɪ", EspeakNgPhonemes.toIpa("jI3"));
   }
+
+  @Test
+  void kirschenbaumGBecomesIpaVelar() {
+    assertEquals("ɡɛ", EspeakNgPhonemes.toIpa("gE"));
+  }
+
+  @Test
+  void numberedSchwaDoesNotLeakDigit() {
+    assertEquals("ðə", EspeakNgPhonemes.toIpa("D@2"));
+    assertEquals("tə", EspeakNgPhonemes.toIpa("t@5"));
+  }
 }

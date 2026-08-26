@@ -3,11 +3,15 @@ package com.igormaznitsa.nanollvm.models.internal;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
+import com.igormaznitsa.nanollvm.llm.Config;
+import com.igormaznitsa.nanollvm.testsupport.OptionalModelAssumptions;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -144,6 +148,67 @@ final class EspeakNgG2pTest {
     EspeakNgG2p g2p = new EspeakNgG2p(ids, dir.resolve("missing"));
     assertFalse(g2p.hasEspeakData());
     assertEquals(List.of(1, 0, 2), g2p.phonemeIds("а"));
+  }
+
+  @Test
+  void russianGeUsesIpaVelar(@TempDir final Path dir) throws Exception {
+    Path data = dir.resolve("espeak-ng-data");
+    Files.createDirectories(data.resolve("lang"));
+    Map<String, List<Integer>> ids = Map.ofEntries(
+      Map.entry("^", List.of(1)),
+      Map.entry("$", List.of(2)),
+      Map.entry("_", List.of(0)),
+      Map.entry("a", List.of(14)),
+      Map.entry("ɡ", List.of(66)),
+      Map.entry("g", List.of(20)));
+    EspeakNgG2p g2p = new EspeakNgG2p(ids, data);
+    List<Integer> ga = g2p.phonemeIds("га");
+    assertTrue(ga.contains(66), ga::toString);
+    assertFalse(ga.contains(20), ga::toString);
+  }
+
+  @Test
+  void irinaAlphabetKeepsVelarG() throws Exception {
+    Path model = OptionalModelAssumptions.requirePiperRussian();
+    Path json;
+    try (Stream<Path> files = Files.list(model)) {
+      json = files
+        .filter(path -> path.getFileName().toString().endsWith(".onnx.json"))
+        .findFirst()
+        .orElseThrow();
+    }
+    Map<String, List<Integer>> ids =
+      Config.HfConfig.fromPiperJson(Files.readString(json)).piper().phonemeIdMap();
+    EspeakNgG2p g2p = new EspeakNgG2p(ids, model.resolve("espeak-ng-data"), "ru");
+    List<Integer> ge = g2p.phonemeIds("Г");
+    assertTrue(ge.contains(66), ge::toString);
+    List<Integer> alphabet = g2p.phonemeIds(
+      "А Б В Г Д Е Ё Ж З И Й К Л М Н О П Р С Т У Ф Х Ц Ч Ш Щ Ъ Ы Ь Э Ю Я");
+    assertTrue(alphabet.contains(66), alphabet::toString);
+  }
+
+  @Test
+  void lessacPangramKeepsVelarAndDropsDigitTwo() throws Exception {
+    Path model = OptionalModelAssumptions.requirePiper();
+    assumeTrue(
+      model.getFileName().toString().contains("-en-"),
+      "needs models/piper-en-lessac-medium");
+    Path json;
+    try (Stream<Path> files = Files.list(model)) {
+      json = files
+        .filter(path -> path.getFileName().toString().endsWith(".onnx.json"))
+        .findFirst()
+        .orElseThrow();
+    }
+    Map<String, List<Integer>> ids =
+      Config.HfConfig.fromPiperJson(Files.readString(json)).piper().phonemeIdMap();
+    EspeakNgG2p g2p = new EspeakNgG2p(ids, model.resolve("espeak-ng-data"), "en-us");
+    List<Integer> pangram = g2p.phonemeIds("The quick brown fox jumps over the lazy dog");
+    assertTrue(pangram.contains(66), pangram::toString);
+    assertFalse(pangram.contains(132), pangram::toString);
+    assertTrue(pangram.contains(88), pangram::toString);
+    assertTrue(pangram.contains(60) || pangram.contains(62), pangram::toString);
+    assertTrue(pangram.contains(120), pangram::toString);
   }
 
   @Test

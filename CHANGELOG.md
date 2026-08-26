@@ -42,7 +42,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   espeak-ng-data is present, compiled `phontab` / `phondata` / `{lang}_dict` so Russian
   lexical stress is available. The dictionary is the G2P when
   present. Otherwise a letter-to-sound fallback is used: Russian uses espeak phones for ш/ж/ы (`ʃ`/`ʒ`/`y`), so those
-  consonants stay audible (academic IPA `ʂ`/`ʐ`/`ɨ` are unused by this voice).
+  consonants stay audible (academic IPA `ʂ`/`ʐ`/`ɨ` are unused by this voice). Piper voices map the voiced velar to
+  IPA `ɡ` (not ASCII `g`); G2P emits `ɡ` so Russian `г` is spoken instead of dropped. English Lessac G2P maps
+  espeak `@2`/`@5` to schwa (no leaked digit `2`), and an en-us post-pass turns British-leaning phones into Piper
+  rhotic IPA (`ɹ`/`ɚ`/`ɑː`) with content-word stress so pangrams stay close to official Piper.
   Russian letter G2P also destresses word-final obstruents, assimilates voicing across clusters
   (including prepositions), and applies common orthoepic rewrites (жи/ши, -ого/-его, что, -ться)
   while still emitting Piper espeak phones. Latin letter G2P uses a small English lexicon plus

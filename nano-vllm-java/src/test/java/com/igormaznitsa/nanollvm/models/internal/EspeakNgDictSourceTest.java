@@ -193,6 +193,12 @@ final class EspeakNgDictSourceTest {
     }
     String shi = source.toIpa("ши");
     assertTrue(shi.contains("y"), shi);
+    String ge = source.toIpa("г");
+    assertTrue(ge.contains("ɡ"), ge);
+    assertFalse(ge.indexOf('g') >= 0, ge);
+    String city = source.toIpa("город");
+    assertTrue(city.contains("ɡ"), city);
+    assertFalse(city.indexOf('g') >= 0, city);
   }
 
   @Test

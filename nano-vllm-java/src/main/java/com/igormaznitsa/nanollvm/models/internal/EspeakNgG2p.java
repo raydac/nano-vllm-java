@@ -60,6 +60,7 @@ final class EspeakNgG2p {
   private final List<String> keysLongestFirst;
   private final Path dataDir;
   private final EspeakNgDictSource dictionary;
+  private final boolean englishUs;
 
   EspeakNgG2p(final Map<String, List<Integer>> phonemeIdMap, final Path dataDir) {
     this(phonemeIdMap, dataDir, "");
@@ -75,8 +76,14 @@ final class EspeakNgG2p {
     this.keysLongestFirst = this.phonemeIdMap.keySet().stream()
       .sorted(Comparator.comparingInt(String::length).reversed().thenComparing(key -> key))
       .toList();
-    this.dictionary =
-      EspeakNgDictSource.load(this.dataDir, requireNonNull(espeakVoice, "espeakVoice"));
+    String voice = requireNonNull(espeakVoice, "espeakVoice");
+    this.dictionary = EspeakNgDictSource.load(this.dataDir, voice);
+    this.englishUs = isEnglishUs(voice);
+  }
+
+  private static boolean isEnglishUs(final String voice) {
+    String folded = voice.strip().toLowerCase(ROOT);
+    return folded.equals("en") || folded.startsWith("en-") || folded.startsWith("en_");
   }
 
   private static boolean isCyrillic(final int cp) {
@@ -128,6 +135,9 @@ final class EspeakNgG2p {
     while (i < ipa.length()) {
       String match = this.longestKey(ipa, i);
       if (match == null) {
+        match = this.ipaVelarIfUnmapped(ipa, i);
+      }
+      if (match == null) {
         i += Character.charCount(ipa.codePointAt(i));
         continue;
       }
@@ -158,6 +168,10 @@ final class EspeakNgG2p {
       .filter(key -> ipa.startsWith(key, start))
       .findFirst()
       .orElse(null);
+  }
+
+  private String ipaVelarIfUnmapped(final String ipa, final int start) {
+    return ipa.charAt(start) == 'g' && this.phonemeIdMap.containsKey("ɡ") ? "ɡ" : null;
   }
 
   private String toIpa(final String text) {
@@ -242,7 +256,18 @@ final class EspeakNgG2p {
     if (!this.dictionary.isLoaded()) {
       return empty();
     }
-    return this.dictionary.phonemesForWord(word.toLowerCase(ROOT)).map(EspeakNgPhonemes::toIpa);
+    return this.dictionary.phonemesForWord(word.toLowerCase(ROOT)).map(this::kirschenbaumToIpa);
+  }
+
+  private String kirschenbaumToIpa(final String kirschenbaum) {
+    String ipa = EspeakNgPhonemes.toIpa(kirschenbaum);
+    return this.englishUs ? EspeakNgEnglishPhonology.apply(ipa) : ipa;
+  }
+
+  private String englishWordToIpa(final String word) {
+    String known = ENGLISH_WORDS.get(word);
+    String ipa = known != null ? known : this.englishLetters(word);
+    return this.englishUs ? EspeakNgEnglishPhonology.apply(ipa) : ipa;
   }
 
   private String russianSpanToIpa(final String span) {
@@ -261,11 +286,6 @@ final class EspeakNgG2p {
       ipa.append(this.russianGrapheme(cps, i));
     }
     return ipa.toString();
-  }
-
-  private String englishWordToIpa(final String word) {
-    String known = ENGLISH_WORDS.get(word);
-    return known != null ? known : this.englishLetters(word);
   }
 
   private String englishLetters(final String word) {
@@ -485,7 +505,7 @@ final class EspeakNgG2p {
       case 'а' -> "a";
       case 'б' -> palatalize ? "b" + PALATAL : "b";
       case 'в' -> palatalize ? "v" + PALATAL : "v";
-      case 'г' -> palatalize ? "g" + PALATAL : "g";
+      case 'г' -> palatalize ? "ɡ" + PALATAL : "ɡ";
       case 'д' -> palatalize ? "d" + PALATAL : "d";
       case 'е' -> this.iotated("e", index, cps);
       case 'ё' -> this.iotated("o", index, cps);

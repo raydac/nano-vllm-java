@@ -24,6 +24,8 @@ final class EspeakNgPhonemes {
       entry("e@", "eə"),
       entry("U@", "ʊə"),
       entry("@-", "ɨ"),
+      entry("@2", "ə"),
+      entry("@5", "ə"),
       entry("3:", "ɜː"),
       entry("A:", "ɑː"),
       entry("O:", "ɔː"),
@@ -80,7 +82,8 @@ final class EspeakNgPhonemes {
       entry("'", "ˈ"),
       entry(",", "ˌ"),
       entry("Y", "y"),
-      entry("W", "w")
+      entry("W", "w"),
+      entry("g", "ɡ")
     ).stream()
     .sorted(comparingInt((Map.Entry<String, String> e) -> e.getKey().length()).reversed())
     .toList();
