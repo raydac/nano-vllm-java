@@ -7,10 +7,13 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.igormaznitsa.nanollvm.llm.LLM;
+import com.igormaznitsa.nanollvm.models.LlmInText;
 import com.igormaznitsa.nanollvm.models.LlmModalities;
+import com.igormaznitsa.nanollvm.models.LlmModality;
 import com.igormaznitsa.nanollvm.models.LlmModel;
 import com.igormaznitsa.nanollvm.models.LlmModelFactory;
 import com.igormaznitsa.nanollvm.models.LlmOptionalData;
+import com.igormaznitsa.nanollvm.models.LlmOutSoundData;
 import com.igormaznitsa.nanollvm.models.ModelSupport;
 import com.igormaznitsa.nanollvm.models.internal.ConvLayout;
 import com.igormaznitsa.nanollvm.models.internal.WeightNames;
@@ -44,7 +47,8 @@ final class PiperLoadTest {
         model.optionalData(LlmOptionalData.ESPEAK_DATA).orElseThrow());
 
       IllegalStateException embed = assertThrows(
-        IllegalStateException.class, () -> model.embed("hello"));
+        IllegalStateException.class,
+        () -> model.generate(LlmInText.of("hello"), LlmModality.EMBEDDING));
       assertTrue(embed.getMessage().contains("text-to-speech"));
 
       try (LLM llm = LLM.builder(model).build()) {
@@ -53,8 +57,11 @@ final class PiperLoadTest {
           ModelSupport.synthesisEngineMisuseMessage(model.architectureName()), chat.getMessage());
         assertEquals(0, llm.config().numKvcacheBlocks());
 
-        byte[] wav = llm.synthesize(
-          modelPath.getFileName().toString().contains("-en-") ? "Hello" : "Привет");
+        LlmOutSoundData sound = (LlmOutSoundData) llm.generate(
+          LlmInText.of(modelPath.getFileName().toString().contains("-en-") ? "Hello" : "Привет"),
+          LlmModality.AUDIO);
+        byte[] wav = sound.wav();
+        assertTrue(sound.sampleRate() >= 8_000);
         assertTrue(wav.length > 44);
         assertEquals("RIFF", new String(wav, 0, 4, StandardCharsets.US_ASCII));
         assertEquals("WAVE", new String(wav, 8, 4, StandardCharsets.US_ASCII));

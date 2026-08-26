@@ -12,10 +12,15 @@ import com.igormaznitsa.nanollvm.llm.LLM;
 import com.igormaznitsa.nanollvm.llm.LlmAdvisor;
 import com.igormaznitsa.nanollvm.llm.LlmAdvisorMixer;
 import com.igormaznitsa.nanollvm.llm.SamplingParams;
+import com.igormaznitsa.nanollvm.models.LlmInSound;
+import com.igormaznitsa.nanollvm.models.LlmInText;
 import com.igormaznitsa.nanollvm.models.LlmModality;
 import com.igormaznitsa.nanollvm.models.LlmModel;
 import com.igormaznitsa.nanollvm.models.LlmModelFactory;
 import com.igormaznitsa.nanollvm.models.LlmOptionalData;
+import com.igormaznitsa.nanollvm.models.LlmOutEmbedding;
+import com.igormaznitsa.nanollvm.models.LlmOutSoundData;
+import com.igormaznitsa.nanollvm.models.LlmOutText;
 import com.igormaznitsa.nanollvm.models.ModelSupport;
 import com.igormaznitsa.nanollvm.rag.DenseRagIndex;
 import com.igormaznitsa.nanollvm.rag.PreparedRag;
@@ -392,7 +397,9 @@ public final class Example {
   }
 
   /**
-   * Speech REPL: each non-empty line is a WAV path passed to {@link LLM#transcribe(Path)}.
+   * Speech REPL: each non-empty line is a WAV path transcribed via
+   * {@link LLM#generate(com.igormaznitsa.nanollvm.models.LlmInput, LlmModality)}
+   * ({@link LlmInSound} → {@link LlmModality#TEXT}).
    *
    * <p>{@code /tone} writes a short 440 Hz beep and transcribes it. {@code /lang xx} sets a
    * {@link Locale} hint ({@code en}, {@code en-US}, {@code yue}); {@code /lang auto} clears it.
@@ -456,9 +463,9 @@ public final class Example {
   ) {
     try {
       long started = System.nanoTime();
-      String text = language == null
-        ? llm.transcribe(wav)
-        : llm.transcribe(wav, language);
+      LlmOutText out = (LlmOutText) llm.generate(
+        LlmInSound.ofWav(Files.readAllBytes(wav), language), LlmModality.TEXT);
+      String text = out.text();
       console.printf(
         Locale.ROOT,
         "%.3fs  %s%n%n",
@@ -494,7 +501,9 @@ public final class Example {
   }
 
   /**
-   * Synthesis REPL: each non-empty line is {@link LLM#synthesize(CharSequence)} written as WAV.
+   * Synthesis REPL: each non-empty line is
+   * {@link LLM#generate(com.igormaznitsa.nanollvm.models.LlmInput, LlmModality)}
+   * ({@link LlmInText} → {@link LlmModality#AUDIO}) written as WAV.
    */
   private static void runSynthesizeSession(
     final LLM llm,
@@ -526,14 +535,16 @@ public final class Example {
       }
       try {
         long started = System.nanoTime();
-        byte[] wav = llm.synthesize(user);
+        LlmOutSoundData sound = (LlmOutSoundData) llm.generate(
+          LlmInText.of(user), LlmModality.AUDIO);
         Path wavPath = outDir.resolve("piper-%02d.wav".formatted(++n));
-        Files.write(wavPath, wav);
+        Files.write(wavPath, sound.wav());
         console.printf(
           Locale.ROOT,
-          "%.3fs  %d bytes → %s%n%n",
+          "%.3fs  %d bytes @ %d Hz → %s%n%n",
           (System.nanoTime() - started) / 1e9,
-          wav.length,
+          sound.wav().length,
+          sound.sampleRate(),
           wavPath);
       } catch (Exception ex) {
         console.println("synthesize failed: " + ex.getMessage());
@@ -543,7 +554,7 @@ public final class Example {
   }
 
   /**
-   * Embedding REPL: each non-empty line is {@link LLM#embed(CharSequence)}.
+   * Embedding REPL: each non-empty line is {@link LLM#generate} → {@link LlmModality#EMBEDDING}.
    *
    * <p>BERT-encoder checkpoints use {@code LLM.builder} like chat. Prints dimension, L2 norm, a short preview, and
    * cosine vs the previous vector.
@@ -583,7 +594,7 @@ public final class Example {
       }
 
       long started = System.nanoTime();
-      float[] vector = llm.embed(user);
+      float[] vector = embedVector(llm, user);
       console.printf(
         Locale.ROOT,
         "dim=%d  L2=%.4f  %.3fs  preview=%s%n",
@@ -644,7 +655,9 @@ public final class Example {
 
   /**
    * Few-shot classify: teach {@code label | text} (or {@code /load} a TSV), then unlabeled lines
-   * predict. Uses {@link EmbeddingClassifier} on {@link LLM#embed} — not a classification head.
+   * predict. Uses {@link EmbeddingClassifier} on
+   * {@link LLM#generate(com.igormaznitsa.nanollvm.models.LlmInput, LlmModality)}
+   * ({@link LlmModality#EMBEDDING}) — not a classification head.
    */
   private static void runClassificationSession(
     final LLM llm,
@@ -707,7 +720,7 @@ public final class Example {
         continue;
       }
       long started = System.nanoTime();
-      printPrediction(fitted, llm.embed(user), (System.nanoTime() - started) / 1e9, console);
+      printPrediction(fitted, embedVector(llm, user), (System.nanoTime() - started) / 1e9, console);
       console.println();
     }
   }
@@ -783,7 +796,7 @@ public final class Example {
     final OrderedConsole console
   ) {
     long started = System.nanoTime();
-    trainer.add(example.label(), llm.embed(example.text()));
+    trainer.add(example.label(), embedVector(llm, example.text()));
     taught.add(example);
     EmbeddingClassifier fitted = trainer.canFit() ? trainer.fit() : null;
     console.printf(
@@ -1358,15 +1371,18 @@ public final class Example {
     }
     if (ModelSupport.isEmbeddingCheckpoint(path)) {
       console.printlnInfo(
-        "This checkpoint is a BERT-family embedding encoder — LLM.builder then LLM.embed.");
+        "This checkpoint is a BERT-family embedding encoder — LLM.builder then "
+          + "generate(LlmInText, EMBEDDING).");
     }
     if (ModelSupport.isSpeechCheckpoint(path)) {
       console.printlnInfo(
-        "This checkpoint is Whisper speech-to-text — LLM.builder then LLM.transcribe.");
+        "This checkpoint is Whisper speech-to-text — LLM.builder then "
+          + "generate(LlmInSound, TEXT).");
     }
     if (ModelSupport.isSynthesisCheckpoint(path)) {
       console.printlnInfo(
-        "This checkpoint is Piper text-to-speech — LLM.builder then LLM.synthesize. "
+        "This checkpoint is Piper text-to-speech — LLM.builder then "
+          + "generate(LlmInText, AUDIO). "
           + "espeak-ng-data is optional (.optionalData(LlmOptionalData.ESPEAK_DATA, path) "
           + "or espeak-ng-data next to the voice); a missing folder is ignored.");
     }
@@ -1553,6 +1569,10 @@ public final class Example {
 
   private static PrintStream answerStream(final OrderedConsole console) {
     return console.stream();
+  }
+
+  private static float[] embedVector(final LLM llm, final String text) {
+    return ((LlmOutEmbedding) llm.generate(LlmInText.of(text), LlmModality.EMBEDDING)).vector();
   }
 
   private static double l2Norm(final float[] vector) {

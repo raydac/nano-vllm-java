@@ -5,14 +5,15 @@
  * <p><b>Load vs run.</b> Weights live on a shareable {@link com.igormaznitsa.nanollvm.models.LlmModel}
  * from {@link com.igormaznitsa.nanollvm.models.LlmModelFactory}. Each {@link LLM} is one engine
  * (KV cache and scheduler for chat; matmul pool for every kind). Close the engine first, then
- * the model. Chat uses {@link LLM#chat}; embeddings {@link LLM#embed}; Whisper
- * {@link LLM#transcribe} ({@code byte[]} WAV or a file); Piper
- * {@link LLM#synthesize} (WAV {@code byte[]}). All of those go through
- * {@link LLM#builder}.
+ * the model. Chat uses {@link LLM#chat}; embeddings, Whisper, Piper, and raw completion use typed
+ * {@link LLM#generate(com.igormaznitsa.nanollvm.models.LlmInput, com.igormaznitsa.nanollvm.models.LlmModality)}.
+ * All of those go through {@link LLM#builder}.
  *
  * <p><b>Which call.</b> {@link LLM#chat()} / {@link LLM#chatOnce(String)} apply the tokenizer chat
- * template and parse thinking/answer. {@link LLM#complete(String)} continues a raw string with no
- * template. {@link LLM#generate} / {@link LLM#generateTokenIds} are the batch primitives (optional
+ * template and parse thinking/answer. Typed
+ * {@link LLM#generate(com.igormaznitsa.nanollvm.models.LlmInput, com.igormaznitsa.nanollvm.models.LlmModality)}
+ * continues a raw string with no template when the output modality is text.
+ * {@link LLM#generate} / {@link LLM#generateTokenIds} are the batch primitives (optional
  * timeout, progress, token stream). {@link LLM#rag} wraps chat with a {@link com.igormaznitsa.nanollvm.rag.RagIndex}.
  *
  * <p><b>Knobs (where to look).</b> How long / how random a reply is:

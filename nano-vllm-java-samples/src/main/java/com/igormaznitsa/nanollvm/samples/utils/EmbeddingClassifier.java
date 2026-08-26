@@ -12,7 +12,8 @@ import java.util.Optional;
 import java.util.stream.IntStream;
 
 /**
- * Few-shot label probe on frozen encoder vectors ({@code LlmModel.embed}).
+ * Few-shot label probe on frozen encoder vectors
+ * ({@code LlmModel.generate(LlmInText, EMBEDDING)}).
  *
  * <p>Fits one L2-normalized residual prototype per label after subtracting the training mean.
  * That centering is what makes fill-mask XLM-RoBERTa / BERT vectors usable; raw cosine is not.

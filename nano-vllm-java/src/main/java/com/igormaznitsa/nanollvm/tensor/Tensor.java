@@ -109,6 +109,32 @@ public final class Tensor {
   }
 
   /**
+   * Views a contiguous slice of an existing buffer as a tensor (no copy).
+   *
+   * <p>{@code data[offset .. offset + numel(shape))} is the logical contents. The array may be
+   * longer than that slice so callers can grow a capacity buffer and expose a prefix.
+   *
+   * @param data   backing storage; must not be {@code null}
+   * @param offset start index of the view ({@code >= 0})
+   * @param shape  axis lengths for the view
+   * @return a tensor sharing {@code data}
+   * @throws NullPointerException     if {@code data} or {@code shape} is {@code null}
+   * @throws IllegalArgumentException if the slice falls outside {@code data} or {@code shape} is
+   *                                  invalid
+   * @since 1.3.0
+   */
+  public static Tensor wrap(final float[] data, final int offset, final int... shape) {
+    int[] s = requireShape(shape);
+    int n = numel(s);
+    requireNonNull(data, "data");
+    if (offset < 0 || (long) offset + n > data.length) {
+      throw new IllegalArgumentException(
+        "view [%d, %d) outside data length %d".formatted(offset, offset + n, data.length));
+    }
+    return new Tensor(data, s, offset, n);
+  }
+
+  /**
    * Validates and defensively copies a shape array.
    *
    * @throws IllegalArgumentException if empty or any dimension is negative

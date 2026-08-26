@@ -9,7 +9,7 @@ import com.igormaznitsa.nanollvm.samples.utils.BundledModels;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
-import java.util.concurrent.ThreadLocalRandom;
+import java.util.Random;
 import java.util.stream.IntStream;
 
 /**
@@ -50,7 +50,7 @@ public final class Bench {
       kvBlocks,
       Runtime.getRuntime().maxMemory() / (1024.0 * 1024.0 * 1024.0));
 
-    ThreadLocalRandom rnd = ThreadLocalRandom.current();
+    Random rnd = new Random();
     try (LlmModel model = LlmModelFactory.make(path, LlmListeners.toSystem());
          LLM llm = LLM.builder(model)
            .maxModelLen(MAX_MODEL_LEN)
@@ -62,9 +62,9 @@ public final class Bench {
 
       List<List<Integer>> prompts = IntStream.range(0, numSeqs)
         .mapToObj(i -> {
-          int len = rnd.nextInt(16, MAX_INPUT_LEN + 1);
+          int len = 16 + rnd.nextInt(MAX_INPUT_LEN - 15);
           return IntStream.range(0, len)
-            .map(t -> rnd.nextInt(0, 10_000))
+            .map(t -> rnd.nextInt(10_000))
             .boxed()
             .toList();
         })
@@ -72,7 +72,7 @@ public final class Bench {
       List<SamplingParams> params = IntStream.range(0, numSeqs)
         .mapToObj(i -> SamplingParams.builder()
           .temperature(0.6f)
-          .maxTokens(rnd.nextInt(8, MAX_OUTPUT_LEN + 1))
+          .maxTokens(8 + rnd.nextInt(MAX_OUTPUT_LEN - 7))
           .ignoreEos(true)
           .build())
         .toList();

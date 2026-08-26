@@ -264,17 +264,18 @@ public final class ModelSupport {
   public static String chatMisuseMessage(final String architectureName) {
     return (
       "This checkpoint is a %s embedding encoder, not a chat model. Use LLM.builder(model).build() "
-        + "then LLM.embed(...).%n%n%s").formatted(blank(architectureName), CATALOG);
+        + "then LLM.generate(LlmInText, EMBEDDING).%n%n%s").formatted(blank(architectureName),
+      CATALOG);
   }
 
   /**
-   * Message when {@link LlmModel#embed} is used on a chat checkpoint.
+   * Message when embedding APIs are used on a chat checkpoint.
    *
    * @since 1.1.0
    */
   public static String embedMisuseMessage(final String architectureName) {
     return ("This checkpoint is a %s chat model, not an embedding encoder. Use LLM.builder(model) "
-      + "for generate / chat.%n%n%s").formatted(blank(architectureName), CATALOG);
+      + "for chat / generate.%n%n%s").formatted(blank(architectureName), CATALOG);
   }
 
   /**
@@ -285,27 +286,27 @@ public final class ModelSupport {
   public static String speechEngineMisuseMessage(final String architectureName) {
     return (
       "This checkpoint is a %s speech model, not a chat model. Use LLM.builder(model).build() "
-        + "then LLM.transcribe(...).%n%n%s").formatted(blank(architectureName), CATALOG);
+        + "then LLM.generate(LlmInSound, TEXT).%n%n%s").formatted(blank(architectureName), CATALOG);
   }
 
   /**
-   * Message when {@link LlmModel#embed} is used on a speech checkpoint.
+   * Message when embedding APIs are used on a speech checkpoint.
    *
    * @since 1.3.0
    */
   public static String speechEmbedMisuseMessage(final String architectureName) {
     return ("This checkpoint is a %s speech model, not an embedding encoder. Call "
-      + "LLM.transcribe(...).%n%n%s").formatted(blank(architectureName), CATALOG);
+      + "LLM.generate(LlmInSound, TEXT).%n%n%s").formatted(blank(architectureName), CATALOG);
   }
 
   /**
-   * Message when {@link LlmModel#transcribe} is used on a chat or embedding checkpoint.
+   * Message when speech generate is used on a chat or embedding checkpoint.
    *
    * @since 1.3.0
    */
   public static String transcribeMisuseMessage(final String architectureName) {
     return ("This checkpoint is a %s model, not Whisper speech-to-text. Chat uses LLM.chat; "
-      + "embeddings use LLM.embed; Piper TTS uses LLM.synthesize.%n%n%s")
+      + "embeddings use LLM.generate(..., EMBEDDING); Piper uses LLM.generate(..., AUDIO).%n%n%s")
       .formatted(blank(architectureName), CATALOG);
   }
 
@@ -316,28 +317,28 @@ public final class ModelSupport {
    */
   public static String synthesisEngineMisuseMessage(final String architectureName) {
     return ("This checkpoint is a %s text-to-speech model, not a chat model. Use "
-      + "LLM.builder(model).build() then LLM.synthesize(...).%n%n%s")
+      + "LLM.builder(model).build() then LLM.generate(LlmInText, AUDIO).%n%n%s")
       .formatted(blank(architectureName), CATALOG);
   }
 
   /**
-   * Message when {@link LlmModel#embed} is used on a synthesis checkpoint.
+   * Message when embedding APIs are used on a synthesis checkpoint.
    *
    * @since 1.3.0
    */
   public static String synthesisEmbedMisuseMessage(final String architectureName) {
     return ("This checkpoint is a %s text-to-speech model, not an embedding encoder. Call "
-      + "LLM.synthesize(...).%n%n%s").formatted(blank(architectureName), CATALOG);
+      + "LLM.generate(LlmInText, AUDIO).%n%n%s").formatted(blank(architectureName), CATALOG);
   }
 
   /**
-   * Message when {@link LlmModel#synthesize} is used on a chat, embedding, or speech checkpoint.
+   * Message when synthesis generate is used on a chat, embedding, or speech checkpoint.
    *
    * @since 1.3.0
    */
   public static String synthesizeMisuseMessage(final String architectureName) {
     return ("This checkpoint is a %s model, not Piper text-to-speech. Chat uses LLM.chat; "
-      + "embeddings use LLM.embed; Whisper uses LLM.transcribe.%n%n%s")
+      + "embeddings use LLM.generate(..., EMBEDDING); Whisper uses LLM.generate(..., TEXT).%n%n%s")
       .formatted(blank(architectureName), CATALOG);
   }
 
@@ -747,16 +748,20 @@ public final class ModelSupport {
      * Causal chat / completion ({@code qwen3}, {@code gemma3}, {@code gemma4}, {@code llama}, {@code lfm2}).
      */
     CHAT,
-    /** BERT-style encoder used with {@link LlmModel#embed}. */
+    /**
+     * BERT-style encoder used with {@link LlmModel#generate(LlmInput, LlmModality)} → embedding.
+     */
     EMBEDDING,
     /**
-     * Speech-to-text encoder-decoder used with {@link LlmModel#transcribe}.
+     * Speech-to-text encoder-decoder used with {@link LlmModel#generate(LlmInput, LlmModality)}
+     * ({@link LlmInSound} → text).
      *
      * @since 1.3.0
      */
     SPEECH,
     /**
-     * Text-to-speech used with {@link LlmModel#synthesize}.
+     * Text-to-speech used with {@link LlmModel#generate(LlmInput, LlmModality)}
+     * ({@link LlmInText} → audio).
      *
      * @since 1.3.0
      */
@@ -781,8 +786,8 @@ public final class ModelSupport {
    * Architecture chosen at load: backend id plus {@link Kind}.
    *
    * <p>Returned by {@link ModelSupport#require} / {@link ModelSupport#resolve} /
-   * {@link ModelSupport#requireGguf}. Use {@link #isEmbedding()} to decide
-   * {@link LlmModel#embed} vs {@link com.igormaznitsa.nanollvm.llm.LLM#builder}.
+   * {@link ModelSupport#requireGguf}. Use {@link #isEmbedding()} to decide embedding
+   * {@link LlmModel#generate(LlmInput, LlmModality)} vs chat {@link com.igormaznitsa.nanollvm.llm.LLM#builder}.
    * {@link #architectureId()} is the canonical key ({@code qwen3}, {@code gemma3}, {@code gemma4},
    * {@code llama}, {@code lfm2}, {@code bert}, {@code whisper}).
    *

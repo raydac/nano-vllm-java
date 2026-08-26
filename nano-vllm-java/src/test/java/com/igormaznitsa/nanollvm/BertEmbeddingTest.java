@@ -6,10 +6,13 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.igormaznitsa.nanollvm.llm.LLM;
+import com.igormaznitsa.nanollvm.models.LlmInText;
+import com.igormaznitsa.nanollvm.models.LlmInTokenIds;
 import com.igormaznitsa.nanollvm.models.LlmModalities;
 import com.igormaznitsa.nanollvm.models.LlmModality;
 import com.igormaznitsa.nanollvm.models.LlmModel;
 import com.igormaznitsa.nanollvm.models.LlmModelFactory;
+import com.igormaznitsa.nanollvm.models.LlmOutEmbedding;
 import com.igormaznitsa.nanollvm.testsupport.OptionalModelAssumptions;
 import java.nio.file.Path;
 import java.util.Set;
@@ -33,6 +36,19 @@ final class BertEmbeddingTest {
     return dot;
   }
 
+  private static float[] embed(final LlmModel model, final String text) {
+    return ((LlmOutEmbedding) model.generate(LlmInText.of(text), LlmModality.EMBEDDING)).vector();
+  }
+
+  private static float[] embed(final LLM llm, final String text) {
+    return ((LlmOutEmbedding) llm.generate(LlmInText.of(text), LlmModality.EMBEDDING)).vector();
+  }
+
+  private static float[] embedIds(final LlmModel model, final int[] ids) {
+    return ((LlmOutEmbedding) model.generate(LlmInTokenIds.of(ids),
+      LlmModality.EMBEDDING)).vector();
+  }
+
   @Test
   void gteSmallEmbedsThroughLlmBuilder() {
     Path path = OptionalModelAssumptions.requireGteSmallGguf();
@@ -51,9 +67,9 @@ final class BertEmbeddingTest {
       assertTrue(text.contains("architecture=bert"), text);
       assertTrue(text.contains("container=gguf"), text);
 
-      float[] a = model.embed("hello world");
-      float[] b = model.embed("hello world");
-      float[] c = model.embed("totally unrelated astronomy text");
+      float[] a = embed(model, "hello world");
+      float[] b = embed(model, "hello world");
+      float[] c = embed(model, "totally unrelated astronomy text");
 
       assertEquals(384, a.length);
       assertEquals(1.0, l2(a), 1e-4);
@@ -63,7 +79,7 @@ final class BertEmbeddingTest {
       try (LLM llm = LLM.builder(model).build()) {
         assertThrows(IllegalStateException.class, llm::chat);
         assertEquals(0, llm.config().numKvcacheBlocks());
-        assertEquals(1.0f, cosine(a, llm.embed("hello world")), 1e-5f);
+        assertEquals(1.0f, cosine(a, embed(llm, "hello world")), 1e-5f);
       }
 
       int cls = model.tokenizer().tokenId("[CLS]").orElseThrow();
@@ -75,8 +91,8 @@ final class BertEmbeddingTest {
         ids[i + 1] = pieces.get(i);
       }
       ids[ids.length - 1] = sep;
-      assertEquals(1.0f, cosine(a, model.embed(ids)), 1e-5f);
-      assertThrows(IllegalArgumentException.class, () -> model.embed(new int[0]));
+      assertEquals(1.0f, cosine(a, embedIds(model, ids)), 1e-5f);
+      assertThrows(IllegalArgumentException.class, () -> LlmInTokenIds.of(new int[0]));
     }
   }
 
@@ -96,9 +112,9 @@ final class BertEmbeddingTest {
       assertTrue(text.contains("architecture=bert"), text);
       assertTrue(text.contains("container=folder"), text);
 
-      float[] a = model.embed("query: hello world");
-      float[] b = model.embed("query: hello world");
-      float[] c = model.embed("query: totally unrelated astronomy text");
+      float[] a = embed(model, "query: hello world");
+      float[] b = embed(model, "query: hello world");
+      float[] c = embed(model, "query: totally unrelated astronomy text");
 
       assertEquals(384, a.length);
       assertEquals(1.0, l2(a), 1e-4);
@@ -108,7 +124,7 @@ final class BertEmbeddingTest {
       try (LLM llm = LLM.builder(model).build()) {
         assertThrows(IllegalStateException.class, llm::chat);
         assertEquals(0, llm.config().numKvcacheBlocks());
-        assertEquals(1.0f, cosine(a, llm.embed("query: hello world")), 1e-5f);
+        assertEquals(1.0f, cosine(a, embed(llm, "query: hello world")), 1e-5f);
       }
 
       int cls = model.tokenizer().tokenId("<s>").orElseThrow();
@@ -120,7 +136,7 @@ final class BertEmbeddingTest {
         ids[i + 1] = pieces.get(i);
       }
       ids[ids.length - 1] = sep;
-      assertEquals(1.0f, cosine(a, model.embed(ids)), 1e-5f);
+      assertEquals(1.0f, cosine(a, embedIds(model, ids)), 1e-5f);
     }
   }
 }

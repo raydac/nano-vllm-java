@@ -1,9 +1,11 @@
 package com.igormaznitsa.nanollvm.layers;
 
+import static java.util.Objects.requireNonNull;
+
 import com.igormaznitsa.nanollvm.tensor.Tensor;
 
 import java.util.Arrays;
-import java.util.concurrent.ThreadLocalRandom;
+import java.util.Random;
 
 /**
  * Next-token draw from a batch of logits: temperature softmax, then top-k, then top-p, then
@@ -14,13 +16,13 @@ import java.util.concurrent.ThreadLocalRandom;
  * whose mass is at least {@code p} and renormalizes, then one index is drawn. {@code topK == 0}
  * skips top-k; {@code topP >= 1} skips nucleus.
  *
- * <p>There is no RNG seed on this type. {@link ThreadLocalRandom} is used unless
- * {@code topK == 1}, which is greedy argmax (no draw). Repeated calls with the same logits
- * can differ when {@code topK != 1}. Temperature must be {@code > 0}; {@code SamplingParams}
- * already rejects greedy {@code 0}.
+ * <p>This type holds no RNG. The caller supplies a {@link Random} ({@code LLM} owns one per
+ * engine and passes it through {@code Transformer} under the exclusive generate lock).
+ * {@code topK == 1} is greedy argmax and does not draw. Temperature must be {@code > 0};
+ * {@code SamplingParams} already rejects greedy {@code 0}.
  *
- * <p><strong>Thread safety:</strong> {@link #forward(Tensor, float[], int[], float[])} may run
- * on the generate thread only (same as {@code Transformer}); the RNG itself is thread-local.
+ * <p><strong>Thread safety:</strong> {@link #forward} is safe for concurrent callers only when
+ * each call uses a distinct {@link Random}; sharing one {@code Random} across threads is not.
  *
  * @see com.igormaznitsa.nanollvm.llm.SamplingParams
  */
@@ -33,10 +35,17 @@ public final class Sampler {
    * @param temperatures per-row softmax temperature; length {@code rows}
    * @param topKs        per-row top-k ({@code 0} = disabled), or {@code null} for all disabled
    * @param topPs        per-row nucleus ({@code 1} = disabled), or {@code null} for all {@code 1}
+   * @param random       Gumbel draw source; must not be {@code null}
    * @return token ids, length {@code rows}
    */
-  public int[] forward(final Tensor logits, final float[] temperatures, final int[] topKs,
-                       final float[] topPs) {
+  public int[] forward(
+    final Tensor logits,
+    final float[] temperatures,
+    final int[] topKs,
+    final float[] topPs,
+    final Random random
+  ) {
+    requireNonNull(random, "random");
     int rows = logits.size(0);
     int vocab = logits.size(1);
     int[] out = new int[rows];
@@ -44,7 +53,7 @@ public final class Sampler {
       float temperature = temperatures[r];
       int topK = topKs != null ? topKs[r] : 0;
       float topP = topPs != null ? topPs[r] : 1f;
-      out[r] = this.sampleRow(logits, r, vocab, temperature, topK, topP);
+      out[r] = this.sampleRow(logits, r, vocab, temperature, topK, topP, random);
     }
     return out;
   }
@@ -54,21 +63,28 @@ public final class Sampler {
    *
    * @param logits       {@code [rows, vocab]}
    * @param temperatures per-row softmax temperature
+   * @param random       Gumbel draw source; must not be {@code null}
    * @return token ids, length {@code rows}
    */
-  public int[] forward(final Tensor logits, final float[] temperatures) {
+  public int[] forward(final Tensor logits, final float[] temperatures, final Random random) {
     int[] topKs = new int[temperatures.length];
     float[] topPs = new float[temperatures.length];
     Arrays.fill(topPs, 1f);
-    return this.forward(logits, temperatures, topKs, topPs);
+    return this.forward(logits, temperatures, topKs, topPs, random);
   }
 
   /**
    * Softmax → top-k → top-p → Gumbel-max for one vocabulary row.
    */
-  private int sampleRow(final Tensor logits, final int row, final int vocab,
-                        final float temperature, final int topK,
-                        final float topP) {
+  private int sampleRow(
+    final Tensor logits,
+    final int row,
+    final int vocab,
+    final float temperature,
+    final int topK,
+    final float topP,
+    final Random random
+  ) {
     if (topK == 1) {
       return this.argmax(logits, row, vocab);
     }
@@ -122,7 +138,7 @@ public final class Sampler {
       if (p <= 0f) {
         continue;
       }
-      float u = ThreadLocalRandom.current().nextFloat();
+      float u = random.nextFloat();
       float g = (float) -Math.log(Math.max(1e-10, u));
       float s = p / Math.max(1e-10f, g);
       if (s > bestScore) {

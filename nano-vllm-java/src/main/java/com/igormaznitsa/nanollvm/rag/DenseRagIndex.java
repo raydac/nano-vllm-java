@@ -2,7 +2,10 @@ package com.igormaznitsa.nanollvm.rag;
 
 import static java.util.Objects.requireNonNull;
 
+import com.igormaznitsa.nanollvm.models.LlmInText;
+import com.igormaznitsa.nanollvm.models.LlmModality;
 import com.igormaznitsa.nanollvm.models.LlmModel;
+import com.igormaznitsa.nanollvm.models.LlmOutEmbedding;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
@@ -259,7 +262,7 @@ public final class DenseRagIndex implements RagIndex {
   ) {
     float[][] vectors = new float[chunks.size()][];
     for (int i = 0; i < chunks.size(); i++) {
-      vectors[i] = embeddingModel.embed(embedText(chunks.get(i)));
+      vectors[i] = encode(embeddingModel, embedText(chunks.get(i)));
       reportPassageProgress(onPassageEmbedded, i + 1);
     }
     return vectors;
@@ -277,7 +280,7 @@ public final class DenseRagIndex implements RagIndex {
     for (int i = 0; i < chunks.size(); i++) {
       int index = i;
       jobs[i] = CompletableFuture.runAsync(() -> {
-        vectors[index] = embeddingModel.embed(embedText(chunks.get(index)));
+        vectors[index] = encode(embeddingModel, embedText(chunks.get(index)));
         reportPassageProgress(onPassageEmbedded, completed.incrementAndGet());
       }, executor);
     }
@@ -432,7 +435,11 @@ public final class DenseRagIndex implements RagIndex {
     return best;
   }
 
+  private static float[] encode(final LlmModel model, final String text) {
+    return ((LlmOutEmbedding) model.generate(LlmInText.of(text), LlmModality.EMBEDDING)).vector();
+  }
+
   private float[] embedQuery(final String query) {
-    return this.encoder.embed(query.isBlank() ? "_" : query);
+    return encode(this.encoder, query.isBlank() ? "_" : query);
   }
 }

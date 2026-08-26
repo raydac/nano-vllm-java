@@ -63,6 +63,7 @@ import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Random;
 import java.util.Set;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutorService;
@@ -108,6 +109,7 @@ class CoreUnitTest {
         .warmup(false)
         .allowUnpackParameters()
         .allowUnpackParameters(false)
+        .random(new Random(7L))
         .listen(LlmListeners.toSystem())
         .listen(LlmListeners.silent())
         .systemPrompt("Answer briefly.")
@@ -978,8 +980,9 @@ class CoreUnitTest {
     float[] temperatures = {0.9f};
     int[] topKs = {1};
     float[] topPs = {0.3f};
-    int[] first = sampler.forward(logits, temperatures, topKs, topPs);
-    int[] second = sampler.forward(logits, temperatures, topKs, topPs);
+    Random random = new Random(1L);
+    int[] first = sampler.forward(logits, temperatures, topKs, topPs, random);
+    int[] second = sampler.forward(logits, temperatures, topKs, topPs, random);
     assertEquals(1, first[0]);
     assertEquals(first[0], second[0]);
   }

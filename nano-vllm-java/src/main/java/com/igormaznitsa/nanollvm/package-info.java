@@ -3,12 +3,15 @@
  *
  * <p><b>Load a checkpoint</b> — {@link com.igormaznitsa.nanollvm.models.LlmModelFactory}
  * ({@code make(path)} or {@code open(path).…make()}). Every kind then goes through
- * {@link com.igormaznitsa.nanollvm.llm.LLM#builder}: chat, {@code embed}, {@code transcribe},
- * or {@code synthesize}.
+ * {@link com.igormaznitsa.nanollvm.llm.LLM#builder}: chat, or typed
+ * {@link com.igormaznitsa.nanollvm.llm.LLM#generate} for embeddings, Whisper, Piper, and raw
+ * text continuation.
  *
  * <p><b>Talk to the model</b> — {@link com.igormaznitsa.nanollvm.llm.LLM}: {@code chat()} for a
- * conversation, {@code chatOnce} for one question, {@code complete} to continue a raw string,
- * {@code rag} to answer from your documents. Reply style (length, randomness) is
+ * conversation, {@code chatOnce} for one question,
+ * {@link com.igormaznitsa.nanollvm.llm.LLM#generate(com.igormaznitsa.nanollvm.models.LlmInput, com.igormaznitsa.nanollvm.models.LlmModality)}
+ * for embeddings / speech / TTS / raw continuation, {@code rag} to answer from your documents.
+ * Reply style (length, randomness) is
  * {@link com.igormaznitsa.nanollvm.llm.SamplingParams}. Session extras (timeout, streaming,
  * history cap) live on {@link com.igormaznitsa.nanollvm.chat.ChatSession}.
  *

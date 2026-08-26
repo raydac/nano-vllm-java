@@ -2,6 +2,7 @@ package com.igormaznitsa.nanollvm.models.internal;
 
 import com.igormaznitsa.nanollvm.tensor.MatmulRuntime;
 import java.nio.file.Path;
+import java.util.Random;
 
 /**
  * Text-to-speech graph: text in, mono PCM out at the voice sample rate.
@@ -32,7 +33,8 @@ public interface TextToSpeech {
    * @param text       text to speak; must not be {@code null} or blank
    * @param espeakData espeak-ng-data directory; must not be {@code null}. A missing folder is ignored.
    * @param runtime    dense kernel runtime; must not be {@code null}
+   * @param random     duration / prior noise source; must not be {@code null}
    * @return mono PCM at {@link #sampleRate()}; never {@code null}
    */
-  float[] synthesize(CharSequence text, Path espeakData, MatmulRuntime runtime);
+  float[] synthesize(CharSequence text, Path espeakData, MatmulRuntime runtime, Random random);
 }

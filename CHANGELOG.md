@@ -26,9 +26,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `phontab` and `{lang}_dict` are present, listed words still come from those files.
 
 - Piper text-to-speech from a voice folder (`*.onnx` + `*.onnx.json`). Load with
-  `LlmModelFactory.make`, then `LLM.builder(model).build()` and `LLM.synthesize` for
-  uncompressed WAV bytes (PCM16 LE mono) — write the array only if you need a file.
-  `LlmModel.synthesize` remains a sequential shortcut.
+  `LlmModelFactory.make`, then `LLM.builder(model).build()` and
+  `generate(LlmInText, AUDIO)` → `LlmOutSoundData` (WAV PCM16 LE mono + sample rate) —
+  write `sound.wav()` only if you need a file. `LlmModel.generate` remains a sequential shortcut.
   Official Piper ONNX exports (including ru_RU-irina-medium) load: the phoneme table exported as
   `sid`, WaveNet kernels named `onnx::Conv_*`, and HiFi-GAN vocoder residual blocks. Conv and
   ConvTranspose geometry (stride, padding, dilation, groups, output padding) comes from the ONNX
@@ -58,23 +58,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   pool as chat, and 1-D conv / conv-transpose split independent output channels across that pool.
   Non-chat engines skip KV paging (`numKvcacheBlocks` is 0), so Piper no longer fails to build
   on a large heap (the chat auto-sizer treated a missing transformer as 1-byte pages and overflowed).
+  Synthesis skips identity attention masks, norms channels in place (no layout ping-pong), and uses
+  SIMD add/dot paths on the VITS hot path.
 
 - Whisper speech-to-text from Hugging Face safetensors (`openai/whisper-*`). Load with
-  `LlmModelFactory.make`, then `LLM.builder(model).build()` and `LLM.transcribe` on uncompressed
-  WAV bytes, a WAV file, or 16 kHz-resampled PCM (no file required when the payload is already
-  in memory). Optional language is a `Locale` (`null` / `Locale.ROOT` = auto; region ignored;
-  ISO aliases such as `jv` map to Whisper's `jw` token). `LlmModel.transcribe` remains a sequential shortcut. The builder
-  uses the same CPU matmul pool as chat (Linear, attention, and stem convs). CTranslate2 /
+  `LlmModelFactory.make`, then `LLM.builder(model).build()` and
+  `generate(LlmInSound, TEXT)` → `LlmOutText` (WAV bytes via `LlmInSound.ofWav`, or PCM via
+  `ofPcm`; read files yourself). Optional language is a `Locale` on `LlmInSound`
+  (`null` / `Locale.ROOT` = auto; region ignored; ISO aliases such as `jv` map to Whisper's
+  `jw` token). `LlmModel.generate` remains a sequential shortcut. The builder
+  uses the same CPU matmul pool as chat (Linear, attention, and stem convs). Decoder steps keep a
+  growing self-attention KV cache (one step per new token). Log-mel STFT uses Bluestein FFT with
+  sparse mel filters and optional frame parallelism on that pool. CTranslate2 /
   faster-whisper `model.bin` folders, Whisper GGUF, and Whisper ONNX are refused. Optional
   `models/download-whisper-base.sh` / `.ps1` / `.cmd` (~290 MB) and `download-whisper-tiny.sh`
   (~150 MB). Sample `TranscribeHelloWorld`; `Example` lists Whisper in the menu and opens a WAV
   transcribe session.
 
+- Cross-kind typed facade: `LlmOutput generate(LlmInput, LlmModality)` on `LlmModel` and `LLM`
+  is the single inference entry for embeddings, Whisper, Piper, and raw text completion.
+  Sealed inputs (`LlmInText`, `LlmInSound`, `LlmInTokenIds`) and outputs (`LlmOutText`,
+  `LlmOutSoundData` with WAV + sample rate, `LlmOutEmbedding`). Kind-specific
+  `embed` / `transcribe` / `synthesize` / `complete` shortcuts were removed; chat stays on
+  `ChatSession` / `chatOnce`, and batched token generation stays on `generate(List, …)`.
+  Text completion via the facade needs an `LLM` engine.
+  `LLM.Builder.random(Random)` injects the engine-owned RNG used for chat
+  Gumbel sampling and Piper noise (default remains unseeded, or seed `1L` for synthesis).
+
 - Optional download scripts for [FacebookAI/xlm-roberta-base](https://huggingface.co/FacebookAI/xlm-roberta-base)
   (`models/download-xlm-roberta-base.sh` / `.ps1` / `.cmd` → `models/xlm-roberta-base/`, ONNX fp32
   saved as `onnx/model.onnx`, ~1.9 GB). BERT-encoder embeddings (`bert` / `roberta` / `xlm-roberta`,
   and the same graph under those family names) load from GGUF or ONNX via `LLM.builder` then
-  `LLM.embed` (or `LlmModel.embed` as a sequential shortcut) — the
+  `generate(LlmInText, EMBEDDING)` (or `LlmModel.generate` as a sequential shortcut) — the
   library keys off architecture, not a named Hub checkpoint. ONNX BERT weight names drop whatever
   module sits in front of `embeddings.` / `encoder.` (not a fixed prefix list).
   `ModelSupport.isEmbeddingCheckpoint` classifies a folder or GGUF from `config.json` / metadata
@@ -91,7 +106,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Model download scripts treat HTTP 416 on resume as "already complete", so re-running a script
   after a sidecar such as `config.json` finished no longer fails (`curl: (22) ... 416`).
-
 ## [1.2.0] — 2026-08-22
 
 Public release of **nano-vllm-java** `1.2.0` (Maven coordinates `com.igormaznitsa:nano-vllm-java:1.2.0`).

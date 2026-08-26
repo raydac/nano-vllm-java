@@ -21,4 +21,25 @@ final class ScaledDotProductAttentionTest {
     assertArrayEquals(new float[] {0.5f, 0.5f}, new float[] {full.get(0), full.get(1)}, 1e-5f);
     assertArrayEquals(new float[] {0.5f, 0.5f}, new float[] {full.get(2), full.get(3)}, 1e-5f);
   }
+
+  @Test
+  void incrementalCausalMatchesPrefillAtLastPosition() {
+    ScaledDotProductAttention attn = new ScaledDotProductAttention(1, 2, 1f, true);
+    Tensor q = Tensor.of(new float[] {1f, 0f, 0f, 1f, 1f, 1f}, 3, 2);
+    Tensor k = Tensor.of(new float[] {1f, 0f, 0f, 1f, 1f, 0f}, 3, 2);
+    Tensor v = Tensor.of(new float[] {1f, 0f, 0f, 1f, 0f, 1f}, 3, 2);
+
+    Tensor prefill = attn.forward(q, k, v);
+    Tensor step = attn.forward(
+      Tensor.wrap(q.data(), 4, 1, 2),
+      k,
+      v,
+      null,
+      2);
+
+    assertArrayEquals(
+      new float[] {prefill.get(4), prefill.get(5)},
+      new float[] {step.get(0), step.get(1)},
+      1e-5f);
+  }
 }

@@ -37,7 +37,8 @@ public enum LlmModality {
    */
   VIDEO("video"),
   /**
-   * Dense vector from {@link LlmModel#embed}.
+   * Dense vector from {@link LlmModel#generate(LlmInput, LlmModality)} with
+   * {@link #EMBEDDING} output.
    */
   EMBEDDING("embedding");
 

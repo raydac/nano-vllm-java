@@ -10,7 +10,9 @@ import com.igormaznitsa.nanollvm.llm.Config;
 import com.igormaznitsa.nanollvm.tensor.MatmulRuntime;
 import com.igormaznitsa.nanollvm.tensor.Ops;
 import com.igormaznitsa.nanollvm.tensor.Tensor;
+import com.igormaznitsa.nanollvm.tensor.VectorMath;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
 import java.util.Random;
@@ -37,7 +39,7 @@ final class VitsSynthesizer {
   private final Duration duration;
   private final List<Coupling> couplings;
   private final Generator generator;
-  private final Random noise = new Random(1L);
+  private boolean identityMask;
 
   VitsSynthesizer(final Config.HfConfig config, final WeightBag weights) {
     this.weights = requireNonNull(weights, "weights");
@@ -57,7 +59,8 @@ final class VitsSynthesizer {
     float[] xd = x.data();
     float[] yd = y.data();
     int off = x.offset();
-    for (int i = 0; i < x.numel(); i++) {
+    int n = x.numel();
+    for (int i = 0; i < n; i++) {
       float v = xd[off + i];
       yd[i] = v < 0f ? LEAKY * v : v;
     }
@@ -73,7 +76,8 @@ final class VitsSynthesizer {
     float[] xd = x.data();
     float[] yd = y.data();
     int off = x.offset();
-    for (int i = 0; i < x.numel(); i++) {
+    int n = x.numel();
+    for (int i = 0; i < n; i++) {
       yd[i] = Math.max(0f, xd[off + i]);
     }
     return y;
@@ -84,7 +88,8 @@ final class VitsSynthesizer {
     float[] xd = x.data();
     float[] yd = y.data();
     int off = x.offset();
-    for (int i = 0; i < x.numel(); i++) {
+    int n = x.numel();
+    for (int i = 0; i < n; i++) {
       yd[i] = (float) Math.tanh(xd[off + i]);
     }
     return y;
@@ -221,6 +226,7 @@ final class VitsSynthesizer {
    * @param lengthScale duration stretch
    * @param noiseW      duration-predictor noise
    * @param runtime     dense kernel runtime; must not be {@code null}
+   * @param random      duration / prior noise source; must not be {@code null}
    * @return mono PCM in {@code [-1, 1]}
    */
   float[] infer(
@@ -228,10 +234,12 @@ final class VitsSynthesizer {
     final float noiseScale,
     final float lengthScale,
     final float noiseW,
-    final MatmulRuntime runtime
+    final MatmulRuntime runtime,
+    final Random random
   ) {
     requireNonNull(phonemeIds, "phonemeIds");
     requireNonNull(runtime, "runtime");
+    requireNonNull(random, "random");
     if (phonemeIds.length == 0) {
       throw new IllegalArgumentException("phonemeIds must not be empty");
     }
@@ -239,7 +247,7 @@ final class VitsSynthesizer {
     context.bindMatmul(runtime);
     Kernels kernels = new Kernels(runtime, context);
     try {
-      return this.inferUnlocked(phonemeIds, noiseScale, lengthScale, noiseW, kernels);
+      return this.inferUnlocked(phonemeIds, noiseScale, lengthScale, noiseW, kernels, random);
     } finally {
       context.clear();
     }
@@ -250,27 +258,32 @@ final class VitsSynthesizer {
     final float noiseScale,
     final float lengthScale,
     final float noiseW,
-    final Kernels kernels
+    final Kernels kernels,
+    final Random random
   ) {
-    Encoded encoded = this.encode(phonemeIds, kernels);
-    Tensor logw = this.duration.logw(encoded.hidden(), encoded.mask(), noiseW, this.noise, kernels);
-    int[] durations = this.ceilDurations(logw, encoded.mask(), lengthScale);
-    int yLen = 0;
-    for (int duration : durations) {
-      yLen += duration;
+    this.identityMask = true;
+    try {
+      Encoded encoded = this.encode(phonemeIds, kernels);
+      Tensor logw =
+        this.duration.logw(encoded.hidden(), encoded.mask(), noiseW, random, kernels);
+      int[] durations = this.ceilDurations(logw, encoded.mask(), lengthScale);
+      int yLen = 0;
+      for (int duration : durations) {
+        yLen += duration;
+      }
+      yLen = Math.max(yLen, 1);
+      Tensor mP = this.expand(encoded.mean(), durations, yLen);
+      Tensor logsP = this.expand(encoded.logStd(), durations, yLen);
+      Tensor yMask = this.onesMask(yLen);
+      Tensor z = this.samplePrior(mP, logsP, yMask, noiseScale, random);
+      for (int i = this.couplings.size() - 1; i >= 0; i--) {
+        z = this.flipChannels(z);
+        z = this.couplings.get(i).reverse(z, yMask, kernels);
+      }
+      return this.toMono(this.generator.forward(z, kernels));
+    } finally {
+      this.identityMask = false;
     }
-    yLen = Math.max(yLen, 1);
-    Tensor mP = this.expand(encoded.mean(), durations, yLen);
-    Tensor logsP = this.expand(encoded.logStd(), durations, yLen);
-    Tensor yMask = this.onesMask(yLen);
-    Tensor zP = this.samplePrior(mP, logsP, yMask, noiseScale);
-    Tensor z = zP;
-    for (int i = this.couplings.size() - 1; i >= 0; i--) {
-      z = this.flipChannels(z);
-      z = this.couplings.get(i).reverse(z, yMask, kernels);
-    }
-    Tensor audio = this.generator.forward(this.mulMask(z, yMask), kernels);
-    return this.toMono(audio);
   }
 
   private Encoded encode(final int[] ids, final Kernels kernels) {
@@ -363,7 +376,8 @@ final class VitsSynthesizer {
     final Tensor mean,
     final Tensor logs,
     final Tensor mask,
-    final float noiseScale
+    final float noiseScale,
+    final Random random
   ) {
     int channels = mean.size(0);
     int time = mean.size(1);
@@ -372,11 +386,15 @@ final class VitsSynthesizer {
     float[] l = logs.data();
     float[] md = mask.data();
     float[] d = z.data();
+    int mOff = mean.offset();
+    int lOff = logs.offset();
+    int maskOff = mask.offset();
     for (int c = 0; c < channels; c++) {
       for (int t = 0; t < time; t++) {
         int i = c * time + t;
-        float n = (float) this.noise.nextGaussian() * noiseScale;
-        d[i] = (m[i] + n * (float) Math.exp(l[i])) * md[t];
+        float n = (float) random.nextGaussian() * noiseScale;
+        float maskValue = this.identityMask ? 1f : md[maskOff + t];
+        d[i] = (m[mOff + i] + n * (float) Math.exp(l[lOff + i])) * maskValue;
       }
     }
     return z;
@@ -431,15 +449,13 @@ final class VitsSynthesizer {
   }
 
   Tensor onesMask(final int time) {
-    Tensor mask = Tensor.zeros(1, time);
-    float[] d = mask.data();
-    for (int t = 0; t < time; t++) {
-      d[t] = 1f;
-    }
-    return mask;
+    return Tensor.ones(1, time);
   }
 
   Tensor mulMask(final Tensor x, final Tensor mask) {
+    if (this.identityMask) {
+      return x;
+    }
     int channels = x.size(0);
     int time = x.size(1);
     Tensor y = Tensor.zeros(channels, time);
@@ -457,23 +473,43 @@ final class VitsSynthesizer {
   }
 
   Tensor add(final Tensor a, final Tensor b) {
-    int n = a.numel();
-    Tensor y = Tensor.zeros(a.shape());
-    float[] ad = a.data();
-    float[] bd = b.data();
-    float[] yd = y.data();
-    int ao = a.offset();
-    int bo = b.offset();
-    for (int i = 0; i < n; i++) {
-      yd[i] = ad[ao + i] + bd[bo + i];
-    }
-    return y;
+    return Ops.add(a, b);
   }
 
   Tensor channelNorm(final Tensor x, final String gammaName, final String betaName) {
-    Tensor tokens = this.channelsToTokens(x);
-    Tensor normed = Ops.layerNorm(tokens, this.require(gammaName), this.require(betaName), LN_EPS);
-    return this.tokensToChannels(normed);
+    int channels = x.size(0);
+    int time = x.size(1);
+    Tensor gamma = this.require(gammaName);
+    Tensor beta = this.require(betaName);
+    if (gamma.numel() != channels || beta.numel() != channels) {
+      throw new IllegalArgumentException("channelNorm gamma/beta length must equal channels");
+    }
+    Tensor y = Tensor.zeros(channels, time);
+    float[] xd = x.data();
+    float[] yd = y.data();
+    float[] gd = gamma.data();
+    float[] bd = beta.data();
+    int xOff = x.offset();
+    int gOff = gamma.offset();
+    int bOff = beta.offset();
+    for (int t = 0; t < time; t++) {
+      float sum = 0f;
+      for (int c = 0; c < channels; c++) {
+        sum += xd[xOff + c * time + t];
+      }
+      float mean = sum / channels;
+      float var = 0f;
+      for (int c = 0; c < channels; c++) {
+        float d = xd[xOff + c * time + t] - mean;
+        var += d * d;
+      }
+      float inv = (float) (1.0 / Math.sqrt(var / channels + LN_EPS));
+      for (int c = 0; c < channels; c++) {
+        yd[c * time + t] =
+          (xd[xOff + c * time + t] - mean) * inv * gd[gOff + c] + bd[bOff + c];
+      }
+    }
+    return y;
   }
 
   Tensor channelsToTokens(final Tensor x) {
@@ -623,20 +659,6 @@ final class VitsSynthesizer {
         owner.conv("enc_p.encoder.ffn_layers." + index + ".conv_2", 1, ffnPad));
     }
 
-    private static float dot(
-      final float[] a,
-      final int aOff,
-      final float[] b,
-      final int bOff,
-      final int n
-    ) {
-      float sum = 0f;
-      for (int i = 0; i < n; i++) {
-        sum += a[aOff + i] * b[bOff + i];
-      }
-      return sum;
-    }
-
     Tensor forward(final Tensor x, final Tensor mask, final Kernels kernels) {
       Tensor q = this.owner.channelsToTokens(kernels.apply(this.query, x));
       Tensor k = this.owner.channelsToTokens(kernels.apply(this.key, x));
@@ -686,10 +708,12 @@ final class VitsSynthesizer {
           int qi = qOff + i * width + headBase;
           float max = Float.NEGATIVE_INFINITY;
           for (int j = 0; j < qLen; j++) {
-            float score = dot(qd, qi, kd, kOff + j * width + headBase, this.headDim) * scale;
+            float score = VectorMath.dot(qd, qi, kd, kOff + j * width + headBase, this.headDim)
+              * scale;
             int rel = j - i;
             if (rel >= -window && rel <= window) {
-              score += dot(qd, qi, ek, ekOff + (window + rel) * this.headDim, this.headDim) * scale;
+              score += VectorMath.dot(
+                qd, qi, ek, ekOff + (window + rel) * this.headDim, this.headDim) * scale;
             }
             scores[j] = score;
             if (score > max) {
@@ -704,21 +728,13 @@ final class VitsSynthesizer {
           }
           float inv = 1f / sum;
           int oi = i * width + headBase;
-          for (int d = 0; d < this.headDim; d++) {
-            od[oi + d] = 0f;
-          }
+          Arrays.fill(od, oi, oi + this.headDim, 0f);
           for (int j = 0; j < qLen; j++) {
             float p = scores[j] * inv;
-            int vj = vOff + j * width + headBase;
-            for (int d = 0; d < this.headDim; d++) {
-              od[oi + d] += p * vd[vj + d];
-            }
+            VectorMath.axpy(od, oi, p, vd, vOff + j * width + headBase, this.headDim);
             int rel = j - i;
             if (rel >= -window && rel <= window) {
-              int eOff = evOff + (window + rel) * this.headDim;
-              for (int d = 0; d < this.headDim; d++) {
-                od[oi + d] += p * ev[eOff + d];
-              }
+              VectorMath.axpy(od, oi, p, ev, evOff + (window + rel) * this.headDim, this.headDim);
             }
           }
         }
@@ -1061,11 +1077,7 @@ final class VitsSynthesizer {
         }
         float inv = 1f / group.size();
         Tensor scaled = Tensor.zeros(acc.shape());
-        float[] ad = acc.data();
-        float[] sd = scaled.data();
-        for (int n = 0; n < acc.numel(); n++) {
-          sd[n] = ad[n] * inv;
-        }
+        VectorMath.scale(acc.data(), acc.offset(), inv, scaled.data(), 0, acc.numel());
         x = scaled;
       }
       return VitsSynthesizer.tanh(kernels.apply(this.post, VitsSynthesizer.leakyRelu(x)));
@@ -1121,16 +1133,7 @@ final class VitsSynthesizer {
     }
 
     private static Tensor addInPlaceCopy(final Tensor a, final Tensor b) {
-      Tensor y = Tensor.zeros(a.shape());
-      float[] ad = a.data();
-      float[] bd = b.data();
-      float[] yd = y.data();
-      int ao = a.offset();
-      int bo = b.offset();
-      for (int i = 0; i < a.numel(); i++) {
-        yd[i] = ad[ao + i] + bd[bo + i];
-      }
-      return y;
+      return Ops.add(a, b);
     }
 
     Tensor forward(final Kernels kernels, final Tensor x) {

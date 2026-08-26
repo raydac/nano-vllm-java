@@ -84,8 +84,8 @@ Windows: `.\models\download-tiny-llm-onnx.ps1` or `models\download-tiny-llm-onnx
 Creates `models/Tiny-LLM-ONNX/`.
 
 Sample: `nano-vllm-java-samples` → `com.igormaznitsa.nanollvm.samples.NextTokenHelloWorld`
-(encode a seed, print the next tokens, continue the text). Use `complete` / `generateTokenIds`,
-not chat templates.
+(encode a seed, print the next tokens, continue the text). Use `generate(LlmInText, TEXT)` /
+`generateTokenIds`, not chat templates.
 
 ## SmolLM2-135M-Instruct-ONNX (optional, Llama ChatML ONNX)
 
@@ -120,12 +120,12 @@ Load like any other model, then embed:
 
 ```java
 try (LlmModel model = LlmModelFactory.make(Path.of("models/gte-small.Q2_K.gguf"))) {
-  float[] v = model.embed("hello world"); // L2-normalized, dim = hidden size
+  LlmOutEmbedding v = (LlmOutEmbedding) model.generate(LlmInText.of("hello world"), LlmModality.EMBEDDING);
 }
 ```
 
 Sample: pass this GGUF to `EmbeddingsHelloWorld` if you want a tiny English checkpoint instead of E5.
-Do not use with `LLM.builder` / chat.
+Prefer `LLM.builder` for the shared matmul pool; do not use chat.
 
 ## multilingual-e5-small ONNX (optional, embeddings)
 
@@ -145,13 +145,13 @@ Creates `models/multilingual-e5-small/`. Context length up to 512 tokens. E5 exp
 
 ```java
 try (LlmModel model = LlmModelFactory.make(Path.of("models/multilingual-e5-small"))) {
-  float[] v = model.embed("query: hello world");
+  LlmOutEmbedding v = (LlmOutEmbedding) model.generate(LlmInText.of("query: hello world"), LlmModality.EMBEDDING);
 }
 ```
 
-Do not use with `LLM.builder` / chat. Sample: `nano-vllm-java-samples` →
-`com.igormaznitsa.nanollvm.samples.EmbeddingsHelloWorld` (default folder; non-retrieval texts get
-`query: `).
+Prefer `LLM.builder` for the shared matmul pool; do not use chat. Sample:
+`nano-vllm-java-samples` → `com.igormaznitsa.nanollvm.samples.EmbeddingsHelloWorld`
+(default folder; non-retrieval texts get `query: `).
 
 ## xlm-roberta-base ONNX (optional, embeddings)
 
@@ -168,18 +168,19 @@ rate-limits the large file.
 Windows: `.\models\download-xlm-roberta-base.ps1` or `models\download-xlm-roberta-base.cmd`.
 
 Creates `models/xlm-roberta-base/`. Context length up to 512 tokens. Mean-pooled embeddings via
-`LlmModel.embed` — not a dedicated sentence-embedding model like E5 (no `query:` / `passage:`
-prefixes). Raw cosine between unrelated strings is often ~0.99 (anisotropy). In `Example`, pick
-**Classify** after load, teach `label | text` (or `/demo` / `/load nano-vllm-java-samples/classify-labels.example.txt`), then predict — a centered prototype
+`generate(LlmInText, EMBEDDING)` — not a dedicated sentence-embedding model like E5 (no
+`query:` / `passage:` prefixes). Raw cosine between unrelated strings is often ~0.99
+(anisotropy). In `Example`, pick **Classify** after load, teach `label | text` (or `/demo` /
+`/load nano-vllm-java-samples/classify-labels.example.txt`), then predict — a centered prototype
 probe, not a sequence-classification head.
 
 ```java
 try (LlmModel model = LlmModelFactory.make(Path.of("models/xlm-roberta-base"))) {
-  float[] v = model.embed("hello world");
+  LlmOutEmbedding v = (LlmOutEmbedding) model.generate(LlmInText.of("hello world"), LlmModality.EMBEDDING);
 }
 ```
 
-Do not use with `LLM.builder` / chat.
+Prefer `LLM.builder` for the shared matmul pool; do not use chat.
 
 ## whisper-base / whisper-tiny (optional, speech-to-text)
 
@@ -200,12 +201,12 @@ optional language; 30 s chunking. No MP3, VAD, beam search, or word timestamps.
 
 ```java
 try (LlmModel model = LlmModelFactory.make(Path.of("models/whisper-base"))) {
-  String text = model.transcribe(Path.of("clip.wav"));
+  LlmOutText text = (LlmOutText) model.generate(LlmInSound.ofWav(Files.readAllBytes(Path.of("clip.wav"))), LlmModality.TEXT);
 }
 ```
 
-Do not use with `LLM.builder` / chat. Sample: `nano-vllm-java-samples` →
-`com.igormaznitsa.nanollvm.samples.TranscribeHelloWorld`.
+Prefer `LLM.builder` for the shared matmul pool; do not use chat. Sample:
+`nano-vllm-java-samples` → `com.igormaznitsa.nanollvm.samples.TranscribeHelloWorld`.
 
 ## piper-en-lessac-medium (optional, English text-to-speech)
 
@@ -225,7 +226,7 @@ Creates `models/piper-en-lessac-medium/`.
 try (LlmModel model = LlmModelFactory.open(Path.of("models/piper-en-lessac-medium"))
     .optionalData(LlmOptionalData.ESPEAK_DATA, Path.of("models/piper-en-lessac-medium/espeak-ng-data"))
     .make()) {
-  byte[] wav = model.synthesize("Hello world");
+  LlmOutSoundData wav = (LlmOutSoundData) model.generate(LlmInText.of("Hello world"), LlmModality.AUDIO);
 }
 ```
 
@@ -251,7 +252,7 @@ default `{model}/espeak-ng-data`):
 try (LlmModel model = LlmModelFactory.open(Path.of("models/piper-ru-irina-medium"))
     .optionalData(LlmOptionalData.ESPEAK_DATA, Path.of("models/piper-ru-irina-medium/espeak-ng-data"))
     .make()) {
-  byte[] wav = model.synthesize("Привет, мир");
+  LlmOutSoundData wav = (LlmOutSoundData) model.generate(LlmInText.of("Привет, мир"), LlmModality.AUDIO);
 }
 ```
 

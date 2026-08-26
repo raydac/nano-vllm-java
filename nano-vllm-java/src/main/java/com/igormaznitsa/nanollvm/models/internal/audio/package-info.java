@@ -1,7 +1,8 @@
 /**
  * Non-exported audio helpers for Whisper and Piper: uncompressed WAV encode/decode and Whisper
- * log-mel features. Application code uses {@link com.igormaznitsa.nanollvm.llm.LLM#transcribe}
- * / {@link com.igormaznitsa.nanollvm.llm.LLM#synthesize} instead of these types.
+ * log-mel features. Application code uses typed
+ * {@link com.igormaznitsa.nanollvm.llm.LLM#generate(com.igormaznitsa.nanollvm.models.LlmInput, com.igormaznitsa.nanollvm.models.LlmModality)}
+ * instead of these types.
  *
  * @since 1.3.0
  */

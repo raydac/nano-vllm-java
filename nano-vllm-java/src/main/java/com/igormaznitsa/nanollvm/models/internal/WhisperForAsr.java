@@ -25,6 +25,9 @@ import java.util.stream.IntStream;
  * OpenAI Whisper encoder-decoder ASR from Hugging Face safetensors. Greedy multilingual
  * transcribe, optional {@link Locale} language, 30 s chunking.
  *
+ * <p>Decoder steps keep a growing self-attention KV cache so each new token runs one decode step
+ * instead of re-encoding the full prefix.
+ *
  * @since 1.3.0
  */
 public final class WhisperForAsr implements SpeechToText {
@@ -54,6 +57,11 @@ public final class WhisperForAsr implements SpeechToText {
   private final List<DecoderBlock> decoderBlocks;
   private final LayerNorm decoderNorm;
   private final Linear.Row logitsHead;
+  private final int hiddenWidth;
+
+  private boolean[] suppressMask;
+  private int suppressEot = Integer.MIN_VALUE;
+  private boolean[] languageOnlyMask;
 
   /**
    * Binds encoder/decoder weights. {@code config.whisper()} must be present.
@@ -92,6 +100,7 @@ public final class WhisperForAsr implements SpeechToText {
       .or(() -> weights.find("model.decoder.embed_tokens.weight"))
       .map(weight -> new Linear.Row(weight, null))
       .orElseGet(() -> new Linear.Row(this.tokenEmbed.weight(), null));
+    this.hiddenWidth = this.tokenEmbed.weight().size(1);
   }
 
   private static Tensor tensor(final WeightBag weights, final String name) {
@@ -146,17 +155,22 @@ public final class WhisperForAsr implements SpeechToText {
       throw new IllegalArgumentException(
         "sequence length %d exceeds position table %d".formatted(rows, table.size(0)));
     }
-    float[] data = new float[rows * dim];
-    System.arraycopy(table.data(), table.offset(), data, 0, data.length);
-    return Tensor.of(data, rows, dim);
+    return Tensor.wrap(table.data(), table.offset(), rows, dim);
+  }
+
+  private static Tensor positionRow(final Tensor table, final int row) {
+    int dim = table.size(1);
+    if (row < 0 || row >= table.size(0)) {
+      throw new IllegalArgumentException(
+        "position %d outside table %d".formatted(row, table.size(0)));
+    }
+    return Tensor.wrap(table.data(), table.offset() + row * dim, 1, dim);
   }
 
   private static Tensor lastRow(final Tensor hidden) {
     int dim = hidden.size(1);
     int seq = hidden.size(0);
-    float[] row = new float[dim];
-    System.arraycopy(hidden.data(), hidden.offset() + (seq - 1) * dim, row, 0, dim);
-    return Tensor.of(row, 1, dim);
+    return Tensor.wrap(hidden.data(), hidden.offset() + (seq - 1) * dim, 1, dim);
   }
 
   private static Tensor idsAsFloat(final List<Integer> tokens) {
@@ -165,6 +179,10 @@ public final class WhisperForAsr implements SpeechToText {
       ids[i] = tokens.get(i);
     }
     return Tensor.of(ids, tokens.size());
+  }
+
+  private static Tensor idAsFloat(final int token) {
+    return Tensor.of(new float[] {token}, 1);
   }
 
   private static int requireToken(final Tokenizer tokenizer, final String token) {
@@ -178,22 +196,6 @@ public final class WhisperForAsr implements SpeechToText {
         .orElseThrow(() -> new IllegalArgumentException(
           "unknown Whisper language: " + language.toLanguageTag())))
       .orElse(null);
-  }
-
-  private static boolean[] suppressMask(
-    final Tokenizer tokenizer,
-    final int vocab,
-    final int eot
-  ) {
-    boolean[] suppress = new boolean[vocab];
-    for (int id = 0; id < vocab; id++) {
-      if (id == eot) {
-        continue;
-      }
-      String piece = tokenizer.decode(List.of(id), false);
-      suppress[id] = piece.startsWith("<|") && piece.endsWith("|>");
-    }
-    return suppress;
   }
 
   private static boolean allSuppressed(final boolean[] suppress) {
@@ -257,17 +259,21 @@ public final class WhisperForAsr implements SpeechToText {
     int transcribe = requireToken(tokenizer, TRANSCRIBE);
     int noTimestamps = requireToken(tokenizer, NO_TIMESTAMPS);
     Integer langId = resolveLanguageId(tokenizer, language);
+    boolean[] suppress = this.suppressMask(tokenizer, eot);
     StringBuilder text = new StringBuilder();
     for (int origin = 0; origin < at16k.length; origin += WhisperLogMel.CHUNK_SAMPLES) {
-      int end = Math.min(origin + WhisperLogMel.CHUNK_SAMPLES, at16k.length);
+      int length = Math.min(WhisperLogMel.CHUNK_SAMPLES, at16k.length - origin);
       String piece = this.transcribeChunk(
-        Arrays.copyOfRange(at16k, origin, end),
+        at16k,
+        origin,
+        length,
         tokenizer,
         sot,
         eot,
         transcribe,
         noTimestamps,
         langId,
+        suppress,
         runtime);
       if (!piece.isBlank()) {
         if (!text.isEmpty()) {
@@ -280,19 +286,22 @@ public final class WhisperForAsr implements SpeechToText {
   }
 
   private String transcribeChunk(
-    final float[] chunk,
+    final float[] pcm16k,
+    final int origin,
+    final int length,
     final Tokenizer tokenizer,
     final int sot,
     final int eot,
     final int transcribe,
     final int noTimestamps,
     final Integer langId,
+    final boolean[] suppress,
     final MatmulRuntime runtime
   ) {
     Context context = new Context();
     context.bindMatmul(runtime);
     Tensor encoderHidden = this.encode(
-      WhisperLogMel.features(chunk, WhisperLogMel.SAMPLE_RATE), context);
+      WhisperLogMel.featuresAt16k(pcm16k, origin, length, runtime), context);
     List<CrossCache> memory = this.decoderBlocks.stream()
       .map(block -> block.crossCache(encoderHidden, context))
       .toList();
@@ -304,14 +313,13 @@ public final class WhisperForAsr implements SpeechToText {
     tokens.add(language);
     tokens.add(transcribe);
     tokens.add(noTimestamps);
-    boolean[] suppress = suppressMask(tokenizer, this.tokenEmbed.numEmbeddings(), eot);
+
+    List<SelfCache> selfCaches = this.newSelfCaches();
+    int next = this.prefill(tokens, memory, selfCaches, context, suppress);
     int maxTokens = this.spec.maxTargetPositions();
-    while (tokens.size() < maxTokens) {
-      int next = this.argmaxLogit(tokens, memory, context, suppress);
-      if (next == eot) {
-        break;
-      }
+    while (tokens.size() < maxTokens && next != eot) {
       tokens.add(next);
+      next = this.decodeStep(next, tokens.size() - 1, memory, selfCaches, context, suppress);
     }
     return tokenizer.decode(tokens.subList(4, tokens.size()), true).strip();
   }
@@ -334,23 +342,18 @@ public final class WhisperForAsr implements SpeechToText {
     final Tokenizer tokenizer,
     final int eot
   ) {
-    boolean[] suppress = new boolean[this.tokenEmbed.numEmbeddings()];
-    Arrays.fill(suppress, true);
-    for (String code : LANGUAGE_CODES) {
-      tokenizer.tokenId("<|" + code + "|>").ifPresent(id -> suppress[id] = false);
-    }
-    if (eot >= 0 && eot < suppress.length) {
-      suppress[eot] = true;
-    }
+    boolean[] suppress = this.languageOnlyMask(tokenizer, eot);
     if (allSuppressed(suppress)) {
       return requireToken(tokenizer, "<|en|>");
     }
-    return this.argmaxLogit(prefix, memory, context, suppress);
+    List<SelfCache> selfCaches = this.newSelfCaches();
+    return this.prefill(prefix, memory, selfCaches, context, suppress);
   }
 
-  private int argmaxLogit(
+  private int prefill(
     final List<Integer> tokens,
     final List<CrossCache> memory,
+    final List<SelfCache> selfCaches,
     final Context context,
     final boolean[] suppress
   ) {
@@ -358,10 +361,77 @@ public final class WhisperForAsr implements SpeechToText {
       this.tokenEmbed.forward(idsAsFloat(tokens), context),
       firstRows(this.decoderPositions, tokens.size()));
     for (int i = 0; i < this.decoderBlocks.size(); i++) {
-      hidden = this.decoderBlocks.get(i).forward(hidden, memory.get(i), context);
+      hidden = this.decoderBlocks.get(i).forward(
+        hidden, memory.get(i), selfCaches.get(i), 0, context);
     }
     hidden = this.decoderNorm.forward(hidden);
     return argmax(this.logitsHead.forward(lastRow(hidden), context), suppress);
+  }
+
+  private int decodeStep(
+    final int token,
+    final int position,
+    final List<CrossCache> memory,
+    final List<SelfCache> selfCaches,
+    final Context context,
+    final boolean[] suppress
+  ) {
+    Tensor hidden = Ops.add(
+      this.tokenEmbed.forward(idAsFloat(token), context),
+      positionRow(this.decoderPositions, position));
+    for (int i = 0; i < this.decoderBlocks.size(); i++) {
+      hidden = this.decoderBlocks.get(i).forward(
+        hidden, memory.get(i), selfCaches.get(i), position, context);
+    }
+    hidden = this.decoderNorm.forward(hidden);
+    return argmax(this.logitsHead.forward(hidden, context), suppress);
+  }
+
+  private List<SelfCache> newSelfCaches() {
+    int capacity = Math.max(16, this.spec.maxTargetPositions());
+    return IntStream.range(0, this.decoderBlocks.size())
+      .mapToObj(i -> new SelfCache(this.hiddenWidth, capacity))
+      .toList();
+  }
+
+  private boolean[] suppressMask(final Tokenizer tokenizer, final int eot) {
+    int vocab = this.tokenEmbed.numEmbeddings();
+    if (this.suppressMask != null
+      && this.suppressEot == eot
+      && this.suppressMask.length == vocab) {
+      return this.suppressMask;
+    }
+    boolean[] suppress = new boolean[vocab];
+    for (int id = 0; id < vocab; id++) {
+      if (id == eot) {
+        continue;
+      }
+      String piece = tokenizer.decode(List.of(id), false);
+      suppress[id] = piece.startsWith("<|") && piece.endsWith("|>");
+    }
+    this.suppressMask = suppress;
+    this.suppressEot = eot;
+    return suppress;
+  }
+
+  private boolean[] languageOnlyMask(final Tokenizer tokenizer, final int eot) {
+    int vocab = this.tokenEmbed.numEmbeddings();
+    if (this.languageOnlyMask != null && this.languageOnlyMask.length == vocab) {
+      if (eot >= 0 && eot < vocab) {
+        this.languageOnlyMask[eot] = true;
+      }
+      return this.languageOnlyMask;
+    }
+    boolean[] suppress = new boolean[vocab];
+    Arrays.fill(suppress, true);
+    for (String code : LANGUAGE_CODES) {
+      tokenizer.tokenId("<|" + code + "|>").ifPresent(id -> suppress[id] = false);
+    }
+    if (eot >= 0 && eot < suppress.length) {
+      suppress[eot] = true;
+    }
+    this.languageOnlyMask = suppress;
+    return suppress;
   }
 
   private record EncoderBlock(
@@ -463,14 +533,21 @@ public final class WhisperForAsr implements SpeechToText {
         this.crossV.forward(encoderHidden, context));
     }
 
-    Tensor forward(final Tensor hidden, final CrossCache memory, final Context context) {
+    Tensor forward(
+      final Tensor hidden,
+      final CrossCache memory,
+      final SelfCache selfCache,
+      final int queryStartPosition,
+      final Context context
+    ) {
       Tensor selfIn = this.selfNorm.forward(hidden);
+      Tensor query = this.selfQ.forward(selfIn, context);
+      Tensor key = this.selfK.forward(selfIn, context);
+      Tensor value = this.selfV.forward(selfIn, context);
+      selfCache.append(key, value);
       Tensor selfOut = this.selfO.forward(
         this.selfAttn.forward(
-          this.selfQ.forward(selfIn, context),
-          this.selfK.forward(selfIn, context),
-          this.selfV.forward(selfIn, context),
-          context),
+          query, selfCache.key(), selfCache.value(), context, queryStartPosition),
         context);
       Tensor afterSelf = Ops.add(hidden, selfOut);
       Tensor crossIn = this.crossNorm.forward(afterSelf);
@@ -489,5 +566,50 @@ public final class WhisperForAsr implements SpeechToText {
   }
 
   private record CrossCache(Tensor key, Tensor value) {
+  }
+
+  private static final class SelfCache {
+    private final int width;
+    private float[] keyData;
+    private float[] valueData;
+    private int seqLen;
+
+    SelfCache(final int width, final int initialCapacity) {
+      this.width = width;
+      int cap = Math.max(1, initialCapacity);
+      this.keyData = new float[cap * width];
+      this.valueData = new float[cap * width];
+    }
+
+    void append(final Tensor key, final Tensor value) {
+      int rows = key.size(0);
+      if (key.size(1) != this.width || value.size(0) != rows || value.size(1) != this.width) {
+        throw new IllegalArgumentException("self-cache append shape mismatch");
+      }
+      this.ensureCapacity(this.seqLen + rows);
+      System.arraycopy(
+        key.data(), key.offset(), this.keyData, this.seqLen * this.width, rows * this.width);
+      System.arraycopy(
+        value.data(), value.offset(), this.valueData, this.seqLen * this.width, rows * this.width);
+      this.seqLen += rows;
+    }
+
+    Tensor key() {
+      return Tensor.wrap(this.keyData, 0, this.seqLen, this.width);
+    }
+
+    Tensor value() {
+      return Tensor.wrap(this.valueData, 0, this.seqLen, this.width);
+    }
+
+    private void ensureCapacity(final int neededRows) {
+      int needed = Math.multiplyExact(neededRows, this.width);
+      if (needed <= this.keyData.length) {
+        return;
+      }
+      int grown = Math.max(needed, Math.multiplyExact(this.keyData.length, 2));
+      this.keyData = Arrays.copyOf(this.keyData, grown);
+      this.valueData = Arrays.copyOf(this.valueData, grown);
+    }
   }
 }

@@ -66,9 +66,38 @@ public final class ScaledDotProductAttention {
    * @return {@code [qLen, numHeads * headDim]}
    */
   public Tensor forward(final Tensor q, final Tensor k, final Tensor v, final Context context) {
+    return this.forward(q, k, v, context, 0);
+  }
+
+  /**
+   * Attention with an absolute start index for causal masking (incremental decode).
+   *
+   * <p>When {@code causal} and query row {@code i} has absolute position
+   * {@code queryStartPosition + i}, it may attend only to keys {@code 0 .. position}. Prefill uses
+   * {@code queryStartPosition = 0}. A single new decode token at absolute index {@code t} passes
+   * {@code queryStartPosition = t} with {@code qLen = 1} and {@code kvLen = t + 1}.
+   *
+   * @param q                  queries {@code [qLen, numHeads * headDim]}
+   * @param k                  keys {@code [kvLen, numHeads * headDim]}
+   * @param v                  values {@code [kvLen, numHeads * headDim]}
+   * @param context            step context, or {@code null} for sequential
+   * @param queryStartPosition absolute index of query row 0 ({@code >= 0})
+   * @return {@code [qLen, numHeads * headDim]}
+   * @since 1.3.0
+   */
+  public Tensor forward(
+    final Tensor q,
+    final Tensor k,
+    final Tensor v,
+    final Context context,
+    final int queryStartPosition
+  ) {
     requireNonNull(q, "q");
     requireNonNull(k, "k");
     requireNonNull(v, "v");
+    if (queryStartPosition < 0) {
+      throw new IllegalArgumentException("queryStartPosition must be >= 0");
+    }
     int qLen = q.size(0);
     int kvLen = k.size(0);
     if (v.size(0) != kvLen) {
@@ -78,8 +107,8 @@ public final class ScaledDotProductAttention {
     if (q.size(1) != width || k.size(1) != width || v.size(1) != width) {
       throw new IllegalArgumentException("q/k/v last dim must be numHeads*headDim");
     }
-    if (this.causal && kvLen < qLen) {
-      throw new IllegalArgumentException("causal attention requires kvLen >= qLen");
+    if (this.causal && kvLen < queryStartPosition + qLen) {
+      throw new IllegalArgumentException("causal attention requires kvLen >= query end");
     }
     Tensor out = Tensor.zeros(qLen, width);
     int work = this.numHeads * qLen;
@@ -88,11 +117,13 @@ public final class ScaledDotProductAttention {
       : MatmulRuntime.sequential();
     int cost = work * Math.max(kvLen, 1);
     if (cost < 256) {
-      this.attendJobs(0, work, q, k, v, out, qLen, kvLen, width);
+      this.attendJobs(0, work, q, k, v, out, qLen, kvLen, width, queryStartPosition);
       return out;
     }
     runtime.parallelRanges(
-      work, (start, end) -> this.attendJobs(start, end, q, k, v, out, qLen, kvLen, width));
+      work,
+      (start, end) -> this.attendJobs(
+        start, end, q, k, v, out, qLen, kvLen, width, queryStartPosition));
     return out;
   }
 
@@ -105,7 +136,8 @@ public final class ScaledDotProductAttention {
     final Tensor out,
     final int qLen,
     final int kvLen,
-    final int width
+    final int width,
+    final int queryStartPosition
   ) {
     float[] qd = q.data();
     float[] kd = k.data();
@@ -122,7 +154,9 @@ public final class ScaledDotProductAttention {
       int headBase = h * this.headDim;
       float max = Float.NEGATIVE_INFINITY;
       int qi = qOff + i * width + headBase;
-      int lastKey = this.causal ? i : kvLen - 1;
+      int lastKey = this.causal
+        ? Math.min(queryStartPosition + i, kvLen - 1)
+        : kvLen - 1;
       Arrays.fill(scores, Float.NEGATIVE_INFINITY);
       for (int j = 0; j <= lastKey; j++) {
         int kj = kOff + j * width + headBase;

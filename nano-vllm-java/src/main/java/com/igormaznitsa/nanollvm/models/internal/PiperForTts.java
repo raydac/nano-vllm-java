@@ -7,6 +7,7 @@ import com.igormaznitsa.nanollvm.llm.Config;
 import com.igormaznitsa.nanollvm.tensor.MatmulRuntime;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Random;
 
 /**
  * Piper VITS text-to-speech: espeak-ng-data G2P, then a Java generator graph.
@@ -48,18 +49,27 @@ public final class PiperForTts implements TextToSpeech {
    * {@inheritDoc}
    */
   @Override
-  public float[] synthesize(final CharSequence text, final Path espeakData,
-                            final MatmulRuntime runtime) {
+  public float[] synthesize(
+    final CharSequence text,
+    final Path espeakData,
+    final MatmulRuntime runtime,
+    final Random random
+  ) {
     requireNonNull(text, "text");
     requireNonNull(espeakData, "espeakData");
     requireNonNull(runtime, "runtime");
+    requireNonNull(random, "random");
     if (text.toString().isBlank()) {
       throw new IllegalArgumentException("text must not be blank");
     }
     Config.PiperSpec spec = this.config.piper();
     List<Integer> ids = this.g2pFor(espeakData, spec).phonemeIds(text);
-    int[] phonemes = ids.stream().mapToInt(Integer::intValue).toArray();
-    return this.vits.infer(phonemes, spec.noiseScale(), spec.lengthScale(), spec.noiseW(), runtime);
+    int[] phonemes = new int[ids.size()];
+    for (int i = 0; i < ids.size(); i++) {
+      phonemes[i] = ids.get(i);
+    }
+    return this.vits.infer(
+      phonemes, spec.noiseScale(), spec.lengthScale(), spec.noiseW(), runtime, random);
   }
 
   private EspeakNgG2p g2pFor(final Path espeakData, final Config.PiperSpec spec) {

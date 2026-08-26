@@ -15,6 +15,7 @@ import com.igormaznitsa.nanollvm.tensor.Tensor;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Random;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
@@ -65,6 +66,7 @@ public final class Transformer implements AutoCloseable {
   private final MatmulRuntime matmul;
   private final Context stepContext = new Context();
   private final Sampler sampler = new Sampler();
+  private final Random sampleRandom;
   private final AtomicBoolean closed = new AtomicBoolean();
   private CausalLM network;
   private KvCacheArena kvCache;
@@ -79,7 +81,7 @@ public final class Transformer implements AutoCloseable {
    * @throws NullPointerException if {@code model}, {@code config}, or {@code matmul} is {@code null}
    */
   public Transformer(final LlmModel model, final Config config, final MatmulRuntime matmul) {
-    this(model, config, matmul, LlmListeners.silent());
+    this(model, config, matmul, LlmListeners.silent(), false, new Random());
   }
 
   /**
@@ -97,7 +99,7 @@ public final class Transformer implements AutoCloseable {
     final MatmulRuntime matmul,
     final LlmListener io
   ) {
-    this(model, config, matmul, io, false);
+    this(model, config, matmul, io, false, new Random());
   }
 
   /**
@@ -117,8 +119,30 @@ public final class Transformer implements AutoCloseable {
     final LlmListener io,
     final boolean allowUnpackParameters
   ) {
+    this(model, config, matmul, io, allowUnpackParameters, new Random());
+  }
+
+  /**
+   * Builds a transformer with an engine-owned sampling RNG.
+   *
+   * @param model                 immutable loaded graph + weights (shared across LLMs)
+   * @param config                engine limits used to size the KV arena
+   * @param matmul                per-LLM dense matmul runtime (bound on step {@link Context})
+   * @param io                    progress sink for KV / conv allocation messages; {@code null} → silent
+   * @param allowUnpackParameters when {@code true}, GGUF packed weights are expanded to float32
+   * @param sampleRandom          Gumbel draw source for {@link Sampler}; must not be {@code null}
+   */
+  public Transformer(
+    final LlmModel model,
+    final Config config,
+    final MatmulRuntime matmul,
+    final LlmListener io,
+    final boolean allowUnpackParameters,
+    final Random sampleRandom
+  ) {
     // Capture engine config and resolve progress sink (null → silent)
     this.config = config;
+    this.sampleRandom = requireNonNull(sampleRandom, "sampleRandom");
     final LlmListener io1 = io == null ? LlmListeners.silent() : io;
     this.blockSize = config.kvcacheBlockSize();
     this.network = LlmModelImpl.peer(model).resolveNetwork(allowUnpackParameters, io1);
@@ -214,7 +238,11 @@ public final class Transformer implements AutoCloseable {
   private List<Integer> sampleTokens(final Tensor logits, final SamplingControls sampling) {
     // Sampler.forward returns int[]; box to List for the scheduler postprocess API
     return this.toTokenIdList(this.sampler.forward(
-      logits, sampling.temperatures(), sampling.topKs(), sampling.topPs()));
+      logits,
+      sampling.temperatures(),
+      sampling.topKs(),
+      sampling.topPs(),
+      this.sampleRandom));
   }
 
   /**

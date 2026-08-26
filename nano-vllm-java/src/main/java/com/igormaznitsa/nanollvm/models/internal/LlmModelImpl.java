@@ -8,20 +8,29 @@ import com.igormaznitsa.nanollvm.chat.LlmListener;
 import com.igormaznitsa.nanollvm.chat.LlmListeners;
 import com.igormaznitsa.nanollvm.chat.ThinkTags;
 import com.igormaznitsa.nanollvm.llm.Config;
+import com.igormaznitsa.nanollvm.models.LlmInSound;
+import com.igormaznitsa.nanollvm.models.LlmInText;
+import com.igormaznitsa.nanollvm.models.LlmInTokenIds;
+import com.igormaznitsa.nanollvm.models.LlmInput;
 import com.igormaznitsa.nanollvm.models.LlmModalities;
+import com.igormaznitsa.nanollvm.models.LlmModality;
 import com.igormaznitsa.nanollvm.models.LlmModel;
 import com.igormaznitsa.nanollvm.models.LlmOptionalData;
+import com.igormaznitsa.nanollvm.models.LlmOutEmbedding;
+import com.igormaznitsa.nanollvm.models.LlmOutSoundData;
+import com.igormaznitsa.nanollvm.models.LlmOutText;
+import com.igormaznitsa.nanollvm.models.LlmOutput;
 import com.igormaznitsa.nanollvm.models.ModelSupport;
 import com.igormaznitsa.nanollvm.models.internal.audio.WavPcm;
 import com.igormaznitsa.nanollvm.tensor.MatmulRuntime;
 import com.igormaznitsa.nanollvm.tokenizer.Tokenizer;
-import java.io.IOException;
 import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Random;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -387,27 +396,6 @@ public final class LlmModelImpl extends LlmModel {
     return "";
   }
 
-  @Override
-  public float[] embed(final CharSequence text) {
-    requireNonNull(text, "text");
-    return this.embedAll(List.of(text))[0];
-  }
-
-  @Override
-  public float[][] embed(final List<? extends CharSequence> texts) {
-    requireNonNull(texts, "texts");
-    return this.embedAll(texts);
-  }
-
-  @Override
-  public float[] embed(final int[] tokenIds) {
-    requireNonNull(tokenIds, "tokenIds");
-    if (tokenIds.length == 0) {
-      throw new IllegalArgumentException("tokenIds must not be empty");
-    }
-    return this.requireEncoder().encode(tokenIds.clone(), MatmulRuntime.sequential());
-  }
-
   public float[] embed(final int[] tokenIds, final MatmulRuntime runtime) {
     requireNonNull(tokenIds, "tokenIds");
     requireNonNull(runtime, "runtime");
@@ -417,52 +405,11 @@ public final class LlmModelImpl extends LlmModel {
     return this.requireEncoder().encode(tokenIds.clone(), runtime);
   }
 
-  @Override
-  public String transcribe(final Path wav) throws IOException {
-    return this.transcribe(wav, null);
-  }
-
-  @Override
-  public String transcribe(final Path wav, final Locale language) throws IOException {
-    WavPcm.MonoPcm audio = WavPcm.read(wav);
-    return this.transcribe(audio.samples(), audio.sampleRate(), language);
-  }
-
-  public String transcribe(final Path wav, final Locale language, final MatmulRuntime runtime)
-    throws IOException {
-    WavPcm.MonoPcm audio = WavPcm.read(wav);
-    return this.transcribe(audio.samples(), audio.sampleRate(), language, runtime);
-  }
-
-  @Override
-  public String transcribe(final byte[] wav) {
-    return this.transcribe(wav, null);
-  }
-
-  @Override
-  public String transcribe(final byte[] wav, final Locale language) {
-    requireNonNull(wav, "wav");
-    WavPcm.MonoPcm audio = WavPcm.read(wav);
-    return this.transcribe(audio.samples(), audio.sampleRate(), language);
-  }
-
   public String transcribe(final byte[] wav, final Locale language, final MatmulRuntime runtime) {
     requireNonNull(wav, "wav");
     requireNonNull(runtime, "runtime");
     WavPcm.MonoPcm audio = WavPcm.read(wav);
     return this.transcribe(audio.samples(), audio.sampleRate(), language, runtime);
-  }
-
-  @Override
-  public String transcribe(final float[] pcm, final int sampleRate) {
-    return this.transcribe(pcm, sampleRate, null);
-  }
-
-  @Override
-  public String transcribe(final float[] pcm, final int sampleRate, final Locale language) {
-    requireNonNull(pcm, "pcm");
-    return this.requireSpeech().transcribe(
-      pcm, sampleRate, language, this.tokenizer, MatmulRuntime.sequential());
   }
 
   public String transcribe(
@@ -476,23 +423,80 @@ public final class LlmModelImpl extends LlmModel {
     return this.requireSpeech().transcribe(pcm, sampleRate, language, this.tokenizer, runtime);
   }
 
-  @Override
-  public byte[] synthesize(final CharSequence text) {
-    requireNonNull(text, "text");
-    TextToSpeech tts = this.requireSynthesis();
-    Path espeakData = this.optionalData(LlmOptionalData.ESPEAK_DATA)
-      .orElseGet(() -> this.path.resolve("espeak-ng-data"));
-    return WavPcm.toWav16Le(
-      tts.synthesize(text, espeakData, MatmulRuntime.sequential()), tts.sampleRate());
+  public LlmOutSoundData synthesizeSound(final CharSequence text, final MatmulRuntime runtime) {
+    return this.synthesizeSound(text, runtime, new Random(1L));
   }
 
-  public byte[] synthesize(final CharSequence text, final MatmulRuntime runtime) {
+  public LlmOutSoundData synthesizeSound(
+    final CharSequence text,
+    final MatmulRuntime runtime,
+    final Random random
+  ) {
     requireNonNull(text, "text");
     requireNonNull(runtime, "runtime");
+    requireNonNull(random, "random");
     TextToSpeech tts = this.requireSynthesis();
     Path espeakData = this.optionalData(LlmOptionalData.ESPEAK_DATA)
       .orElseGet(() -> this.path.resolve("espeak-ng-data"));
-    return WavPcm.toWav16Le(tts.synthesize(text, espeakData, runtime), tts.sampleRate());
+    float[] samples = tts.synthesize(text, espeakData, runtime, random);
+    return new LlmOutSoundData(WavPcm.toWav16Le(samples, tts.sampleRate()), tts.sampleRate());
+  }
+
+  @Override
+  public LlmOutput generate(final LlmInput input, final LlmModality outputModality) {
+    return this.generate(input, outputModality, MatmulRuntime.sequential());
+  }
+
+  public LlmOutput generate(
+    final LlmInput input,
+    final LlmModality outputModality,
+    final MatmulRuntime runtime
+  ) {
+    return this.generate(
+      input,
+      outputModality,
+      runtime,
+      outputModality == LlmModality.AUDIO ? new Random(1L) : new Random());
+  }
+
+  public LlmOutput generate(
+    final LlmInput input,
+    final LlmModality outputModality,
+    final MatmulRuntime runtime,
+    final Random random
+  ) {
+    requireNonNull(input, "input");
+    requireNonNull(outputModality, "outputModality");
+    requireNonNull(runtime, "runtime");
+    requireNonNull(random, "random");
+    this.assertNotClosed();
+
+    return switch (input) {
+      case LlmInText text when outputModality == LlmModality.EMBEDDING ->
+        new LlmOutEmbedding(this.embedAll(List.of(text.text()), runtime)[0]);
+      case LlmInTokenIds ids when outputModality == LlmModality.EMBEDDING ->
+        new LlmOutEmbedding(this.embed(ids.tokenIds(), runtime));
+      case LlmInText text when outputModality == LlmModality.AUDIO ->
+        this.synthesizeSound(text.text(), runtime, random);
+      case LlmInText ignored when outputModality == LlmModality.TEXT ->
+        throw new IllegalStateException(
+          "text completion requires LLM.builder(model).build() then "
+            + "LLM.generate(LlmInput, LlmModality); LlmModel has no KV engine");
+      case LlmInSound sound when outputModality == LlmModality.TEXT ->
+        new LlmOutText(this.transcribeSound(sound, runtime));
+      default -> throw new IllegalArgumentException(
+        "unsupported generate pair: %s → %s (usable %s)".formatted(
+          input.getClass().getSimpleName(),
+          outputModality.wireName(),
+          this.usableModalities()));
+    };
+  }
+
+  private String transcribeSound(final LlmInSound sound, final MatmulRuntime runtime) {
+    if (sound.isWav()) {
+      return this.transcribe(sound.wav(), sound.language(), runtime);
+    }
+    return this.transcribe(sound.pcm(), sound.sampleRate(), sound.language(), runtime);
   }
 
   public float[][] embedAll(final List<? extends CharSequence> texts, final MatmulRuntime runtime) {
@@ -507,10 +511,6 @@ public final class LlmModelImpl extends LlmModel {
       out[i] = active.encode(this.wrapClsSep(this.tokenizer.encode(text.toString())), runtime);
     }
     return out;
-  }
-
-  private float[][] embedAll(final List<? extends CharSequence> texts) {
-    return this.embedAll(texts, MatmulRuntime.sequential());
   }
 
   private int[] wrapClsSep(final List<Integer> pieces) {

@@ -19,7 +19,7 @@ public final class LlmOptionalData {
   /**
    * Directory of espeak-ng-data for Piper TTS. Value is a {@link Path}; a {@link CharSequence}
    * is accepted and converted. Omit the key to use {@code {model}/espeak-ng-data}. A missing
-   * or incomplete folder is ignored; synthesize still runs. G2P reads {@code dictsource/*_list}
+   * or incomplete folder is ignored; TTS still runs. G2P reads {@code dictsource/*_list}
    * and {@code *_rules} when present (download scripts install those next to {@code lang/}),
    * including suffix/prefix {@code S}/{@code P} rules and number fragments. If those source
    * files are missing, compiled {@code phontab} and {@code *_dict} in the same directory

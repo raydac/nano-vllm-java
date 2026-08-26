@@ -1,9 +1,12 @@
 package com.igormaznitsa.nanollvm.samples;
 
 import com.igormaznitsa.nanollvm.llm.LLM;
+import com.igormaznitsa.nanollvm.models.LlmInText;
+import com.igormaznitsa.nanollvm.models.LlmModality;
 import com.igormaznitsa.nanollvm.models.LlmModel;
 import com.igormaznitsa.nanollvm.models.LlmModelFactory;
 import com.igormaznitsa.nanollvm.models.LlmOptionalData;
+import com.igormaznitsa.nanollvm.models.LlmOutSoundData;
 import com.igormaznitsa.nanollvm.samples.utils.BundledModels;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -13,10 +16,10 @@ import java.util.Locale;
  * Minimal Piper text-to-speech demo. Default voice is {@code models/piper-en-lessac-medium}
  * if present, otherwise {@code models/piper-ru-irina-medium}. Writes uncompressed WAV bytes.
  *
- * <p>This is a synthesis model — {@link com.igormaznitsa.nanollvm.llm.LLM#builder} then
- * {@link com.igormaznitsa.nanollvm.llm.LLM#synthesize(CharSequence)}. espeak-ng-data is optional
- * ({@link LlmOptionalData#ESPEAK_DATA}, or {@code espeak-ng-data/} next to the voice); a missing
- * folder is ignored.
+ * <p>This is a synthesis model — {@link LLM#builder} then
+ * {@link LLM#generate} with {@link LlmInText} → {@link LlmModality#AUDIO}. espeak-ng-data is
+ * optional ({@link LlmOptionalData#ESPEAK_DATA}, or {@code espeak-ng-data/} next to the voice); a
+ * missing folder is ignored.
  *
  * <p>Args: optional model folder, optional text, optional WAV output path. From the repository
  * root: {@code mvn -pl nano-vllm-java-samples -q exec:java
@@ -51,9 +54,14 @@ public final class SynthesizeHelloWorld {
         + " synthesis=" + model.isSynthesisModel()
         + " modalities=" + model.modalities()
         + " usable=" + model.usableModalities());
-      byte[] wav = llm.synthesize(text);
-      Files.write(wavOut, wav);
-      System.out.printf(Locale.ROOT, "wrote %d bytes to %s%n", wav.length, wavOut);
+      LlmOutSoundData sound = (LlmOutSoundData) llm.generate(LlmInText.of(text), LlmModality.AUDIO);
+      Files.write(wavOut, sound.wav());
+      System.out.printf(
+        Locale.ROOT,
+        "wrote %d bytes (%d Hz) to %s%n",
+        sound.wav().length,
+        sound.sampleRate(),
+        wavOut);
     } finally {
       System.out.println("Time taken: " + (System.currentTimeMillis() - started) + "ms");
     }

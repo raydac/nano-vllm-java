@@ -73,7 +73,7 @@ public final class SamplingDefaults {
   /**
    * Repeatable knobs: highest-logit token every step ({@code topK = 1}, nucleus off). Other
    * fields match {@link #neutral()}. Prefer {@link LLM.Builder#deterministic()} to seal this on
-   * chat / complete / RAG.
+   * chat / typed generate / RAG.
    *
    * @return a new immutable {@link SamplingParams}
    * @see SamplingParams#deterministic()

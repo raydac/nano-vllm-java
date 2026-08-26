@@ -3,8 +3,11 @@ package com.igormaznitsa.nanollvm.samples;
 import static java.util.stream.Collectors.joining;
 
 import com.igormaznitsa.nanollvm.llm.LLM;
+import com.igormaznitsa.nanollvm.models.LlmInText;
+import com.igormaznitsa.nanollvm.models.LlmModality;
 import com.igormaznitsa.nanollvm.models.LlmModel;
 import com.igormaznitsa.nanollvm.models.LlmModelFactory;
+import com.igormaznitsa.nanollvm.models.LlmOutEmbedding;
 import com.igormaznitsa.nanollvm.samples.utils.BundledModels;
 
 import java.nio.file.Path;
@@ -18,9 +21,9 @@ import java.util.stream.IntStream;
  * L2-normalized vector, print dim / preview, then cosine vs the same text and an unrelated
  * sentence.
  *
- * <p>This is a BERT embedding checkpoint — {@link com.igormaznitsa.nanollvm.llm.LLM#builder} then
- * {@link com.igormaznitsa.nanollvm.llm.LLM#embed}. Do not use a chat/completion model here. Non-retrieval E5 inputs use the
- * {@code query: } prefix.
+ * <p>This is a BERT embedding checkpoint — {@link LLM#builder} then
+ * {@link LLM#generate} with {@link LlmInText} → {@link LlmModality#EMBEDDING}. Do not use a
+ * chat/completion model here. Non-retrieval E5 inputs use the {@code query: } prefix.
  *
  * <p>Args: optional model folder (default {@code models/multilingual-e5-small}), optional text
  * (default {@code The capital of France is Paris.}). From the repository root:
@@ -63,15 +66,15 @@ public final class EmbeddingsHelloWorld {
       + " embedding=" + model.isEmbeddingModel()
       + " modalities=" + model.modalities());
 
-    float[] vector = llm.embed(embedInput(text, e5Prefix));
-    float[] same = llm.embed(embedInput(text, e5Prefix));
-    float[] other = llm.embed(embedInput(UNRELATED_TEXT, e5Prefix));
+    float[] vector = encode(llm, embedInput(text, e5Prefix));
+    float[] same = encode(llm, embedInput(text, e5Prefix));
+    float[] other = encode(llm, embedInput(UNRELATED_TEXT, e5Prefix));
 
     printVector(text, vector);
     System.out.printf(Locale.ROOT, "cos(same)=%.4f%n", cosine(vector, same));
 
     if (DEFAULT_TEXT.equals(text)) {
-      float[] related = llm.embed(embedInput(RELATED_TEXT, e5Prefix));
+      float[] related = encode(llm, embedInput(RELATED_TEXT, e5Prefix));
       System.out.printf(Locale.ROOT, "cos(related)=%.4f  %s%n", cosine(vector, related),
         RELATED_TEXT);
     }
@@ -118,6 +121,10 @@ public final class EmbeddingsHelloWorld {
 
   private static boolean usesE5Prefix(final Path path) {
     return path.getFileName().toString().toLowerCase(Locale.ROOT).contains("e5");
+  }
+
+  private static float[] encode(final LLM llm, final String text) {
+    return ((LlmOutEmbedding) llm.generate(LlmInText.of(text), LlmModality.EMBEDDING)).vector();
   }
 
   private static String embedInput(final String text, final boolean e5Prefix) {

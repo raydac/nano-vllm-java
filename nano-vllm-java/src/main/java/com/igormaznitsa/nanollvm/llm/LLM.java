@@ -16,8 +16,14 @@ import com.igormaznitsa.nanollvm.engine.Transformer;
 import com.igormaznitsa.nanollvm.exceptions.GenerationCancelledException;
 import com.igormaznitsa.nanollvm.exceptions.GenerationTimeoutException;
 import com.igormaznitsa.nanollvm.exceptions.ModelLoadException;
+import com.igormaznitsa.nanollvm.models.LlmInText;
+import com.igormaznitsa.nanollvm.models.LlmInTokenIds;
+import com.igormaznitsa.nanollvm.models.LlmInput;
+import com.igormaznitsa.nanollvm.models.LlmModality;
 import com.igormaznitsa.nanollvm.models.LlmModel;
 import com.igormaznitsa.nanollvm.models.LlmModelFactory;
+import com.igormaznitsa.nanollvm.models.LlmOutText;
+import com.igormaznitsa.nanollvm.models.LlmOutput;
 import com.igormaznitsa.nanollvm.models.ModelSupport;
 import com.igormaznitsa.nanollvm.models.internal.LlmModelImpl;
 import com.igormaznitsa.nanollvm.rag.PreparedRag;
@@ -27,7 +33,6 @@ import com.igormaznitsa.nanollvm.rag.RagSession;
 import com.igormaznitsa.nanollvm.tensor.MatmulRuntime;
 import com.igormaznitsa.nanollvm.tokenizer.Tokenizer;
 import com.igormaznitsa.nanollvm.utils.NanoLlvmProps;
-import java.io.IOException;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -38,6 +43,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Random;
 import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -49,7 +55,7 @@ import java.util.stream.IntStream;
 
 /**
  * One engine bound to a loaded {@link LlmModel}: conversation, raw continuation, batch generate,
- * RAG, embeddings, Whisper transcribe, or Piper synthesize — depending on the checkpoint kind.
+ * RAG, embeddings, Whisper, or Piper — depending on the checkpoint kind.
  * {@link Builder} is the common construction path for every kind ({@code cpuThreads}, matmul pool).
  *
  * <h2>Typical use</h2>
@@ -65,7 +71,7 @@ import java.util.stream.IntStream;
  *         .build()) {
  *     String reply = llm.chat().send("Hello").answer();
  *     String once = llm.chatOnce("What is 2+2?", 64);
- *     String raw = llm.complete("The capital of France is", 32);
+ *     LlmOutText raw = (LlmOutText) llm.generate(LlmInText.of("The capital of France is"), LlmModality.TEXT);
  * }  // LLM closes first, then model
  * }</pre>
  *
@@ -76,14 +82,16 @@ import java.util.stream.IntStream;
  *   <li><b>A conversation that remembers earlier turns</b> — {@link #chat()} then
  *       {@link ChatSession#send(String)}; show {@link ChatReply#answer()} to the user.</li>
  *   <li><b>One question, no history</b> — {@link #chatOnce(String)}.</li>
- *   <li><b>Finish a sentence / continue a text as-is</b> — {@link #complete(String)}
- *       (no chat role wrapping).</li>
+ *   <li><b>Finish a sentence / continue a text as-is</b> — {@link #generate(LlmInput, LlmModality)}
+ *       with {@link LlmInText} → {@link LlmModality#TEXT} (no chat role wrapping).</li>
  *   <li><b>Answer from your files</b> — index with {@link RagFactory}, then {@link #rag(RagIndex)}.</li>
  *   <li><b>Shorter or longer replies</b> — {@link SamplingParams.Builder#maxTokens(int)} via
  *       {@link Builder#sampling(SamplingParams)}, or {@link #chat(int)} /
  *       {@link ChatSession#maxTokens(int)}.</li>
  *   <li><b>The same wording every run</b> — {@link Builder#deterministic()} (greedy argmax;
  *       {@code temperature(0)} is still rejected).</li>
+ *   <li><b>Reproducible sampling / Piper noise</b> — {@link Builder#random(Random)} (engine-owned
+ *       RNG; do not share one {@link Random} across concurrent {@code LLM}s).</li>
  *   <li><b>More predictable wording, still random</b> — lower {@link SamplingParams.Builder#temperature(float)}
  *       ({@code 0.1}–{@code 0.2} for facts / RAG; default {@code 0.6}).</li>
  *   <li><b>Faster CPU</b> — {@link Builder#cpuThreads(int)} / {@link Builder#allCpuThreads()};
@@ -92,15 +100,16 @@ import java.util.stream.IntStream;
  *   <li><b>Less RAM</b> — smaller {@link Builder#maxModelLen(int)} and
  *       {@link Builder#kvHeapFraction(float)}; keep GGUF packed (default).</li>
  *   <li><b>Stop a stuck generate</b> — {@link #cancel()} from another thread.</li>
- *   <li><b>A number vector for search / similarity</b> — {@link #embed} on an embedding
- *       checkpoint after {@link Builder#build()}.</li>
- *   <li><b>Speech to text</b> — {@link #transcribe} on a Whisper checkpoint
- *       ({@code byte[]} WAV, a file {@link Path}, or mono PCM).</li>
- *   <li><b>Text to speech</b> — {@link #synthesize} on a Piper checkpoint
- *       (returns WAV bytes; no file write).</li>
+ *   <li><b>A number vector for search / similarity</b> — {@link #generate(LlmInput, LlmModality)}
+ *       with {@link LlmInText} → {@link LlmModality#EMBEDDING}.</li>
+ *   <li><b>Speech to text</b> — {@link #generate(LlmInput, LlmModality)} with
+ *       {@link com.igormaznitsa.nanollvm.models.LlmInSound} → {@link LlmModality#TEXT}.</li>
+ *   <li><b>Text to speech</b> — {@link #generate(LlmInput, LlmModality)} with
+ *       {@link LlmInText} → {@link LlmModality#AUDIO} ({@link com.igormaznitsa.nanollvm.models.LlmOutSoundData}).</li>
  * </ul>
- * Prefer {@link #chat()} / {@link #complete} / {@link #chatOnce} unless you need a batch of prompts
- * or a token-id stream — that is {@link #generate} / {@link #generateTokenIds}.
+ * Prefer {@link #chat()} / {@link #chatOnce} / typed {@link #generate(LlmInput, LlmModality)} unless you need a
+ * batch of prompts or a token-id stream — that is {@link #generate(List, SamplingParams)} /
+ * {@link #generateTokenIds}.
  *
  * <h2>Defaults</h2>
  * Construction is <em>library-quiet</em> ({@link LlmListeners#silent()}). CLI tools should pass
@@ -111,9 +120,8 @@ import java.util.stream.IntStream;
  *
  * <h2>Thread safety</h2>
  * <ul>
- *   <li>One {@code LLM} must not run concurrent {@link #generate}, chat, RAG, {@link #complete},
- *       {@link #embed}, {@link #transcribe}, or {@link #synthesize} — those share one generate
- *       lock.</li>
+ *   <li>One {@code LLM} must not run concurrent {@link #generate}, chat, RAG, or typed
+ *       {@link #generate(LlmInput, LlmModality)} — those share one generate lock.</li>
  *   <li>Prefer one instance per thread, or external locking. Share one immutable {@link LlmModel}
  *       across many {@code LLM}s.</li>
  *   <li>{@link #cancel()} is safe from another thread and aborts an in-flight generate with
@@ -125,7 +133,7 @@ import java.util.stream.IntStream;
  * </ul>
  *
  * <h2>Servers, threads, and memory</h2>
- * One {@code LLM} is a single in-flight generate (chat / RAG / complete share that lock). For
+ * One {@code LLM} is a single in-flight generate (chat / RAG / typed generate share that lock). For
  * concurrent HTTP requests, share one {@link LlmModel} and keep a pool of {@code LLM} engines
  * (or serialize onto one engine). {@link #cancel()} is the cross-thread abort; cap wall time with
  * {@link #generate(List, SamplingParams, Duration)} or {@link ChatSession#timeout(Duration)}.
@@ -142,7 +150,8 @@ import java.util.stream.IntStream;
  *   <li>{@link Builder#disableMultiCpu()} — calling thread only; no matmul executor</li>
  * </ul>
  * Dense RAG indexing is sequential unless you pass an {@link java.util.concurrent.Executor};
- * {@link LlmModel#embed} runs on the caller. Load is blocking I/O on the calling thread — do it
+ * {@link LlmModel#generate(LlmInput, LlmModality)} (embedding) runs on the caller. Load is blocking
+ * I/O on the calling thread — do it
  * at startup. Close engines, then the model. Files &gt; 2 GiB keep a {@code FileChannel} until
  * model close; dense weight arrays become unreachable for GC after close (they are not zeroed).
  * {@link com.igormaznitsa.nanollvm.utils.ResourceLimits#setCurrent} is JVM-global; per-corpus
@@ -190,6 +199,7 @@ public final class LLM implements AutoCloseable {
   private final LlmAdvisorMixer advisorMixer;
   private final Predicate<String> advisorNoteFilter;
   private final SamplingParams defaultSampling;
+  private final Random random;
 
   private LLM(final Builder builder) {
     requireNonNull(builder, "builder");
@@ -209,6 +219,7 @@ public final class LLM implements AutoCloseable {
       this.matmul = createdMatmul;
       boundModel = builder.resolveModel();
       this.model = boundModel;
+      this.random = builder.resolveRandom(this.model);
       this.tokenizer = this.model.tokenizer();
       this.config = builder.toConfig(this.model, this.tokenizer, cpuThreads);
       this.listener = builder.listener;
@@ -219,7 +230,12 @@ public final class LLM implements AutoCloseable {
       this.defaultSampling = builder.resolveSampling();
       if (this.model.isCausalModel()) {
         createdTransformer = new Transformer(
-          this.model, this.config, this.matmul, this.listener, builder.allowUnpackParameters);
+          this.model,
+          this.config,
+          this.matmul,
+          this.listener,
+          builder.allowUnpackParameters,
+          this.random);
         this.transformer = createdTransformer;
         this.scheduler = new Scheduler(this.config, this.transformer::clearConvState);
         if (builder.warmup) {
@@ -292,230 +308,43 @@ public final class LLM implements AutoCloseable {
   }
 
   /**
-   * Turns {@code text} into an L2-normalized embedding vector. Embedding checkpoints only.
-   * Uses this engine's {@link MatmulRuntime} (same CPU pool as chat). Exclusive on this instance
-   * (see class-level thread-safety).
+   * Cross-kind entry: runs the graph that produces {@code outputModality} from {@code input}.
+   * Exclusive on this instance (same lock as {@link #generate(List, SamplingParams)}).
    *
-   * @param text input to encode; must not be {@code null}
-   * @return one L2-normalized vector; never {@code null}
-   * @throws NullPointerException  if {@code text} is {@code null}
-   * @throws IllegalStateException if this engine is closed or the checkpoint is not an embedding
-   *                               encoder
+   * <p>Supported pairs:
+   * <ul>
+   *   <li>{@link LlmInText} → {@link LlmModality#TEXT} — raw completion (no chat template)</li>
+   *   <li>{@link LlmInText} → {@link LlmModality#EMBEDDING} — embedding encoders</li>
+   *   <li>{@link LlmInTokenIds} → {@link LlmModality#EMBEDDING} — already-tokenized ids</li>
+   *   <li>{@link LlmInText} → {@link LlmModality#AUDIO} — Piper synthesis ({@link LlmOutSoundData})</li>
+   *   <li>{@link LlmInSound} → {@link LlmModality#TEXT} — Whisper transcription</li>
+   * </ul>
+   *
+   * @param input          typed payload; must not be {@code null}
+   * @param outputModality desired result type; must not be {@code null}
+   * @return typed result matching {@code outputModality}
+   * @throws NullPointerException     if either argument is {@code null}
+   * @throws IllegalArgumentException if the input/output pair is unsupported
+   * @throws IllegalStateException    if this engine is closed or the wrong graph kind
    * @since 1.3.0
    */
-  public float[] embed(final CharSequence text) {
-    requireNonNull(text, "text");
+  public LlmOutput generate(final LlmInput input, final LlmModality outputModality) {
+    requireNonNull(input, "input");
+    requireNonNull(outputModality, "outputModality");
     this.assertNotClosed();
-    this.requireEmbedding();
-    this.generateLock.lock();
-    try {
-      this.assertNotClosed();
-      return LlmModelImpl.peer(this.model).embedAll(List.of(text), this.matmul)[0];
-    } finally {
-      this.generateLock.unlock();
+
+    if (input instanceof LlmInText text && outputModality == LlmModality.TEXT) {
+      this.requireCausal();
+      List<GenerationOutput> outputs = this.generate(
+        List.of(text.text().toString()), this.defaultSampling());
+      return new LlmOutText(outputs.getFirst().text());
     }
-  }
 
-  /**
-   * Encodes each text to an L2-normalized embedding. Embedding checkpoints only.
-   * Exclusive on this instance.
-   *
-   * @param texts one string per vector; must not be {@code null}; elements must not be {@code null}
-   * @return one vector per input, same order; never {@code null}
-   * @throws NullPointerException  if {@code texts} or an element is {@code null}
-   * @throws IllegalStateException if this engine is closed or the checkpoint is not an embedding
-   *                               encoder
-   * @since 1.3.0
-   */
-  public float[][] embed(final List<? extends CharSequence> texts) {
-    requireNonNull(texts, "texts");
-    this.assertNotClosed();
-    this.requireEmbedding();
     this.generateLock.lock();
     try {
       this.assertNotClosed();
-      return LlmModelImpl.peer(this.model).embedAll(texts, this.matmul);
-    } finally {
-      this.generateLock.unlock();
-    }
-  }
-
-  /**
-   * Encodes already-tokenized ids to a single L2-normalized embedding. Embedding checkpoints
-   * only. Ids are used as-is — include specials such as {@code [CLS]} / {@code [SEP]} when the
-   * checkpoint expects them. Exclusive on this instance.
-   *
-   * @param tokenIds vocabulary ids; must not be {@code null} or empty
-   * @return one L2-normalized vector; never {@code null}
-   * @throws NullPointerException     if {@code tokenIds} is {@code null}
-   * @throws IllegalArgumentException if {@code tokenIds} is empty
-   * @throws IllegalStateException    if this engine is closed or the checkpoint is not an
-   *                                  embedding encoder
-   * @since 1.3.0
-   */
-  public float[] embed(final int[] tokenIds) {
-    requireNonNull(tokenIds, "tokenIds");
-    this.assertNotClosed();
-    this.requireEmbedding();
-    this.generateLock.lock();
-    try {
-      this.assertNotClosed();
-      return LlmModelImpl.peer(this.model).embed(tokenIds, this.matmul);
-    } finally {
-      this.generateLock.unlock();
-    }
-  }
-
-  /**
-   * Transcribes an uncompressed WAV file (PCM or IEEE float, mixed to mono). Speech checkpoints
-   * only. Prefer {@link #transcribe(byte[])} when the payload is already in memory. Exclusive on
-   * this instance.
-   *
-   * @param wav path to a {@code .wav} file; must not be {@code null}
-   * @return transcript text; empty when the clip is silent or too short; never {@code null}
-   * @throws NullPointerException     if {@code wav} is {@code null}
-   * @throws IOException              if the file cannot be read
-   * @throws IllegalArgumentException if the container is compressed or malformed
-   * @throws IllegalStateException    if this engine is closed or the checkpoint is not speech
-   * @since 1.3.0
-   */
-  public String transcribe(final Path wav) throws IOException {
-    return this.transcribe(wav, null);
-  }
-
-  /**
-   * Transcribes an uncompressed WAV file with an optional language hint. {@code null} or
-   * {@link Locale#ROOT} selects automatically; region is ignored ({@link Locale#US} is English).
-   * Speech checkpoints only. Exclusive on this instance.
-   *
-   * @param wav      path to a {@code .wav} file; must not be {@code null}
-   * @param language hint, or {@code null}/{@link Locale#ROOT} for auto
-   * @return transcript text; never {@code null}
-   * @throws NullPointerException     if {@code wav} is {@code null}
-   * @throws IOException              if the file cannot be read
-   * @throws IllegalArgumentException if the container is compressed or malformed, or the language
-   *                                  is not a Whisper token
-   * @throws IllegalStateException    if this engine is closed or the checkpoint is not speech
-   * @since 1.3.0
-   */
-  public String transcribe(final Path wav, final Locale language) throws IOException {
-    requireNonNull(wav, "wav");
-    this.assertNotClosed();
-    this.requireSpeech();
-    this.generateLock.lock();
-    try {
-      this.assertNotClosed();
-      return LlmModelImpl.peer(this.model).transcribe(wav, language, this.matmul);
-    } finally {
-      this.generateLock.unlock();
-    }
-  }
-
-  /**
-   * Transcribes an uncompressed WAV payload already in memory (same RIFF/WAVE bytes a
-   * {@code .wav} file would contain). Speech checkpoints only. Does not touch the filesystem.
-   * Exclusive on this instance.
-   *
-   * @param wav RIFF/WAVE bytes; must not be {@code null}
-   * @return transcript text; never {@code null}
-   * @throws NullPointerException     if {@code wav} is {@code null}
-   * @throws IllegalArgumentException if the container is compressed or malformed
-   * @throws IllegalStateException    if this engine is closed or the checkpoint is not speech
-   * @since 1.3.0
-   */
-  public String transcribe(final byte[] wav) {
-    return this.transcribe(wav, (Locale) null);
-  }
-
-  /**
-   * Transcribes in-memory WAV bytes with an optional language hint. Speech checkpoints only.
-   * Exclusive on this instance.
-   *
-   * @param wav      RIFF/WAVE bytes; must not be {@code null}
-   * @param language hint, or {@code null}/{@link Locale#ROOT} for auto
-   * @return transcript text; never {@code null}
-   * @throws NullPointerException     if {@code wav} is {@code null}
-   * @throws IllegalArgumentException if the container is compressed or malformed, or the language
-   *                                  is not a Whisper token
-   * @throws IllegalStateException    if this engine is closed or the checkpoint is not speech
-   * @since 1.3.0
-   */
-  public String transcribe(final byte[] wav, final Locale language) {
-    requireNonNull(wav, "wav");
-    this.assertNotClosed();
-    this.requireSpeech();
-    this.generateLock.lock();
-    try {
-      this.assertNotClosed();
-      return LlmModelImpl.peer(this.model).transcribe(wav, language, this.matmul);
-    } finally {
-      this.generateLock.unlock();
-    }
-  }
-
-  /**
-   * Transcribes mono PCM. {@code sampleRate} is Hertz; other rates are resampled to 16 kHz.
-   * Speech checkpoints only. Exclusive on this instance.
-   *
-   * @param pcm        mono samples in {@code [-1, 1]}; must not be {@code null}
-   * @param sampleRate Hertz of {@code pcm}; must be {@code >= 1}
-   * @return transcript text; never {@code null}
-   * @throws NullPointerException     if {@code pcm} is {@code null}
-   * @throws IllegalArgumentException if {@code sampleRate < 1}
-   * @throws IllegalStateException    if this engine is closed or the checkpoint is not speech
-   * @since 1.3.0
-   */
-  public String transcribe(final float[] pcm, final int sampleRate) {
-    return this.transcribe(pcm, sampleRate, null);
-  }
-
-  /**
-   * Transcribes mono PCM with an optional language hint. Speech checkpoints only. Exclusive on
-   * this instance.
-   *
-   * @param pcm        mono samples in {@code [-1, 1]}; must not be {@code null}
-   * @param sampleRate Hertz of {@code pcm}; must be {@code >= 1}
-   * @param language   hint, or {@code null}/{@link Locale#ROOT} for auto
-   * @return transcript text; never {@code null}
-   * @throws NullPointerException     if {@code pcm} is {@code null}
-   * @throws IllegalArgumentException if {@code sampleRate < 1}, or the language is not a Whisper
-   *                                  token
-   * @throws IllegalStateException    if this engine is closed or the checkpoint is not speech
-   * @since 1.3.0
-   */
-  public String transcribe(final float[] pcm, final int sampleRate, final Locale language) {
-    requireNonNull(pcm, "pcm");
-    this.assertNotClosed();
-    this.requireSpeech();
-    this.generateLock.lock();
-    try {
-      this.assertNotClosed();
-      return LlmModelImpl.peer(this.model).transcribe(pcm, sampleRate, language, this.matmul);
-    } finally {
-      this.generateLock.unlock();
-    }
-  }
-
-  /**
-   * Synthesizes uncompressed WAV bytes (PCM16 little-endian, mono). The return value is the file
-   * contents — write it only if you need a {@code .wav} on disk. Synthesis checkpoints only.
-   * Exclusive on this instance.
-   *
-   * @param text text to speak; must not be {@code null} or blank
-   * @return RIFF/WAVE bytes; never {@code null}
-   * @throws NullPointerException     if {@code text} is {@code null}
-   * @throws IllegalArgumentException if {@code text} is blank
-   * @throws IllegalStateException    if this engine is closed or the checkpoint is not synthesis
-   * @since 1.3.0
-   */
-  public byte[] synthesize(final CharSequence text) {
-    requireNonNull(text, "text");
-    this.assertNotClosed();
-    this.requireSynthesis();
-    this.generateLock.lock();
-    try {
-      this.assertNotClosed();
-      return LlmModelImpl.peer(this.model).synthesize(text, this.matmul);
+      return LlmModelImpl.peer(this.model).generate(
+        input, outputModality, this.matmul, this.random);
     } finally {
       this.generateLock.unlock();
     }
@@ -606,7 +435,7 @@ public final class LLM implements AutoCloseable {
   }
 
   /**
-   * Requests cancellation of an in-flight {@link #generate} (and chat/RAG/complete that use it).
+   * Requests cancellation of an in-flight {@link #generate} (and chat/RAG/typed generate that use it).
    * Safe to call from other threads. The blocked generate then throws
    * {@link GenerationCancelledException}.
    *
@@ -1277,7 +1106,7 @@ public final class LLM implements AutoCloseable {
   /**
    * Engine sampling policy from {@link Builder#sampling(SamplingParams)}, or
    * {@link SamplingDefaults#neutral()} when unset. {@link Builder#deterministic()} seals greedy
-   * argmax on that policy. Chat / complete / RAG helpers use this unless the call overrides max
+   * argmax on that policy. Chat / typed generate / RAG helpers use this unless the call overrides max
    * tokens or passes its own {@link SamplingParams}.
    *
    * @return a new immutable {@link SamplingParams}; never {@code null}
@@ -1290,7 +1119,7 @@ public final class LLM implements AutoCloseable {
 
   /**
    * {@link #defaultSampling()} with a custom max new-token budget; temperature, top-k, and top-p
-   * stay unchanged. Chat / complete / RAG max-token shortcuts use this.
+   * stay unchanged. Chat / typed generate / RAG max-token shortcuts use this.
    *
    * @param maxTokens maximum newly generated tokens per sequence; must be {@code >= 1}
    * @return a new immutable {@link SamplingParams}
@@ -1384,52 +1213,10 @@ public final class LLM implements AutoCloseable {
   }
 
   /**
-   * Raw text continuation with {@link #defaultSampling()}. No chat template and no history —
-   * the model sees {@code prompt} as a prefix to complete. For instruct/chat models prefer
-   * {@link #chatOnce(String)}.
-   *
-   * @param prompt continuation seed as plain text; non-{@code null} (may be empty)
-   * @return decoded completion text for the single prompt (not including the prompt itself)
-   * @throws NullPointerException         if {@code prompt} is {@code null}
-   * @throws GenerationCancelledException if {@link #cancel()} fires
-   * @throws IllegalStateException        if this engine is closed
-   */
-  public String complete(final String prompt) {
-    return this.complete(prompt, this.defaultSampling());
-  }
-
-  /**
-   * Raw text continuation like {@link #complete(String)} with engine sampling limited to
-   * {@code maxTokens}. Other knobs stay at {@link #defaultSampling()}.
-   *
-   * @param prompt    continuation seed; non-{@code null}
-   * @param maxTokens new-token cap; must be {@code >= 1}
-   * @return decoded completion (prompt not echoed)
-   * @since 1.1.0
-   */
-  public String complete(final String prompt, final int maxTokens) {
-    return this.complete(prompt, this.defaultSampling(maxTokens));
-  }
-
-  /**
-   * Raw text completion (no chat template).
-   *
-   * @param prompt         continuation seed as plain text; non-{@code null}
-   * @param samplingParams sampling controls; non-{@code null}
-   * @return decoded completion text (prompt not echoed)
-   * @throws NullPointerException         if either argument is {@code null}
-   * @throws GenerationCancelledException if {@link #cancel()} fires
-   */
-  public String complete(final String prompt, final SamplingParams samplingParams) {
-    // Business: raw continuation (no chat template) → single decoded string
-    requireNonNull(prompt, "prompt");
-    List<GenerationOutput> outputs = this.generate(List.of(prompt), samplingParams);
-    return outputs.getFirst().text();
-  }
-
-  /**
    * Single-turn chat: system prompt (if any) + one user message, then the assistant answer text.
-   * Uses {@link #defaultSampling()}. History is not retained after the call.
+   * Uses {@link #defaultSampling()}. History is not retained after the call. For raw continuation
+   * without a chat template use {@link #generate(LlmInput, LlmModality)} with
+   * {@link LlmInText} → {@link LlmModality#TEXT}.
    *
    * @param userMessage user turn text; non-{@code null}
    * @return visible answer only (thinking / tags stripped by the session parser)
@@ -1676,31 +1463,6 @@ public final class LLM implements AutoCloseable {
     }
   }
 
-  private void requireEmbedding() {
-    if (!this.model.isEmbeddingModel()) {
-      throw new IllegalStateException(
-        this.model.isSpeechModel()
-          ? ModelSupport.speechEmbedMisuseMessage(this.model.architectureName())
-          : this.model.isSynthesisModel()
-          ? ModelSupport.synthesisEmbedMisuseMessage(this.model.architectureName())
-          : ModelSupport.embedMisuseMessage(this.model.architectureName()));
-    }
-  }
-
-  private void requireSpeech() {
-    if (!this.model.isSpeechModel()) {
-      throw new IllegalStateException(
-        ModelSupport.transcribeMisuseMessage(this.model.architectureName()));
-    }
-  }
-
-  private void requireSynthesis() {
-    if (!this.model.isSynthesisModel()) {
-      throw new IllegalStateException(
-        ModelSupport.synthesizeMisuseMessage(this.model.architectureName()));
-    }
-  }
-
   /**
    * Fluent configurator for {@link LLM}.
    *
@@ -1714,7 +1476,7 @@ public final class LLM implements AutoCloseable {
    * <h2>Which setter?</h2>
    * <ul>
    *   <li><b>Reply style</b> — {@link #sampling}, {@link #systemPrompt} / {@link #noSystemPrompt},
-   *       {@link #advisors}, {@link #deterministic}</li>
+   *       {@link #advisors}, {@link #deterministic}, {@link #random}</li>
    *   <li><b>How much text one generate may hold</b> — {@link #maxModelLen}
    *       (prompt + new tokens; not the same as {@code maxTokens} on sampling)</li>
    *   <li><b>CPU / speed</b> — {@link #cpuThreads(int)}, {@link #allCpuThreads}, {@link #disableMultiCpu},
@@ -1758,6 +1520,7 @@ public final class LLM implements AutoCloseable {
     private SamplingParams samplingParams;
     private boolean deterministic;
     private List<Integer> stopTokenIds;
+    private Random random;
 
     private Builder(final LlmModel model) {
       this.sharedModel = requireNonNull(model, "model");
@@ -1897,7 +1660,8 @@ public final class LLM implements AutoCloseable {
 
     /**
      * Seals default sampling for {@link LLM#chat()}, {@link LLM#chatOnce(String)},
-     * {@link LLM#complete(String)}, {@link LLM#rag(RagIndex)}, and {@link LLM#defaultSampling()}.
+     * typed {@link LLM#generate(LlmInput, LlmModality)}, {@link LLM#rag(RagIndex)}, and
+     * {@link LLM#defaultSampling()}.
      * Unset → {@link SamplingDefaults#neutral()}. {@link LLM#chat(int)} / max-token shortcuts
      * override only {@code maxTokens}. {@link #deterministic()} still wins at {@link #build()} and
      * turns these knobs into greedy argmax. See {@link SamplingParams} for temperature, top-k, and
@@ -1915,7 +1679,7 @@ public final class LLM implements AutoCloseable {
     /**
      * Always pick the highest-logit token (greedy argmax). Applied at {@link #build()} on top of
      * {@link #sampling(SamplingParams)} or {@link SamplingDefaults#neutral()}: {@code topK = 1},
-     * nucleus off. Chat, complete, RAG, and advisors inherit this. Call order with {@link #sampling}
+     * nucleus off. Chat, typed generate, RAG, and advisors inherit this. Call order with {@link #sampling}
      * does not matter. {@code temperature(0)} stays rejected.
      *
      * @return {@code this}
@@ -2128,6 +1892,22 @@ public final class LLM implements AutoCloseable {
     }
 
     /**
+     * Engine-owned RNG for chat Gumbel sampling and Piper duration/prior noise.
+     *
+     * <p>Omit to keep defaults: unseeded {@link Random} for chat / embed / speech engines, and
+     * {@code new Random(1L)} for synthesis so Piper noise stays stable across runs. The instance
+     * must not be shared with another concurrent {@link LLM}.
+     *
+     * @param random caller-owned RNG; must not be {@code null}
+     * @return {@code this}
+     * @since 1.3.0
+     */
+    public Builder random(final Random random) {
+      this.random = requireNonNull(random, "random");
+      return this;
+    }
+
+    /**
      * Runs a short synthetic generate after {@link #build()} to warm JIT / caches. Off by default
      * so construction stays cheap; enable for long-running servers where the first real request
      * should not pay the cold penalty.
@@ -2196,6 +1976,13 @@ public final class LLM implements AutoCloseable {
         ? SamplingDefaults.neutral()
         : this.samplingParams;
       return this.deterministic ? sampling.asDeterministic() : sampling;
+    }
+
+    private Random resolveRandom(final LlmModel model) {
+      if (this.random != null) {
+        return this.random;
+      }
+      return model.isSynthesisModel() ? new Random(1L) : new Random();
     }
 
     private Path modelPath() {
