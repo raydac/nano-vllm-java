@@ -188,6 +188,11 @@
 - Dense RAG query embeds are concurrent (`generate(…, EMBEDDING)` uses a per-call step context);
   index-time passage embeds stay sequential unless the caller supplies an `Executor`; no ANN / vector DB yet
 - ONNX: no QDQ/int8; no LFM2-from-ONNX; ModelFileSource rejects external_data sidecars; transformers.js name drift may need more remaps
+- **Java Senior audit (2026-08-27):** `final` / `this.` / naming / no single-letter methods look good on engine+TTS paths.
+  Main debt: narrative `//` in `Transformer` (~27) and `LLM` (~41) that restate DSL brick calls; interface
+  params missing `final` (`TextToSpeech`, `SpeechToText`, `EmbeddingEncoder`, …); samples
+  `Example.ModelChoice` holds `Optional<Path>` as state.
+  Keep array/`for` on tensor, sampler, mel, VITS, prefill packing, and other hot numeric paths — Streams are slower there.
 
 
 ## 4. Current Work In Progress
@@ -287,6 +292,7 @@
 
 ## 8. User Advice and Recommendations
 - **Pure Java only:** no third-party libraries in the library or samples runtime (JDK + this project). Test-scoped dependencies are allowed. No JNI (and no other native interop) — inference, parsers, and G2P stay pure Java. Maven plugins for the build are fine; they must not become runtime JARs.
+- **Hot-path arrays over Streams:** Streams allocate and box; they are slower than plain array/`for` loops. In the library, keep imperative array operations on critical numeric paths (tensor / Ops / kernels, attention, sampler, STFT/mel, VITS, KV packing, and similar). Use Stream only for cold collection transforms (config, catalogs, schedules, samples) where clarity wins and cost is negligible.
 - Piper multilingual G2P: Java reader of caller-provided espeak-ng-data (`dictsource`, else compiled `phontab`/`*_dict`) via `LlmOptionalData.ESPEAK_DATA`; missing data is ignored (letter G2P). Do not vendor GPL Piper/espeak sources.
 - Document Maven as `mvn` (portable); agent on this machine may use `mvn22`
 - README is the public latest-release doc: badge, Maven/Gradle coords, and JAR names stay on the
