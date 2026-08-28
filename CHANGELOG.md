@@ -52,7 +52,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   letter/digraph rules so a US English Piper voice still works without dictionaries. Optional
   `models/download-piper-en-lessac-medium.sh` / `.ps1` / `.cmd` (Lessac medium + espeak-ng-data)
   and `models/download-piper-ru-irina-medium.sh` / `.ps1` / `.cmd` (Irina medium + espeak-ng-data).
-  Sample `SynthesizeHelloWorld` prefers Lessac when both folders exist; `Example` lists both
+  Sample `SynthesizeHelloWorld` prefers Lessac when both folders exist; `VoiceReplyHelloWorld`
+  speaks the chat reply with that same voice and plays it through Java Sound
+  (`javax.sound.sampled`) when a mixer is present. With no input WAV it records 15
+  seconds from the default microphone (`TargetDataLine`), trims leading and trailing
+  silence, and falls back to a canned
+  Piper line if that input is missing; `Example` lists both
   voices and the TTS session suggests `Hello world` / `Привет, мир`.
   `LLM.builder` is the runtime for every graph kind: Piper uses the same `cpuThreads` / matmul
   pool as chat, and 1-D conv / conv-transpose split independent output channels across that pool.
@@ -72,7 +77,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   sparse mel filters and optional frame parallelism on that pool. CTranslate2 /
   faster-whisper `model.bin` folders, Whisper GGUF, and Whisper ONNX are refused. Optional
   `models/download-whisper-base.sh` / `.ps1` / `.cmd` (~290 MB) and `download-whisper-tiny.sh`
-  (~150 MB). Sample `TranscribeHelloWorld`; `Example` lists Whisper in the menu and opens a WAV
+  (~150 MB). Sample `TranscribeHelloWorld`; `VoiceReplyHelloWorld` chains Whisper → few-shot mood
+  of the transcript → chat → Piper; `Example` lists Whisper in the menu and opens a WAV
   transcribe session.
 
 - Cross-kind typed facade: `LlmOutput generate(LlmInput, LlmModality)` on `LlmModel` and `LLM`

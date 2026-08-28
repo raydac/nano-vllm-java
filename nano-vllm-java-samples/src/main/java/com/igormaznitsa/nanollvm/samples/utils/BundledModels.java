@@ -5,6 +5,7 @@ import static com.igormaznitsa.nanollvm.utils.NanoLlvmProps.ENV_MODEL;
 import static com.igormaznitsa.nanollvm.utils.NanoLlvmProps.ENV_MODELS_DIR;
 import static com.igormaznitsa.nanollvm.utils.NanoLlvmProps.PROP_MODEL;
 import static com.igormaznitsa.nanollvm.utils.NanoLlvmProps.PROP_MODELS_DIR;
+import static java.util.Objects.requireNonNull;
 
 import com.igormaznitsa.nanollvm.models.ModelSupport;
 import com.igormaznitsa.nanollvm.utils.NanoLlvmProps;
@@ -162,11 +163,68 @@ public final class BundledModels {
   }
 
   /**
+   * Whisper-tiny if present, otherwise Whisper-base.
+   */
+  public static Path requireWhisper() {
+    return find(WHISPER_TINY)
+        .or(() -> find(WHISPER_BASE))
+        .orElseThrow(() -> new IllegalStateException(
+            "no Whisper checkpoint under " + modelsRoot()
+                + ". Run models/download-whisper-tiny.sh or models/download-whisper-base.sh"));
+  }
+
+  /**
+   * multilingual-e5-small if present, otherwise gte-small GGUF, otherwise xlm-roberta-base.
+   */
+  public static Path requireEmbeddingEncoder() {
+    return find(MULTILINGUAL_E5_SMALL)
+        .or(() -> find(GTE_SMALL_GGUF))
+        .or(() -> find(XLM_ROBERTA_BASE))
+        .orElseThrow(() -> new IllegalStateException(
+            "no BERT embedding checkpoint under " + modelsRoot()
+                +
+                ". Run models/download-multilingual-e5-small.sh or models/download-gte-small-gguf.sh"));
+  }
+
+  /**
+   * Smallest local chat demo: Gemma3-270M, else SmolLM2 Instruct ONNX, else Qwen3-0.6B.
+   */
+  public static Path requireChatDemo() {
+    return find(GEMMA3_270M)
+        .or(() -> find(SMOLLM2_135M_INSTRUCT_ONNX))
+        .or(() -> find(QWEN3_0_6B))
+        .orElseThrow(() -> new IllegalStateException(
+            "no small chat checkpoint under " + modelsRoot()
+                +
+                ". Run models/download-gemma3-270m.sh, models/download-smollm2-135m-instruct-onnx.sh, "
+                + "or models/download-qwen3-0.6b.sh"));
+  }
+
+  /**
+   * {@code true} for US-English Lessac-style Piper folder names.
+   */
+  public static boolean isEnglishPiperVoice(final Path modelDir) {
+    requireNonNull(modelDir, "modelDir");
+    Path fileName = modelDir.getFileName();
+    String name = (fileName == null ? modelDir : fileName).toString().toLowerCase(Locale.ROOT);
+    return name.contains("-en-") || name.contains("lessac");
+  }
+
+  /**
+   * {@code true} when E5 checkpoints expect a {@code query: } prefix on non-passage text.
+   */
+  public static boolean usesE5QueryPrefix(final Path modelPath) {
+    requireNonNull(modelPath, "modelPath");
+    Path fileName = modelPath.getFileName();
+    String name = (fileName == null ? modelPath : fileName).toString().toLowerCase(Locale.ROOT);
+    return name.contains("e5");
+  }
+
+  /**
    * Default TTS prompt for a Piper folder ({@code Hello world} for Lessac, Russian otherwise).
    */
   public static String defaultPiperText(final Path modelDir) {
-    String name = modelDir.getFileName().toString().toLowerCase(Locale.ROOT);
-    return name.contains("-en-") || name.contains("lessac") ? "Hello world" : "Привет, мир";
+    return isEnglishPiperVoice(modelDir) ? "Hello world" : "Привет, мир";
   }
 
   /**

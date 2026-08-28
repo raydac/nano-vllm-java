@@ -76,7 +76,8 @@ The rest of this guide unpacks that sentence without assuming prior ML coursewor
 
 **In the code:** front door is `LLM` / `LLM.Builder`; interactive demo is `samples.Example`; linear mains include
 `HelloWorld`, `NextTokenHelloWorld`, `LogTriageHelloWorld`, `AdvisorRagHelloWorld`,
-`RagTunerHelloWorld`, `EmbeddingsHelloWorld`, `TranscribeHelloWorld`, `SynthesizeHelloWorld` (chapter 16).
+`RagTunerHelloWorld`, `EmbeddingsHelloWorld`, `TranscribeHelloWorld`, `SynthesizeHelloWorld`,
+`VoiceReplyHelloWorld` (chapter 16).
 
 ---
 
@@ -1657,7 +1658,8 @@ try (LlmModel model = LlmModelFactory.make(Path.of("models/whisper-base"));
 an engine.
 
 **In the code:** `LlmModelFactory` → `SpeechArchitecture` / `WhisperProcessor` → `WhisperForAsr`; public surface
-`generate(LlmInSound, TEXT)` → `LlmOutText`; sample `TranscribeHelloWorld`; `Example` opens a WAV session (`/tone`, `/lang`).
+`generate(LlmInSound, TEXT)` → `LlmOutText`; sample `TranscribeHelloWorld`; `VoiceReplyHelloWorld`
+chains STT → mood of the transcript → chat → TTS; `Example` opens a WAV session (`/tone`, `/lang`).
 
 ### Inside one speech `generate` call (pipeline)
 
@@ -1696,7 +1698,7 @@ Runtime, no JNI, no libespeak-ng.
 
 Demo crates: `models/download-piper-en-lessac-medium.sh` (US English) and
 `models/download-piper-ru-irina-medium.sh` (Russian). Sample `SynthesizeHelloWorld` prefers Lessac when both folders
-exist.
+exist; `VoiceReplyHelloWorld` uses that voice for the spoken reply.
 
 ### What “text-to-speech” means here
 
@@ -1731,7 +1733,8 @@ try (LlmModel model = LlmModelFactory.open(voice)
 ```
 
 **In the code:** `SynthesisArchitecture` / `PiperProcessor` → `PiperForTts`; G2P in `models.internal` espeak readers;
-sample `SynthesizeHelloWorld`; `Example` lists Lessac and Irina.
+sample `SynthesizeHelloWorld`; `VoiceReplyHelloWorld` speaks the chat reply and plays it
+through Java Sound when a mixer is present; `Example` lists Lessac and Irina.
 
 ### Grapheme-to-phoneme (how letters become phones)
 
@@ -3405,7 +3408,7 @@ packages. Demos live in the separate Maven module `nano-vllm-java-samples`.
 | `layers/` — `Attention`, `BidirectionalAttention`, `Sampler`, `Linear`, `Norms`, …     | Attention, sampling, projections, norms/RoPE         | **no** |
 | `tensor/` — `Tensor`, `Ops`, `MatmulRuntime`, `LinearKernel`, `EmbeddingKernel`, …     | Arrays, float ops, parallel GEMM                     | **no** |
 | `prompts/` — `ChatPrompts`, `RagPrompts`, `AdvisorPrompts`                             | Default system / RAG / advisor wording               | **no** |
-| *(Maven module `nano-vllm-java-samples`)* `Example`, `HelloWorld`, `NextTokenHelloWorld`, `Bench`, `EmbeddingsHelloWorld`, `TranscribeHelloWorld`, `SynthesizeHelloWorld`, `LogTriageHelloWorld`, `AdvisorRagHelloWorld`, `RagTunerHelloWorld`, `utils/Bundled*` | Runnable demos (not in the library JAR) | n/a |
+| *(Maven module `nano-vllm-java-samples`)* `Example`, `HelloWorld`, `NextTokenHelloWorld`, `Bench`, `EmbeddingsHelloWorld`, `TranscribeHelloWorld`, `SynthesizeHelloWorld`, `VoiceReplyHelloWorld`, `LogTriageHelloWorld`, `AdvisorRagHelloWorld`, `RagTunerHelloWorld`, `utils/Bundled*` | Runnable demos (not in the library JAR) | n/a |
 
 `Config.HfConfig` (in `llm/Config`) holds the blueprint plus per-LLM engine knobs (`maxModelLen`, `kvHeapFraction`, …).
 
@@ -3755,7 +3758,7 @@ LLM.builder(model).build().generate(LlmInSound.ofWav|ofPcm(...), TEXT)
     → encoder → greedy decoder (incremental self-attn KV) → String
 ```
 
-Narrative: **chapter 7d**. Demo: `samples.TranscribeHelloWorld`.
+Narrative: **chapter 7d**. Demo: `samples.TranscribeHelloWorld`; chained in `samples.VoiceReplyHelloWorld`.
 
 ### Sample G0c — Piper TTS (**since 1.3.0**)
 
@@ -3768,7 +3771,23 @@ LLM.builder(model).build().generate(LlmInText.of(text), AUDIO)
     → G2P → VITS reverse (identity-mask skip, channel-major norm, SIMD) → HiFi-GAN → PCM16 LE mono WAV bytes
 ```
 
-Narrative: **chapter 7e**. Demo: `samples.SynthesizeHelloWorld`.
+Narrative: **chapter 7e**. Demo: `samples.SynthesizeHelloWorld`; chained in `samples.VoiceReplyHelloWorld`.
+
+### Sample G0d — voice desk (**since 1.3.0**)
+
+```text
+four LlmModelFactory loads (Whisper, BERT embed, chat, Piper)
+    → four LLM.builder(…).dedicatedMatmulPool() engines
+    → WAV file, else default TargetDataLine (15 s, silence trimmed), else canned Piper
+    → generate(LlmInSound, TEXT)                 transcript
+    → few-shot EmbeddingClassifier on generate(…, EMBEDDING)   mood of the words
+    → ChatSession.send(mood + transcript)        reply
+    → generate(LlmInText, AUDIO)                 spoken WAV
+    → javax.sound.sampled Clip                   play when a mixer exists
+```
+
+Share the four `LlmModel`s; one `LLM` per in-flight call. Mood is text, not acoustics.
+The sample still writes `voice-reply.wav` if the machine has no mixer.
 
 ### Sample G — text RAG (prepare once, ask many times)
 
@@ -3836,7 +3855,7 @@ nano-vllm-java/src/main/java/com/igormaznitsa/nanollvm/
   exceptions/…
 
 nano-vllm-java-samples/src/main/java/com/igormaznitsa/nanollvm/samples/
-  Example.java / HelloWorld.java / NextTokenHelloWorld.java / Bench.java / EmbeddingsHelloWorld.java / TranscribeHelloWorld.java / SynthesizeHelloWorld.java / LogTriageHelloWorld.java / AdvisorRagHelloWorld.java / RagTunerHelloWorld.java
+  Example.java / HelloWorld.java / NextTokenHelloWorld.java / Bench.java / EmbeddingsHelloWorld.java / TranscribeHelloWorld.java / SynthesizeHelloWorld.java / VoiceReplyHelloWorld.java / LogTriageHelloWorld.java / AdvisorRagHelloWorld.java / RagTunerHelloWorld.java
   utils/BundledModels.java / BundledRag.java / OrderedConsole.java / EpubText.java
 ```
 

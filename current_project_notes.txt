@@ -139,7 +139,7 @@
 
 - **RAG:** `RagFactory` → `PreparedRag` (BM25); mix folders / classpath / inline on one `builder()` (`addFolders` / `addResource` / `add`); optional `withEmbeddings` → `HybridRagIndex` (RRF over BM25+dense, or `HybridRagIndex.of` any `RagIndex` list — ranking fusion, not corpus union); package-private `CorpusLoader`; public API includes `RagTuner` / `RagResource` (`Builder.addProcessor` filter / extract / preprocess, `@since 1.2.0`). Default extract is UTF-8 only (no `PdfTextExtractor` / pdfbox); PDF/EPUB need a custom extractor + `.folderExtensions` for folder walks. `ResourceLimits` no longer has PDF inflate / CMap caps. Chunk ceiling is `RagLoadOptions` (`defaults()` 500 / `forTinyModels()` 220, then `withMaxChunkChars`); Javadoc on that type, `RagFactory`, package-info, `PreparedRag.options()`, `RagSession.maxContextChars` (prompt cap, separate). Packing leftover-long-sentence windows honor `chunkOverlap` (was hardcoded 40).
 - **RAG off-topic:** `isOutsideCorpus` ignores conversational glue (`what`/`think`/`about`/…); source stems use `/`+`\` basename (Windows-safe)
-- **Samples** (`nano-vllm-java-samples`): linear `main` flows (`HelloWorld`, `NextTokenHelloWorld`, `EmbeddingsHelloWorld`, `TranscribeHelloWorld`, `SynthesizeHelloWorld`, `LogTriageHelloWorld`, `AdvisorRagHelloWorld`, `RagTunerHelloWorld`, `Bench`, `Example`); `NextTokenHelloWorld` encodes a seed and prints the next tokens on Tiny-LLM-ONNX; `EmbeddingsHelloWorld` encodes text with multilingual-e5-small ONNX (`generate(LlmInText, EMBEDDING)`, `query: ` prefix); `TranscribeHelloWorld` loads Whisper safetensors and transcribes a WAV (or a synthesized 440 Hz tone); `AdvisorRagHelloWorld` is one `main` (Alex advisor + BM25 over `rag/`, Grimm names/father, Gemma3-270M); `RagTunerHelloWorld` extracts bundled `pg59112.epub` (Čapek *R.U.R.*) via `RagTuner` + JDK zip/StAX (no epub4j/xpp3; OPF title kept as a short Markdown heading so later chunks still name the play), indexes with BM25, then asks play questions on Qwen3-0.6B with `LLM.Builder.deterministic()` and `isolateGeneration(true)` (greedy argmax, same tokens each run); RAG hits prepend `RagPrompts.GROUNDING`; hit dump (score, source, passage) is one stderr block so Maven/IDE do not split it from stdout answers; `Example` is a terminal app (model menu → RAG mode → advisor count → chat/embed/transcribe); speech checkpoints skip RAG and open a WAV session (`/tone`, `/lang`, path); Enter = first menu item; downloaded models listed first (Qwen3-0.6B preferred); empty disk exits with download help; `--debug` enables prepared-prompt dumps; SmolLM2 Instruct ONNX (compact chat demo) + Tiny-LLM (base); gte-small / e5 / xlm-roberta-base embeddings; whisper-base / whisper-tiny speech; `BundledModels` / `BundledRag` / `OrderedConsole` in `samples.utils` (`ReentrantLock` for drain and stream buffers)
+- **Samples** (`nano-vllm-java-samples`): linear `main` flows (`HelloWorld`, `NextTokenHelloWorld`, `EmbeddingsHelloWorld`, `TranscribeHelloWorld`, `SynthesizeHelloWorld`, `VoiceReplyHelloWorld`, `LogTriageHelloWorld`, `AdvisorRagHelloWorld`, `RagTunerHelloWorld`, `Bench`, `Example`); `NextTokenHelloWorld` encodes a seed and prints the next tokens on Tiny-LLM-ONNX; `EmbeddingsHelloWorld` encodes text with multilingual-e5-small ONNX (`generate(LlmInText, EMBEDDING)`, `query: ` prefix); `TranscribeHelloWorld` loads Whisper safetensors and transcribes a WAV (or a synthesized 440 Hz tone); `VoiceReplyHelloWorld` loads Whisper + BERT embed + chat + Piper (`dedicatedMatmulPool` per engine), transcribes a WAV or the default microphone (or Piper-speaks a canned line if no input line), few-shot classifies mood of the *transcript*, chats, writes spoken WAV and plays it through Java Sound when a mixer exists; `AdvisorRagHelloWorld` is one `main` (Alex advisor + BM25 over `rag/`, Grimm names/father, Gemma3-270M); `RagTunerHelloWorld` extracts bundled `pg59112.epub` (Čapek *R.U.R.*) via `RagTuner` + JDK zip/StAX (no epub4j/xpp3; OPF title kept as a short Markdown heading so later chunks still name the play), indexes with BM25, then asks play questions on Qwen3-0.6B with `LLM.Builder.deterministic()` and `isolateGeneration(true)` (greedy argmax, same tokens each run); RAG hits prepend `RagPrompts.GROUNDING`; hit dump (score, source, passage) is one stderr block so Maven/IDE do not split it from stdout answers; `Example` is a terminal app (model menu → RAG mode → advisor count → chat/embed/transcribe); speech checkpoints skip RAG and open a WAV session (`/tone`, `/lang`, path); Enter = first menu item; downloaded models listed first (Qwen3-0.6B preferred); empty disk exits with download help; `--debug` enables prepared-prompt dumps; SmolLM2 Instruct ONNX (compact chat demo) + Tiny-LLM (base); gte-small / e5 / xlm-roberta-base embeddings; whisper-base / whisper-tiny speech; `BundledModels` / `BundledRag` / `OrderedConsole` in `samples.utils` (`ReentrantLock` for drain and stream buffers)
 
 
 ## 2. Architecture & Technical Discoveries
@@ -196,6 +196,19 @@
 
 
 ## 4. Current Work In Progress
+- **Voice pipeline sample (2026-08-28):**   `VoiceReplyHelloWorld` loads Whisper + BERT
+  embed + chat + Piper through the same factory/`LLM.builder`, each with
+  `dedicatedMatmulPool`. Pipeline is sequential (STT → few-shot mood of the
+  *transcript* → chat → TTS). With no input WAV, records 15 s from the default
+  `TargetDataLine` (OS default mic) and trims leading/trailing silence; if that
+  line is missing, Piper speaks a
+  canned line instead. Prints `Recorded …` then `Starting process...` before STT.
+  Plays the spoken WAV through `javax.sound.sampled`
+  (`Clip`) when a mixer exists; otherwise keeps the file on disk. No acoustic
+  emotion, no MP3/streaming.
+  `BundledModels.requireWhisper` / `requireEmbeddingEncoder` / `requireChatDemo`
+  / `requirePiperVoice` pick the smallest local fallbacks. A server still owns
+  an engine pool per kind for inter-request parallelism.
 - **Whisper/Piper CPU speed (2026-08-26):** incremental Whisper decoder KV cache; Bluestein FFT
   log-mel + sparse mels + parallel STFT frames; Piper identity-mask skip + channel-major norm +
   SIMD dots. `RealDftTest` / `WhisperLogMelTest` / `ScaledDotProductAttentionTest` /
@@ -281,6 +294,9 @@
   `LlmModelFactory.open(path).optionalData(LlmOptionalData.ESPEAK_DATA, path.resolve("espeak-ng-data")).make()`;
   `LLM.builder(model).build()` then `llm.synthesize(text)`; sample `SynthesizeHelloWorld` (Lessac if present, else Irina);
   `Example` menu has both voices — at `tts?>` try `Hello world`
+- Voice desk: `VoiceReplyHelloWorld` (Whisper + embed + chat + Piper, `dedicatedMatmulPool` per engine;
+  optional input WAV, else 15 s from the default microphone (silence trimmed), else canned Piper; default output `voice-reply.wav`;
+  plays the reply via Java Sound when a mixer exists)
 - Example Classify labels: `nano-vllm-java-samples/classify-labels.example.txt` (`/load` from repo root)
 - Dense RAG: `RagFactory.withEmbeddings(preparedRag, embedModel)` → `HybridRagIndex`; keep BM25 via `PreparedRag` alone
 - Advisor+BM25 demo: `AdvisorRagHelloWorld` (Gemma3-270M, advisor Alex, Grimm names/father)
@@ -327,7 +343,8 @@
   `generate(LlmInput, LlmModality)` → `LlmOutText` / `LlmOutSoundData` / `LlmOutEmbedding`.
   Same `cpuThreads` / matmul pool. `LlmModel.generate` is the sequential shortcut (RAG indexing
   uses it for embeddings). Text completion needs `LLM` (not bare `LlmModel`).
-  (`samples.EmbeddingsHelloWorld`, `TranscribeHelloWorld`, `SynthesizeHelloWorld`)
+  (`samples.EmbeddingsHelloWorld`, `TranscribeHelloWorld`, `SynthesizeHelloWorld`,
+  `VoiceReplyHelloWorld`)
 - Whisper default `models/whisper-base`; in-memory WAV `byte[]`, uncompressed WAV file, or 16 kHz PCM
 - Piper: `.optionalData(LlmOptionalData.ESPEAK_DATA, dir)` when espeak-ng-data is not next to the voice; omit it or leave the folder missing — synthesize still runs
 - For Tiny-LLM-ONNX use `onnx/model.onnx` (fp32) or `model_fp16.onnx`; skip quantized community files

@@ -207,6 +207,8 @@ try (LlmModel model = LlmModelFactory.make(Path.of("models/whisper-base"))) {
 
 Prefer `LLM.builder` for the shared matmul pool; do not use chat. Sample:
 `nano-vllm-java-samples` → `com.igormaznitsa.nanollvm.samples.TranscribeHelloWorld`.
+Four-kind desk (mic or WAV → STT → mood of the transcript → chat → TTS, then Java Sound playback):
+`VoiceReplyHelloWorld`.
 
 ## piper-en-lessac-medium (optional, English text-to-speech)
 
