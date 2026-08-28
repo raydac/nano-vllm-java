@@ -1631,8 +1631,11 @@ Whisper ONNX are refused.
 | Output | Token ids / text | Transcript string |
 | `usableModalities()` | text→text | audio→text |
 
-There is **no** chat template, KV cache, or next-token sampler on this path. Decode is **greedy** (highest logit),
-multilingual, with optional language. Clips longer than 30 s are split into 30 s chunks.
+There is **no** chat template, chat `Transformer` KV arena, or next-token sampler on this path. The
+**decoder** still keeps a growing **self-attention KV cache** so each new token runs one decode step
+(not a full prefix replay). Decode is **greedy** (highest logit), multilingual, with optional language.
+Clips longer than 30 s are split into 30 s chunks (mel features read each slice in place — no per-chunk
+PCM copy).
 
 ### How this project loads and runs it
 
@@ -1661,9 +1664,9 @@ an engine.
 ```text
 WAV bytes or PCM
   → mix to mono, resample to 16 kHz
-  → log-mel spectrogram (30 s windows)
+  → log-mel (Bluestein FFT STFT, sparse Slaney mels; frames may run in parallel on the matmul pool)
   → encoder (bidirectional transformer)
-  → greedy decoder (language token, then text tokens)
+  → greedy decoder with incremental self-attn KV (language token, then text tokens)
   → tokenizer decode → String
 ```
 
@@ -1750,7 +1753,8 @@ high-frequency lemmas (`это`, `мама`).
 text
   → G2P (dictsource / compiled dict / letter tables) → phoneme ids
   → VITS reverse (duration, residual couplings with channel flips, WaveNet skips)
-  → HiFi-GAN vocoder (Conv / ConvTranspose geometry from the ONNX graph)
+  → HiFi-GAN vocoder (Conv / ConvTranspose geometry from the ONNX graph;
+     identity attention masks short-circuit; channel-major LayerNorm; SIMD add/dot on hot paths)
   → PCM16 LE mono WAV bytes
 ```
 
@@ -3747,7 +3751,8 @@ LlmModelFactory.make(models/whisper-base)
     → LlmModel (isSpeechModel == true)
 
 LLM.builder(model).build().generate(LlmInSound.ofWav|ofPcm(...), TEXT)
-    → mix/resample 16 kHz → log-mel → encoder → greedy decode → String
+    → mix/resample 16 kHz → log-mel (Bluestein FFT, sparse mels, parallel STFT)
+    → encoder → greedy decoder (incremental self-attn KV) → String
 ```
 
 Narrative: **chapter 7d**. Demo: `samples.TranscribeHelloWorld`.
@@ -3760,7 +3765,7 @@ LlmModelFactory.open(voiceFolder).optionalData(ESPEAK_DATA, espeakDir).make()
     → LlmModel (isSynthesisModel == true)
 
 LLM.builder(model).build().generate(LlmInText.of(text), AUDIO)
-    → G2P → VITS reverse → HiFi-GAN → PCM16 LE mono WAV bytes
+    → G2P → VITS reverse (identity-mask skip, channel-major norm, SIMD) → HiFi-GAN → PCM16 LE mono WAV bytes
 ```
 
 Narrative: **chapter 7e**. Demo: `samples.SynthesizeHelloWorld`.
