@@ -41,7 +41,7 @@ public final class SynthesizeHelloWorld {
       : BundledModels.defaultPiperText(modelDir);
     Path wavOut = args != null && args.length > 2 && args[2] != null && !args[2].isBlank()
       ? Path.of(args[2]).toAbsolutePath().normalize()
-      : Path.of("piper-hello.wav").toAbsolutePath().normalize();
+      : defaultWavPath();
     Path espeak = modelDir.resolve("espeak-ng-data");
 
     System.out.println("Loading synthesis model from " + modelDir);
@@ -49,21 +49,27 @@ public final class SynthesizeHelloWorld {
     try (LlmModel model = LlmModelFactory.open(modelDir)
       .optionalData(LlmOptionalData.ESPEAK_DATA, espeak)
       .make();
-         LLM llm = LLM.builder(model).build()) {
+         LLM llm = LLM.builder(model).allCpuThreads().build()) {
       System.out.println("architecture=" + model.architectureName()
         + " synthesis=" + model.isSynthesisModel()
         + " modalities=" + model.modalities()
         + " usable=" + model.usableModalities());
       LlmOutSoundData sound = (LlmOutSoundData) llm.generate(LlmInText.of(text), LlmModality.AUDIO);
-      Files.write(wavOut, sound.wav());
+      byte[] wav = sound.wav();
+      Files.write(wavOut, wav);
       System.out.printf(
         Locale.ROOT,
-        "wrote %d bytes (%d Hz) to %s%n",
-        sound.wav().length,
+        "wrote %d bytes (%d PCM16 frames, %d Hz) to %s%n",
+        wav.length,
+        (wav.length - 44) / 2,
         sound.sampleRate(),
         wavOut);
     } finally {
       System.out.println("Time taken: " + (System.currentTimeMillis() - started) + "ms");
     }
+  }
+
+  static Path defaultWavPath() {
+    return Path.of("piper-hello.wav").toAbsolutePath().normalize();
   }
 }

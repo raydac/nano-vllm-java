@@ -23,8 +23,7 @@ models/whisper-tiny/
 models/piper-ru-irina-medium/
 models/piper-en-lessac-medium/
 
-# Local-only / temporary RAG PDFs — demo corpus is .md/.txt only
-rag/*.pdf
+*.wav
 
 /current_project_notes.txt
 /.editorconfig

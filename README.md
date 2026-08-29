@@ -176,31 +176,9 @@ mvn -pl nano-vllm-java-samples -q exec:java \
 # optional: … -Dexec.args="models/multilingual-e5-small hello world"
 ```
 
-Speech-to-text (Whisper safetensors; defaults to `models/whisper-base` — download with
-`./models/download-whisper-base.sh`):
-
-```bash
-mvn -pl nano-vllm-java-samples -q exec:java \
-  -Dexec.mainClass=com.igormaznitsa.nanollvm.samples.TranscribeHelloWorld
-# optional: … -Dexec.args="models/whisper-base clip.wav"
-```
-
-Text-to-speech (Piper ONNX; Lessac if present, else Irina — download with
-`./models/download-piper-en-lessac-medium.sh`):
-
-```bash
-mvn -pl nano-vllm-java-samples -q exec:java \
-  -Dexec.mainClass=com.igormaznitsa.nanollvm.samples.SynthesizeHelloWorld
-# optional: … -Dexec.args="models/piper-en-lessac-medium Hello world"
-```
-
-Voice desk (Whisper → few-shot mood of the transcript → chat → Piper; optional WAV, else 15 s from
-the default microphone):
-
-```bash
-mvn -pl nano-vllm-java-samples -q exec:java \
-  -Dexec.mainClass=com.igormaznitsa.nanollvm.samples.VoiceReplyHelloWorld
-```
+Speech-to-text and text-to-speech snippets (PCM arrays, WAV, and the in-repo samples) are in
+[Hello World — Whisper](#hello-world--whisper-speech-to-text) and
+[Hello World — Piper](#hello-world--piper-text-to-speech).
 
 Custom advisor **Alex** plus lexical **BM25** RAG over `rag/` (Grimm names and father; Gemma3-270M):
 
@@ -219,6 +197,77 @@ mvn -pl nano-vllm-java-samples -q exec:java \
 ```
 
 More API samples (streaming, RAG, GGUF, advisors) are in [Library quick start](#library-quick-start).
+
+<a id="hello-world--whisper-speech-to-text"></a>
+## Hello World — Whisper speech-to-text
+
+Audio → text. `pcm` is mono `float[]` in `[-1, 1]`; WAV is uncompressed (PCM or IEEE float).
+Optional `Locale` on `ofPcm` / `ofWav` is a language hint (`null` / `ROOT` = auto).
+No MP3, VAD, or timestamps. Download: `./models/download-whisper-base.sh`.
+
+```java
+try (LlmModel model = LlmModelFactory.make(Path.of("models/whisper-base"));
+     LLM llm = LLM.builder(model).build()) {
+  LlmOutText fromPcm = (LlmOutText) llm.generate(
+      LlmInSound.ofPcm(pcm, 16_000), LlmModality.TEXT);
+  LlmOutText fromWav = (LlmOutText) llm.generate(
+      LlmInSound.ofWav(Files.readAllBytes(Path.of("clip.wav"))), LlmModality.TEXT);
+}
+```
+
+Sample: [`TranscribeHelloWorld.java`](nano-vllm-java-samples/src/main/java/com/igormaznitsa/nanollvm/samples/TranscribeHelloWorld.java)
+(`piper-hello.wav` from Synthesize if present, else an `ofPcm` tone, or a WAV path).
+
+```bash
+mvn -pl nano-vllm-java-samples -q exec:java \
+  -Dexec.mainClass=com.igormaznitsa.nanollvm.samples.TranscribeHelloWorld
+# optional: … -Dexec.args="models/whisper-base clip.wav"
+```
+
+<a id="hello-world--piper-text-to-speech"></a>
+## Hello World — Piper text-to-speech
+
+Text → audio. `LlmOutSoundData` is PCM16 LE mono WAV plus sample rate.
+`espeak-ng-data` is optional. Download: `./models/download-piper-en-lessac-medium.sh`.
+
+```java
+Path voice = Path.of("models/piper-en-lessac-medium");
+try (LlmModel model = LlmModelFactory.open(voice)
+         .optionalData(LlmOptionalData.ESPEAK_DATA, voice.resolve("espeak-ng-data"))
+         .make();
+     LLM llm = LLM.builder(model).build()) {
+  LlmOutSoundData sound = (LlmOutSoundData) llm.generate(
+      LlmInText.of("Hello world"), LlmModality.AUDIO);
+  byte[] wav = sound.wav();
+  int hz = sound.sampleRate();
+}
+```
+
+PCM frames start at byte 44 (`short / 32768f` → `[-1, 1]`). That layout is this library’s
+Piper output only — other WAV files go to Whisper via `ofWav`.
+
+```java
+ByteBuffer buf = ByteBuffer.wrap(wav, 44, wav.length - 44).order(ByteOrder.LITTLE_ENDIAN);
+float[] pcm = new float[buf.remaining() / 2];
+for (int i = 0; i < pcm.length; i++) {
+  pcm[i] = buf.getShort() / 32768f;
+}
+```
+
+Sample: [`SynthesizeHelloWorld.java`](nano-vllm-java-samples/src/main/java/com/igormaznitsa/nanollvm/samples/SynthesizeHelloWorld.java)
+(writes `piper-hello.wav`). STT → chat → TTS:
+[`VoiceReplyHelloWorld.java`](nano-vllm-java-samples/src/main/java/com/igormaznitsa/nanollvm/samples/VoiceReplyHelloWorld.java).
+
+```bash
+mvn -pl nano-vllm-java-samples -q exec:java \
+  -Dexec.mainClass=com.igormaznitsa.nanollvm.samples.SynthesizeHelloWorld
+# optional: … -Dexec.args="models/piper-en-lessac-medium Hello world"
+```
+
+```bash
+mvn -pl nano-vllm-java-samples -q exec:java \
+  -Dexec.mainClass=com.igormaznitsa.nanollvm.samples.VoiceReplyHelloWorld
+```
 
 ## Key features
 
@@ -651,42 +700,13 @@ try (LlmModel model = LlmModelFactory.make(Path.of("models/Qwen3-0.6B"));
 
 Every graph kind uses `LlmModelFactory` then `LLM.builder`. Non-chat work is typed
 `generate(LlmInput, LlmModality)` (`LlmModel.generate` is a sequential shortcut — no engine pool).
+PCM / WAV: [Whisper](#hello-world--whisper-speech-to-text), [Piper](#hello-world--piper-text-to-speech).
 
 ```java
-import com.igormaznitsa.nanollvm.models.LlmInSound;
-import com.igormaznitsa.nanollvm.models.LlmInText;
-import com.igormaznitsa.nanollvm.models.LlmModality;
-import com.igormaznitsa.nanollvm.models.LlmOptionalData;
-import com.igormaznitsa.nanollvm.models.LlmOutEmbedding;
-import com.igormaznitsa.nanollvm.models.LlmOutSoundData;
-import com.igormaznitsa.nanollvm.models.LlmOutText;
-
-import java.nio.file.Files;
-import java.nio.file.Path;
-
-// BERT / E5 / XLM-R embeddings
 try (LlmModel model = LlmModelFactory.make(Path.of("models/multilingual-e5-small"));
      LLM llm = LLM.builder(model).build()) {
   LlmOutEmbedding v = (LlmOutEmbedding) llm.generate(
       LlmInText.of("query: hello world"), LlmModality.EMBEDDING);
-}
-
-// Whisper speech-to-text (uncompressed WAV)
-try (LlmModel model = LlmModelFactory.make(Path.of("models/whisper-base"));
-     LLM llm = LLM.builder(model).build()) {
-  LlmOutText text = (LlmOutText) llm.generate(
-      LlmInSound.ofWav(Files.readAllBytes(Path.of("clip.wav"))), LlmModality.TEXT);
-}
-
-// Piper text-to-speech (espeak-ng-data is optional)
-Path voice = Path.of("models/piper-en-lessac-medium");
-try (LlmModel model = LlmModelFactory.open(voice)
-         .optionalData(LlmOptionalData.ESPEAK_DATA, voice.resolve("espeak-ng-data"))
-         .make();
-     LLM llm = LLM.builder(model).build()) {
-  LlmOutSoundData sound = (LlmOutSoundData) llm.generate(
-      LlmInText.of("Hello world"), LlmModality.AUDIO);
-  byte[] wav = sound.wav();
 }
 ```
 
@@ -903,6 +923,9 @@ Prompt wording is module-private (`prompts`); `RagSession.formatUserMessage` bui
 |-----|----------|
 | [`description.md`](description.md) | Design tour: attention, tensors, scheduler, GGUF, ONNX, embeddings, Whisper, Piper, call chain, RAG |
 | [`models/README.md`](models/README.md) | Download scripts and model layout |
+| [`TranscribeHelloWorld.java`](nano-vllm-java-samples/src/main/java/com/igormaznitsa/nanollvm/samples/TranscribeHelloWorld.java) | Whisper sample: `piper-hello.wav` if present, else `ofPcm` tone, or `ofWav` |
+| [`SynthesizeHelloWorld.java`](nano-vllm-java-samples/src/main/java/com/igormaznitsa/nanollvm/samples/SynthesizeHelloWorld.java) | Piper sample: `generate` → `LlmOutSoundData.wav()` |
+| [`VoiceReplyHelloWorld.java`](nano-vllm-java-samples/src/main/java/com/igormaznitsa/nanollvm/samples/VoiceReplyHelloWorld.java) | Whisper → chat → Piper |
 | [`rag/`](rag/) | Demo corpus (fairy tales + fact cards) |
 
 ## License
