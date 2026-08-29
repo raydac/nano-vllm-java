@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   path and a TornadoVM-enabled JDK reports at least one device, `-Dnanollvm.kernels=auto` (default)
   prefers TornadoVM for large dense GEMV; elementwise kernels stay on the Vector/scalar CPU backend.
   Explicit modes: `tornado` / `gpu`, `vector` / `simd`, `scalar` / `plain`.
+  Tornado GEMV reuses compiled execution plans (LRU cache) and keeps weights on-device
+  between calls with the same buffers and shape.
 
 ## [1.3.0] — 2026-08-29
 
