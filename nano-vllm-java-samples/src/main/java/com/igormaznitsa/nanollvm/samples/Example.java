@@ -37,6 +37,7 @@ import com.igormaznitsa.nanollvm.samples.utils.EmbeddingClassifier.Prediction;
 import com.igormaznitsa.nanollvm.samples.utils.OrderedConsole;
 import com.igormaznitsa.nanollvm.samples.utils.SampleAdvisorPrompts;
 import com.igormaznitsa.nanollvm.samples.utils.SampleChatPrompts;
+import com.igormaznitsa.nanollvm.utils.KernelBackend;
 import com.igormaznitsa.nanollvm.utils.NanoLlvmProps;
 import java.io.BufferedReader;
 import java.io.IOException;
@@ -1354,9 +1355,11 @@ public final class Example {
     console.printlnInfo(
       "Architecture auto-detects from config.json / GGUF metadata "
         + "(override: -Dnanollvm.arch=qwen3|gemma3|llama|lfm2|bert|whisper|piper).");
+    console.printlnInfo(KernelBackend.summaryLine());
     console.printlnInfo(
-      "CPU matmul: " + Runtime.getRuntime().availableProcessors()
-        + " threads from Runtime (override: -Dnanollvm.cpu.threads=N).");
+      "CPU matmul threads: " + Runtime.getRuntime().availableProcessors()
+        + " from Runtime (override: -Dnanollvm.cpu.threads=N). "
+        + KernelBackend.matmulDetail() + ".");
     if (isTinyLlmPath(path)) {
       console.printlnInfo(
         "This checkpoint is a base/completion toy model (~10M), not chat-tuned — "

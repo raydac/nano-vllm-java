@@ -9,10 +9,12 @@ package com.igormaznitsa.nanollvm.tensor;
  * <strong>raw buffers with explicit offsets and lengths</strong>, matching how {@link Tensor}
  * stores a view: logical element {@code i} lives at {@code array[offset + i]}.
  *
- * <p>Two implementations exist:
+ * <p>Implementations:
  * <ul>
  *   <li><strong>Scalar</strong> — plain Java loops ({@code ScalarFloatKernels})</li>
  *   <li><strong>Vector</strong> — JDK incubator Vector API / SIMD ({@code VectorFloatKernels})</li>
+ *   <li><strong>TornadoVM</strong> — optional heterogeneous GEMV when {@code tornado.api} and
+ *       {@code tornado.runtime} are on the module path; elementwise ops stay on the CPU backend</li>
  * </ul>
  * Selection is done once by {@link FloatKernelsFactory} (see {@code -Dnanollvm.kernels}).
  * The process-wide default instance is {@link #get()}; {@link VectorMath} delegates to it.
@@ -48,7 +50,8 @@ public abstract class FloatKernels {
   /**
    * Process-wide kernel backend chosen at class initialization via {@link FloatKernelsFactory#create()}.
    *
-   * <p>Honors {@code -Dnanollvm.kernels=auto|vector|scalar} (aliases {@code simd}/{@code plain}).
+   * <p>Honors {@code -Dnanollvm.kernels=auto|tornado|vector|scalar}
+   * (aliases {@code gpu}/{@code simd}/{@code plain}).
    */
   static FloatKernels get() {
     return INSTANCE;

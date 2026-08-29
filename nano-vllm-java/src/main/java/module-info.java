@@ -16,9 +16,13 @@
  *
  * <p>Consumers that use the Vector API path need {@code jdk.incubator.vector} on the module path
  * (optional at runtime — scalar kernels are used when it is absent).
+ *
+ * <p>Optional TornadoVM acceleration uses {@code requires static tornado.api}; add {@code tornado-runtime}
+ * on the module path and run on a TornadoVM-enabled JDK to activate it.
  */
 module com.igormaznitsa.nanollvm {
   requires static jdk.incubator.vector;
+  requires static tornado.api;
 
   exports com.igormaznitsa.nanollvm.models;
   exports com.igormaznitsa.nanollvm.llm;

@@ -19,9 +19,10 @@ package com.igormaznitsa.nanollvm.utils;
  *       <td>{@link com.igormaznitsa.nanollvm.models.ModelSupport}</td>
  *       <td>Must match the checkpoint family; used to fail fast on a mismatch, not to pick a
  *           random architecture.</td></tr>
- *   <tr><td>{@link #PROP_KERNELS} ({@code auto}|{@code vector}|{@code scalar})</td>
+ *   <tr><td>{@link #PROP_KERNELS} ({@code auto}|{@code tornado}|{@code vector}|{@code scalar})</td>
  *       <td>CPU math kernels</td>
- *       <td>{@code auto} uses the Vector API when present; {@code scalar} forces portable Java.</td></tr>
+ *       <td>{@code auto} prefers TornadoVM when the optional add-on and a device are present,
+ *           else Vector API, else scalar. {@code scalar} forces portable Java.</td></tr>
  *   <tr><td>{@link #PROP_MODEL} / {@link #ENV_MODEL}</td>
  *       <td>samples / your app</td>
  *       <td>Suggested single checkpoint path. Not read by {@code LlmModelFactory}.</td></tr>
@@ -57,7 +58,9 @@ public final class NanoLlvmProps {
 
   /** Library: must match the checkpoint family ({@code qwen3}, {@code gemma3}, {@code llama}, {@code lfm2}). */
   public static final String PROP_ARCH = "nanollvm.arch";
-  /** Library: CPU kernel mode {@code auto}, {@code vector}, or {@code scalar}. */
+  /**
+   * Library: kernel mode {@code auto}, {@code tornado}, {@code vector}, or {@code scalar}.
+   */
   public static final String PROP_KERNELS = "nanollvm.kernels";
   /** Library: matmul workers when {@link com.igormaznitsa.nanollvm.llm.LLM.Builder} did not set a thread count. */
   public static final String PROP_CPU_THREADS = "nanollvm.cpu.threads";

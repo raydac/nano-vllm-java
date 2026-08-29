@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased] — 1.3.1-SNAPSHOT
 
+### Added
+- Optional TornadoVM acceleration compiled into the main library (`tornado-api` optional/provided,
+  `tornado-runtime` optional/runtime — not transitive for consumers). When TornadoVM is on the module
+  path and a TornadoVM-enabled JDK reports at least one device, `-Dnanollvm.kernels=auto` (default)
+  prefers TornadoVM for large dense GEMV; elementwise kernels stay on the Vector/scalar CPU backend.
+  Explicit modes: `tornado` / `gpu`, `vector` / `simd`, `scalar` / `plain`.
+
 ## [1.3.0] — 2026-08-29
 
 Public release of **nano-vllm-java** `1.3.0` (Maven coordinates `com.igormaznitsa:nano-vllm-java:1.3.0`).

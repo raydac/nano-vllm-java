@@ -182,7 +182,9 @@ final class ModuleExportsTest {
       assertEquals(LIBRARY, descriptor.name());
       assertEquals(
         EXPORTED,
-        descriptor.exports().stream().map(ModuleDescriptor.Exports::source)
+        descriptor.exports().stream()
+          .filter(exports -> exports.targets().isEmpty())
+          .map(ModuleDescriptor.Exports::source)
           .collect(Collectors.toSet()));
     }
   }

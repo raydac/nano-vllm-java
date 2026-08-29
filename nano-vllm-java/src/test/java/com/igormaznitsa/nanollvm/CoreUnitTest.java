@@ -767,9 +767,13 @@ class CoreUnitTest {
     for (int i = 0; i < 64; i++) {
       assertEquals(outS[i], outV[i], 2e-4f);
     }
+  }
 
-    FloatKernels best = FloatKernelsFactory.createBestAvailable();
-    assertTrue(best.name().contains("Vector API"), best.name());
+  @Test
+  void kernelBackendSummaryIncludesActiveLabel() {
+    String summary = com.igormaznitsa.nanollvm.utils.KernelBackend.summaryLine();
+    assertTrue(summary.contains(com.igormaznitsa.nanollvm.utils.KernelBackend.label()));
+    assertTrue(summary.contains("mode=" + com.igormaznitsa.nanollvm.utils.KernelBackend.mode()));
   }
 
   @Test
