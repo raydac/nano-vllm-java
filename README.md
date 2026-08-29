@@ -21,6 +21,11 @@ engine.
 
 For a guided tour of the design (scheduler, attention, tensors, RAG), see [`description.md`](description.md).
 
+Session recording (Gemma3 load + RAG questions about the Grimm brothers and their father) — full interactive demo:
+[`Example`](#interactive-chat-example):
+
+![Gemma3 RAG session recording](assets/java_nano_llvm_session_1.gif)
+
 ## Supported formats and variants
 
 One entry point: `LlmModelFactory.make(…)` (folder, `.gguf` file, or `ModelFileSource` / classpath). What you may load
@@ -609,10 +614,6 @@ rag?> /clear
 
 rag?> /exit
 ```
-
-Session recording (Gemma3 load + RAG questions about the Grimm brothers and their father):
-
-![Gemma3 RAG session recording](assets/java_nano_llvm_session_1.gif)
 
 | Command                          | Action                                      |
 |----------------------------------|---------------------------------------------|
