@@ -258,8 +258,8 @@ try (LlmModel model = LlmModelFactory.open(Path.of("models/piper-ru-irina-medium
 }
 ```
 
-Do not use with `LLM.builder` / chat. Sample: `nano-vllm-java-samples` →
-`com.igormaznitsa.nanollvm.samples.SynthesizeHelloWorld`.
+Prefer `LLM.builder` for the shared matmul pool; do not use chat. Sample:
+`nano-vllm-java-samples` → `com.igormaznitsa.nanollvm.samples.SynthesizeHelloWorld`.
 
 ## Selecting a model
 

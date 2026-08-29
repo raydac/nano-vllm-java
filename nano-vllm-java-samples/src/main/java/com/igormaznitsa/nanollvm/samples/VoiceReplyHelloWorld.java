@@ -183,7 +183,7 @@ public final class VoiceReplyHelloWorld {
   }
 
   private static byte[] userUtterance(
-    final Optional<Path> inputWav,
+    @SuppressWarnings("OptionalUsedAsFieldOrParameterType") final Optional<Path> inputWav,
     final LLM tts,
     final boolean english
   ) throws IOException {
@@ -339,10 +339,8 @@ public final class VoiceReplyHelloWorld {
         pcm16le(44_100f, 1))
       .filter(format -> format.equals(source) || AudioSystem.isConversionSupported(format, source))
       .filter(VoiceReplyHelloWorld::supportsClip)
-      .findFirst()
-      .map(format -> format.equals(source) ? encoded :
-        AudioSystem.getAudioInputStream(format, encoded))
-      .orElse(encoded);
+      .findFirst().filter(format -> !format.equals(source))
+      .map(format -> AudioSystem.getAudioInputStream(format, encoded)).orElse(encoded);
   }
 
   private static boolean supportsClip(final AudioFormat format) {
@@ -457,7 +455,7 @@ public final class VoiceReplyHelloWorld {
     ByteBuffer buf = ByteBuffer.wrap(pcm).order(ByteOrder.LITTLE_ENDIAN);
     int peak = 0;
     for (int i = 0; i < frames; i++) {
-      peak = Math.max(peak, Math.abs((int) buf.getShort()));
+      peak = Math.max(peak, Math.abs(buf.getShort()));
     }
     return peak;
   }
@@ -465,7 +463,7 @@ public final class VoiceReplyHelloWorld {
   private static int firstAudibleFrame(final byte[] pcm, final int frames, final int threshold) {
     ByteBuffer buf = ByteBuffer.wrap(pcm).order(ByteOrder.LITTLE_ENDIAN);
     for (int i = 0; i < frames; i++) {
-      if (Math.abs((int) buf.getShort()) >= threshold) {
+      if (Math.abs(buf.getShort()) >= threshold) {
         return i;
       }
     }
@@ -475,7 +473,7 @@ public final class VoiceReplyHelloWorld {
   private static int lastAudibleFrame(final byte[] pcm, final int frames, final int threshold) {
     ByteBuffer buf = ByteBuffer.wrap(pcm).order(ByteOrder.LITTLE_ENDIAN);
     for (int i = frames - 1; i >= 0; i--) {
-      if (Math.abs((int) buf.getShort(i * 2)) >= threshold) {
+      if (Math.abs(buf.getShort(i * 2)) >= threshold) {
         return i;
       }
     }

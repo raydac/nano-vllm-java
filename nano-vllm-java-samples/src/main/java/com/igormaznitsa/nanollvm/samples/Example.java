@@ -225,7 +225,7 @@ public final class Example {
       console.println("Select model to load:");
       console.println(
         "  Kind: chat = instruct Q&A · base = plain completion (not chat-tuned)"
-          + " · embeddings = vectors · speech = audio→text");
+          + " · embeddings = vectors · speech = audio→text · TTS = text→audio");
       for (int i = 0; i < menu.size(); i++) {
         console.println("  " + (i + 1) + ") " + menu.get(i).display());
       }
@@ -701,9 +701,7 @@ public final class Example {
             console.println("(examples cleared)");
           }
           case LABELS -> printTaughtLabels(taught, console);
-          case DEMO -> {
-            fitted = teachAll(CLASSIFY_DEMO, llm, trainer, taught, console);
-          }
+          case DEMO -> fitted = teachAll(CLASSIFY_DEMO, llm, trainer, taught, console);
           case LOAD -> fitted = loadLabelFile(user, llm, trainer, taught, console).orElse(fitted);
         }
         continue;
@@ -1627,17 +1625,19 @@ public final class Example {
 
     static Optional<ClassifyCommand> parse(final String user) {
       String command = user.toLowerCase(Locale.ROOT);
-      if (command.equals("/help") || command.equals("help")) {
-        return Optional.of(HELP);
-      }
-      if (command.equals("/forget") || command.equals("/clear")) {
-        return Optional.of(FORGET);
-      }
-      if (command.equals("/labels")) {
-        return Optional.of(LABELS);
-      }
-      if (command.equals("/demo")) {
-        return Optional.of(DEMO);
+      switch (command) {
+        case "/help", "help" -> {
+          return Optional.of(HELP);
+        }
+        case "/forget", "/clear" -> {
+          return Optional.of(FORGET);
+        }
+        case "/labels" -> {
+          return Optional.of(LABELS);
+        }
+        case "/demo" -> {
+          return Optional.of(DEMO);
+        }
       }
       if (command.equals("/load") || command.startsWith("/load ")) {
         return Optional.of(LOAD);

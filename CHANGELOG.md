@@ -5,7 +5,13 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased] — 1.3.0-SNAPSHOT
+## [Unreleased]
+
+## [1.3.0] — 2026-08-29
+
+Public release of **nano-vllm-java** `1.3.0` (Maven coordinates `com.igormaznitsa:nano-vllm-java:1.3.0`).
+Whisper speech-to-text, Piper text-to-speech, typed `generate(LlmInput, LlmModality)` for every graph
+kind, XLM-RoBERTa embeddings, and `optionalData` load extras.
 
 ### Added
 - Load-time extras via typed keys: `LlmModelFactory.open(path).optionalData(key, value).make()`.
@@ -84,8 +90,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Cross-kind typed facade: `LlmOutput generate(LlmInput, LlmModality)` on `LlmModel` and `LLM`
   is the single inference entry for embeddings, Whisper, Piper, and raw text completion.
   Sealed inputs (`LlmInText`, `LlmInSound`, `LlmInTokenIds`) and outputs (`LlmOutText`,
-  `LlmOutSoundData` with WAV + sample rate, `LlmOutEmbedding`). Kind-specific
-  `embed` / `transcribe` / `synthesize` / `complete` shortcuts were removed; chat stays on
+  `LlmOutSoundData` with WAV + sample rate, `LlmOutEmbedding`). Chat stays on
   `ChatSession` / `chatOnce`, and batched token generation stays on `generate(List, …)`.
   Text completion via the facade needs an `LLM` engine.
   `LLM.Builder.random(Random)` injects the engine-owned RNG used for chat
@@ -106,12 +111,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   caller `Executor`). DistilBERT / ALBERT / DeBERTa / ELECTRA stay unsupported; safetensors
   BERT-family folders are still rejected.
 
+### Removed
+- Public `embed` / `transcribe` / `synthesize` / `complete` shortcuts. Call typed
+  `generate(LlmInput, LlmModality)` instead (`LlmInText` → `EMBEDDING` / `AUDIO` / `TEXT`,
+  `LlmInSound` → `TEXT`). BERT embeddings now go through `LLM.builder` like every other kind.
+
 ### Fixed
 - Chat answers no longer keep a typed ChatML lookalike `<|im_ended|>` at the end of a turn
   (`ChatSpecials.DEFAULT`). Generation still stops only on real EOS ids such as `<|im_end|>`.
 
 - Model download scripts treat HTTP 416 on resume as "already complete", so re-running a script
   after a sidecar such as `config.json` finished no longer fails (`curl: (22) ... 416`).
+
 ## [1.2.0] — 2026-08-22
 
 Public release of **nano-vllm-java** `1.2.0` (Maven coordinates `com.igormaznitsa:nano-vllm-java:1.2.0`).

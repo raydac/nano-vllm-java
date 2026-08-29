@@ -135,19 +135,9 @@ public final class BundledModels {
   public static Path require(final String modelPathOrName) {
     return find(modelPathOrName).orElseThrow(() -> new IllegalStateException(
       "model not found: " + modelPathOrName
-        + " (expected under " + modelsRoot()
-        + "). Run models/download-qwen3-0.6b.sh, models/download-gemma3-270m.sh, "
-        + "models/download-gemma4-e2b-qat-mobile.sh, "
-        + "models/download-lfm2.5-2.6b-gguf.sh, models/download-gte-small-gguf.sh, "
-        + "models/download-multilingual-e5-small.sh, "
-        + "models/download-xlm-roberta-base.sh, "
-        + "models/download-whisper-base.sh, "
-        + "models/download-piper-en-lessac-medium.sh, "
-        + "models/download-piper-ru-irina-medium.sh, "
-        + "or models/download-tiny-llm-onnx.sh, "
-        + "models/download-smollm2-135m-instruct-onnx.sh, "
-        + "or pass a model path / -D" + PROP_MODEL + "=… / " + ENV_MODEL + "."
-    ));
+        + " (expected under " + modelsRoot() + "). "
+        + downloadHint(modelPathOrName)
+        + " Or pass a model path / -D" + PROP_MODEL + "=… / " + ENV_MODEL + "."));
   }
 
   /**
@@ -182,8 +172,8 @@ public final class BundledModels {
         .or(() -> find(XLM_ROBERTA_BASE))
         .orElseThrow(() -> new IllegalStateException(
             "no BERT embedding checkpoint under " + modelsRoot()
-                +
-                ". Run models/download-multilingual-e5-small.sh or models/download-gte-small-gguf.sh"));
+              + ". Run models/download-multilingual-e5-small.sh, "
+              + "models/download-gte-small-gguf.sh, or models/download-xlm-roberta-base.sh"));
   }
 
   /**
@@ -267,6 +257,29 @@ public final class BundledModels {
       }
     }
     return Optional.empty();
+  }
+
+  private static String downloadHint(final String modelPathOrName) {
+    String key = stripModelsPrefix(modelPathOrName.strip());
+    String script = switch (key) {
+      case DEFAULT_MODEL_NAME -> "models/download-qwen3-0.6b.sh";
+      case "Gemma3-270M" -> "models/download-gemma3-270m.sh (HF license + HF_TOKEN)";
+      case "Gemma4-E2B-IT-QAT-Mobile" -> "models/download-gemma4-e2b-qat-mobile.sh";
+      case "LFM2.5-2.6B-Q4_K_M.gguf" -> "models/download-lfm2.5-2.6b-gguf.sh";
+      case "gte-small.Q2_K.gguf" -> "models/download-gte-small-gguf.sh";
+      case "multilingual-e5-small" -> "models/download-multilingual-e5-small.sh";
+      case "xlm-roberta-base" -> "models/download-xlm-roberta-base.sh";
+      case "whisper-base" -> "models/download-whisper-base.sh";
+      case "whisper-tiny" -> "models/download-whisper-tiny.sh";
+      case "piper-en-lessac-medium" -> "models/download-piper-en-lessac-medium.sh";
+      case "piper-ru-irina-medium" -> "models/download-piper-ru-irina-medium.sh";
+      case "Tiny-LLM-ONNX" -> "models/download-tiny-llm-onnx.sh";
+      case "SmolLM2-135M-Instruct-ONNX" -> "models/download-smollm2-135m-instruct-onnx.sh";
+      default -> null;
+    };
+    return script == null
+      ? "Run the matching models/download-*.sh (see models/README.md)."
+      : "Run " + script + ".";
   }
 
   private static String stripModelsPrefix(final String key) {

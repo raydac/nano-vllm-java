@@ -12,7 +12,7 @@ The subject is a small program that **loads a pretrained model** and runs **infe
 CUDA or other native backends: continuing text or short chat with a **causal** language model; (**since 1.1.0**)
 encoding sentences to vectors with a **BERT-family embedding** GGUF or ONNX; (**since 1.3.0**) transcribing speech
 with **Whisper** safetensors; and synthesizing speech with **Piper** ONNX voices. Java package / JPMS module:
-`com.igormaznitsa.nanollvm`. This guide matches development line **1.3.0-SNAPSHOT** (after released **1.2.0**,
+`com.igormaznitsa.nanollvm`. This guide matches **1.3.0** (released 2026-08-29; previous **1.2.0**
 2026-08-22).
 
 Where a topic has a standard paper or format specification, a short **Further reading** note lists links. Those are

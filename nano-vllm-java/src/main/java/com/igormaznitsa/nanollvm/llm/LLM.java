@@ -316,8 +316,8 @@ public final class LLM implements AutoCloseable {
    *   <li>{@link LlmInText} → {@link LlmModality#TEXT} — raw completion (no chat template)</li>
    *   <li>{@link LlmInText} → {@link LlmModality#EMBEDDING} — embedding encoders</li>
    *   <li>{@link LlmInTokenIds} → {@link LlmModality#EMBEDDING} — already-tokenized ids</li>
-   *   <li>{@link LlmInText} → {@link LlmModality#AUDIO} — Piper synthesis ({@link LlmOutSoundData})</li>
-   *   <li>{@link LlmInSound} → {@link LlmModality#TEXT} — Whisper transcription</li>
+   *   <li>{@link LlmInText} → {@link LlmModality#AUDIO} — Piper synthesis ({@link com.igormaznitsa.nanollvm.models.LlmOutSoundData})</li>
+   *   <li>{@link com.igormaznitsa.nanollvm.models.LlmInSound} → {@link LlmModality#TEXT} — Whisper transcription</li>
    * </ul>
    *
    * @param input          typed payload; must not be {@code null}

@@ -103,7 +103,14 @@ public final class OptionalModelAssumptions {
     if (english.isPresent()) {
       return english.get();
     }
-    return requirePiperRussian();
+    Optional<Path> russian = findModel(PIPER_RU_IRINA_MEDIUM);
+    if (russian.isPresent()) {
+      return russian.get();
+    }
+    return require(
+        Optional.empty(),
+        "piper-en-lessac-medium or piper-ru-irina-medium",
+        "models/download-piper-en-lessac-medium.sh or models/download-piper-ru-irina-medium.sh");
   }
 
   public static Path requirePiperRussian() {

@@ -3,7 +3,7 @@
 [![License Apache 2.0](https://img.shields.io/badge/license-Apache%20License%202.0-green.svg)](http://www.apache.org/licenses/LICENSE-2.0)
 [![Java 21+](https://img.shields.io/badge/java-21.0%2b-green.svg)](https://bell-sw.com/pages/downloads/)
 [![Maven 3.8+](https://img.shields.io/badge/maven-3.8%2b-green.svg)](https://maven.apache.org/)
-[![Maven central](https://img.shields.io/badge/Maven%20central-1.2.0-green.svg)](http://search.maven.org/#artifactdetails|com.igormaznitsa|nano-vllm-java|1.2.0|jar)   
+[![Maven central](https://img.shields.io/badge/Maven%20central-1.3.0-green.svg)](http://search.maven.org/#artifactdetails|com.igormaznitsa|nano-vllm-java|1.3.0|jar)   
 [![Arthur's acres sanctuary donation](assets/arthur_sanctuary_banner.png)](https://www.arthursacresanimalsanctuary.org/donate)
 
 # Nano-vLLM Java
@@ -12,9 +12,9 @@ Pure **Java 21+** LLM inference library: continuous batching, paged KV cache, an
 loading on **CPU only** — no CUDA, PyTorch, or native runtime bindings. Add it to a Maven or Gradle app and call it
 from ordinary Java.
 
-The latest release is **1.2.0** on Maven Central (SentencePiece `tokenizer.model` and extra tokenizer families,
-RAG load tuners, dedicated matmul pool, deterministic sampling, checkpoint modalities). Features marked
-**since 1.1.0** and **since 1.2.0** are in that release.
+The latest release is **1.3.0** on Maven Central (Whisper speech-to-text, Piper text-to-speech, typed
+`generate(LlmInput, LlmModality)` for embeddings / STT / TTS / raw completion, XLM-RoBERTa embeddings).
+Features marked **since 1.1.0**, **since 1.2.0**, and **since 1.3.0** are in that release.
 
 Ideas in this project were inspired by the Python [nano-vllm](https://github.com/GeeeekExplorer/nano-vllm) educational
 engine.
@@ -30,9 +30,9 @@ depends on the **container** and the **architecture** — this is a curated subs
 
 | Format | Since | What you point at | Role |
 |--------|-------|-------------------|------|
-| **Safetensors** | **1.0.0** | HF folder: `config.json` + tokenizer + `*.safetensors` | Dense float weights (`F32` / `F16` / `BF16` / `F64` → float32). **Since 1.1.0:** Gemma 4 text **QAT** stays packed (int2/4/8). If both safetensors and ONNX are present, **safetensors wins**. |
+| **Safetensors** | **1.0.0** | HF folder: `config.json` + tokenizer + `*.safetensors` | Dense float weights (`F32` / `F16` / `BF16` / `F64` → float32). **Since 1.1.0:** Gemma 4 text **QAT** stays packed (int2/4/8). **Since 1.3.0:** Whisper speech. If both safetensors and ONNX are present, **safetensors wins**. |
 | **GGUF** | **1.0.0** | Single `.gguf` file | Packed GGML blocks; dequant on matmul / embed. Mmap ≤ ~2 GiB. Architectures: **`qwen3`** / **`lfm2`** (chat) and **`bert`** (embeddings **since 1.1.0**). |
-| **ONNX** (Tier A) | **1.1.0** | HF folder: same sidecars + `model.onnx` / `model_fp16.onnx` (root or `onnx/`) | **Initializers only** — no ONNX Runtime, no graph execution. Preferred float exports; community `*_q4*` / `*_int8*` / `*_quantized*` / `with_past` names are skipped. |
+| **ONNX** (Tier A) | **1.1.0** | HF folder: same sidecars + `model.onnx` / `model_fp16.onnx` (root or `onnx/`); Piper: `*.onnx` + `*.onnx.json` (**since 1.3.0**) | **Initializers only** — no ONNX Runtime, no graph execution. Preferred float exports; community `*_q4*` / `*_int8*` / `*_quantized*` / `with_past` names are skipped. |
 
 Stream / classpath loads (`ModelFileSource`, `fromClasspath*`) are **since 1.1.0** (bytes → heap, no disk cache). ONNX
 `external_data` sidecars need `make(Path)`; stream loads reject them.
@@ -45,7 +45,9 @@ Stream / classpath loads (`ModelFileSource`, `fromClasspath*`) are **since 1.1.0
 | **Gemma 4 text** (QAT mobile) | **1.1.0** | HF safetensors only (packed int2/4/8; **not** GGUF / ONNX) | Same `LLM` path; vision/audio towers in the crate are skipped |
 | **LFM2** hybrid causal chat | **1.0.0** | GGUF only (`lfm2`) | Same `LLM` path; not from HF safetensors / ONNX |
 | **Llama** causal (incl. Tiny-LLM / SmolLM2 Instruct demos) | **1.1.0** | HF safetensors or ONNX | Same `LLM` path |
-| **BERT** sentence embeddings | **1.1.0** | GGUF `bert` (e.g. gte-small); ONNX BERT when names map | `LlmModel.embed(…)` — **not** `LLM.builder` |
+| **BERT** sentence embeddings | **1.1.0** | GGUF `bert` (e.g. gte-small); ONNX `bert` / `roberta` / `xlm-roberta` | `LLM.builder` → `generate(LlmInText, EMBEDDING)` (`LlmModel.generate` is a sequential shortcut) |
+| **Whisper** speech-to-text | **1.3.0** | HF safetensors only (`openai/whisper-*`; not GGUF / ONNX / CTranslate2) | `LLM.builder` → `generate(LlmInSound, TEXT)` |
+| **Piper** text-to-speech | **1.3.0** | Voice folder: `*.onnx` + `*.onnx.json` (+ optional `espeak-ng-data`) | `LLM.builder` → `generate(LlmInText, AUDIO)` → `LlmOutSoundData` |
 
 ### GGUF / ONNX dtype notes
 
@@ -54,7 +56,7 @@ Stream / classpath loads (`ModelFileSource`, `fromClasspath*`) are **since 1.1.0
 | GGUF GGML | Current llama.cpp weight dtypes (floats, K-quants, IQ, TQ, MXFP4/NVFP4, `Q*_0`/`Q*_1`) | Removed ggml types (`Q4_2`/`Q4_3`, SIMD-repack `*_4_4`); Gemma/Llama GGUF **architectures** (Qwen2 / MoE / VL too) |
 | ONNX TensorProto | FLOAT / FLOAT16 / BFLOAT16 / DOUBLE → float32 | Float8 / nibble / unknown weight types (fail loud); int/bool/string/complex initializers skipped as graph constants |
 
-Details and honest limits: [`description.md`](description.md) chapters **7** / **7a** / **7b** / **7c**. Download scripts and
+Details and honest limits: [`description.md`](description.md) chapters **7** / **7a** / **7b** / **7c** / **7d** / **7e**. Download scripts and
 folder layout: [Download and load models](#download-and-load-models).
 
 <a id="hello-world--gemma3-log-triage-in-your-app"></a>
@@ -71,14 +73,14 @@ choose), ask a short business question, print the answer.
 <dependency>
   <groupId>com.igormaznitsa</groupId>
   <artifactId>nano-vllm-java</artifactId>
-  <version>1.2.0</version>
+  <version>1.3.0</version>
 </dependency>
 ```
 
 **Gradle (Groovy)**
 
 ```gradle
-implementation 'com.igormaznitsa:nano-vllm-java:1.2.0'
+implementation 'com.igormaznitsa:nano-vllm-java:1.3.0'
 ```
 
 JPMS module name: `com.igormaznitsa.nanollvm` (`requires com.igormaznitsa.nanollvm;`).
@@ -174,6 +176,32 @@ mvn -pl nano-vllm-java-samples -q exec:java \
 # optional: … -Dexec.args="models/multilingual-e5-small hello world"
 ```
 
+Speech-to-text (Whisper safetensors; defaults to `models/whisper-base` — download with
+`./models/download-whisper-base.sh`):
+
+```bash
+mvn -pl nano-vllm-java-samples -q exec:java \
+  -Dexec.mainClass=com.igormaznitsa.nanollvm.samples.TranscribeHelloWorld
+# optional: … -Dexec.args="models/whisper-base clip.wav"
+```
+
+Text-to-speech (Piper ONNX; Lessac if present, else Irina — download with
+`./models/download-piper-en-lessac-medium.sh`):
+
+```bash
+mvn -pl nano-vllm-java-samples -q exec:java \
+  -Dexec.mainClass=com.igormaznitsa.nanollvm.samples.SynthesizeHelloWorld
+# optional: … -Dexec.args="models/piper-en-lessac-medium Hello world"
+```
+
+Voice desk (Whisper → few-shot mood of the transcript → chat → Piper; optional WAV, else 15 s from
+the default microphone):
+
+```bash
+mvn -pl nano-vllm-java-samples -q exec:java \
+  -Dexec.mainClass=com.igormaznitsa.nanollvm.samples.VoiceReplyHelloWorld
+```
+
 Custom advisor **Alex** plus lexical **BM25** RAG over `rag/` (Grimm names and father; Gemma3-270M):
 
 ```bash
@@ -196,6 +224,7 @@ More API samples (streaming, RAG, GGUF, advisors) are in [Library quick start](#
 
 - Continuous batching scheduler with paged KV cache and prefix caching
 - **Qwen3** (HF safetensors, ONNX **1.1.0**, or GGUF **1.1.0**), **Gemma3**, **Gemma 4 text** QAT mobile (**since 1.1.0**, packed safetensors), **Llama** (**since 1.1.0**), and **LFM2** (hybrid short-conv + GQA, GGUF) causal LMs
+- **Whisper** speech-to-text and **Piper** text-to-speech (**since 1.3.0**); BERT embeddings (**since 1.1.0**) share `LLM.builder` and typed `generate(LlmInput, LlmModality)`
 - Weight crates: HF **safetensors**, **GGUF**, and (**since 1.1.0**) ONNX Tier A — see [Supported formats and variants](#supported-formats-and-variants)
 - Optional multi-thread CPU matmul (`cpuThreads` / `matmulExecutor` / `dedicatedMatmulPool` **since 1.2.0** /
   `disableMultiCpu`); default = all processors on a lazily shared pool
@@ -234,7 +263,7 @@ integration tests when those files are absent. The concurrent model+RAG race
 
 Artifacts:
 
-- `nano-vllm-java/target/nano-vllm-java-1.2.0.jar` — library JAR (JPMS module `com.igormaznitsa.nanollvm`; no `Main-Class`)
+- `nano-vllm-java/target/nano-vllm-java-1.3.0.jar` — library JAR (JPMS module `com.igormaznitsa.nanollvm`; no `Main-Class`)
 - `nano-vllm-java-samples/target/…` — demo classes (not published to Maven Central)
 
 Tests use the Vector incubator module (`jvm.module.args` in the POM). Production runs should use the same flags
@@ -249,7 +278,7 @@ example.
 <dependency>
   <groupId>com.igormaznitsa</groupId>
   <artifactId>nano-vllm-java</artifactId>
-  <version>1.2.0</version>
+  <version>1.3.0</version>
 </dependency>
 ```
 
@@ -264,7 +293,8 @@ Weight-load internals (`models.llmcontainer`, `models.llmarch`, `models.internal
 `prompts`, `engine`, `layers`, `tensor`, and `internal` are **not** exported — use
 `LlmModelFactory` / `LLM` / `RagFactory` from application code. Runnable demos
 (`HelloWorld`, `NextTokenHelloWorld`, `LogTriageHelloWorld`, `AdvisorRagHelloWorld`,
-`RagTunerHelloWorld`, `EmbeddingsHelloWorld`, `Example`, `Bench`, `samples.utils`) live in the
+`RagTunerHelloWorld`, `EmbeddingsHelloWorld`, `TranscribeHelloWorld`, `SynthesizeHelloWorld`,
+`VoiceReplyHelloWorld`, `Example`, `Bench`, `samples.utils`) live in the
 separate `nano-vllm-java-samples` module.
 
 The packaged library JAR has no `Main-Class`. In-repo demos:
@@ -292,12 +322,12 @@ models/Qwen3-0.6B/
 ```
 
 At load time, `LlmModelFactory` reads `config.json`, checks the architecture against `ModelSupport` (exact family
-names — `qwen3_5` is not `qwen3`), builds the matching graph (Qwen3, Gemma3, Gemma 4 text, Llama, …), loads
-weights from safetensors (including packed Gemma 4 QAT) **or** ONNX initializers (Qwen3 / Gemma3 / Llama / BERT — not
-Gemma 4), and constructs the tokenizer. `-Dnanollvm.arch=qwen3|gemma3|gemma4|llama|lfm2|bert` may only confirm a
+names — `qwen3_5` is not `qwen3`), builds the matching graph (Qwen3, Gemma3, Gemma 4 text, Llama, Whisper, Piper, …), loads
+weights from safetensors (including packed Gemma 4 QAT) **or** ONNX initializers (Qwen3 / Gemma3 / Llama / BERT / Piper — not
+Gemma 4), and constructs the tokenizer. `-Dnanollvm.arch=qwen3|gemma3|gemma4|llama|lfm2|bert|whisper|piper` may only confirm a
 matching checkpoint, not override a different family. Unsupported models throw `UnsupportedModelException` with the
 support catalog. If both `*.safetensors` and `*.onnx` are present, safetensors wins (BERT folders prefer ONNX because
-HF BERT safetensors is not supported).
+HF BERT safetensors is not supported). Piper voices are a folder of `*.onnx` + `*.onnx.json` (no `config.json`).
 
 <a id="onnx-weight-import"></a>
 ### ONNX (weight import) — since 1.1.0
@@ -306,7 +336,7 @@ A folder may use ONNX weights instead of safetensors (same `config.json` + token
 [Supported formats and variants](#supported-formats-and-variants) for filters and TensorProto limits. Supported files
 (root or `onnx/`): `model.onnx`, `model_fp16.onnx`, Optimum decoder names; quantized community variants (`*_q4*`,
 `*_int8*`, …) are skipped. The computation graph is ignored — only initializers are loaded into the existing Java
-engine (Qwen3 / Gemma3 / Llama chat, or BERT embeddings). Gemma 4 text is **safetensors only**, not ONNX.
+The engine extracts weights only (Qwen3 / Gemma3 / Llama chat, BERT embeddings, or Piper voices). Gemma 4 text is **safetensors only**, not ONNX.
 
 Tiny Llama demo ([onnx-community/Tiny-LLM-ONNX](https://huggingface.co/onnx-community/Tiny-LLM-ONNX)) —
 base/completion toy (~10M), not chat-tuned; useful to smoke-test ONNX load and next-token
@@ -412,8 +442,20 @@ Creates `models/Gemma4-E2B-IT-QAT-Mobile/`. Text-only chat load (vision/audio un
 `./models/download-multilingual-e5-small.sh` → `models/multilingual-e5-small/`. Linear demo:
 `EmbeddingsHelloWorld` (non-retrieval texts use the `query: ` prefix).
 
+**xlm-roberta-base ONNX (multilingual encoder embeddings, ~1.9 GB)** —
+`./models/download-xlm-roberta-base.sh` → `models/xlm-roberta-base/`. Mean-pooled fill-mask
+checkpoint, not E5-style retrieval.
+
+**whisper-base / whisper-tiny (speech-to-text, ~290 MB / ~150 MB)** —
+`./models/download-whisper-base.sh` (or `download-whisper-tiny.sh`) → Hugging Face safetensors.
+Linear demo: `TranscribeHelloWorld`.
+
+**piper-en-lessac-medium / piper-ru-irina-medium (TTS, ~63 MB + espeak-ng-data)** —
+`./models/download-piper-en-lessac-medium.sh` (or `download-piper-ru-irina-medium.sh`).
+Linear demo: `SynthesizeHelloWorld`. Voice desk: `VoiceReplyHelloWorld`.
+
 **Windows:** `.\models\download-qwen3-0.6b.ps1` / `.cmd` and the matching Gemma 3 / Gemma 4 / LFM / Tiny-LLM-ONNX /
-SmolLM2 Instruct ONNX / gte-small / multilingual-e5-small scripts under `models/`.
+SmolLM2 Instruct ONNX / gte-small / multilingual-e5-small / xlm-roberta-base / whisper / piper scripts under `models/`.
 
 You can also point the engine at **any** local HF-style directory (your own path or another download).
 
@@ -435,7 +477,7 @@ The models root itself defaults to `./models`, overridable with `-Dnanollvm.mode
 | Property           | `-Dnanollvm.model=/data/hf/Qwen3-0.6B`                              |
 | Environment        | `NANOLLVM_MODEL=models/Gemma3-270M`                                 |
 | Models root        | `-Dnanollvm.models.dir=/opt/models`                                 |
-| Force architecture | `-Dnanollvm.arch=gemma3` or `gemma4` (must match the checkpoint; cannot force Qwen2 → Qwen3) |
+| Force architecture | `-Dnanollvm.arch=gemma3` or `gemma4` (must match the checkpoint; cannot force Qwen2 → Qwen3; Whisper / Piper / BERT ids also accepted) |
 | RAG corpus dir     | `-Dnanollvm.rag.dir=./docs` or `NANOLLVM_RAG_DIR` (default `./rag`) |
 | CPU matmul threads | `.cpuThreads(N)` / `.allCpuThreads()` / `.disableMultiCpu()` (builder wins); else `-Dnanollvm.cpu.threads=N`; else all processors. `.disableMultiCpu()` = calling thread only, no executor. Optional `.matmulExecutor(…)` only when workers &gt; 1 |
 
@@ -448,15 +490,16 @@ first (Qwen3-0.6B preferred for chat quality, then Gemma3, Gemma 4 QAT, LFM2, co
 
 ### Interactive chat (`Example`)
 
-Line-oriented terminal demo. Three setup questions, then a chat (or embed) loop:
+Line-oriented terminal demo. Setup questions, then a chat, embed, transcribe, or TTS loop:
 
 1. **Model** — bundled catalog (Enter = first downloaded; Qwen3-0.6B preferred), or a path via CLI / `-Dnanollvm.model` / `NANOLLVM_MODEL`. If none are on disk, the demo exits with download commands.
-2. **RAG mode** — none / BM25 / dense / hybrid (Enter = none; skipped for embedding models)
-3. **Advisor count** — `0`–`3` roles (Enter = none)
+2. **RAG mode** — none / BM25 / dense / hybrid (Enter = none; skipped for embedding, speech, and TTS models)
+3. **Advisor count** — `0`–`3` roles (Enter = none; skipped for embedding, speech, and TTS)
 
 Thinking, advisor notes, and load status go to **stderr**; answers and prompts go to **stdout**.
 Safetensors, GGUF, and ONNX loads share one in-place percent/ETA bar on that status stream.
-Prepared-prompt dumps (`debug> …`) are **off** unless you pass `--debug`.
+Prepared-prompt dumps (`debug> …`) are **off** unless you pass `--debug`. Speech checkpoints open a
+WAV transcribe session (`/tone`, `/lang`). Synthesis checkpoints open a text→WAV session (`tts?>`).
 
 ```bash
 # After downloading a model — heap defaults to -Xmx16g via .mvn/jvm.config
@@ -478,8 +521,8 @@ NANOLLVM_MODEL=models/Qwen3-0.6B mvn -pl nano-vllm-java-samples -q exec:java
 ```
 
 **RAG mode:** if the directory `rag/` exists (the repo ships Grimm / Little Red Riding Hood `.txt` and fact cards),
-choose None / BM25 / dense / hybrid. Dense and hybrid need `models/gte-small.Q2_K.gguf`
-(`./models/download-gte-small-gguf.sh`).
+choose None / BM25 / dense / hybrid. Dense and hybrid scan `models/` for any BERT-encoder checkpoint
+(gte-small GGUF, multilingual-e5-small, xlm-roberta-base, …).
 
 **Advisors:** after RAG, the demo asks how many named advisors to run before each turn
 (`0` = off). Notes appear on the thinking stream as `[Name] …`; the default mixer folds useful
@@ -491,7 +534,7 @@ Example session (ask about the demo corpus):
 Select model to load:
   1) Qwen3-0.6B (chat, safetensors)
   …
-Choice [1-9, Enter=1]:
+Choice [1-14, Enter=1]:
 Select RAG index and use mode:
   2) BM25 lexical
 Choice [1-5, Enter=1]: 2
@@ -540,7 +583,7 @@ After `mvn package` (prefer `mvn -pl nano-vllm-java-samples exec:java` when poss
 ```bash
 java --add-modules jdk.incubator.vector \
   -Xmx16g \
-  -cp nano-vllm-java/target/nano-vllm-java-1.2.0.jar:nano-vllm-java-samples/target/nano-vllm-java-samples-1.2.0.jar \
+  -cp nano-vllm-java/target/nano-vllm-java-1.3.0.jar:nano-vllm-java-samples/target/nano-vllm-java-samples-1.3.0.jar \
   com.igormaznitsa.nanollvm.samples.Example \
   models/Qwen3-0.6B
 ```
@@ -567,8 +610,11 @@ use one instance per thread, or call sequentially. `LLM.cancel()` is safe from a
 ### Chat, one-shot, and completion
 
 ```java
+import com.igormaznitsa.nanollvm.models.LlmInText;
+import com.igormaznitsa.nanollvm.models.LlmModality;
 import com.igormaznitsa.nanollvm.models.LlmModel;
 import com.igormaznitsa.nanollvm.models.LlmModelFactory;
+import com.igormaznitsa.nanollvm.models.LlmOutText;
 import com.igormaznitsa.nanollvm.llm.LLM;
 import com.igormaznitsa.nanollvm.llm.SamplingParams;
 
@@ -585,7 +631,8 @@ try (LlmModel model = LlmModelFactory.make(modelDir);  // or open(dir).listen(Ll
 
   String reply = llm.chat().send("Hello.").answer();
   String once = llm.chatOnce("What is 2+2?", 64);
-  String completion = llm.complete("The capital of France is", 32);
+  LlmOutText completion = (LlmOutText) llm.generate(
+      LlmInText.of("The capital of France is"), LlmModality.TEXT);
 }
 ```
 
@@ -597,6 +644,49 @@ Same tokens every run: `.deterministic()` on the builder (`temperature(0)` is st
 try (LlmModel model = LlmModelFactory.make(Path.of("models/Qwen3-0.6B"));
      LLM llm = LLM.builder(model).listen(LlmListeners.toSystem()).build()) {
   System.out.println(llm.chatOnce("Say hi in one sentence."));
+}
+```
+
+### Embeddings, speech, and TTS (**since 1.3.0**)
+
+Every graph kind uses `LlmModelFactory` then `LLM.builder`. Non-chat work is typed
+`generate(LlmInput, LlmModality)` (`LlmModel.generate` is a sequential shortcut — no engine pool).
+
+```java
+import com.igormaznitsa.nanollvm.models.LlmInSound;
+import com.igormaznitsa.nanollvm.models.LlmInText;
+import com.igormaznitsa.nanollvm.models.LlmModality;
+import com.igormaznitsa.nanollvm.models.LlmOptionalData;
+import com.igormaznitsa.nanollvm.models.LlmOutEmbedding;
+import com.igormaznitsa.nanollvm.models.LlmOutSoundData;
+import com.igormaznitsa.nanollvm.models.LlmOutText;
+
+import java.nio.file.Files;
+import java.nio.file.Path;
+
+// BERT / E5 / XLM-R embeddings
+try (LlmModel model = LlmModelFactory.make(Path.of("models/multilingual-e5-small"));
+     LLM llm = LLM.builder(model).build()) {
+  LlmOutEmbedding v = (LlmOutEmbedding) llm.generate(
+      LlmInText.of("query: hello world"), LlmModality.EMBEDDING);
+}
+
+// Whisper speech-to-text (uncompressed WAV)
+try (LlmModel model = LlmModelFactory.make(Path.of("models/whisper-base"));
+     LLM llm = LLM.builder(model).build()) {
+  LlmOutText text = (LlmOutText) llm.generate(
+      LlmInSound.ofWav(Files.readAllBytes(Path.of("clip.wav"))), LlmModality.TEXT);
+}
+
+// Piper text-to-speech (espeak-ng-data is optional)
+Path voice = Path.of("models/piper-en-lessac-medium");
+try (LlmModel model = LlmModelFactory.open(voice)
+         .optionalData(LlmOptionalData.ESPEAK_DATA, voice.resolve("espeak-ng-data"))
+         .make();
+     LLM llm = LLM.builder(model).build()) {
+  LlmOutSoundData sound = (LlmOutSoundData) llm.generate(
+      LlmInText.of("Hello world"), LlmModality.AUDIO);
+  byte[] wav = sound.wav();
 }
 ```
 
@@ -811,7 +901,7 @@ Prompt wording is module-private (`prompts`); `RagSession.formatUserMessage` bui
 
 | Doc | Contents |
 |-----|----------|
-| [`description.md`](description.md) | Design tour: attention, tensors, scheduler, GGUF, ONNX, embeddings, call chain, RAG |
+| [`description.md`](description.md) | Design tour: attention, tensors, scheduler, GGUF, ONNX, embeddings, Whisper, Piper, call chain, RAG |
 | [`models/README.md`](models/README.md) | Download scripts and model layout |
 | [`rag/`](rag/) | Demo corpus (fairy tales + fact cards) |
 
