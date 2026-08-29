@@ -1,5 +1,5 @@
 ## 1. Implementation Progress
-- Maven multi-module **`1.3.0`** (2026-08-29; previous 1.2.0 / 1.1.0 / 1.0.0). Parent `nano-vllm-java-pom`, library `nano-vllm-java`, samples `nano-vllm-java-samples`. Enforcer Java `[21,)`, Maven `[3.8,)`. JPMS module `com.igormaznitsa.nanollvm` (library only).
+- Maven multi-module **`1.3.1-SNAPSHOT`** (post **1.3.0** 2026-08-29; previous 1.2.0 / 1.1.0 / 1.0.0). Parent `nano-vllm-java-pom`, library `nano-vllm-java`, samples `nano-vllm-java-samples`. Enforcer Java `[21,)`, Maven `[3.8,)`. JPMS module `com.igormaznitsa.nanollvm` (library only).
 - Four graph kinds, one factory + `LLM.builder`: chat (Qwen3 / Gemma3 / Gemma 4 text QAT / Llama / LFM2 GGUF), BERT embeddings (`bert` / `roberta` / `xlm-roberta` GGUF or ONNX), Whisper STT (HF safetensors), Piper TTS (`*.onnx` + `*.onnx.json`). Public non-chat entry is typed `generate(LlmInput, LlmModality)`. Removed `embed` / `transcribe` / `synthesize` / `complete`. Chat stays `ChatSession` / `chatOnce`; batch stays `generate(List,…)`. Text completion needs `LLM`.
 - Containers: safetensors (Whisper + chat; Gemma 4 QAT packed), GGUF packed by default (`qwen3` / `lfm2` chat, `bert` embed), ONNX Tier A initializers only (chat / BERT / Piper; no ORT). `make(Path)` vs `ModelFileSource` / classpath (heap, no disk cache; ONNX `external_data` needs Path).
 - `ModelSupport`: exact family + catalog on `UnsupportedModelException`. Look-alikes fail before weight load (Qwen2 / Qwen3.5 / Gemma2 / VLMs / GGUF Llama-Gemma / HF BERT safetensors / DistilBERT…). `-Dnanollvm.arch` may only confirm a matching id.
@@ -9,8 +9,8 @@
 - Modalities: `modalities()` = checkpoint-declared; `usableModalities()` = what this port runs (text→text, text→embedding, audio→text, text→audio). Gemma 4 QAT declares towers, runtime is text-only.
 - RAG: `RagFactory` → BM25 `PreparedRag`; optional dense/hybrid (`withEmbeddings` / `HybridRagIndex.of` = RRF, not corpus union). Tuners `RagTuner` / `RagResource` (1.2.0). UTF-8 extract only — no PDF. `AdvisorRagHelloWorld` / `RagTunerHelloWorld` stay BM25.
 - Samples: `HelloWorld`, `NextTokenHelloWorld`, `EmbeddingsHelloWorld`, `TranscribeHelloWorld`, `SynthesizeHelloWorld`, `VoiceReplyHelloWorld` (STT → mood of transcript → chat → TTS; mic 15 s or canned Piper), `LogTriageHelloWorld`, `AdvisorRagHelloWorld`, `RagTunerHelloWorld` (bundled *R.U.R.* EPUB), `Bench`, `Example` (chat / embed / classify / transcribe / TTS). Helpers: `BundledModels` / `BundledRag` / `OrderedConsole`.
-- Docs: README + Maven coords are released **1.3.0** (never SNAPSHOT). `description.md` matches 1.3.0 (Whisper §7d, Piper §7e). CHANGELOG `[1.3.0] — 2026-08-29`.
-- `@since`: new 1.3.0 types/members get `@since 1.3.0`; do not retag older members. `ResourceLimits` is 1.0.
+- Docs: README + Maven coords stay released **1.3.0** (never SNAPSHOT). `description.md` still matches 1.3.0 (Whisper §7d, Piper §7e). CHANGELOG `[Unreleased] — 1.3.1-SNAPSHOT`.
+- `@since`: new 1.3.1 types/members get `@since 1.3.1`; do not retag older members. `ResourceLimits` is 1.0.
 - Download scripts under `models/` (`.sh` + Windows `.ps1`/`.cmd`): Qwen3, Gemma3, Gemma4 E2B QAT, LFM2 GGUF, gte-small, e5, xlm-roberta-base, whisper-base/tiny, piper Lessac/Irina, Tiny-LLM-ONNX, SmolLM2 Instruct ONNX. Qwen3 GGUF is bring-your-own.
 - Concurrent test: `ConcurrentLibraryUseTest` (`-Pconcurrent_test`); needs SmolLM2 Instruct ONNX + gte-small. Default Surefire excludes it.
 
@@ -40,7 +40,8 @@
 - **Java Senior (2026-08-27):** narrative `//` in `Transformer` / `LLM`; some interface params missing `final`; `Example.ModelChoice` holds `Optional<Path>`. Keep array/`for` on hot numeric paths (tensor, sampler, mel, VITS, KV packing).
 
 ## 4. Current Work In Progress
-- No active feature branch. **1.3.0** shipped 2026-08-29.
+- Development line **`1.3.1-SNAPSHOT`** (after **1.3.0** 2026-08-29); Maven Central still **1.3.0**.
+- README is public docs for the **latest release** — never SNAPSHOT (badge, Maven/Gradle coords, JAR names stay **1.3.0**).
 - Notes compacted 2026-08-29: dropped completed WIP essays (Piper G2P diary, JavaDoc/SpotBugs pass, duplicate `@since` catalogs, description.md chapter index) and folded standing facts into §§1–2 / 8.
 - Javadoc `-Xdoclint:reference` fails the `javadoc:jar` publish goal on unresolved `{@link}`. Cross-package types that are not imported must use FQNs (`LlmInSound` / `LlmOutSoundData` in `LLM.generate` javadoc).
 
@@ -59,7 +60,7 @@
 - Fara / Qwen3.5 (`qwen3_5`) stay unsupported (fail fast). Gemma 4 multimodal / MoE stay out of scope.
 
 ## 7. Useful References
-- `CHANGELOG.md` — 1.3.0 (2026-08-29). `README.md` — public latest-release docs. `description.md` — design tour. `security_audit.txt` — 1.0 threat model. `models/README.md` — download layout.
+- `CHANGELOG.md` — **1.3.0** released 2026-08-29; active line **1.3.1-SNAPSHOT**. `README.md` — public latest-release docs (**1.3.0**, never SNAPSHOT). `description.md` — design tour matching 1.3.0. `security_audit.txt` — 1.0 threat model. `models/README.md` — download layout.
 - Build: `mvn22 -q test` (document as `mvn`). Samples: `mvn22 -pl nano-vllm-java-samples -q exec:java` (default `Example`; `-Dexec.mainClass=…` for others). SpotBugs: `mvn22 -pl nano-vllm-java -am compile spotbugs:check`. Concurrent: `mvn22 -pl nano-vllm-java -Pconcurrent_test test`. Heap/vector: `.mvn/jvm.config`.
 - Load: `LlmModelFactory.make(path)` / `open(path).make()` — close LLM then model. Chat: `LLM.builder` → `chat` / `chatOnce`. Non-chat: `generate(LlmInput, LlmModality)`.
 - Demos: `EmbeddingsHelloWorld` (e5, `query: ` prefix); `TranscribeHelloWorld` (whisper-base); `SynthesizeHelloWorld` (Lessac else Irina); `VoiceReplyHelloWorld`; `AdvisorRagHelloWorld`; `RagTunerHelloWorld`; classify labels `nano-vllm-java-samples/classify-labels.example.txt`.
@@ -68,7 +69,7 @@
 - Pure Java only; no JNI. Hot-path arrays/`for`, not Streams (tensor, attention, sampler, STFT/mel, VITS, KV).
 - README stays on the last shipped version — never write SNAPSHOT into badge/coords/JAR names. After a release, `description.md` matches that version; during SNAPSHOT it may lead README.
 - Document Maven as `mvn`; this machine uses `mvn22`.
-- New public API in the current minor gets that `@since`; do not retag older members. Do not vendor GPL Piper/espeak sources.
+- New public API in **1.3.1-SNAPSHOT** gets `@since 1.3.1`; do not retag older members. Do not vendor GPL Piper/espeak sources.
 - `LLM.builder` for every kind; `.deterministic()` for greedy (not `temperature(0)`). Server: `.dedicatedMatmulPool()`, `.matmulExecutor(appPool)`, or `.disableMultiCpu()` — do not rely on the process-wide pool. One `LLM` per in-flight generate; share `LlmModel`. `ResourceLimits.setCurrent` is JVM-global.
 - Mix RAG origins on one `RagFactory.builder()`. Do not put hybrid indexing back on `AdvisorRagHelloWorld` / `RagTunerHelloWorld` unless asked.
 - Think tags / chat specials: `open(path).thinkTags(…).chatSpecials(…)`; omitted keys fill `DEFAULT`. Streaming `TEXT_RAW` keeps specials; `streamTo` ignores it.
