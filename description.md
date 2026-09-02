@@ -31,7 +31,8 @@ file paths.
 2. [The one trick: guessing the next piece of text](#2-the-one-trick-guessing-the-next-piece-of-text)
 3. [Cutting language into pieces the machine can count](#3-cutting-language-into-pieces-the-machine-can-count)
 4. [Loading a model: opening the library box](#4-loading-a-model-opening-the-library-box)
-5. [`config.json` — the blueprint field by field](#5-configjson--the-blueprint-field-by-field)
+5. [`config.json` — the blueprint field by field](#5-configjson--the-blueprint-field-by-field) —
+    **who chooses sizes; embedding width vs context window**
 6. [`tokenizer.json` — the dictionary file field by field](#6-tokenizerjson--the-dictionary-file-field-by-field)
 7. [Tensors and `*.safetensors` — parameters on disk](#7-tensors-and-safetensors--parameters-on-disk)
 7a. [GGUF — quantized single-file models (Qwen3 and LFM2)](#7a-gguf--quantized-single-file-models-qwen3-and-lfm2)
@@ -39,10 +40,11 @@ file paths.
 7c. [ONNX weight folders and Llama (**since 1.1.0**)](#7c-onnx-weight-folders-and-llama-since-110)
 7d. [Whisper speech-to-text (**since 1.3.0**)](#7d-whisper-speech-to-text-since-130)
 7e. [Piper text-to-speech (**since 1.3.0**)](#7e-piper-text-to-speech-since-130)
-8. [Attention: kinds of looking-back, and how they work](#8-attention-kinds-of-looking-back-and-how-they-work)
+8. [Attention: kinds of looking-back, and how they work](#8-attention-kinds-of-looking-back-and-how-they-work) —
+    **how Query, Key, and Value are made**
 9. [The thinking process: how it is organized and how it works with the model](#9-the-thinking-process-how-it-is-organized-and-how-it-works-with-the-model)
 10. [Tensors, embeddings, and the arithmetic of inference](#10-tensors-embeddings-and-the-arithmetic-of-inference) —
-    **math catalog** (linear, RMSNorm, attention, RoPE, MLP, sampling)
+    **math catalog** (linear, QKV, RMSNorm, attention, RoPE, MLP, sampling)
 11. [Choosing a word: not always the most obvious one](#11-choosing-a-word-not-always-the-most-obvious-one)
 12. [Why the program keeps a notebook of the past](#12-why-the-program-keeps-a-notebook-of-the-past)
 13. [Serving several conversations without chaos](#13-serving-several-conversations-without-chaos)
@@ -159,6 +161,16 @@ of those scraps). Decoding means: turn the numbers back into readable text.
 Why bother? Because the model’s entire inner life is **arithmetic on lists of numbers**. Tokens are the bridge between
 human language and that arithmetic. The next bridge after ids is the **embedding** table: each id becomes a vector of
 length `hidden_size` (chapter 10).
+
+Two different “sizes” are easy to mix up and will keep returning:
+
+| Size | Everyday meaning | Who chooses it | Where it is explained |
+|------|------------------|----------------|------------------------|
+| **Embedding width** (`hidden_size`) | How *long* one token’s portrait is | The lab that trained the checkpoint — frozen | Chapter 5 |
+| **Context window** | How *many* tokens may sit on the desk at once | Trainers claim a maximum; you pick a desk that fits RAM | Chapter 5 |
+
+A wide portrait is not the same as a long memory. A small model can still claim a long window; a wide model can still
+be run on a short desk.
 
 A separate file, the **tokenizer**, holds that dictionary and the rules for chopping text. Chat models also store a
 **template**: stage directions such as “this line is the user,” “this line is the assistant,” so the model is not
@@ -327,7 +339,7 @@ by [nano-vllm](https://github.com/GeeeekExplorer/nano-vllm) and the serving idea
 |---------------------------|-----------------------------------------------------------------------|
 | Embedding card-index      | Turn each token number into a rich “portrait” (a long list of traits) |
 | Norm scales               | Keep those portraits from becoming absurdly loud or tiny              |
-| Query / Key / Value mixes | Prepare three views of each place in the text for attention           |
+| Query / Key / Value mixes | Prepare three views of each place in the text for attention (chapter 8) |
 | Attention output mix      | Blend several parallel “glances” back into one stream                 |
 | Feed-forward (MLP) block  | A large private rewrite of each portrait — much of the model’s bulk   |
 | Final vocabulary scorer   | Turn the last portrait into “how good is each next token?”            |
@@ -393,6 +405,25 @@ A Gemma file adds things like `layer_types`, `sliding_window`, `hidden_activatio
 - **Means** — everyday meaning.
 - **Used for** — what this Java engine does with it.
 - **If missing** — the default or fallback this loader applies.
+
+### Who writes these numbers?
+
+Almost every field in `config.json` was chosen **when the model was designed and trained**, by the lab that published
+the checkpoint — not by this Java program, and not by you at chat time.
+
+| Who | What they choose | Can you change it later? |
+|-----|------------------|--------------------------|
+| **Training lab** | `hidden_size`, layer count, heads, `head_dim`, `max_position_embeddings`, vocabulary width, RoPE, windows, … | **No.** Those sizes are baked into the weight tensors. A different width would be a different model. |
+| **You at load / run time** | Which checkpoint to open; `maxModelLen` (must not exceed the claimed context); KV pages / heap fraction; CPU threads; sampling | **Yes** — engine knobs. Summary table at the end of this chapter. |
+| **This library** | Nothing architectural. It **reads** the blueprint and builds furniture to match. | — |
+
+Two measurements matter most on a first reading, and they are **independent**:
+
+- **How wide** each token’s portrait is — `hidden_size` (the embedding dimension).
+- **How many** tokens may sit on the desk at once — the context window (`max_position_embeddings` claimed; `maxModelLen` actually used).
+
+A small model can still claim a long window. A wide model can still be run on a short desk if RAM is tight. Neither
+number is “intelligence” by itself; both bound what silent inner work (chapter 9) is allowed to mix.
 
 ---
 
@@ -487,7 +518,39 @@ It is **not**:
   same width after attention, after MLP, after every layer
 ```
 
-Larger `hidden_size` → higher capacity per position, and more memory/compute. Smaller → leaner.
+#### Who chooses `hidden_size`, and why it matters
+
+The **training lab** picks $H$ when they design the architecture. Typical small teaching crates in this guide use
+**1024** (Qwen3-0.6B) or **640** (Gemma3-270M). You cannot raise $H$ at inference to “get more intelligence”: the
+Query/Key/Value matrices, the MLP, and the embedding table are all sized to that $H$. Loading a different checkpoint is
+how you change it.
+
+**Why the width matters**
+
+- **Capacity per token.** A longer portrait can carry more independent features through the stack. That is one reason
+  larger models often (not always) write more coherent text — they have more numbers per place, and usually more layers
+  too.
+- **Memory and time.** Every attention and MLP multiply scales with $H$. RAM for activations, and the embedding table
+  itself, grow with $H$.
+- **Attention geometry.** Each head’s slice is `head_dim` long. Often `hidden_size ≈ num_attention_heads × head_dim`
+  (Qwen3-0.6B: 16 × 128 = 1024). If `head_dim` is given explicitly it can differ; the loader still uses the stated
+  `head_dim` for QKV slices.
+
+**Two “embedding sizes” that are not the same thing**
+
+| What people say | What they usually mean | Shape |
+|-----------------|------------------------|-------|
+| Embedding **dimension** / width | Length of one token’s portrait = `hidden_size` $H$ | One vector, length $H$ |
+| Embedding **table** | The whole card-index: one row per vocabulary id | Matrix $[V, H]$ (`vocab_size` × `hidden_size`) |
+| Context **window** | How many tokens of text may be present | A **count of tokens**, not a vector length |
+
+The table’s RAM cost is roughly $V \times H$ numbers (then ×4 bytes once this engine holds float32). A huge vocabulary
+with a modest $H$ (Gemma3-270M: 262144 × 640) can rival a smaller vocabulary with a wider $H$ (Qwen3-0.6B: 151936 ×
+1024). That is a **storage** trade-off, not a longer memory of the conversation — memory of the conversation is the
+context window, next section.
+
+Larger `hidden_size` → higher capacity per position, and more memory/compute. Smaller → leaner. This engine never
+invents $H$; it allocates every shelf to the value in the blueprint.
 
 ### What `intermediate_size` really is
 
@@ -568,7 +631,21 @@ Qwen here: 16 Queries / 8 KV → groups of 2. Gemma here: 4 Queries / 1 KV → e
 
 ---
 
-### How long a passage may be
+### How long a passage may be (the context window)
+
+The **context window** is a budget counted in **tokens** (not characters, not words): how many scraps of text may be
+present in **one** forward pass — the prompt you just sent, plus the reply being written, together.
+
+```text
+  one token's portrait:   [ n₁ n₂ … n_H ]      ← hidden_size (width of each place)
+
+  the desk (window):      tok 0, tok 1, … tok L−1
+                          ◄──── context length L ────►
+                          prompt tokens + tokens already generated
+```
+
+Width and window do different jobs. $H$ is how rich **each** place is. $L$ is how many places attention is allowed to
+mix. Silent thinking (chapter 9) walks every layer for each new token, but it can only look back inside this desk.
 
 | Field                     | Means                                             | Used for                                                                                                | If missing                      |
 |---------------------------|---------------------------------------------------|---------------------------------------------------------------------------------------------------------|---------------------------------|
@@ -576,7 +653,37 @@ Qwen here: 16 Queries / 8 KV → groups of 2. Gemma here: 4 Queries / 1 KV → e
 
 **Real values:** Qwen3-0.6B → 40960; Gemma3-270M → 32768.
 
-Your machine may not afford the full length in RAM; the builder’s `maxModelLen` can choose a smaller desk.
+#### Who chooses the window
+
+| Number | Who sets it | What it does |
+|--------|-------------|--------------|
+| `max_position_embeddings` | The **training lab**, in `config.json` / GGUF metadata | Claimed maximum. RoPE’s cos/sin tables are built up to this length. Positions beyond it are not in the recipe. |
+| `maxModelLen` | **You**, on `LLM.builder(model).maxModelLen(…)` | The desk this engine actually reserves. Always **min**(your setting, the claim). |
+
+This library does not extend a 4k-trained recipe to 40k by wishing. If the checkpoint claims 40960, you *may* open a
+2048-token desk to save RAM. You may not open a desk larger than the claim.
+
+#### How the window works at runtime
+
+1. **Chat template** turns history + the new user line into one prompt string, then into token ids.
+2. Those ids plus the tokens that will be generated must fit in `maxModelLen`. `ChatSession` drops oldest turns if the
+   templated prompt would overflow (chapter 12).
+3. **RoPE** needs a position index `0 … L−1` for each token; the cos/sin cache is sized from the claimed maximum.
+4. **Attention** may mix only positions that are on the desk (and, on Gemma local layers, only a sliding window inside
+   it).
+5. **KV notebooks** store a Key and a Value per position per layer. A longer desk means more notebook pages — often the
+   first RAM limit you hit, before weight size.
+
+#### Why the window is important
+
+- **Too short:** early facts fall off the desk. The model does not “remember” them unless they are still in the
+  remaining prompt. Long chats on a small `maxModelLen` lose the beginning on purpose (chapter 12).
+- **Too long for the machine:** KV pages grow with $L \times$ layers $\times$ KV heads $\times$ `head_dim`. A 40k claim
+  on a laptop heap can fail even when the weight file itself fits.
+- **Quality of looking-back:** every new token’s Query can only match Keys that are still on the desk. Multi-step
+  reasoning that needs page 1 of the prompt fails if page 1 was truncated.
+
+Your machine may not afford the full claimed length; a smaller `maxModelLen` is the usual honest choice.
 
 ---
 
@@ -728,6 +835,9 @@ consult it.
 ---
 
 ### Blueprint vs engine knobs (do not confuse)
+
+The blueprint says what the **model is**. The builder says how hard you ask your **machine** to run it. You never edit
+`hidden_size` or the claimed context in JSON to “upgrade” a checkpoint — you pick a different crate, or a smaller desk.
 
 | Comes from `config.json` / GGUF metadata  | Comes from this program’s builder / runtime                                         |
 |-------------------------------------------|-------------------------------------------------------------------------------------|
@@ -1816,12 +1926,116 @@ So attention always means:
 > For this place, **how much should each allowed other place influence me?** Then take that blend as part of my
 > updated meaning.
 
-The *kinds* of attention differ mainly in the word **allowed**.
+The *kinds* of attention differ mainly in the word **allowed**. The next subsection is the missing piece: **where Q, K,
+and V come from**, how the checkpoint provides them, and why three views are required. The kinds (causal, GQA, windows)
+then change only which Keys a Query is allowed to see.
 
 **Further reading:** original multi-head attention —
 [Vaswani et al.](https://arxiv.org/abs/1706.03762); gentle annotated code —
 [The Annotated Transformer](https://nlp.seas.harvard.edu/annotated-transformer/).
 
+---
+
+### How Query, Key, and Value are made (and why there are three)
+
+Attention does not read the hidden portrait `h` directly. Each place first builds **three different views** of the same
+portrait. Those views are ordinary linear maps — matrix × vector — using **weight shelves loaded from the model file**.
+They are not a second brain and not English sentences; they are three learned ways of looking at the same numbers.
+
+```text
+  hidden portrait h  (length hidden_size H)
+       │
+       ├── × W_Q  →  Query   “what am I looking for from here?”
+       ├── × W_K  →  Key     “how should this place advertise itself?”
+       └── × W_V  →  Value   “if someone chooses me, what content do they take?”
+
+  then:  this Query  ·  allowed Keys  →  mix those Values
+```
+
+#### Why three views, not one
+
+If search, address, and payload were forced to be the same vector, the model could not **ask a question** that is
+shaped differently from **what it stores**. Query can emphasize “I need a number.” Key can emphasize “I am the token
+`2`.” Value can carry whatever content later layers learned to hand over. Training writes those three habits into three
+matrices. That split is why looking-back can route information instead of merely averaging nearby portraits.
+
+| View | Calculated from | Everyday job | Kept in the KV notebook? |
+|------|-----------------|--------------|--------------------------|
+| **Query** | $W_Q \times h$ | Search card for *this* position | **No** — rebuilt for the current token |
+| **Key** | $W_K \times h$ | Address card for *this* position | **Yes** (after RoPE) |
+| **Value** | $W_V \times h$ | Payload if this position is chosen | **Yes** |
+
+#### How they are provided in the model
+
+The matrices $W_Q$, $W_K$, $W_V$ are **trained parameters**. They arrive in the crate under names such as
+`self_attn.q_proj.weight`, `k_proj.weight`, `v_proj.weight` (chapter 7). This engine:
+
+1. **Loads** those tensors onto shelves (Hugging Face often ships three matrices; the loader **fuses** them into one
+   wider `qkv_proj` of shape `[qSize + kvSize + kvSize, H]`). **GGUF Qwen3** keeps `attn_q` / `attn_k` / `attn_v`
+   **unfused** so packed quants stay packed.
+2. **Reuses the same shelves** for every token and every request. Chat does not rewrite them.
+3. **Computes** Q, K, V as activations: `Linear.Qkv` × current hidden states, then `Ops.splitLast` into the three
+   parts.
+
+Shapes (Qwen3-0.6B numbers as a worked example):
+
+| Piece | Length / shape | Why |
+|-------|----------------|-----|
+| Hidden state $h$ | $H$ = 1024 | Residual stream |
+| Query | `num_attention_heads × head_dim` = 16 × 128 = **1024** | One slice per Query head |
+| Key, Value | `num_key_value_heads × head_dim` = 8 × 128 = **512** each | GQA: fewer KV groups than Queries |
+| Fused `qkv_proj` | `[1024 + 512 + 512, 1024]` = `[2048, 1024]` | One matmul, then split |
+
+`head_dim` is the length of **one head’s** Q, K, or V vector. If the JSON omits it, the loader uses
+`hidden_size / num_attention_heads`. Qwen3-0.6B states `head_dim` 128 even though $1024 / 16 = 64$ — **always trust the
+stated `head_dim`**, not that division (GGUF stores the same fact as `qwen3.attention.key_length`).
+
+#### How they are calculated in one layer (this port)
+
+Inside each attention block, for the token positions being computed:
+
+1. **RMSNorm** the residual stream (volume control).
+2. **One (or three) linear maps** produce packed Q, K, V from that normalized $h$.
+3. **Reshape** into `[tokens, heads, head_dim]`.
+4. **Optional Q/K RMSNorm** per head (Qwen when `attention_bias` is false).
+5. **RoPE** rotates Query and Key by the token’s position (Value is left as projected).
+6. **Attend:** each Query dots against allowed Keys, softmax, mix Values.
+7. **Output mix** (`o_proj`) folds the heads back to width $H$ and adds onto the residual.
+
+```text
+  h  →  norm  →  qkv_proj  →  split Q | K | V
+                                │
+                     reshape heads × head_dim
+                                │
+                     (Qwen) RMSNorm on Q, K heads
+                                │
+                     RoPE(Q), RoPE(K)     V unchanged
+                                │
+                     Attention: softmax(Q Kᵀ / scale) V
+                                │
+                     o_proj  →  add residual
+```
+
+**Prefill** does this for every prompt position and **writes** K and V into notebooks. **Decode** does it for the newest
+token only: a new Query, a new Key/Value line, then the Query searches the notebooks (chapter 12).
+
+#### Why this is important
+
+- **Without QKV there is no looking-back.** Layers would rewrite each portrait in isolation; “she” could not borrow
+  “Mary” or “Susan.”
+- **Only K and V are cached.** That is why the notebook is called a **KV cache**, and why its RAM grows with context
+  length × KV heads × `head_dim` × layers — Query is cheap to rebuild for one token.
+- **GQA is a size choice on K and V**, not on Query. Fewer KV heads → smaller notebooks, slightly less independent
+  “address space.”
+- **The weights are the skill; the activations are the moment.** $W_Q$, $W_K$, $W_V$ are long-term habits. Q, K, V on a
+  given step are this page’s search, addresses, and payloads.
+
+Formal scoring math: **chapter 10**. Notebooks: **chapter 12**. Thinking uses this same trio every Sense A step:
+**chapter 9**.
+
+**In the code:** `Linear.Qkv#forward` then `Ops.splitLast` in `Qwen3Attention` / `Gemma3Attention` /
+`LlamaForCausalLM` / `Lfm2Attention`; Gemma 4 text may keep separate Q/K/V linears; RoPE then `Attention#forward`
+(chapter 16).
 
 ---
 
@@ -2038,9 +2252,10 @@ Both happen in **every** room, stacked many times.
 
 ### One sentence to keep
 
-> All generating models here use **causal self-attention**; they usually run it as **many heads with shared KV
-> notebooks (GQA)**; Gemma may **alternate local windows and global views**; the same rule is heavy at **prefill** and
-> lighter at **decode** thanks to notebooks.
+> All generating models here use **causal self-attention**; Query, Key, and Value are three linear views of each
+> portrait, from **loaded** $W_Q$, $W_K$, $W_V$ (fused `qkv_proj` on most chat graphs); they usually run as **many
+> Query heads with shared KV notebooks (GQA)**; Gemma may **alternate local windows and global views**; the same rule
+> is heavy at **prefill** and lighter at **decode** thanks to notebooks.
 
 ---
 
@@ -2049,6 +2264,16 @@ Both happen in **every** room, stacked many times.
 People say models “think.” That single English word hides several different mechanisms. This chapter separates them,
 shows how they are **organized in time**, and explains how they **use** the loaded model (weights, attention,
 notebooks) — including what this Java chat path does with visible “thinking” text.
+
+Hold three facts from earlier chapters; everything below is those facts used in a loop:
+
+1. Each token is a portrait of width `hidden_size` (chapter 5). Richer portraits, not a second mind.
+2. Only tokens still on the **context window** can be mixed (chapter 5). What fell off the desk is gone for this pass.
+3. Looking-back is **Query, Key, Value** — three views built from those portraits with loaded matrices (chapter 8).
+
+There is no extra “thinker.” Organization means: **repeat the same layer-walk once per next token**, optionally emit
+extra words that later walks can reread, and — in this project’s chat helper — optionally wrap those words in tags so a
+UI can hide them.
 
 ### First distinction: three senses of “thinking”
 
@@ -2097,11 +2322,13 @@ the blueprint — often dozens of rooms).
 Inside **each** room, in order:
 
 1. **Normalize** the stream (RMSNorm — volume control).
-2. **Build Query / Key / Value** from the loaded projection shelves.
-3. **Twist by position** (RoPE) so order matters.
+2. **Build Query / Key / Value** — three linear views of this place’s portrait, using the loaded $W_Q$, $W_K$, $W_V$
+   shelves (chapter 8). Query is the search; Key and Value are written into notebooks for later steps.
+3. **Twist by position** (RoPE) so order matters — applied to Query and Key, not Value.
 4. **Attend** with the rules from chapter 8 (causal; GQA; maybe sliding window).
    - Write new Keys/Values into notebooks for positions being computed.
-   - Mix past Values into the present according to match strengths.
+   - Mix past Values into the present according to match strengths (this Query versus allowed Keys, inside the
+     context window).
 5. **Mix heads** back to one stream; **add** onto the residual draft.
 6. **Normalize** again.
 7. **MLP rewrite** using the large feed-forward shelves; **add** onto the residual again.
@@ -2166,6 +2393,20 @@ not rebuild every past Key/Value each time.
 So: **weights = long-term habits; notebooks = short-term notes for this conversation; Sense A = the procedure that
 combines them every step.**
 
+#### What width and window do to silent thinking
+
+Sense A is the same *recipe* on every model this port runs. The **sizes** change how much that recipe can mix — they do
+not add a new kind of thought.
+
+| Size | Who chose it | What it does to Sense A |
+|------|----------------|-------------------------|
+| Embedding width $H$ | Training lab (`hidden_size`) | Each portrait, and each Q/K/V slice, has this many numbers. Wider → more capacity per place, more RAM/time per step. You cannot turn it up at chat time. |
+| Context window $L$ | Lab claims a max; you set `maxModelLen` ≤ that | Each Query may only match Keys still on the desk. Written notes (Sense B/C) help **only while they remain inside $L$**. |
+| KV heads / `head_dim` | Training lab | How fat each notebook line is. GQA shares Keys/Values across Query heads to keep long windows affordable. |
+
+A ten-token answer on a 640-wide model with a 2k desk is still ten Sense A units after prefill. A 1024-wide model with
+a 40k claim is still the same pipeline — only the furniture is larger, and only if you actually reserved that desk.
+
 **In the code (Sense A):** `LLM.generate` / `step` → `Scheduler.schedule` → `Transformer.step` → layer
 `forward` stacks on `Qwen3ForCausalLM` / `Gemma3ForCausalLM` / `Gemma4ForCausalLM` / `LlamaForCausalLM` /
 `Lfm2ForCausalLM` (chapter 16).
@@ -2217,6 +2458,11 @@ glance can reuse.
 
 Sense C is Sense B with **stage directions** so software can separate “notes for the assistant” from “lines for the
 human.”
+
+In plain language: the model still only emits one stream of tokens (Sense A). Some of those tokens happen to be the
+characters `<think>` … `</think>`. After generation (and while streaming), this library **parses** that stream the way a
+typesetter splits footnotes from body text. The model never calls a `Think()` function. If the checkpoint’s vocabulary
+does not contain those markers, Sense C simply does not appear — silent work still runs.
 
 #### The format this chat path expects (Qwen-style tagged scratchpad)
 
@@ -2369,12 +2615,14 @@ Written thinking helps **because** attention can reread it — not because a sec
 ### A fair humanities summary of this chapter
 
 > **Silent thinking (A)** is the organized walk through every loaded layer — attention plus rewrite — once per next
-> token, using fixed weights and short-term notebooks.
+> token, using fixed weights and short-term notebooks. Each place is a portrait of width `hidden_size`; looking-back
+> is Query matching Keys and mixing Values; only tokens inside the context window can take part.
 > **Written thinking (B/C)** is more language produced by that same walk; once written, it becomes part of the page
-> that later attention can use.
+> that later attention can use — until it falls off the desk.
 > This project’s chat layer **invites and parses** tagged scratchpads for Qwen-style dialogs; Gemma relies on silent
 > work without that ceremony.
-> Nowhere is there a ghost that thinks *beside* the model — only the model, used in a loop.
+> Nowhere is there a ghost that thinks *beside* the model — only the model, used in a loop. The lab chose the widths;
+> you choose the desk size; the three QKV views are how the walk looks back.
 
 ---
 
@@ -2513,7 +2761,8 @@ $$
 Equivalently $\mathbf{x} = E^{\mathsf{T}}\mathbf{e}_t$ for a one-hot $\mathbf{e}_t$, but the engine **copies row $t$**
 (`EmbeddingKernel.gather` via `VocabParallelEmbedding`) — a gather, not a matmul.
 
-$H$ = `hidden_size` (e.g. 1024 for Qwen3-0.6B, 640 for Gemma3-270M). $V$ = `vocab_size`.
+$H$ = `hidden_size` (e.g. 1024 for Qwen3-0.6B, 640 for Gemma3-270M). $V$ = `vocab_size`. The **lab** that trained the
+checkpoint chose both; this engine only reads them (chapter 5). $H$ is the portrait width, not the context window.
 
 #### Gemma embedding scale
 
@@ -2592,6 +2841,35 @@ $$
 This port rejects $\tau \rightarrow 0$ (pure greedy) in `SamplingParams`. Repeatable argmax is
 `LLM.Builder.deterministic()` / `SamplingParams.deterministic()` (`topK = 1`), not temperature zero.
 
+### Query, Key, Value — how they are calculated
+
+Chapter 8 is the conceptual home (why three views, how the crate provides $W_Q$, $W_K$, $W_V$, GQA sizes). This section
+is the algebra that matches the Java forward pass.
+
+After RMSNorm, the hidden state of one position is $\mathbf{h} \in \mathbb{R}^{H}$. Three linear maps (bias optional)
+produce the views:
+
+$$
+\mathbf{q} = W_Q \mathbf{h},\qquad \mathbf{k} = W_K \mathbf{h},\qquad \mathbf{v} = W_V \mathbf{h}.
+$$
+
+| Matrix | Shape in this port | Output length |
+|--------|--------------------|---------------|
+| $W_Q$ | $[n_q \cdot d,\; H]$ | $n_q \cdot d$ (`num_attention_heads × head_dim`) |
+| $W_K$, $W_V$ | $[n_{kv} \cdot d,\; H]$ | $n_{kv} \cdot d$ (`num_key_value_heads × head_dim`) |
+
+$d$ = `head_dim`. Under **GQA**, $n_{kv} < n_q$, so Keys and Values are shorter than Query. Hugging Face safetensors
+often ship three tensors; the loader **concatenates** them into one `qkv_proj` of shape
+$[n_q d + 2 n_{kv} d,\; H]$. The forward pass is then one matmul (`Linear.Qkv`) and `Ops.splitLast` into three parts.
+GGUF Qwen3 keeps the three tensors unfused. Activations are reshaped to $[\textit{tokens},\; \textit{heads},\; d]$.
+
+Qwen with `attention_bias = false` then RMSNorms each Query/Key **head** ($d$ channels). **RoPE** rotates $\mathbf{q}$
+and $\mathbf{k}$ by position (next section). $\mathbf{v}$ is not rotated. The next section is the scoring math that
+uses those vectors.
+
+**In the code:** `Qwen3Attention#forward` / `Gemma3Attention#forward` (and Llama / LFM2 analogues) → `Linear.Qkv` →
+`Ops.splitLast` → optional head RMSNorm → `RotaryEmbedding#forward` → `Attention#forward`.
+
 ### Causal self-attention (the scoring math)
 
 For one head, with Queries, Keys, Values $\mathbf{q}_t, \mathbf{k}_j, \mathbf{v}_j \in \mathbb{R}^{d}$
@@ -2609,8 +2887,8 @@ $$
 - **GQA / MQA:** several Query heads share one Key/Value group (`num_key_value_heads` ≤ `num_attention_heads`); this
   port sets `repeats = numHeads / numKvHeads`.
 
-Q, K, V themselves come from linear maps of the (normalized) hidden state. Chapter 8 describes *kinds* of attention;
-this section is the shared algebra.
+Q, K, V themselves come from the linear maps in the previous section. Chapter 8 describes *kinds* of attention and why
+three views exist; this section is the shared scoring algebra.
 
 **In the code:** `layers.Attention` (scores via `VectorMath.dot` × `scale`, then softmax-like normalization in the
 attend loop); projections in the model’s attention module.
@@ -4173,13 +4451,14 @@ Short glossary. For the Java home of each idea, prefer the **In the code** notes
 | BPE                   | Byte-Pair Encoding: merge frequent pieces using an ordered merge list                            |
 | `data_offsets`        | Byte range of one tensor inside a safetensors payload                                            |
 | ChatML                | Turn markers `<\|im_start\|>` / `<\|im_end\|>` (LFM2 GGUF chat packaging here)                   |
-| `hidden_size`         | Width $H$ of the residual stream; also the embedding dimension                                   |
+| `hidden_size`         | Width $H$ of each token’s portrait (embedding dimension). Chosen by the training lab; frozen. Distinct from the context window (ch. 5) |
 | `intermediate_size`   | Temporary wider width inside each layer’s MLP expand→shrink step                                 |
 | `num_hidden_layers`   | Number of stacked attention+MLP blocks                                                           |
 | GQA heads fields      | `num_attention_heads` vs `num_key_value_heads` (sharing of KV cache groups)                      |
+| `head_dim`            | Length of one attention head’s Q, K, or V vector; QKV slice size (ch. 8)                         |
 | Inference             | Running the pretrained model to produce text (not training)                                      |
 | Token                 | A vocabulary unit with an integer id                                                             |
-| Embedding (token)     | Matrix $E \in \mathbb{R}^{V \times H}$; row lookup starts the forward pass                       |
+| Embedding (token)     | Matrix $E \in \mathbb{R}^{V \times H}$; one **row** per id, each of length $H$. Table size ≠ context window (ch. 5) |
 | BERT / embedding GGUF | Bidirectional encoder → mean-pool → L2 vector via `generate(…, EMBEDDING)` (**since 1.1.0** embeddings; typed facade **since 1.3.0**; ch. 7b)     |
 | Whisper               | Audio→text from HF safetensors via `generate(LlmInSound, TEXT)` (**since 1.3.0**; ch. 7d) |
 | Piper                 | Text→WAV from `*.onnx` + `*.onnx.json` via `generate(LlmInText, AUDIO)` (**since 1.3.0**; ch. 7e) |
@@ -4198,7 +4477,7 @@ Short glossary. For the Java home of each idea, prefer the **In the code** notes
 | MQA                   | Multi-query: all Query heads share a single Key/Value pair                                       |
 | Sliding window        | Attend only within a fixed recent span, not the full past                                        |
 | Global attention      | Attend over the whole allowed past                                                               |
-| Query / Key / Value   | Linear projections used by attention (search / address / content). Only **K** and **V** are cached (ch. 12) |
+| Query / Key / Value   | Three linear views of a hidden portrait: search / address / payload ($W_Q,W_K,W_V$ from the crate; ch. 8, 10). Only **K** and **V** are cached (ch. 12) |
 | Inner work (Sense A)  | Invisible stack of attention + MLP for each next token                                           |
 | Chain of thought (B)  | Reasoning written as ordinary tokens in the reply                                                |
 | Tagged scratchpad (C) | Written reasoning inside open/close markers (default `<think>…</think>`; override with `ThinkTags`) |
@@ -4209,8 +4488,8 @@ Short glossary. For the Java home of each idea, prefer the **In the code** notes
 | Decode                | Later tokens: Q/K/V for the newest token only, append one K/V slot, attend cached Keys/Values    |
 | Sampling              | Drawing the next token from (filtered) probabilities                                             |
 | Temperature           | Softmax temperature $\tau$; lower → more peaked                                                  |
-| Context length        | How much past text fits in one forward pass                                                      |
-| Context window        | Hard token budget for one forward (`maxModelLen` / `max_position_embeddings`)                    |
+| Context length        | How many tokens of past text fit in one forward pass                                             |
+| Context window        | Hard token budget: trainers claim `max_position_embeddings`; you set `maxModelLen` ≤ that (ch. 5) |
 | Chat history          | `ChatSession` message list re-fed each turn; may be truncated                                    |
 | Weights               | Learned parameters from `.safetensors` (float32) or `.gguf` (packed by default; dequant on use)  |
 | Dedicated matmul pool | `LLM.Builder.dedicatedMatmulPool()` — engine-owned CPU workers shut down on `close()` (**since 1.2.0**) |
