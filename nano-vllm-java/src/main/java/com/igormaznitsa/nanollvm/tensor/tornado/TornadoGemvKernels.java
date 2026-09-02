@@ -5,7 +5,7 @@ import uk.ac.manchester.tornado.api.annotations.Parallel;
 /**
  * TornadoVM-parallel dense GEMV: {@code y[o] = bias[o] + dot(x, W[o])} for {@code o in [out0, out1)}.
  *
- * @since 1.3.1
+ * @since 1.4.0
  */
 final class TornadoGemvKernels {
 

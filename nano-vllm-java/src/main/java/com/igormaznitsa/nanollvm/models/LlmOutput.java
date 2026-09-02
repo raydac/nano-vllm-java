@@ -6,7 +6,8 @@ package com.igormaznitsa.nanollvm.models;
  *
  * @since 1.3.0
  */
-public sealed interface LlmOutput permits LlmOutText, LlmOutSoundData, LlmOutEmbedding {
+public sealed interface LlmOutput
+  permits LlmOutText, LlmOutSoundData, LlmOutEmbedding, LlmOutLabels {
 
   /**
    * Content type of this result.

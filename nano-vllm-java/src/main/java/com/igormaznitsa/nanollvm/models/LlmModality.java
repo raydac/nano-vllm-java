@@ -13,8 +13,9 @@ import java.util.Optional;
  * encoders accept {@link #TEXT} and produce {@link #EMBEDDING}. {@link #IMAGE}, {@link #AUDIO},
  * and {@link #VIDEO} appear on {@link LlmModel#modalities()} when the checkpoint declares those
  * towers (Gemma 4 QAT mobile does). Whisper speech graphs run {@link #AUDIO} in and
- * {@link #TEXT} out. {@link LlmModel#usableModalities()} stays text-only for chat
- * checkpoints until vision/audio towers are wired.
+ * {@link #TEXT} out. fastText classifiers run {@link #TEXT} in and {@link #LABELS} out.
+ * {@link LlmModel#usableModalities()} stays text-only for chat checkpoints until
+ * vision/audio towers are wired.
  *
  * @since 1.2.0
  */
@@ -40,7 +41,14 @@ public enum LlmModality {
    * Dense vector from {@link LlmModel#generate(LlmInput, LlmModality)} with
    * {@link #EMBEDDING} output.
    */
-  EMBEDDING("embedding");
+  EMBEDDING("embedding"),
+  /**
+   * Ranked classification labels from {@link LlmModel#generate(LlmInput, LlmModality)} with
+   * {@link #LABELS} output (fastText language id and other supervised classifiers).
+   *
+   * @since 1.4.0
+   */
+  LABELS("labels");
 
   private final String wireName;
 
@@ -50,7 +58,7 @@ public enum LlmModality {
 
   /**
    * Parses a lowercase wire name ({@code text}, {@code image}, {@code audio}, {@code video},
-   * {@code embedding}). Blank or unknown names are empty.
+   * {@code embedding}, {@code labels}). Blank or unknown names are empty.
    *
    * @param name wire name; {@code null} or blank → empty
    * @return matching constant, or empty when unrecognized

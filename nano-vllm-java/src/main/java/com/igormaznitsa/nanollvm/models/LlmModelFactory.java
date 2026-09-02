@@ -15,10 +15,12 @@ import com.igormaznitsa.nanollvm.llm.Config;
 import com.igormaznitsa.nanollvm.llm.LLM;
 import com.igormaznitsa.nanollvm.models.internal.CausalLM;
 import com.igormaznitsa.nanollvm.models.internal.EmbeddingEncoder;
+import com.igormaznitsa.nanollvm.models.internal.FastTextForClassification;
 import com.igormaznitsa.nanollvm.models.internal.LlmModelImpl;
 import com.igormaznitsa.nanollvm.models.internal.SpeechToText;
 import com.igormaznitsa.nanollvm.models.internal.TextToSpeech;
 import com.igormaznitsa.nanollvm.models.internal.WeightBag;
+import com.igormaznitsa.nanollvm.models.internal.fasttext.FastTextModel;
 import com.igormaznitsa.nanollvm.models.llmarch.GgufModelLoader;
 import com.igormaznitsa.nanollvm.models.llmarch.GgufModelLoader.LoadedGguf;
 import com.igormaznitsa.nanollvm.models.llmarch.ModelBinding;
@@ -40,15 +42,16 @@ import java.util.Map;
 
 /**
  * Loads a {@link LlmModel} from a HuggingFace model directory (safetensors or ONNX weights), a
- * {@code .gguf} file, or a {@link ModelFileSource} (classpath / custom streams read into heap; no
- * filesystem cache).
+ * {@code .gguf} file, a Meta fastText {@code *.bin}/{@code *.ftz} classifier, or a
+ * {@link ModelFileSource} (classpath / custom streams read into heap; no filesystem cache).
  *
  * <p>One {@link LlmModel} may be reused by any number of {@link LLM} instances until
  * {@link LlmModel#close()}. Load is blocking I/O on the calling thread; the returned model is safe
  * to share across threads while open. BERT embedding GGUFs load through the same entry points;
  * use {@link LlmModel#generate(LlmInput, LlmModality)} with {@link LlmModality#EMBEDDING}. Whisper
  * speech checkpoints use {@link LlmInSound} → {@link LlmModality#TEXT} (Hugging Face safetensors
- * only; not CTranslate2 {@code model.bin}).
+ * only; not CTranslate2 {@code model.bin}). fastText classifiers use {@link LlmInText} →
+ * {@link LlmModality#LABELS}.
  *
  * <p>GGUF stays packed by default. Pass {@code allowUnpackParameters=true} to dequantize to float32
  * during load (file bytes or in-memory buffer → float tensors; no packed heap residency).
@@ -512,13 +515,20 @@ public final class LlmModelFactory {
       if (isGgufFile(path)) {
         return loadGgufFile(path, streams, allowUnpackParameters, frozen);
       }
+      if (Files.isRegularFile(path) && ModelSupport.isClassificationCheckpoint(path)) {
+        return loadFastText(path, streams, frozen);
+      }
       if (!Files.isDirectory(path)) {
         throw new ModelLoadException(
-          "model path is not an HF model folder (safetensors/ONNX), a Piper voice folder, or a .gguf file: "
+          "model path is not an HF model folder (safetensors/ONNX), a Piper voice folder, "
+            + "a fastText *.bin/*.ftz, or a .gguf file: "
             + path);
       }
       if (ModelSupport.isSynthesisCheckpoint(path)) {
         return loadPiperFolder(path, streams, frozen);
+      }
+      if (ModelSupport.isClassificationCheckpoint(path)) {
+        return loadFastText(path, streams, frozen);
       }
       return loadHfFolder(path, streams, frozen);
     } catch (ModelLoadException e) {
@@ -623,6 +633,32 @@ public final class LlmModelFactory {
     }
   }
 
+  private static LlmModel loadFastText(
+    final Path path,
+    final LlmListener io,
+    final Map<String, Object> options
+  ) throws IOException {
+    long t0 = System.nanoTime();
+    LlmListeners.info(io, null, "CPU backend: " + MatmulRuntime.sequential().backendInfo());
+    Path modelFile = Files.isDirectory(path)
+      ? ModelSupport.findFastTextModelFile(path).orElseThrow(
+      () -> new ModelLoadException("no fastText *.bin / *.ftz in " + path))
+      : path;
+    LlmListeners.info(io, null, "Loading fastText classifier…");
+    long tGraph = System.nanoTime();
+    FastTextModel ft = FastTextModel.load(modelFile);
+    FastTextForClassification classifier = new FastTextForClassification(ft);
+    Config.HfConfig config = Config.HfConfig.forFastText(ft.dimension(), ft.labelCount());
+    Tokenizer tokenizer = Tokenizer.fromJsonDocuments(
+      null, null, null, "{\"vocab_size\":" + Math.max(ft.labelCount(), 1) + "}");
+    LlmListeners.infof(io, null, "Classification graph ready (%s) in %.1fs%n",
+      classifier.architectureName(), (System.nanoTime() - tGraph) / 1e9);
+    LlmListeners.infof(io, null, "Model loaded in %.1fs%n",
+      (System.nanoTime() - t0) / 1e9);
+    return new LlmModelImpl(
+      path, config, new WeightBag(Map.of()), classifier, tokenizer, options);
+  }
+
   private static LlmModel loadHf(
     final ModelFileBundle bundle,
     final LlmListener io,
@@ -672,6 +708,7 @@ public final class LlmModelFactory {
       case HF_SAFETENSORS -> SafetensorsTransport.open(modelFolder, configJson);
       case ONNX -> OnnxTransport.open(modelFolder, configJson);
       case GGUF -> throw new ModelLoadException("HF folder cannot be a GGUF container");
+      case FASTTEXT -> throw new ModelLoadException("HF folder cannot be a fastText container");
     };
   }
 
@@ -688,6 +725,7 @@ public final class LlmModelFactory {
         yield OnnxTransport.open(primary.bytes(), primary.name(), configJson);
       }
       case GGUF -> throw new ModelLoadException("HF bundle cannot be a GGUF container");
+      case FASTTEXT -> throw new ModelLoadException("HF bundle cannot be a fastText container");
     };
   }
 

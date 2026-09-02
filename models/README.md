@@ -210,6 +210,35 @@ Prefer `LLM.builder` for the shared matmul pool; do not use chat. Sample:
 Four-kind desk (mic or WAV → STT → mood of the transcript → chat → TTS, then Java Sound playback):
 `VoiceReplyHelloWorld`.
 
+## fasttext-lid-176 (optional, language identification)
+
+[Meta fastText language identification](https://fasttext.cc/docs/en/language-identification.html)
+— supervised classifier for **176** languages. This script downloads the denser
+[`lid.176.bin`](https://dl.fbaipublicfiles.com/fasttext/supervised-models/lid.176.bin) (~126 MB,
+CC-BY-SA 3.0), which Meta describes as slightly more accurate (and faster) than the compressed
+[`lid.176.ftz`](https://dl.fbaipublicfiles.com/fasttext/supervised-models/lid.176.ftz) (~917 KB).
+The `.ftz` still loads if you place it in the same folder (`.bin` is preferred when both exist).
+
+```bash
+./models/download-fasttext-lid-176.sh
+```
+
+Windows: `.\models\download-fasttext-lid-176.ps1` or `models\download-fasttext-lid-176.cmd`.
+
+Creates `models/fasttext-lid-176/lid.176.bin`. Pure Java load (no JNI). Input is UTF-8 text;
+output is ranked `__label__xx` codes with probabilities.
+
+```java
+try (LlmModel model = LlmModelFactory.make(Path.of("models/fasttext-lid-176"));
+     LLM llm = LLM.builder(model).build()) {
+  LlmOutLabels labels = (LlmOutLabels) llm.generate(
+    LlmInText.of("Bonjour, comment allez-vous ?"), LlmModality.LABELS);
+  System.out.println(labels.topLabel() + " " + labels.top().score());
+}
+```
+
+Sample: `nano-vllm-java-samples` → `com.igormaznitsa.nanollvm.samples.LanguageIdHelloWorld`.
+
 ## piper-en-lessac-medium (optional, English text-to-speech)
 
 [rhasspy/piper-voices Lessac medium](https://huggingface.co/rhasspy/piper-voices/tree/main/en/en_US/lessac/medium)

@@ -1,6 +1,7 @@
 package com.igormaznitsa.nanollvm.models;
 
 import static com.igormaznitsa.nanollvm.models.internal.WeightNames.ARCH_BERT;
+import static com.igormaznitsa.nanollvm.models.internal.WeightNames.ARCH_FASTTEXT;
 import static com.igormaznitsa.nanollvm.models.internal.WeightNames.ARCH_GEMMA3;
 import static com.igormaznitsa.nanollvm.models.internal.WeightNames.ARCH_GEMMA4;
 import static com.igormaznitsa.nanollvm.models.internal.WeightNames.ARCH_LFM2;
@@ -15,14 +16,17 @@ import static java.util.Objects.requireNonNull;
 
 import com.igormaznitsa.nanollvm.exceptions.UnsupportedModelException;
 import com.igormaznitsa.nanollvm.llm.Config;
+import com.igormaznitsa.nanollvm.models.internal.fasttext.FastTextModel;
 import com.igormaznitsa.nanollvm.models.llmcontainer.GgufReader;
 import com.igormaznitsa.nanollvm.utils.NanoLlvmProps;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
 import java.util.regex.Pattern;
+import java.util.stream.Stream;
 
 /**
  * Exact architecture detection and user-facing support catalog. Substring matching is
@@ -45,9 +49,11 @@ public final class ModelSupport {
       Embeddings from GGUF or ONNX: bert encoder (bert / roberta / xlm-roberta)
       Speech from a Hugging Face folder (config.json + *.safetensors): whisper (openai/whisper-*)
       Speech synthesis from a Piper voice folder (*.onnx + *.onnx.json): piper
+      Text classification / language id from a Meta fastText file (*.bin / *.ftz): fasttext (lid.176)
     Not supported: Qwen2 / Qwen2.5, Qwen3.5 / Qwen3-Next / Fara, vision-language models, Gemma 1 / 2, \
     Gemma 4 vision/audio towers, Mistral / Mixtral, Phi, MoE, GGUF Llama / Gemma, Hugging Face BERT safetensors, \
-    CTranslate2 / faster-whisper model.bin, Whisper GGUF / ONNX, ONNX Runtime Piper execution.""";
+    CTranslate2 / faster-whisper model.bin, Whisper GGUF / ONNX, ONNX Runtime Piper execution, \
+    unsupervised fastText word vectors, JNI fastText bindings.""";
 
   private static final Pattern HF_CLASS_SUFFIX = Pattern.compile(
     "(ForCausalLM|ForConditionalGeneration|ForSequenceClassification|ForMaskedLM"
@@ -217,6 +223,16 @@ public final class ModelSupport {
   }
 
   /**
+   * {@code true} when {@code config} is a fastText text classifier this library can run.
+   *
+   * @since 1.4.0
+   */
+  public static boolean isClassification(final Config.HfConfig config) {
+    Verdict verdict = inspect(requireNonNull(config, "config"));
+    return verdict.supported() && verdict.selection().isClassification();
+  }
+
+  /**
    * {@code true} when {@code path} is a Piper voice folder ({@code *.onnx} + {@code *.onnx.json}),
    * without loading weights.
    *
@@ -228,6 +244,68 @@ public final class ModelSupport {
       return false;
     }
     return findPiperSidecar(file).isPresent();
+  }
+
+  /**
+   * {@code true} when {@code path} is a Meta fastText {@code *.bin} / {@code *.ftz} file, or a
+   * folder containing one (magic {@code 793712314}), without fully loading weights.
+   *
+   * @since 1.4.0
+   */
+  public static boolean isClassificationCheckpoint(final Path path) {
+    Path file = requireNonNull(path, "path").toAbsolutePath().normalize();
+    if (isGgufFile(file)) {
+      return false;
+    }
+    if (Files.isRegularFile(file)) {
+      return FastTextModel.isFastTextFile(file);
+    }
+    if (!Files.isDirectory(file)) {
+      return false;
+    }
+    return findFastTextModelFile(file).isPresent();
+  }
+
+  /**
+   * First fastText model file under {@code folder} ({@code lid.176.bin}, {@code lid.176.ftz},
+   * then any magic-matching {@code *.bin} / {@code *.ftz}).
+   *
+   * @since 1.4.0
+   */
+  public static Optional<Path> findFastTextModelFile(final Path folder) {
+    Path dir = requireNonNull(folder, "folder").toAbsolutePath().normalize();
+    if (!Files.isDirectory(dir)) {
+      return Optional.empty();
+    }
+    Optional<Path> preferred = Stream.of("lid.176.bin", "lid.176.ftz", "model.bin", "model.ftz")
+      .map(dir::resolve)
+      .filter(FastTextModel::isFastTextFile)
+      .findFirst();
+    if (preferred.isPresent()) {
+      return preferred;
+    }
+    try (var stream = Files.list(dir)) {
+      return stream
+        .filter(Files::isRegularFile)
+        .filter(ModelSupport::looksLikeFastTextName)
+        .sorted(Comparator.comparing(path -> {
+          Path name = path.getFileName();
+          return name == null ? "" : name.toString().toLowerCase(ROOT);
+        }))
+        .filter(FastTextModel::isFastTextFile)
+        .findFirst();
+    } catch (IOException ignored) {
+      return Optional.empty();
+    }
+  }
+
+  private static boolean looksLikeFastTextName(final Path candidate) {
+    Path name = candidate.getFileName();
+    if (name == null) {
+      return false;
+    }
+    String lower = name.toString().toLowerCase(ROOT);
+    return lower.endsWith(".ftz") || lower.endsWith(".bin");
   }
 
   static Optional<Path> findPiperSidecar(final Path folder) {
@@ -339,6 +417,39 @@ public final class ModelSupport {
   public static String synthesizeMisuseMessage(final String architectureName) {
     return ("This checkpoint is a %s model, not Piper text-to-speech. Chat uses LLM.chat; "
       + "embeddings use LLM.generate(..., EMBEDDING); Whisper uses LLM.generate(..., TEXT).%n%n%s")
+      .formatted(blank(architectureName), CATALOG);
+  }
+
+  /**
+   * Message when chat APIs are used on a classification checkpoint.
+   *
+   * @since 1.4.0
+   */
+  public static String classificationEngineMisuseMessage(final String architectureName) {
+    return ("This checkpoint is a %s text classifier, not a chat model. Use "
+      + "LLM.builder(model).build() then LLM.generate(LlmInText, LABELS).%n%n%s")
+      .formatted(blank(architectureName), CATALOG);
+  }
+
+  /**
+   * Message when embedding APIs are used on a classification checkpoint.
+   *
+   * @since 1.4.0
+   */
+  public static String classificationEmbedMisuseMessage(final String architectureName) {
+    return ("This checkpoint is a %s text classifier, not an embedding encoder. Call "
+      + "LLM.generate(LlmInText, LABELS).%n%n%s").formatted(blank(architectureName), CATALOG);
+  }
+
+  /**
+   * Message when LABELS generate is used on a non-classifier checkpoint.
+   *
+   * @since 1.4.0
+   */
+  public static String classifyMisuseMessage(final String architectureName) {
+    return ("This checkpoint is a %s model, not a fastText classifier. Chat uses LLM.chat; "
+      + "embeddings use LLM.generate(..., EMBEDDING); Whisper uses LLM.generate(..., TEXT); "
+      + "Piper uses LLM.generate(..., AUDIO).%n%n%s")
       .formatted(blank(architectureName), CATALOG);
   }
 
@@ -499,6 +610,14 @@ public final class ModelSupport {
         modelType,
         architectures);
     }
+    if (ARCH_FASTTEXT.equals(id) && source != Source.FASTTEXT) {
+      throw unsupported(
+        "fastText classifiers load from a Meta *.bin / *.ftz file (or a folder containing one), "
+          + "not from GGUF, ONNX, or Hugging Face safetensors. Use lid.176.bin / lid.176.ftz from "
+          + "https://fasttext.cc/docs/en/language-identification.html",
+        modelType,
+        architectures);
+    }
   }
 
   private static Verdict classifyToken(final String token) {
@@ -582,6 +701,10 @@ public final class ModelSupport {
     if (token.equals("piper") || token.equals("piper_vits") || token.equals("pipervits")
       || token.equals("vits")) {
       return Verdict.ok(ARCH_PIPER, Kind.SYNTHESIS);
+    }
+    if (token.equals("fasttext") || token.equals("fast_text") || token.equals("lid")
+      || token.equals("language_id") || token.equals("languageidentification")) {
+      return Verdict.ok(ARCH_FASTTEXT, Kind.CLASSIFICATION);
     }
     String known = knownUnsupportedReason(token);
     if (known != null) {
@@ -765,7 +888,14 @@ public final class ModelSupport {
      *
      * @since 1.3.0
      */
-    SYNTHESIS
+    SYNTHESIS,
+    /**
+     * Text classifier used with {@link LlmModel#generate(LlmInput, LlmModality)}
+     * ({@link LlmInText} → labels).
+     *
+     * @since 1.4.0
+     */
+    CLASSIFICATION
   }
 
   /**
@@ -779,7 +909,13 @@ public final class ModelSupport {
     /** Hugging Face folder with {@code *.onnx} (Tier A, since 1.1.0). */
     ONNX,
     /** Single {@code .gguf} file. */
-    GGUF
+    GGUF,
+    /**
+     * Meta fastText supervised {@code *.bin} / {@code *.ftz} file (or folder containing one).
+     *
+     * @since 1.4.0
+     */
+    FASTTEXT
   }
 
   /**
@@ -826,6 +962,15 @@ public final class ModelSupport {
      */
     public boolean isSynthesis() {
       return this.kind == Kind.SYNTHESIS;
+    }
+
+    /**
+     * {@code true} when this checkpoint is a fastText (or similar) text classifier.
+     *
+     * @since 1.4.0
+     */
+    public boolean isClassification() {
+      return this.kind == Kind.CLASSIFICATION;
     }
   }
 

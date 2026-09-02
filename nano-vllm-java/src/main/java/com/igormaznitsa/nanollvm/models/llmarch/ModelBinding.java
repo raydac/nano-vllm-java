@@ -31,6 +31,8 @@ public final class ModelBinding {
     return switch (catalog.source()) {
       case GGUF -> bindGguf(catalog);
       case HF_SAFETENSORS, ONNX -> bindHfCatalog(catalog);
+      case FASTTEXT -> throw new IllegalArgumentException(
+        "fastText models are not bound through ContainerCatalog");
     };
   }
 

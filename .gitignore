@@ -22,6 +22,7 @@ models/whisper-base/
 models/whisper-tiny/
 models/piper-ru-irina-medium/
 models/piper-en-lessac-medium/
+models/fasttext-lid-176/
 
 *.wav
 

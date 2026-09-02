@@ -12,11 +12,13 @@ import com.igormaznitsa.nanollvm.models.LlmInSound;
 import com.igormaznitsa.nanollvm.models.LlmInText;
 import com.igormaznitsa.nanollvm.models.LlmInTokenIds;
 import com.igormaznitsa.nanollvm.models.LlmInput;
+import com.igormaznitsa.nanollvm.models.LlmLabelScore;
 import com.igormaznitsa.nanollvm.models.LlmModalities;
 import com.igormaznitsa.nanollvm.models.LlmModality;
 import com.igormaznitsa.nanollvm.models.LlmModel;
 import com.igormaznitsa.nanollvm.models.LlmOptionalData;
 import com.igormaznitsa.nanollvm.models.LlmOutEmbedding;
+import com.igormaznitsa.nanollvm.models.LlmOutLabels;
 import com.igormaznitsa.nanollvm.models.LlmOutSoundData;
 import com.igormaznitsa.nanollvm.models.LlmOutText;
 import com.igormaznitsa.nanollvm.models.LlmOutput;
@@ -38,8 +40,8 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.locks.ReentrantLock;
 
 /**
- * Library {@link LlmModel}: weights, causal graph, embedding encoder, speech graph, or
- * synthesis graph, unpack, and engine lease.
+ * Library {@link LlmModel}: weights, causal graph, embedding encoder, speech graph,
+ * synthesis graph, or classification graph, unpack, and engine lease.
  */
 public final class LlmModelImpl extends LlmModel {
 
@@ -56,6 +58,7 @@ public final class LlmModelImpl extends LlmModel {
   private final boolean embeddingModel;
   private final boolean speechModel;
   private final boolean synthesisModel;
+  private final boolean classificationModel;
   private final LlmModalities modalities;
   private final LlmModalities usableModalities;
   private final AtomicReference<WeightBag> weights;
@@ -63,6 +66,7 @@ public final class LlmModelImpl extends LlmModel {
   private final AtomicReference<EmbeddingEncoder> encoder;
   private final AtomicReference<SpeechToText> speech;
   private final AtomicReference<TextToSpeech> synthesis;
+  private final AtomicReference<TextClassifier> classifier;
   private final ReentrantLock unpackLock = new ReentrantLock();
   private final AtomicBoolean closed = new AtomicBoolean();
   private final AtomicInteger liveEngines = new AtomicInteger();
@@ -75,7 +79,7 @@ public final class LlmModelImpl extends LlmModel {
     final Tokenizer tokenizer,
     final Map<String, ?> options
   ) {
-    this(path, hfConfig, weights, network, null, null, null, tokenizer, options);
+    this(path, hfConfig, weights, network, null, null, null, null, tokenizer, options);
   }
 
   public LlmModelImpl(
@@ -86,7 +90,7 @@ public final class LlmModelImpl extends LlmModel {
     final Tokenizer tokenizer,
     final Map<String, ?> options
   ) {
-    this(path, hfConfig, weights, null, encoder, null, null, tokenizer, options);
+    this(path, hfConfig, weights, null, encoder, null, null, null, tokenizer, options);
   }
 
   public LlmModelImpl(
@@ -97,7 +101,7 @@ public final class LlmModelImpl extends LlmModel {
     final Tokenizer tokenizer,
     final Map<String, ?> options
   ) {
-    this(path, hfConfig, weights, null, null, speech, null, tokenizer, options);
+    this(path, hfConfig, weights, null, null, speech, null, null, tokenizer, options);
   }
 
   public LlmModelImpl(
@@ -108,7 +112,18 @@ public final class LlmModelImpl extends LlmModel {
     final Tokenizer tokenizer,
     final Map<String, ?> options
   ) {
-    this(path, hfConfig, weights, null, null, null, synthesis, tokenizer, options);
+    this(path, hfConfig, weights, null, null, null, synthesis, null, tokenizer, options);
+  }
+
+  public LlmModelImpl(
+    final Path path,
+    final Config.HfConfig hfConfig,
+    final WeightBag weights,
+    final TextClassifier classifier,
+    final Tokenizer tokenizer,
+    final Map<String, ?> options
+  ) {
+    this(path, hfConfig, weights, null, null, null, null, classifier, tokenizer, options);
   }
 
   private LlmModelImpl(
@@ -119,14 +134,16 @@ public final class LlmModelImpl extends LlmModel {
     final EmbeddingEncoder encoder,
     final SpeechToText speech,
     final TextToSpeech synthesis,
+    final TextClassifier classifier,
     final Tokenizer tokenizer,
     final Map<String, ?> options
   ) {
     int graphs = (network != null ? 1 : 0) + (encoder != null ? 1 : 0)
-      + (speech != null ? 1 : 0) + (synthesis != null ? 1 : 0);
+      + (speech != null ? 1 : 0) + (synthesis != null ? 1 : 0)
+      + (classifier != null ? 1 : 0);
     if (graphs != 1) {
       throw new IllegalArgumentException(
-        "exactly one of network, encoder, speech, or synthesis must be set");
+        "exactly one of network, encoder, speech, synthesis, or classifier must be set");
     }
     this.path = requireNonNull(path, "path").toAbsolutePath().normalize();
     this.hfConfig = requireNonNull(hfConfig, "hfConfig");
@@ -135,14 +152,16 @@ public final class LlmModelImpl extends LlmModel {
     this.encoder = new AtomicReference<>(encoder);
     this.speech = new AtomicReference<>(speech);
     this.synthesis = new AtomicReference<>(synthesis);
+    this.classifier = new AtomicReference<>(classifier);
     this.embeddingModel = encoder != null;
     this.speechModel = speech != null;
     this.synthesisModel = synthesis != null;
+    this.classificationModel = classifier != null;
     this.tokenizer = requireNonNull(tokenizer, "tokenizer");
     this.options = copyAndValidateOptions(options);
     this.modalities = LlmModalities.ofCheckpoint(this.hfConfig, this.embeddingModel);
     this.usableModalities = LlmModalities.usable(
-      this.embeddingModel, this.speechModel, this.synthesisModel);
+      this.embeddingModel, this.speechModel, this.synthesisModel, this.classificationModel);
   }
 
   public static LlmModelImpl peer(final LlmModel model) {
@@ -280,6 +299,10 @@ public final class LlmModelImpl extends LlmModel {
     if (synthesis != null) {
       return synthesis.architectureName();
     }
+    TextClassifier classifier = this.classifier.get();
+    if (classifier != null) {
+      return classifier.architectureName();
+    }
     return this.hfConfig.modelType();
   }
 
@@ -315,6 +338,12 @@ public final class LlmModelImpl extends LlmModel {
   public boolean isSynthesisModel() {
     this.assertNotClosed();
     return this.synthesis.get() != null;
+  }
+
+  @Override
+  public boolean isClassificationModel() {
+    this.assertNotClosed();
+    return this.classifier.get() != null;
   }
 
   @Override
@@ -362,6 +391,9 @@ public final class LlmModelImpl extends LlmModel {
   }
 
   private String kindLabel() {
+    if (this.classificationModel) {
+      return "classification";
+    }
     if (this.synthesisModel) {
       return "synthesis";
     }
@@ -376,6 +408,10 @@ public final class LlmModelImpl extends LlmModel {
     String name = (fileName == null ? this.path.toString() : fileName.toString()).toLowerCase(ROOT);
     if (name.endsWith(".gguf")) {
       return "gguf";
+    }
+    if (name.endsWith(".bin") || name.endsWith(".ftz")
+      || FastTextForClassification.ARCH_FASTTEXT.equals(this.architectureName())) {
+      return "fasttext";
     }
     return this.path.toString().contains("nanollvm-memory") ? "memory" : "folder";
   }
@@ -478,6 +514,8 @@ public final class LlmModelImpl extends LlmModel {
         new LlmOutEmbedding(this.embed(ids.tokenIds(), runtime));
       case LlmInText text when outputModality == LlmModality.AUDIO ->
         this.synthesizeSound(text.text(), runtime, random);
+      case LlmInText text when outputModality == LlmModality.LABELS ->
+        this.classifyLabels(text.text());
       case LlmInText ignored when outputModality == LlmModality.TEXT ->
         throw new IllegalStateException(
           "text completion requires LLM.builder(model).build() then "
@@ -490,6 +528,17 @@ public final class LlmModelImpl extends LlmModel {
           outputModality.wireName(),
           this.usableModalities()));
     };
+  }
+
+  private LlmOutLabels classifyLabels(final CharSequence text) {
+    List<TextClassifier.ScoredLabel> scored = this.requireClassifier().classify(text, 5, 0f);
+    if (scored.isEmpty()) {
+      throw new IllegalArgumentException(
+        "classification produced no labels for the given text (topK=5, threshold=0)");
+    }
+    return new LlmOutLabels(scored.stream()
+      .map(prediction -> new LlmLabelScore(prediction.label(), prediction.score()))
+      .toList());
   }
 
   private String transcribeSound(final LlmInSound sound, final MatmulRuntime runtime) {
@@ -553,6 +602,7 @@ public final class LlmModelImpl extends LlmModel {
       this.encoder.set(null);
       this.speech.set(null);
       this.synthesis.set(null);
+      this.classifier.set(null);
       if (bag != null) {
         bag.releaseResources();
       }
@@ -562,9 +612,12 @@ public final class LlmModelImpl extends LlmModel {
   }
 
   public CausalLM resolveNetwork(final boolean allowUnpackParameters, final LlmListener io) {
-    if (this.isEmbeddingModel() || this.isSpeechModel() || this.isSynthesisModel()) {
+    if (this.isEmbeddingModel() || this.isSpeechModel() || this.isSynthesisModel()
+      || this.isClassificationModel()) {
       throw new IllegalStateException(
-        this.isSynthesisModel()
+        this.isClassificationModel()
+          ? ModelSupport.classificationEngineMisuseMessage(this.architectureName())
+          : this.isSynthesisModel()
           ? ModelSupport.synthesisEngineMisuseMessage(this.architectureName())
           : this.isSpeechModel()
           ? ModelSupport.speechEngineMisuseMessage(this.architectureName())
@@ -617,7 +670,9 @@ public final class LlmModelImpl extends LlmModel {
     CausalLM current = this.network.get();
     if (current == null) {
       throw new IllegalStateException(
-        this.synthesis.get() != null
+        this.classifier.get() != null
+          ? ModelSupport.classificationEngineMisuseMessage(this.architectureName())
+          : this.synthesis.get() != null
           ? ModelSupport.synthesisEngineMisuseMessage(this.architectureName())
           : this.speech.get() != null
           ? ModelSupport.speechEngineMisuseMessage(this.architectureName())
@@ -633,7 +688,9 @@ public final class LlmModelImpl extends LlmModel {
     EmbeddingEncoder current = this.encoder.get();
     if (current == null) {
       throw new IllegalStateException(
-        this.synthesis.get() != null
+        this.classifier.get() != null
+          ? ModelSupport.classificationEmbedMisuseMessage(this.architectureName())
+          : this.synthesis.get() != null
           ? ModelSupport.synthesisEmbedMisuseMessage(this.architectureName())
           : this.speech.get() != null
           ? ModelSupport.speechEmbedMisuseMessage(this.architectureName())
@@ -660,6 +717,16 @@ public final class LlmModelImpl extends LlmModel {
     if (current == null) {
       throw new IllegalStateException(
         ModelSupport.synthesizeMisuseMessage(this.architectureName()));
+    }
+    return current;
+  }
+
+  private TextClassifier requireClassifier() {
+    this.assertNotClosed();
+    TextClassifier current = this.classifier.get();
+    if (current == null) {
+      throw new IllegalStateException(
+        ModelSupport.classifyMisuseMessage(this.architectureName()));
     }
     return current;
   }

@@ -5,9 +5,16 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased] — 1.3.1-SNAPSHOT
+## [Unreleased] — 1.4.0-SNAPSHOT
 
 ### Added
+- Meta fastText supervised text classification (`*.bin` / `*.ftz`), including the official
+  [language-identification](https://fasttext.cc/docs/en/language-identification.html) models
+  (`lid.176.bin` preferred / `lid.176.ftz`, 176 languages). Load a file or folder with
+  `LlmModelFactory.make`, then `LLM.generate(LlmInText, LABELS)` → ranked `LlmOutLabels`
+  (`__label__xx` codes with probabilities). Pure Java (no JNI); hierarchical softmax,
+  softmax, and one-vs-all. Download: `models/download-fasttext-lid-176.sh` (or `.ps1` / `.cmd`)
+  fetches the denser `lid.176.bin` (~126 MB). Sample: `LanguageIdHelloWorld`.
 - Optional TornadoVM acceleration compiled into the main library (`tornado-api` optional/provided,
   `tornado-runtime` optional/runtime — not transitive for consumers). When TornadoVM is on the module
   path and a TornadoVM-enabled JDK reports at least one device, `-Dnanollvm.kernels=auto` (default)

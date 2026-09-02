@@ -948,6 +948,55 @@ public final class Config {
     }
 
     /**
+     * Stub blueprint for a loaded Meta fastText supervised model.
+     *
+     * @param dimension  embedding width ({@code args.dim})
+     * @param labelCount number of output labels
+     * @return blueprint with {@link #isFastText()} true
+     * @since 1.4.0
+     */
+    public static HfConfig forFastText(final int dimension, final int labelCount) {
+      if (dimension <= 0) {
+        throw new IllegalArgumentException("dimension must be positive");
+      }
+      if (labelCount <= 0) {
+        throw new IllegalArgumentException("labelCount must be positive");
+      }
+      return new HfConfig(
+        labelCount,
+        0,
+        0,
+        dimension,
+        0,
+        0,
+        0,
+        0,
+        1e-5f,
+        "relu",
+        false,
+        false,
+        0f,
+        null,
+        "float32",
+        "fasttext",
+        List.of("FastText"),
+        "relu",
+        0,
+        List.of(),
+        0f,
+        0f,
+        0,
+        false,
+        false,
+        false,
+        false,
+        false,
+        null,
+        null,
+        null);
+    }
+
+    /**
      * Attention head dim at {@code layerIndex}. Non-Gemma-4 models use {@link #headDim()} for
      * every layer. Gemma 4 global (non-sliding) layers may use {@link Gemma4Text#globalHeadDim()}.
      *
@@ -1136,6 +1185,15 @@ public final class Config {
      */
     public boolean isPiper() {
       return this.piper != null;
+    }
+
+    /**
+     * {@code true} when this blueprint is a Meta fastText supervised classifier.
+     *
+     * @since 1.4.0
+     */
+    public boolean isFastText() {
+      return "fasttext".equals(this.modelType);
     }
   }
 

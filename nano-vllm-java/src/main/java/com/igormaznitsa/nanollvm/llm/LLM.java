@@ -1455,7 +1455,9 @@ public final class LLM implements AutoCloseable {
 
   private void requireCausal() {
     if (!this.model.isCausalModel()) {
-      throw new IllegalStateException(this.model.isSpeechModel()
+      throw new IllegalStateException(this.model.isClassificationModel()
+        ? ModelSupport.classificationEngineMisuseMessage(this.model.architectureName())
+        : this.model.isSpeechModel()
         ? ModelSupport.speechEngineMisuseMessage(this.model.architectureName())
         : this.model.isSynthesisModel()
         ? ModelSupport.synthesisEngineMisuseMessage(this.model.architectureName())

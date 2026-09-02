@@ -40,6 +40,12 @@ public final class WeightNames {
    * @since 1.3.0
    */
   public static final String ARCH_PIPER = "piper";
+  /**
+   * Meta fastText supervised classifier ({@code *.bin} / {@code *.ftz}), including language id.
+   *
+   * @since 1.4.0
+   */
+  public static final String ARCH_FASTTEXT = "fasttext";
 
   public static final String EMBED_TOKENS = "model.embed_tokens.weight";
   public static final String MODEL_NORM = "model.norm.weight";

@@ -19,16 +19,17 @@ import java.util.Set;
  * inference state (KV cache, scheduler, sampling) lives on each {@link LLM}, not here. Load-time
  * options ({@link #options()}, including {@link #OPTION_THINK_TAGS} and
  * {@link #OPTION_CHAT_SPECIALS}) are frozen at
- * {@link LlmModelFactory#make} and never change. Embedding, speech, and synthesis graphs use
+ * {@link LlmModelFactory#make} and never change. Embedding, speech, synthesis, and classification
+ * graphs use
  * {@link #generate(LlmInput, LlmModality)} / {@link LLM#generate(LlmInput, LlmModality)} for typed
- * {@link LlmOutput} results (text, sound, or embedding). Chat dialog stays on {@link LLM#chat} /
- * {@link com.igormaznitsa.nanollvm.chat.ChatSession}; batched token generation stays on
- * {@link LLM#generate(java.util.List, com.igormaznitsa.nanollvm.llm.SamplingParams)}.
+ * {@link LlmOutput} results (text, sound, embedding, or labels). Chat dialog stays on
+ * {@link LLM#chat} / {@link com.igormaznitsa.nanollvm.chat.ChatSession}; batched token generation
+ * stays on {@link LLM#generate(java.util.List, com.igormaznitsa.nanollvm.llm.SamplingParams)}.
  *
  * <p>{@link #modalities()} is what the checkpoint file declares (Gemma 4 QAT mobile includes
  * image, audio, and video keys). {@link #usableModalities()} is what this library actually
- * runs: text→text chat, text→embedding, audio→text Whisper, or text→audio Piper. Extra towers
- * are skipped at load.
+ * runs: text→text chat, text→embedding, audio→text Whisper, text→audio Piper, or text→labels
+ * fastText. Extra towers are skipped at load.
  *
  * <p>GGUF models keep quantized weights packed by default. Prefer unpacking at load with
  * {@link LlmModelFactory#make(Path, LlmListener, boolean)} ({@code true}) so float32 is built
@@ -138,7 +139,8 @@ public abstract sealed class LlmModel implements AutoCloseable permits LlmModelI
    * also declares image, audio, and video input. Embedding encoders are
    * {@link LlmModalities#TEXT_TO_EMBEDDING}. Whisper speech models are
    * {@link LlmModalities#AUDIO_TO_TEXT}. Piper synthesis models are
-   * {@link LlmModalities#TEXT_TO_AUDIO}. Gemma 4 extra towers are skipped at load — see
+   * {@link LlmModalities#TEXT_TO_AUDIO}. fastText classifiers are
+   * {@link LlmModalities#TEXT_TO_LABELS}. Gemma 4 extra towers are skipped at load — see
    * {@link #usableModalities()}. Safe to call after {@link #close()}.
    *
    * @since 1.2.0
@@ -147,8 +149,8 @@ public abstract sealed class LlmModel implements AutoCloseable permits LlmModelI
 
   /**
    * Content types this library actually consumes and produces for the loaded graph: text→text
-   * chat, text→embedding, audio→text speech, or text→audio synthesis. Safe to call after
-   * {@link #close()}.
+   * chat, text→embedding, audio→text speech, text→audio synthesis, or text→labels
+   * classification. Safe to call after {@link #close()}.
    *
    * @since 1.2.0
    */
@@ -207,6 +209,16 @@ public abstract sealed class LlmModel implements AutoCloseable permits LlmModelI
   public abstract boolean isSynthesisModel();
 
   /**
+   * {@code true} when this file is fastText (or other) text classification — use
+   * {@link LLM#builder(LlmModel)} then {@link LLM#generate(LlmInput, LlmModality)} with
+   * {@link LlmInText} → {@link LlmModality#LABELS} ({@link LlmOutLabels}).
+   * {@link #generate(LlmInput, LlmModality)} remains a sequential shortcut.
+   *
+   * @since 1.4.0
+   */
+  public abstract boolean isClassificationModel();
+
+  /**
    * {@code true} when GGUF/QAT weights are still packed (not widened to float32).
    */
   public abstract boolean hasPackedWeights();
@@ -235,6 +247,7 @@ public abstract sealed class LlmModel implements AutoCloseable permits LlmModelI
    *   <li>{@link LlmInTokenIds} → {@link LlmModality#EMBEDDING} — already-tokenized ids</li>
    *   <li>{@link LlmInText} → {@link LlmModality#AUDIO} — Piper synthesis ({@link LlmOutSoundData})</li>
    *   <li>{@link LlmInSound} → {@link LlmModality#TEXT} — Whisper transcription</li>
+   *   <li>{@link LlmInText} → {@link LlmModality#LABELS} — fastText classification ({@link LlmOutLabels})</li>
    * </ul>
    * Text completion ({@link LlmInText} → {@link LlmModality#TEXT}) needs an {@link LLM} engine —
    * call {@link LLM#generate(LlmInput, LlmModality)} instead.

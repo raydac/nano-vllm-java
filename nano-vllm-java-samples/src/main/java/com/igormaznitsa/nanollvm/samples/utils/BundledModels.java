@@ -82,6 +82,12 @@ public final class BundledModels {
   public static final String PIPER_EN_LESSAC_MEDIUM =
     DEFAULT_MODELS_DIR + "/piper-en-lessac-medium";
   /**
+   * Bundled Meta fastText language-id folder ({@code lid.176.bin}) under {@link #DEFAULT_MODELS_DIR}.
+   *
+   * @since 1.4.0
+   */
+  public static final String FASTTEXT_LID_176 = DEFAULT_MODELS_DIR + "/fasttext-lid-176";
+  /**
    * Bundled Tiny-LLM ONNX folder under {@link #DEFAULT_MODELS_DIR}.
    *
    * @since 1.1.0
@@ -161,6 +167,18 @@ public final class BundledModels {
         .orElseThrow(() -> new IllegalStateException(
             "no Whisper checkpoint under " + modelsRoot()
                 + ". Run models/download-whisper-tiny.sh or models/download-whisper-base.sh"));
+  }
+
+  /**
+   * Meta fastText lid.176 folder ({@code lid.176.bin} preferred, or {@code lid.176.ftz}).
+   *
+   * @since 1.4.0
+   */
+  public static Path requireFastTextLid() {
+    return find(FASTTEXT_LID_176)
+      .orElseThrow(() -> new IllegalStateException(
+        "no fastText language-id model under " + modelsRoot()
+          + ". Run models/download-fasttext-lid-176.sh"));
   }
 
   /**
@@ -273,6 +291,7 @@ public final class BundledModels {
       case "whisper-tiny" -> "models/download-whisper-tiny.sh";
       case "piper-en-lessac-medium" -> "models/download-piper-en-lessac-medium.sh";
       case "piper-ru-irina-medium" -> "models/download-piper-ru-irina-medium.sh";
+      case "fasttext-lid-176" -> "models/download-fasttext-lid-176.sh";
       case "Tiny-LLM-ONNX" -> "models/download-tiny-llm-onnx.sh";
       case "SmolLM2-135M-Instruct-ONNX" -> "models/download-smollm2-135m-instruct-onnx.sh";
       default -> null;
@@ -291,7 +310,8 @@ public final class BundledModels {
 
   private static boolean isModel(final Path path) {
     return isGgufFile(path) || isHfModelDir(path) || isDirWithGguf(path)
-      || ModelSupport.isSynthesisCheckpoint(path);
+      || ModelSupport.isSynthesisCheckpoint(path)
+      || ModelSupport.isClassificationCheckpoint(path);
   }
 
   private static boolean isGgufFile(final Path path) {

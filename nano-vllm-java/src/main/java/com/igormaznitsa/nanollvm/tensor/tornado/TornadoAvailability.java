@@ -7,7 +7,7 @@ import uk.ac.manchester.tornado.api.runtime.TornadoRuntimeProvider;
 /**
  * One-time probe for a usable TornadoVM runtime and accelerator device.
  *
- * @since 1.3.1
+ * @since 1.4.0
  */
 final class TornadoAvailability {
 

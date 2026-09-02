@@ -34,6 +34,7 @@ public final class OptionalModelAssumptions {
   private static final String WHISPER_TINY = "whisper-tiny";
   private static final String PIPER_RU_IRINA_MEDIUM = "piper-ru-irina-medium";
   private static final String PIPER_EN_LESSAC_MEDIUM = "piper-en-lessac-medium";
+  private static final String FASTTEXT_LID_176 = "fasttext-lid-176";
 
   private OptionalModelAssumptions() {
   }
@@ -120,6 +121,13 @@ public final class OptionalModelAssumptions {
       "models/download-piper-ru-irina-medium.sh");
   }
 
+  public static Path requireFastTextLid() {
+    return require(
+      findModel(FASTTEXT_LID_176),
+      "fasttext-lid-176",
+      "models/download-fasttext-lid-176.sh");
+  }
+
   public static Path requireLocalRag() {
     return require(
       findRag(),
@@ -178,7 +186,8 @@ public final class OptionalModelAssumptions {
 
   private static boolean isModel(final Path path) {
     return isGgufFile(path) || isHfModelDir(path) || isDirWithGguf(path)
-      || ModelSupport.isSynthesisCheckpoint(path);
+      || ModelSupport.isSynthesisCheckpoint(path)
+      || ModelSupport.isClassificationCheckpoint(path);
   }
 
   private static boolean isGgufFile(final Path path) {

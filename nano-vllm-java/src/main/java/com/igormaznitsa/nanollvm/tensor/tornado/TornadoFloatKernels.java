@@ -5,7 +5,7 @@ import com.igormaznitsa.nanollvm.tensor.FloatKernels;
 /**
  * Hybrid {@link FloatKernels}: large dense GEMV on TornadoVM, everything else on a CPU backend.
  *
- * @since 1.3.1
+ * @since 1.4.0
  */
 public final class TornadoFloatKernels extends FloatKernels {
 

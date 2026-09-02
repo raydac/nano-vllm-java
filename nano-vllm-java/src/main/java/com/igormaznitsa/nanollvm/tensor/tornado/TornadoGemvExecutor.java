@@ -5,6 +5,7 @@ import static uk.ac.manchester.tornado.api.enums.DataTransferMode.FIRST_EXECUTIO
 
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Objects;
 import java.util.concurrent.locks.ReentrantLock;
 import uk.ac.manchester.tornado.api.ImmutableTaskGraph;
 import uk.ac.manchester.tornado.api.TaskGraph;
@@ -14,7 +15,7 @@ import uk.ac.manchester.tornado.api.exceptions.TornadoExecutionPlanException;
 /**
  * Launches {@link TornadoGemvKernels#gemv} on the default TornadoVM device.
  *
- * @since 1.3.1
+ * @since 1.4.0
  */
 final class TornadoGemvExecutor {
 
@@ -59,13 +60,38 @@ final class TornadoGemvExecutor {
     }
   }
 
-  private record GemvSignature(
-    float[] x, int xOff,
-    float[] w, int wOff,
-    float[] bias,
-    float[] y, int yOff,
-    int in, int out0, int out1
-  ) {
+  private static final class GemvSignature {
+
+    private final float[] x;
+    private final int xOff;
+    private final float[] w;
+    private final int wOff;
+    private final float[] bias;
+    private final float[] y;
+    private final int yOff;
+    private final int in;
+    private final int out0;
+    private final int out1;
+
+    private GemvSignature(
+      final float[] x, final int xOff,
+      final float[] w, final int wOff,
+      final float[] bias,
+      final float[] y, final int yOff,
+      final int in, final int out0, final int out1
+    ) {
+      this.x = x;
+      this.xOff = xOff;
+      this.w = w;
+      this.wOff = wOff;
+      this.bias = bias;
+      this.y = y;
+      this.yOff = yOff;
+      this.in = in;
+      this.out0 = out0;
+      this.out1 = out1;
+    }
+
     static GemvSignature of(
       final float[] x, final int xOff,
       final float[] w, final int wOff,
@@ -74,6 +100,43 @@ final class TornadoGemvExecutor {
       final int in, final int out0, final int out1
     ) {
       return new GemvSignature(x, xOff, w, wOff, bias, y, yOff, in, out0, out1);
+    }
+
+    @SuppressWarnings("ReferenceEquality")
+    private static boolean buffersIdentical(final float[] left, final float[] right) {
+      return left == right;
+    }
+
+    float[] x() {
+      return this.x;
+    }
+
+    int xOff() {
+      return this.xOff;
+    }
+
+    float[] w() {
+      return this.w;
+    }
+
+    int wOff() {
+      return this.wOff;
+    }
+
+    float[] y() {
+      return this.y;
+    }
+
+    int yOff() {
+      return this.yOff;
+    }
+
+    int in() {
+      return this.in;
+    }
+
+    int out0() {
+      return this.out0;
     }
 
     boolean hasBias() {
@@ -86,6 +149,32 @@ final class TornadoGemvExecutor {
 
     int hasBiasFlag() {
       return this.hasBias() ? 1 : 0;
+    }
+
+    int out1() {
+      return this.out1;
+    }
+
+    @Override
+    public boolean equals(final Object other) {
+      if (!(other instanceof GemvSignature that)) {
+        return false;
+      }
+      return buffersIdentical(this.x, that.x) && this.xOff == that.xOff
+        && buffersIdentical(this.w, that.w) && this.wOff == that.wOff
+        && buffersIdentical(this.bias, that.bias)
+        && buffersIdentical(this.y, that.y) && this.yOff == that.yOff
+        && this.in == that.in && this.out0 == that.out0 && this.out1 == that.out1;
+    }
+
+    @Override
+    public int hashCode() {
+      return Objects.hash(
+        System.identityHashCode(this.x), this.xOff,
+        System.identityHashCode(this.w), this.wOff,
+        System.identityHashCode(this.bias),
+        System.identityHashCode(this.y), this.yOff,
+        this.in, this.out0, this.out1);
     }
   }
 
@@ -133,7 +222,8 @@ final class TornadoGemvExecutor {
     void closeQuietly() {
       try {
         this.close();
-      } catch (TornadoExecutionPlanException ignored) {
+      } catch (TornadoExecutionPlanException failure) {
+        Objects.requireNonNull(failure);
       }
     }
   }
