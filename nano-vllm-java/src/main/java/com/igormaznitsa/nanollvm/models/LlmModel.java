@@ -254,13 +254,17 @@ public abstract sealed class LlmModel implements AutoCloseable permits LlmModelI
    *
    * @param input          typed payload; must not be {@code null}
    * @param outputModality desired result type; must not be {@code null}
-   * @return typed result matching {@code outputModality}
+   * @return typed result matching {@code outputModality}'s {@link LlmModality#resultType()}
    * @throws NullPointerException     if either argument is {@code null}
    * @throws IllegalArgumentException if the input/output pair is unsupported
    * @throws IllegalStateException    if this model is closed or the wrong graph kind
    * @since 1.3.0
    */
-  public abstract LlmOutput generate(final LlmInput input, final LlmModality outputModality);
+  @SuppressWarnings("TypeParameterUnusedInFormals")
+  public abstract <T extends LlmOutput> T generate(
+    final LlmInput input,
+    final LlmModality outputModality
+  );
 
   /**
    * Releases packed payloads, closes weight file channels (&gt; 2 GiB shards), and drops

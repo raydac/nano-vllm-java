@@ -53,7 +53,7 @@ final class WhisperLoadTest {
           ModelSupport.speechEngineMisuseMessage(model.architectureName()), chat.getMessage());
         assertEquals(0, llm.config().numKvcacheBlocks());
 
-        LlmOutText out = (LlmOutText) llm.generate(
+        LlmOutText out = llm.generate(
           LlmInSound.ofWav(Files.readAllBytes(wav), Locale.ENGLISH), LlmModality.TEXT);
         String normalized = lettersAndSpaces(out.text());
         assertTrue(

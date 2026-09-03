@@ -37,16 +37,18 @@ final class BertEmbeddingTest {
   }
 
   private static float[] embed(final LlmModel model, final String text) {
-    return ((LlmOutEmbedding) model.generate(LlmInText.of(text), LlmModality.EMBEDDING)).vector();
+    LlmOutEmbedding embedding = model.generate(LlmInText.of(text), LlmModality.EMBEDDING);
+    return embedding.vector();
   }
 
   private static float[] embed(final LLM llm, final String text) {
-    return ((LlmOutEmbedding) llm.generate(LlmInText.of(text), LlmModality.EMBEDDING)).vector();
+    LlmOutEmbedding embedding = llm.generate(LlmInText.of(text), LlmModality.EMBEDDING);
+    return embedding.vector();
   }
 
   private static float[] embedIds(final LlmModel model, final int[] ids) {
-    return ((LlmOutEmbedding) model.generate(LlmInTokenIds.of(ids),
-      LlmModality.EMBEDDING)).vector();
+    LlmOutEmbedding embedding = model.generate(LlmInTokenIds.of(ids), LlmModality.EMBEDDING);
+    return embedding.vector();
   }
 
   @Test

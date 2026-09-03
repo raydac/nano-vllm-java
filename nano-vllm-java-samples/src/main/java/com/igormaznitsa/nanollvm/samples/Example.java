@@ -464,7 +464,7 @@ public final class Example {
   ) {
     try {
       long started = System.nanoTime();
-      LlmOutText out = (LlmOutText) llm.generate(
+      LlmOutText out = llm.generate(
         LlmInSound.ofWav(Files.readAllBytes(wav), language), LlmModality.TEXT);
       String text = out.text();
       console.printf(
@@ -536,7 +536,7 @@ public final class Example {
       }
       try {
         long started = System.nanoTime();
-        LlmOutSoundData sound = (LlmOutSoundData) llm.generate(
+        LlmOutSoundData sound = llm.generate(
           LlmInText.of(user), LlmModality.AUDIO);
         Path wavPath = outDir.resolve("piper-%02d.wav".formatted(++n));
         Files.write(wavPath, sound.wav());
@@ -1573,7 +1573,8 @@ public final class Example {
   }
 
   private static float[] embedVector(final LLM llm, final String text) {
-    return ((LlmOutEmbedding) llm.generate(LlmInText.of(text), LlmModality.EMBEDDING)).vector();
+    LlmOutEmbedding embedding = llm.generate(LlmInText.of(text), LlmModality.EMBEDDING);
+    return embedding.vector();
   }
 
   private static double l2Norm(final float[] vector) {

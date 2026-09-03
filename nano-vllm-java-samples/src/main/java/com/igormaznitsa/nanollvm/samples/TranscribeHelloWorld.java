@@ -51,7 +51,7 @@ public final class TranscribeHelloWorld {
         + " modalities=" + model.modalities()
         + " usable=" + model.usableModalities());
       System.out.println(wav.map(path -> "WAV " + path).orElse("PCM " + SAMPLE_RATE + " Hz"));
-      LlmOutText out = (LlmOutText) llm.generate(input, LlmModality.TEXT);
+      LlmOutText out = llm.generate(input, LlmModality.TEXT);
       String text = out.text();
       System.out.printf(Locale.ROOT, "transcript: %s%n", text.isBlank() ? "(empty)" : text);
     } finally {

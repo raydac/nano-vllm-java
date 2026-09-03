@@ -479,8 +479,9 @@ public final class LlmModelImpl extends LlmModel {
   }
 
   @Override
-  public LlmOutput generate(final LlmInput input, final LlmModality outputModality) {
-    return this.generate(input, outputModality, MatmulRuntime.sequential());
+  @SuppressWarnings("TypeParameterUnusedInFormals")
+  public <T extends LlmOutput> T generate(final LlmInput input, final LlmModality outputModality) {
+    return outputModality.cast(this.generate(input, outputModality, MatmulRuntime.sequential()));
   }
 
   public LlmOutput generate(

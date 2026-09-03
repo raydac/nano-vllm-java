@@ -1,7 +1,6 @@
 package com.igormaznitsa.nanollvm;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -15,7 +14,6 @@ import com.igormaznitsa.nanollvm.models.LlmOptionalData;
 import com.igormaznitsa.nanollvm.models.LlmOutEmbedding;
 import com.igormaznitsa.nanollvm.models.LlmOutSoundData;
 import com.igormaznitsa.nanollvm.models.LlmOutText;
-import com.igormaznitsa.nanollvm.models.LlmOutput;
 import com.igormaznitsa.nanollvm.models.internal.audio.WavPcm;
 import com.igormaznitsa.nanollvm.testsupport.OptionalModelAssumptions;
 import java.nio.charset.StandardCharsets;
@@ -35,14 +33,12 @@ final class LlmGenerateFacadeTest {
          LLM llm = LLM.builder(model).build()) {
       String phrase = modelPath.getFileName().toString().contains("-en-") ? "Hello" : "Привет";
 
-      LlmOutput fromModel = model.generate(LlmInText.of(phrase), LlmModality.AUDIO);
-      LlmOutSoundData sound = assertInstanceOf(LlmOutSoundData.class, fromModel);
+      LlmOutSoundData sound = model.generate(LlmInText.of(phrase), LlmModality.AUDIO);
       assertTrue(sound.sampleRate() >= 8_000);
       assertTrue(sound.wav().length > 44);
       assertEquals("RIFF", new String(sound.wav(), 0, 4, StandardCharsets.US_ASCII));
 
-      LlmOutput fromEngine = llm.generate(LlmInText.of(phrase), LlmModality.AUDIO);
-      LlmOutSoundData engineSound = assertInstanceOf(LlmOutSoundData.class, fromEngine);
+      LlmOutSoundData engineSound = llm.generate(LlmInText.of(phrase), LlmModality.AUDIO);
       assertEquals(sound.sampleRate(), engineSound.sampleRate());
 
       assertThrows(
@@ -62,14 +58,13 @@ final class LlmGenerateFacadeTest {
     try (LlmModel model = LlmModelFactory.make(modelPath);
          LLM llm = LLM.builder(model).build()) {
       byte[] wav = java.nio.file.Files.readAllBytes(clip);
-      LlmOutput out = llm.generate(LlmInSound.ofWav(wav), LlmModality.TEXT);
-      LlmOutText text = assertInstanceOf(LlmOutText.class, out);
+      LlmOutText text = llm.generate(LlmInSound.ofWav(wav), LlmModality.TEXT);
       assertTrue(text.text().length() > 5, "transcript was too short: " + text.text());
 
       WavPcm.MonoPcm pcm = WavPcm.read(wav);
-      LlmOutput fromPcm = model.generate(
+      LlmOutText fromPcm = model.generate(
         LlmInSound.ofPcm(pcm.samples(), pcm.sampleRate()), LlmModality.TEXT);
-      assertInstanceOf(LlmOutText.class, fromPcm);
+      assertTrue(fromPcm.text().length() > 0);
     }
   }
 
@@ -79,12 +74,12 @@ final class LlmGenerateFacadeTest {
 
     try (LlmModel model = LlmModelFactory.make(modelPath);
          LLM llm = LLM.builder(model).build()) {
-      LlmOutput out = llm.generate(LlmInText.of("query: hello"), LlmModality.EMBEDDING);
-      LlmOutEmbedding embedding = assertInstanceOf(LlmOutEmbedding.class, out);
+      LlmOutEmbedding embedding = llm.generate(LlmInText.of("query: hello"), LlmModality.EMBEDDING);
       assertTrue(embedding.vector().length > 8);
 
-      LlmOutput fromModel = model.generate(LlmInText.of("query: hello"), LlmModality.EMBEDDING);
-      assertEquals(embedding.vector().length, ((LlmOutEmbedding) fromModel).vector().length);
+      LlmOutEmbedding fromModel =
+        model.generate(LlmInText.of("query: hello"), LlmModality.EMBEDDING);
+      assertEquals(embedding.vector().length, fromModel.vector().length);
     }
   }
 
@@ -98,8 +93,8 @@ final class LlmGenerateFacadeTest {
         IllegalStateException.class,
         () -> model.generate(LlmInText.of("Hello"), LlmModality.TEXT));
 
-      LlmOutput out = llm.generate(LlmInText.of("Hello"), LlmModality.TEXT);
-      assertInstanceOf(LlmOutText.class, out);
+      LlmOutText out = llm.generate(LlmInText.of("Hello"), LlmModality.TEXT);
+      assertTrue(out.text() != null);
     }
   }
 }

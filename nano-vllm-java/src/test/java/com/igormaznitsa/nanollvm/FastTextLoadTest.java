@@ -2,7 +2,6 @@ package com.igormaznitsa.nanollvm;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -47,15 +46,13 @@ final class FastTextLoadTest {
           chat.getMessage());
         assertEquals(0, llm.config().numKvcacheBlocks());
 
-        LlmOutLabels english = assertInstanceOf(
-          LlmOutLabels.class,
-          llm.generate(LlmInText.of("The capital of France is Paris."), LlmModality.LABELS));
+        LlmOutLabels english =
+          llm.generate(LlmInText.of("The capital of France is Paris."), LlmModality.LABELS);
         assertTrue(english.topLabel().endsWith("en"), english.topLabel());
         assertTrue(english.top().score() > 0.5f, Float.toString(english.top().score()));
 
-        LlmOutLabels french = assertInstanceOf(
-          LlmOutLabels.class,
-          llm.generate(LlmInText.of("Bonjour, comment allez-vous ?"), LlmModality.LABELS));
+        LlmOutLabels french =
+          llm.generate(LlmInText.of("Bonjour, comment allez-vous ?"), LlmModality.LABELS);
         assertTrue(french.topLabel().endsWith("fr"), french.topLabel());
       }
     }

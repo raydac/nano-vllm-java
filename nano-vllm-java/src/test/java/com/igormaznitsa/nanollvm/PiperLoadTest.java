@@ -57,7 +57,7 @@ final class PiperLoadTest {
           ModelSupport.synthesisEngineMisuseMessage(model.architectureName()), chat.getMessage());
         assertEquals(0, llm.config().numKvcacheBlocks());
 
-        LlmOutSoundData sound = (LlmOutSoundData) llm.generate(
+        LlmOutSoundData sound = llm.generate(
           LlmInText.of(modelPath.getFileName().toString().contains("-en-") ? "Hello" : "Привет"),
           LlmModality.AUDIO);
         byte[] wav = sound.wav();

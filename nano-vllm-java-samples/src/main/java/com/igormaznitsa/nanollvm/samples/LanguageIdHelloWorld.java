@@ -66,7 +66,7 @@ public final class LanguageIdHelloWorld {
       + " modalities=" + model.usableModalities());
 
     for (String text : texts) {
-      LlmOutLabels out = (LlmOutLabels) llm.generate(LlmInText.of(text), LlmModality.LABELS);
+      LlmOutLabels out = llm.generate(LlmInText.of(text), LlmModality.LABELS);
       System.out.println("text: " + text);
       System.out.println("  top: " + formatLabel(out.top()));
       out.labels().stream()

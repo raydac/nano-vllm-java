@@ -54,7 +54,7 @@ public final class SynthesizeHelloWorld {
         + " synthesis=" + model.isSynthesisModel()
         + " modalities=" + model.modalities()
         + " usable=" + model.usableModalities());
-      LlmOutSoundData sound = (LlmOutSoundData) llm.generate(LlmInText.of(text), LlmModality.AUDIO);
+      LlmOutSoundData sound = llm.generate(LlmInText.of(text), LlmModality.AUDIO);
       byte[] wav = sound.wav();
       Files.write(wavOut, wav);
       System.out.printf(

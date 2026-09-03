@@ -14,7 +14,6 @@ import com.igormaznitsa.nanollvm.models.LlmOptionalData;
 import com.igormaznitsa.nanollvm.models.LlmOutEmbedding;
 import com.igormaznitsa.nanollvm.models.LlmOutSoundData;
 import com.igormaznitsa.nanollvm.models.LlmOutText;
-import com.igormaznitsa.nanollvm.models.LlmOutput;
 import com.igormaznitsa.nanollvm.samples.utils.BundledModels;
 import com.igormaznitsa.nanollvm.samples.utils.EmbeddingClassifier;
 import com.igormaznitsa.nanollvm.samples.utils.EmbeddingClassifier.LabeledText;
@@ -231,11 +230,13 @@ public final class VoiceReplyHelloWorld {
   }
 
   private static String transcribe(final LLM stt, final byte[] wav, final Locale language) {
-    return textOf(stt.generate(LlmInSound.ofWav(wav, language), LlmModality.TEXT));
+    LlmOutText text = stt.generate(LlmInSound.ofWav(wav, language), LlmModality.TEXT);
+    return text.text();
   }
 
   private static byte[] synthesize(final LLM tts, final String text) {
-    return soundOf(tts.generate(LlmInText.of(text), LlmModality.AUDIO));
+    LlmOutSoundData sound = tts.generate(LlmInText.of(text), LlmModality.AUDIO);
+    return sound.wav();
   }
 
   private static Prediction classifyMood(
@@ -266,7 +267,8 @@ public final class VoiceReplyHelloWorld {
   }
 
   private static float[] embed(final LLM encoder, final String text) {
-    return vectorOf(encoder.generate(LlmInText.of(text), LlmModality.EMBEDDING));
+    LlmOutEmbedding embedding = encoder.generate(LlmInText.of(text), LlmModality.EMBEDDING);
+    return embedding.vector();
   }
 
   private static String embedInput(final String text, final boolean e5Prefix) {
@@ -290,27 +292,6 @@ public final class VoiceReplyHelloWorld {
       throw new IllegalStateException("chat model returned an empty reply");
     }
     return reply.strip();
-  }
-
-  private static String textOf(final LlmOutput output) {
-    if (output instanceof LlmOutText(String text)) {
-      return text;
-    }
-    throw new IllegalStateException("expected text, got " + output.modality());
-  }
-
-  private static float[] vectorOf(final LlmOutput output) {
-    if (output instanceof LlmOutEmbedding embedding) {
-      return embedding.vector();
-    }
-    throw new IllegalStateException("expected embedding, got " + output.modality());
-  }
-
-  private static byte[] soundOf(final LlmOutput output) {
-    if (output instanceof LlmOutSoundData sound) {
-      return sound.wav();
-    }
-    throw new IllegalStateException("expected audio, got " + output.modality());
   }
 
   static boolean playWav(final byte[] wav) {

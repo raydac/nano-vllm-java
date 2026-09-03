@@ -71,7 +71,7 @@ import java.util.stream.IntStream;
  *         .build()) {
  *     String reply = llm.chat().send("Hello").answer();
  *     String once = llm.chatOnce("What is 2+2?", 64);
- *     LlmOutText raw = (LlmOutText) llm.generate(LlmInText.of("The capital of France is"), LlmModality.TEXT);
+ *     LlmOutText raw = llm.generate(LlmInText.of("The capital of France is"), LlmModality.TEXT);
  * }  // LLM closes first, then model
  * }</pre>
  *
@@ -322,29 +322,30 @@ public final class LLM implements AutoCloseable {
    *
    * @param input          typed payload; must not be {@code null}
    * @param outputModality desired result type; must not be {@code null}
-   * @return typed result matching {@code outputModality}
+   * @return typed result matching {@code outputModality}'s {@link LlmModality#resultType()}
    * @throws NullPointerException     if either argument is {@code null}
    * @throws IllegalArgumentException if the input/output pair is unsupported
    * @throws IllegalStateException    if this engine is closed or the wrong graph kind
    * @since 1.3.0
    */
-  public LlmOutput generate(final LlmInput input, final LlmModality outputModality) {
+  @SuppressWarnings("TypeParameterUnusedInFormals")
+  public <T extends LlmOutput> T generate(final LlmInput input, final LlmModality outputModality) {
     requireNonNull(input, "input");
     requireNonNull(outputModality, "outputModality");
     this.assertNotClosed();
 
-    if (input instanceof LlmInText text && outputModality == LlmModality.TEXT) {
+    if (input instanceof LlmInText(CharSequence text1) && outputModality == LlmModality.TEXT) {
       this.requireCausal();
       List<GenerationOutput> outputs = this.generate(
-        List.of(text.text().toString()), this.defaultSampling());
-      return new LlmOutText(outputs.getFirst().text());
+        List.of(text1.toString()), this.defaultSampling());
+      return outputModality.cast(new LlmOutText(outputs.getFirst().text()));
     }
 
     this.generateLock.lock();
     try {
       this.assertNotClosed();
-      return LlmModelImpl.peer(this.model).generate(
-        input, outputModality, this.matmul, this.random);
+      return outputModality.cast(
+        LlmModelImpl.peer(this.model).generate(input, outputModality, this.matmul, this.random));
     } finally {
       this.generateLock.unlock();
     }
@@ -1314,7 +1315,7 @@ public final class LLM implements AutoCloseable {
    * Builder override wins; otherwise the library default is empty (no system turn).
    * Set {@link Builder#systemPrompt(String)} for application policy.
    *
-   * @return system prompt string; never {@code null} (may be blank = no system turn)
+   * @return system prompt string; never {@code null} (maybe blank = no system turn)
    */
   public String systemPrompt() {
     if (this.systemPromptOverride != null) {
@@ -1872,7 +1873,7 @@ public final class LLM implements AutoCloseable {
      * Prefer {@link LlmModelFactory#open(Path)} {@code .unpackParameters()} so unpack
      * happens <em>during load</em> (file bytes → float32, no packed heap copy). For an already-loaded
      * packed {@link LlmModel}, unpacks at engine build and releases packed bytes.
-     * No-op for already-dense HF safetensors. Default is packed (size-first).
+     * No-op for already-dense HF safe-tensors. Default is packed (size-first).
      *
      * @return {@code this}
      */

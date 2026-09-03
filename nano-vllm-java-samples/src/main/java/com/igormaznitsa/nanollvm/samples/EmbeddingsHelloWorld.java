@@ -124,7 +124,8 @@ public final class EmbeddingsHelloWorld {
   }
 
   private static float[] encode(final LLM llm, final String text) {
-    return ((LlmOutEmbedding) llm.generate(LlmInText.of(text), LlmModality.EMBEDDING)).vector();
+    LlmOutEmbedding embedding = llm.generate(LlmInText.of(text), LlmModality.EMBEDDING);
+    return embedding.vector();
   }
 
   private static String embedInput(final String text, final boolean e5Prefix) {

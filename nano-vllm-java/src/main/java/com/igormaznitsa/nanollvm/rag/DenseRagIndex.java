@@ -436,7 +436,8 @@ public final class DenseRagIndex implements RagIndex {
   }
 
   private static float[] encode(final LlmModel model, final String text) {
-    return ((LlmOutEmbedding) model.generate(LlmInText.of(text), LlmModality.EMBEDDING)).vector();
+    LlmOutEmbedding embedding = model.generate(LlmInText.of(text), LlmModality.EMBEDDING);
+    return embedding.vector();
   }
 
   private float[] embedQuery(final String query) {

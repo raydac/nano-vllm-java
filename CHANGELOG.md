@@ -23,6 +23,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Tornado GEMV reuses compiled execution plans (LRU cache) and keeps weights on-device
   between calls with the same buffers and shape.
 
+### Changed
+- `LlmModality` carries the concrete `generate` result class (`TEXT`→`LlmOutText`,
+  `AUDIO`→`LlmOutSoundData`, `EMBEDDING`→`LlmOutEmbedding`, `LABELS`→`LlmOutLabels`).
+  `LLM.generate` / `LlmModel.generate` return that type via `LlmModality.cast`, so callers no
+  longer need an explicit cast.
+
 ## [1.3.0] — 2026-08-29
 
 Public release of **nano-vllm-java** `1.3.0` (Maven coordinates `com.igormaznitsa:nano-vllm-java:1.3.0`).
