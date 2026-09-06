@@ -104,7 +104,9 @@ public record ChatSpecials(List<String> markers) {
     return stripped;
   }
 
-  /** Stable sort: longer strings first, then lexicographic. */
+  /**
+   * Stable sort: longer strings first, then lexicographic.
+   */
   private static List<String> longestFirst(final List<String> markers) {
     return markers.stream()
       .sorted(comparingInt(String::length).reversed().thenComparing(naturalOrder()))

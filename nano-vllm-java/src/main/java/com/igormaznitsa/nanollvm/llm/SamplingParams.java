@@ -258,13 +258,17 @@ public final class SamplingParams {
       && Float.compare(this.topP, that.topP) == 0;
   }
 
-  /** {@inheritDoc} */
+  /**
+   * {@inheritDoc}
+   */
   @Override
   public int hashCode() {
     return Objects.hash(this.temperature, this.maxTokens, this.ignoreEos, this.topK, this.topP);
   }
 
-  /** {@inheritDoc} */
+  /**
+   * {@inheritDoc}
+   */
   @Override
   public String toString() {
     return "SamplingParams[temperature=%s, maxTokens=%d, ignoreEos=%s, topK=%d, topP=%s]"

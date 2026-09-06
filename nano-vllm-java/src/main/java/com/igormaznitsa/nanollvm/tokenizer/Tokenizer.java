@@ -120,7 +120,7 @@ public final class Tokenizer {
    * @param source GGUF metadata reader; non-{@code null}
    * @return immutable tokenizer ({@link #invitesThinking()} follows vocab {@code <think>}/{@code </think>} markers)
    * @throws com.igormaznitsa.nanollvm.exceptions.ModelLoadException if {@code tokenizer.ggml.tokens} is missing/empty
-   * @throws NullPointerException if {@code source} is {@code null}
+   * @throws NullPointerException                                    if {@code source} is {@code null}
    */
   public static Tokenizer fromGguf(final GgufTokenizerSource source) {
     return TokenizerLoader.fromGguf(source);

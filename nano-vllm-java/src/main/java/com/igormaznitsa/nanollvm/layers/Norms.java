@@ -207,10 +207,10 @@ public final class Norms {
     /**
      * Full-head RoPE table (same as the public constructor).
      *
-     * @param headSize     per-head width
-     * @param rotaryDim    must equal {@code headSize}
-     * @param maxPosition  table length
-     * @param base         RoPE theta
+     * @param headSize    per-head width
+     * @param rotaryDim   must equal {@code headSize}
+     * @param maxPosition table length
+     * @param base        RoPE theta
      * @return internable table
      */
     public static RotaryEmbedding of(
@@ -226,10 +226,10 @@ public final class Norms {
      * Partial RoPE: only the first {@code partialRotaryFactor * headSize / 2} angle pairs rotate;
      * remaining pairs keep inv-freq {@code 0} (cos=1, sin=0). Gemma 4 global attention.
      *
-     * @param headSize             per-head width
-     * @param maxPosition          table length
-     * @param base                 RoPE theta
-     * @param partialRotaryFactor  fraction of the head that rotates, in {@code (0, 1]}
+     * @param headSize            per-head width
+     * @param maxPosition         table length
+     * @param base                RoPE theta
+     * @param partialRotaryFactor fraction of the head that rotates, in {@code (0, 1]}
      * @return internable table
      * @since 1.1.0
      */

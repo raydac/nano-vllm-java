@@ -46,6 +46,20 @@ public final class MatmulRuntime implements AutoCloseable {
   private final boolean sharedCheckout;
   private final boolean shutdownPoolOnClose;
 
+  private MatmulRuntime(
+    final int cpuThreads,
+    final ExecutorService pool,
+    final boolean markClosedOnClose,
+    final boolean sharedCheckout,
+    final boolean shutdownPoolOnClose
+  ) {
+    this.cpuThreads = cpuThreads;
+    this.pool = pool;
+    this.markClosedOnClose = markClosedOnClose;
+    this.sharedCheckout = sharedCheckout;
+    this.shutdownPoolOnClose = shutdownPoolOnClose;
+  }
+
   /**
    * Process-wide matmul pool, created on first parallel use ({@code availableProcessors} daemons).
    * Shut down when the last runtime that checked it out is {@link #close() closed}.
@@ -66,20 +80,6 @@ public final class MatmulRuntime implements AutoCloseable {
         return current.executor();
       }
     }
-  }
-
-  private MatmulRuntime(
-    final int cpuThreads,
-    final ExecutorService pool,
-    final boolean markClosedOnClose,
-    final boolean sharedCheckout,
-    final boolean shutdownPoolOnClose
-  ) {
-    this.cpuThreads = cpuThreads;
-    this.pool = pool;
-    this.markClosedOnClose = markClosedOnClose;
-    this.sharedCheckout = sharedCheckout;
-    this.shutdownPoolOnClose = shutdownPoolOnClose;
   }
 
   public static Builder builder() {
@@ -128,6 +128,15 @@ public final class MatmulRuntime implements AutoCloseable {
     return Executors.newFixedThreadPool(cpuThreads, factory);
   }
 
+  private static ThreadFactory namedDaemonFactory() {
+    AtomicInteger seq = new AtomicInteger();
+    return runnable -> {
+      Thread thread = new Thread(runnable, "nanollvm-matmul-" + seq.getAndIncrement());
+      thread.setDaemon(true);
+      return thread;
+    };
+  }
+
   @Override
   public void close() {
     if (this.markClosedOnClose) {
@@ -146,15 +155,6 @@ public final class MatmulRuntime implements AutoCloseable {
       return;
     }
     this.pool.shutdownNow();
-  }
-
-  private static ThreadFactory namedDaemonFactory() {
-    AtomicInteger seq = new AtomicInteger();
-    return runnable -> {
-      Thread thread = new Thread(runnable, "nanollvm-matmul-" + seq.getAndIncrement());
-      thread.setDaemon(true);
-      return thread;
-    };
   }
 
   public int cpuThreads() {
@@ -245,7 +245,7 @@ public final class MatmulRuntime implements AutoCloseable {
       this.linearDecode1(x, xOffset, w, wOffset, bias, y, yOffset, in, out);
       return;
     }
-    if (!this.parallelEnabled() || out < MIN_PARALLEL_OUT) {
+    if (KERNELS.prefersSingleShotGemv() || !this.parallelEnabled() || out < MIN_PARALLEL_OUT) {
       this.linearRange(x, xOffset, w, wOffset, bias, y, yOffset, rows, in, out, 0, out);
       return;
     }
@@ -283,7 +283,7 @@ public final class MatmulRuntime implements AutoCloseable {
     final int in, final int out
   ) {
     this.requireOpen();
-    if (!this.parallelEnabled() || out < MIN_PARALLEL_OUT) {
+    if (KERNELS.prefersSingleShotGemv() || !this.parallelEnabled() || out < MIN_PARALLEL_OUT) {
       this.decode1Range(x, xOffset, w, wOffset, bias, y, yOffset, in, 0, out);
       return;
     }
@@ -410,9 +410,6 @@ public final class MatmulRuntime implements AutoCloseable {
     }
   }
 
-  private record SharedPool(ExecutorService executor, int checkouts) {
-  }
-
   private void requireOpen() {
     if (this.closed.get()) {
       throw new IllegalStateException("MatmulRuntime is closed");
@@ -460,6 +457,9 @@ public final class MatmulRuntime implements AutoCloseable {
   @FunctionalInterface
   public interface PackedRowDequant {
     void dequantizeRow(int row, float[] dst);
+  }
+
+  private record SharedPool(ExecutorService executor, int checkouts) {
   }
 
   public static final class Builder {

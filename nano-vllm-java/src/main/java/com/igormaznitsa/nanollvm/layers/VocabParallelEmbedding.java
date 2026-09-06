@@ -57,15 +57,6 @@ public class VocabParallelEmbedding {
     this.embeddingKernel = requireNonNull(kernel, "kernel");
   }
 
-  private static VocabParallelEmbedding denseOrPacked(final PackedWeight weight) {
-    if (weight.isFloat32()) {
-      Tensor dense = weight.materialize();
-      weight.releasePackedBytes();
-      return new VocabParallelEmbedding(dense);
-    }
-    return new VocabParallelEmbedding(EmbeddingKernel.of(weight), weight);
-  }
-
   /**
    * Already-bound gather kernel (tests and custom graphs). No dense/packed table is stored.
    *
@@ -75,6 +66,15 @@ public class VocabParallelEmbedding {
     this.weight = null;
     this.packedWeight = null;
     this.embeddingKernel = requireNonNull(kernel, "kernel");
+  }
+
+  private static VocabParallelEmbedding denseOrPacked(final PackedWeight weight) {
+    if (weight.isFloat32()) {
+      Tensor dense = weight.materialize();
+      weight.releasePackedBytes();
+      return new VocabParallelEmbedding(dense);
+    }
+    return new VocabParallelEmbedding(EmbeddingKernel.of(weight), weight);
   }
 
   /**

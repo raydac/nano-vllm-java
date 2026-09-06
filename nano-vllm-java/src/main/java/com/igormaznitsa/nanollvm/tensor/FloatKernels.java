@@ -65,6 +65,17 @@ public abstract class FloatKernels {
   public abstract String name();
 
   /**
+   * When {@code true}, dense GEMV should run as one full-range call instead of CPU-sharded tiles.
+   * Device offload paths that hold a global execute lock benefit from a single transfer/launch.
+   *
+   * @return {@code false} for CPU backends
+   * @since 1.4.0
+   */
+  public boolean prefersSingleShotGemv() {
+    return false;
+  }
+
+  /**
    * Dot product of two equal-length float slices: {@code Σ<sub>i=0..n-1</sub> a[aOff+i] * b[bOff+i]}.
    *
    * <p>Used heavily by {@link MatmulRuntime#linear} (each output channel accumulates tiled dots against

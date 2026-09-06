@@ -43,31 +43,50 @@ public final class NanoLlvmProps {
    * Application / samples: path to one checkpoint. Not read by {@code LlmModelFactory}.
    */
   public static final String PROP_MODEL = "nanollvm.model";
-  /** Same as {@link #PROP_MODEL} via the environment. */
+  /**
+   * Same as {@link #PROP_MODEL} via the environment.
+   */
   public static final String ENV_MODEL = "NANOLLVM_MODEL";
 
-  /** Application / samples / tests: folder of checkpoints. Not read by {@code LlmModelFactory}. */
+  /**
+   * Application / samples / tests: folder of checkpoints. Not read by {@code LlmModelFactory}.
+   */
   public static final String PROP_MODELS_DIR = "nanollvm.models.dir";
-  /** Same as {@link #PROP_MODELS_DIR} via the environment. */
+  /**
+   * Same as {@link #PROP_MODELS_DIR} via the environment.
+   */
   public static final String ENV_MODELS_DIR = "NANOLLVM_MODELS_DIR";
 
-  /** Application / samples / tests: folder of RAG documents. Not read by {@code RagFactory}. */
+  /**
+   * Application / samples / tests: folder of RAG documents. Not read by {@code RagFactory}.
+   */
   public static final String PROP_RAG_DIR = "nanollvm.rag.dir";
-  /** Same as {@link #PROP_RAG_DIR} via the environment. */
+  /**
+   * Same as {@link #PROP_RAG_DIR} via the environment.
+   */
   public static final String ENV_RAG_DIR = "NANOLLVM_RAG_DIR";
 
-  /** Library: must match the checkpoint family ({@code qwen3}, {@code gemma3}, {@code llama}, {@code lfm2}). */
+  /**
+   * Library: must match the checkpoint family ({@code qwen3}, {@code gemma3}, {@code llama}, {@code lfm2}).
+   */
   public static final String PROP_ARCH = "nanollvm.arch";
   /**
    * Library: kernel mode {@code auto}, {@code tornado}, {@code vector}, or {@code scalar}.
+   * Values {@code tornado} / {@code gpu} (and {@code auto} preferring TornadoVM) date from 1.4.0.
    */
   public static final String PROP_KERNELS = "nanollvm.kernels";
-  /** Library: matmul workers when {@link com.igormaznitsa.nanollvm.llm.LLM.Builder} did not set a thread count. */
+  /**
+   * Library: matmul workers when {@link com.igormaznitsa.nanollvm.llm.LLM.Builder} did not set a thread count.
+   */
   public static final String PROP_CPU_THREADS = "nanollvm.cpu.threads";
-  /** Samples CLI: {@code false} disables ANSI color on thinking streams. */
+  /**
+   * Samples CLI: {@code false} disables ANSI color on thinking streams.
+   */
   public static final String PROP_COLOR = "nanollvm.color";
 
-  /** Hugging Face sidecar filename expected in a model folder. */
+  /**
+   * Hugging Face sidecar filename expected in a model folder.
+   */
   public static final String CONFIG_JSON = "config.json";
 
   private NanoLlvmProps() {

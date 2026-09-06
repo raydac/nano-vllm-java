@@ -904,11 +904,17 @@ public final class ModelSupport {
    * @since 1.1.0
    */
   public enum Source {
-    /** Hugging Face folder with {@code *.safetensors}. */
+    /**
+     * Hugging Face folder with {@code *.safetensors}.
+     */
     HF_SAFETENSORS,
-    /** Hugging Face folder with {@code *.onnx} (Tier A, since 1.1.0). */
+    /**
+     * Hugging Face folder with {@code *.onnx} (Tier A, since 1.1.0).
+     */
     ONNX,
-    /** Single {@code .gguf} file. */
+    /**
+     * Single {@code .gguf} file.
+     */
     GGUF,
     /**
      * Meta fastText supervised {@code *.bin} / {@code *.ftz} file (or folder containing one).

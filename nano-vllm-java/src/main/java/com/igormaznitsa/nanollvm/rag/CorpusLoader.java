@@ -359,7 +359,7 @@ final class CorpusLoader {
     ) {
       String body = this.tuners.preprocess(text == null ? "" : text);
       List<TextChunk> chunks = Chunking.split(
-          id,
+        id,
         source,
         body,
         this.maxChunkChars,

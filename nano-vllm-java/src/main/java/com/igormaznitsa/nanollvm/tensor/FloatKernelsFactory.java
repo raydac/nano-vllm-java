@@ -147,8 +147,7 @@ public final class FloatKernelsFactory {
     try {
       Class<?> provider = Class.forName(TORNADO_PROVIDER);
       Method isAvailable = provider.getMethod("isAvailable");
-      Object result = isAvailable.invoke(null);
-      return Boolean.TRUE.equals(result);
+      return Boolean.TRUE.equals(isAvailable.invoke(null));
     } catch (Throwable ignored) {
       return false;
     }

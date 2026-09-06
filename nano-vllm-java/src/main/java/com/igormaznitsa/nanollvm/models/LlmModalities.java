@@ -69,16 +69,6 @@ public record LlmModalities(Set<LlmModality> input, Set<LlmModality> output) {
     }
   }
 
-  @Override
-  public Set<LlmModality> input() {
-    return Set.copyOf(this.input);
-  }
-
-  @Override
-  public Set<LlmModality> output() {
-    return Set.copyOf(this.output);
-  }
-
   /**
    * Single input type and single output type.
    *
@@ -221,6 +211,16 @@ public record LlmModalities(Set<LlmModality> input, Set<LlmModality> output) {
 
   private static String format(final Set<LlmModality> side) {
     return side.isEmpty() ? "none" : side.stream().map(LlmModality::wireName).collect(joining("+"));
+  }
+
+  @Override
+  public Set<LlmModality> input() {
+    return Set.copyOf(this.input);
+  }
+
+  @Override
+  public Set<LlmModality> output() {
+    return Set.copyOf(this.output);
   }
 
   /**

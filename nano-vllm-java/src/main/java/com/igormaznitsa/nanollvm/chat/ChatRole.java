@@ -14,9 +14,13 @@ public enum ChatRole {
    * Instruction / system seed turn.
    */
   SYSTEM("system"),
-  /** Human turn. */
+  /**
+   * Human turn.
+   */
   USER("user"),
-  /** Model turn (visible answer in session history). */
+  /**
+   * Model turn (visible answer in session history).
+   */
   ASSISTANT("assistant");
 
   private final String wireName;

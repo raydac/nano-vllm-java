@@ -747,12 +747,6 @@ public final class Config {
       return new ModalityFlags(image, audio, video);
     }
 
-    private record ModalityFlags(boolean image, boolean audio, boolean video) {
-      boolean vision() {
-        return this.image || this.video;
-      }
-    }
-
     static boolean isGemma4Family(final String modelType) {
       return "gemma4".equals(modelType) || "gemma4_text".equals(modelType);
     }
@@ -810,95 +804,6 @@ public final class Config {
         partialRotary,
         Json.asFloat(m.get("final_logit_softcapping"), 0f),
         Json.asBoolean(m.get("enable_moe_block"), false));
-    }
-
-    /**
-     * Attention softmax scale: {@code (queryPreAttnScalar or headDim)^-0.5} for most families.
-     * Gemma 4 uses {@code 1.0} because Q/K RMSNorm already unit-RMS those tensors.
-     *
-     * @return scale applied to QK scores before softmax
-     */
-    public float attentionScale() {
-      if (this.gemma4 != null) {
-        return 1.0f;
-      }
-      float denom = this.queryPreAttnScalar > 0f ? this.queryPreAttnScalar : this.headDim;
-      return (float) Math.pow(denom, -0.5);
-    }
-
-    /**
-     * {@code true} when {@link #layerTypes()} names a linear-attention layer. Those hybrids
-     * (Qwen3.5 / Fara-style Gated DeltaNet) are not supported; load fails via
-     * {@link com.igormaznitsa.nanollvm.models.ModelSupport} before weights bind.
-     *
-     * @return whether any layer type contains {@code linear_attention}
-     * @since 1.1.0
-     */
-    public boolean hasLinearAttentionLayers() {
-      return this.layerTypes.stream()
-        .anyMatch(
-          type -> type != null && type.toLowerCase(Locale.ROOT).contains("linear_attention"));
-    }
-
-    /**
-     * {@code true} when layer {@code layerIndex} is a short-convolution block (LFM2), not
-     * attention. Out-of-range indexes are treated as attention.
-     *
-     * @param layerIndex zero-based transformer layer
-     * @return whether this layer uses conv state instead of KV attention
-     */
-    public boolean isConvLayer(final int layerIndex) {
-      if (this.layerTypes != null && layerIndex >= 0 && layerIndex < this.layerTypes.size()) {
-        String type = this.layerTypes.get(layerIndex);
-        return type != null && type.toLowerCase(Locale.ROOT).contains("conv")
-          && !type.toLowerCase(Locale.ROOT).contains("attention");
-      }
-      return false;
-    }
-
-    /**
-     * Inverse of {@link #isConvLayer(int)}: the layer runs attention (full or sliding) rather
-     * than LFM2 short-convolution.
-     *
-     * @param layerIndex zero-based transformer layer
-     * @return {@code true} when the layer is not a conv block
-     */
-    public boolean isFullAttentionLayer(final int layerIndex) {
-      return !this.isConvLayer(layerIndex);
-    }
-
-    /**
-     * MLP activation name used by the graph: {@link #hiddenActivation()} when non-blank, else
-     * {@link #hiddenAct()}, else {@code silu}. Gemma often stores GELU-tanh under
-     * {@code hidden_activation}.
-     *
-     * @return non-blank activation id
-     */
-    public String effectiveActivation() {
-      if (this.hiddenActivation != null && !this.hiddenActivation.isBlank()) {
-        return this.hiddenActivation;
-      }
-      return this.hiddenAct == null ? "silu" : this.hiddenAct;
-    }
-
-    /**
-     * {@code true} when this blueprint includes {@link Gemma4Text} extras (QAT mobile text, PLE,
-     * KV sharing). Other families leave {@link #gemma4()} {@code null}.
-     *
-     * @return whether Gemma 4 text fields were parsed
-     * @since 1.1.0
-     */
-    public boolean isGemma4() {
-      return this.gemma4 != null;
-    }
-
-    /**
-     * {@code true} when this blueprint includes {@link WhisperSpec} (OpenAI Whisper ASR).
-     *
-     * @since 1.3.0
-     */
-    public boolean isWhisper() {
-      return this.whisper != null;
     }
 
     /**
@@ -996,6 +901,169 @@ public final class Config {
         null);
     }
 
+    private static PiperSpec parsePiper(final Map<String, Object> root, final String modelType) {
+      if (Json.asObject(root.get("phoneme_id_map")) == null) {
+        return null;
+      }
+      if (!"piper".equals(modelType) && Json.asString(root.get("espeak")) == null
+        && Json.asObject(root.get("espeak")) == null) {
+        return null;
+      }
+      return piperFromRoot(root);
+    }
+
+    private static PiperSpec piperFromRoot(final Map<String, Object> root) {
+      Map<String, Object> audio = Json.asObject(root.get("audio"));
+      Map<String, Object> espeak = Json.asObject(root.get("espeak"));
+      Map<String, Object> inference = Json.asObject(root.get("inference"));
+      int sampleRate = audio == null
+        ? Json.asInt(root.get("sample_rate"), 22_050)
+        : Json.asInt(audio.get("sample_rate"), 22_050);
+      String quality = audio == null ? "" : Json.asString(audio.get("quality"));
+      String voice = espeak == null ? "" : Json.asString(espeak.get("voice"));
+      if (voice == null || voice.isBlank()) {
+        voice = espeak == null ? "" : Json.asString(espeak.get("language"));
+      }
+      float noise = 0.667f;
+      float length = 1f;
+      float noiseW = 0.8f;
+      if (inference != null) {
+        noise = Json.asFloat(inference.get("noise_scale"), noise);
+        length = Json.asFloat(inference.get("length_scale"), length);
+        noiseW = Json.asFloat(inference.get("noise_w"), noiseW);
+      }
+      return new PiperSpec(
+        sampleRate,
+        quality == null ? "" : quality,
+        voice == null ? "" : voice,
+        Json.asInt(root.get("num_speakers"), 1),
+        Json.asInt(root.get("num_symbols"), 256),
+        noise,
+        length,
+        noiseW,
+        intListMap(Json.asObject(root.get("phoneme_id_map"))),
+        stringListMap(Json.asObject(root.get("phoneme_map"))));
+    }
+
+    private static Map<String, List<Integer>> intListMap(final Map<String, Object> raw) {
+      if (raw == null || raw.isEmpty()) {
+        return Map.of();
+      }
+      Map<String, List<Integer>> out = new LinkedHashMap<>();
+      raw.forEach((key, value) -> {
+        List<Object> list = Json.asArray(value);
+        if (list == null) {
+          return;
+        }
+        out.put(key, list.stream().map(item -> Json.asInt(item, 0)).toList());
+      });
+      return out;
+    }
+
+    private static Map<String, List<String>> stringListMap(final Map<String, Object> raw) {
+      if (raw == null || raw.isEmpty()) {
+        return Map.of();
+      }
+      Map<String, List<String>> out = new LinkedHashMap<>();
+      raw.forEach((key, value) -> {
+        List<Object> list = Json.asArray(value);
+        if (list == null) {
+          return;
+        }
+        out.put(key, list.stream().map(Json::asString).toList());
+      });
+      return out;
+    }
+
+    /**
+     * Attention softmax scale: {@code (queryPreAttnScalar or headDim)^-0.5} for most families.
+     * Gemma 4 uses {@code 1.0} because Q/K RMSNorm already unit-RMS those tensors.
+     *
+     * @return scale applied to QK scores before softmax
+     */
+    public float attentionScale() {
+      if (this.gemma4 != null) {
+        return 1.0f;
+      }
+      float denom = this.queryPreAttnScalar > 0f ? this.queryPreAttnScalar : this.headDim;
+      return (float) Math.pow(denom, -0.5);
+    }
+
+    /**
+     * {@code true} when {@link #layerTypes()} names a linear-attention layer. Those hybrids
+     * (Qwen3.5 / Fara-style Gated DeltaNet) are not supported; load fails via
+     * {@link com.igormaznitsa.nanollvm.models.ModelSupport} before weights bind.
+     *
+     * @return whether any layer type contains {@code linear_attention}
+     * @since 1.1.0
+     */
+    public boolean hasLinearAttentionLayers() {
+      return this.layerTypes.stream()
+        .anyMatch(
+          type -> type != null && type.toLowerCase(Locale.ROOT).contains("linear_attention"));
+    }
+
+    /**
+     * {@code true} when layer {@code layerIndex} is a short-convolution block (LFM2), not
+     * attention. Out-of-range indexes are treated as attention.
+     *
+     * @param layerIndex zero-based transformer layer
+     * @return whether this layer uses conv state instead of KV attention
+     */
+    public boolean isConvLayer(final int layerIndex) {
+      if (this.layerTypes != null && layerIndex >= 0 && layerIndex < this.layerTypes.size()) {
+        String type = this.layerTypes.get(layerIndex);
+        return type != null && type.toLowerCase(Locale.ROOT).contains("conv")
+          && !type.toLowerCase(Locale.ROOT).contains("attention");
+      }
+      return false;
+    }
+
+    /**
+     * Inverse of {@link #isConvLayer(int)}: the layer runs attention (full or sliding) rather
+     * than LFM2 short-convolution.
+     *
+     * @param layerIndex zero-based transformer layer
+     * @return {@code true} when the layer is not a conv block
+     */
+    public boolean isFullAttentionLayer(final int layerIndex) {
+      return !this.isConvLayer(layerIndex);
+    }
+
+    /**
+     * MLP activation name used by the graph: {@link #hiddenActivation()} when non-blank, else
+     * {@link #hiddenAct()}, else {@code silu}. Gemma often stores GELU-tanh under
+     * {@code hidden_activation}.
+     *
+     * @return non-blank activation id
+     */
+    public String effectiveActivation() {
+      if (this.hiddenActivation != null && !this.hiddenActivation.isBlank()) {
+        return this.hiddenActivation;
+      }
+      return this.hiddenAct == null ? "silu" : this.hiddenAct;
+    }
+
+    /**
+     * {@code true} when this blueprint includes {@link Gemma4Text} extras (QAT mobile text, PLE,
+     * KV sharing). Other families leave {@link #gemma4()} {@code null}.
+     *
+     * @return whether Gemma 4 text fields were parsed
+     * @since 1.1.0
+     */
+    public boolean isGemma4() {
+      return this.gemma4 != null;
+    }
+
+    /**
+     * {@code true} when this blueprint includes {@link WhisperSpec} (OpenAI Whisper ASR).
+     *
+     * @since 1.3.0
+     */
+    public boolean isWhisper() {
+      return this.whisper != null;
+    }
+
     /**
      * Attention head dim at {@code layerIndex}. Non-Gemma-4 models use {@link #headDim()} for
      * every layer. Gemma 4 global (non-sliding) layers may use {@link Gemma4Text#globalHeadDim()}.
@@ -1079,9 +1147,6 @@ public final class Config {
         "no KV producer layer of matching type for shared layer " + layerIndex);
     }
 
-    private record RopeBases(float theta, float localBaseFreq, float partialRotaryFactor) {
-    }
-
     /**
      * {@code true} when layer {@code layerIndex} uses a sliding attention window.
      *
@@ -1104,80 +1169,6 @@ public final class Config {
       return false;
     }
 
-    private static PiperSpec parsePiper(final Map<String, Object> root, final String modelType) {
-      if (Json.asObject(root.get("phoneme_id_map")) == null) {
-        return null;
-      }
-      if (!"piper".equals(modelType) && Json.asString(root.get("espeak")) == null
-        && Json.asObject(root.get("espeak")) == null) {
-        return null;
-      }
-      return piperFromRoot(root);
-    }
-
-    private static PiperSpec piperFromRoot(final Map<String, Object> root) {
-      Map<String, Object> audio = Json.asObject(root.get("audio"));
-      Map<String, Object> espeak = Json.asObject(root.get("espeak"));
-      Map<String, Object> inference = Json.asObject(root.get("inference"));
-      int sampleRate = audio == null
-        ? Json.asInt(root.get("sample_rate"), 22_050)
-        : Json.asInt(audio.get("sample_rate"), 22_050);
-      String quality = audio == null ? "" : Json.asString(audio.get("quality"));
-      String voice = espeak == null ? "" : Json.asString(espeak.get("voice"));
-      if (voice == null || voice.isBlank()) {
-        voice = espeak == null ? "" : Json.asString(espeak.get("language"));
-      }
-      float noise = 0.667f;
-      float length = 1f;
-      float noiseW = 0.8f;
-      if (inference != null) {
-        noise = Json.asFloat(inference.get("noise_scale"), noise);
-        length = Json.asFloat(inference.get("length_scale"), length);
-        noiseW = Json.asFloat(inference.get("noise_w"), noiseW);
-      }
-      return new PiperSpec(
-        sampleRate,
-        quality == null ? "" : quality,
-        voice == null ? "" : voice,
-        Json.asInt(root.get("num_speakers"), 1),
-        Json.asInt(root.get("num_symbols"), 256),
-        noise,
-        length,
-        noiseW,
-        intListMap(Json.asObject(root.get("phoneme_id_map"))),
-        stringListMap(Json.asObject(root.get("phoneme_map"))));
-    }
-
-    private static Map<String, List<Integer>> intListMap(final Map<String, Object> raw) {
-      if (raw == null || raw.isEmpty()) {
-        return Map.of();
-      }
-      Map<String, List<Integer>> out = new LinkedHashMap<>();
-      raw.forEach((key, value) -> {
-        List<Object> list = Json.asArray(value);
-        if (list == null) {
-          return;
-        }
-        out.put(key, list.stream().map(item -> Json.asInt(item, 0)).toList());
-      });
-      return out;
-    }
-
-    private static Map<String, List<String>> stringListMap(final Map<String, Object> raw) {
-      if (raw == null || raw.isEmpty()) {
-        return Map.of();
-      }
-      Map<String, List<String>> out = new LinkedHashMap<>();
-      raw.forEach((key, value) -> {
-        List<Object> list = Json.asArray(value);
-        if (list == null) {
-          return;
-        }
-        out.put(key, list.stream().map(Json::asString).toList());
-      });
-      return out;
-    }
-
     /**
      * {@code true} when this blueprint is a Piper VITS voice.
      *
@@ -1194,6 +1185,15 @@ public final class Config {
      */
     public boolean isFastText() {
       return "fasttext".equals(this.modelType);
+    }
+
+    private record ModalityFlags(boolean image, boolean audio, boolean video) {
+      boolean vision() {
+        return this.image || this.video;
+      }
+    }
+
+    private record RopeBases(float theta, float localBaseFreq, float partialRotaryFactor) {
     }
   }
 
@@ -1263,13 +1263,13 @@ public final class Config {
    * leave {@link HfConfig#gemma4()} {@code null}. Vision/audio towers in the same checkpoint are
    * skipped at load; MoE ({@code enable_moe_block}) is unsupported.
    *
-   * @param hiddenSizePerLayerInput  PLE / per-layer input width
-   * @param numKvSharedLayers        how many trailing layers reuse earlier KV
-   * @param useDoubleWideMlp         double MLP width on shared-KV layers
-   * @param globalHeadDim            head dim for full-attention (non-sliding) layers
-   * @param fullPartialRotaryFactor  RoPE fraction on full-attention layers
-   * @param finalLogitSoftcapping    logit softcap; {@code 0} disables
-   * @param enableMoeBlock           MoE flag from config (this engine does not run MoE)
+   * @param hiddenSizePerLayerInput PLE / per-layer input width
+   * @param numKvSharedLayers       how many trailing layers reuse earlier KV
+   * @param useDoubleWideMlp        double MLP width on shared-KV layers
+   * @param globalHeadDim           head dim for full-attention (non-sliding) layers
+   * @param fullPartialRotaryFactor RoPE fraction on full-attention layers
+   * @param finalLogitSoftcapping   logit softcap; {@code 0} disables
+   * @param enableMoeBlock          MoE flag from config (this engine does not run MoE)
    * @since 1.1.0
    */
   public record Gemma4Text(

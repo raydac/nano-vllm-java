@@ -29,10 +29,10 @@ public final class SafetensorsReader implements AutoCloseable {
   private static final ByteBuffer CLOSED_MAP = ByteBuffer.allocate(0).asReadOnlyBuffer();
 
   private final String label;
-  private FileChannel channel;
-  private ByteBuffer map;
   private final Map<String, TensorInfo> tensors;
   private final long dataOffset;
+  private FileChannel channel;
+  private ByteBuffer map;
   private boolean closed;
 
   public SafetensorsReader(final Path path) throws IOException {

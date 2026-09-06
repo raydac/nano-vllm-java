@@ -36,6 +36,10 @@ public final class WeightBag {
     }
   }
 
+  private static boolean isPackedValue(final Object value) {
+    return value instanceof PackedWeight || value instanceof GemmaQatWeight;
+  }
+
   public Optional<ConvLayout> convLayout(final String weightName) {
     return Optional.ofNullable(this.convLayouts.get(requireNonNull(weightName, "weightName")));
   }
@@ -43,10 +47,6 @@ public final class WeightBag {
   public int convDilation(final String weightName, final int fallback) {
     ConvLayout layout = this.convLayouts.get(requireNonNull(weightName, "weightName"));
     return layout == null ? fallback : layout.dilationOr(fallback);
-  }
-
-  private static boolean isPackedValue(final Object value) {
-    return value instanceof PackedWeight || value instanceof GemmaQatWeight;
   }
 
   public Tensor require(final String name) {

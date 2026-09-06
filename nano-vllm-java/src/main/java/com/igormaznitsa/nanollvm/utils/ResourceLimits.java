@@ -212,49 +212,65 @@ public record ResourceLimits(
       return this;
     }
 
-    /** Summed RAG corpus cap ({@code >= 1}). */
+    /**
+     * Summed RAG corpus cap ({@code >= 1}).
+     */
     public Builder maxTotalCorpusBytes(final long maxTotalCorpusBytes) {
       this.maxTotalCorpusBytes = maxTotalCorpusBytes;
       return this;
     }
 
-    /** Max files in one corpus load ({@code >= 1}). */
+    /**
+     * Max files in one corpus load ({@code >= 1}).
+     */
     public Builder maxCorpusFiles(final int maxCorpusFiles) {
       this.maxCorpusFiles = maxCorpusFiles;
       return this;
     }
 
-    /** {@code .safetensors} JSON header cap ({@code >= 1}). */
+    /**
+     * {@code .safetensors} JSON header cap ({@code >= 1}).
+     */
     public Builder maxSafetensorsHeaderBytes(final long maxSafetensorsHeaderBytes) {
       this.maxSafetensorsHeaderBytes = maxSafetensorsHeaderBytes;
       return this;
     }
 
-    /** JSON nesting cap ({@code >= 1}). */
+    /**
+     * JSON nesting cap ({@code >= 1}).
+     */
     public Builder maxJsonDepth(final int maxJsonDepth) {
       this.maxJsonDepth = maxJsonDepth;
       return this;
     }
 
-    /** JSON document size cap ({@code >= 1}). */
+    /**
+     * JSON document size cap ({@code >= 1}).
+     */
     public Builder maxJsonChars(final long maxJsonChars) {
       this.maxJsonChars = maxJsonChars;
       return this;
     }
 
-    /** Max GGUF metadata string ({@code >= 1}). */
+    /**
+     * Max GGUF metadata string ({@code >= 1}).
+     */
     public Builder maxGgufStringBytes(final long maxGgufStringBytes) {
       this.maxGgufStringBytes = maxGgufStringBytes;
       return this;
     }
 
-    /** Max GGUF tensor rank ({@code >= 1}). */
+    /**
+     * Max GGUF tensor rank ({@code >= 1}).
+     */
     public Builder maxGgufDims(final int maxGgufDims) {
       this.maxGgufDims = maxGgufDims;
       return this;
     }
 
-    /** Chat history length cap ({@code >= 1}). */
+    /**
+     * Chat history length cap ({@code >= 1}).
+     */
     public Builder maxHistoryMessages(final int maxHistoryMessages) {
       this.maxHistoryMessages = maxHistoryMessages;
       return this;

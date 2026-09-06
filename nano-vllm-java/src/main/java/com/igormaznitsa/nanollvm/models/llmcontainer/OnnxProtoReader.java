@@ -583,13 +583,13 @@ public final class OnnxProtoReader {
   /**
    * Parsed graph slice for Tier A import.
    *
-   * @param initializers           named TensorProto weights / constants
-   * @param matMulWeightAliases    anonymous MatMul {@code B} initializer name → HF-style
-   *                               {@code ….weight} path derived from the MatMul node name
-   * @param identityWeightAliases  Conv / ConvTranspose / embedding-Gather initializer name →
-   *                               PyTorch-style {@code ….weight} path (no transpose)
-   * @param convLayouts            Conv / ConvTranspose weight name → spatial attributes from the
-   *                               consuming node (stride, pads, dilation, groups, output_padding)
+   * @param initializers          named TensorProto weights / constants
+   * @param matMulWeightAliases   anonymous MatMul {@code B} initializer name → HF-style
+   *                              {@code ….weight} path derived from the MatMul node name
+   * @param identityWeightAliases Conv / ConvTranspose / embedding-Gather initializer name →
+   *                              PyTorch-style {@code ….weight} path (no transpose)
+   * @param convLayouts           Conv / ConvTranspose weight name → spatial attributes from the
+   *                              consuming node (stride, pads, dilation, groups, output_padding)
    * @since 1.1.0
    */
   public record OnnxGraphBundle(

@@ -106,57 +106,79 @@ public final class Context {
     return this.prefill;
   }
 
-  /** Cumulative query lengths for the current batch, or {@code null} when unset. */
+  /**
+   * Cumulative query lengths for the current batch, or {@code null} when unset.
+   */
   public int[] cuSeqlensQ() {
     return this.cuSeqlensQ;
   }
 
-  /** Cumulative key lengths for the current batch, or {@code null} when unset. */
+  /**
+   * Cumulative key lengths for the current batch, or {@code null} when unset.
+   */
   public int[] cuSeqlensK() {
     return this.cuSeqlensK;
   }
 
-  /** Max query length in the current batch. */
+  /**
+   * Max query length in the current batch.
+   */
   public int maxSeqlenQ() {
     return this.maxSeqlenQ;
   }
 
-  /** Max key length in the current batch. */
+  /**
+   * Max key length in the current batch.
+   */
   public int maxSeqlenK() {
     return this.maxSeqlenK;
   }
 
-  /** KV write-slot mapping, or {@code null} when unset. */
+  /**
+   * KV write-slot mapping, or {@code null} when unset.
+   */
   public int[] slotMapping() {
     return this.slotMapping;
   }
 
-  /** Per-sequence context lengths, or {@code null} when unset. */
+  /**
+   * Per-sequence context lengths, or {@code null} when unset.
+   */
   public int[] contextLens() {
     return this.contextLens;
   }
 
-  /** Per-sequence page tables, or {@code null} when unset. */
+  /**
+   * Per-sequence page tables, or {@code null} when unset.
+   */
   public int[][] blockTables() {
     return this.blockTables;
   }
 
-  /** Engine sequence ids for the current batch, or {@code null} when unset. */
+  /**
+   * Engine sequence ids for the current batch, or {@code null} when unset.
+   */
   public int[] seqIds() {
     return this.seqIds;
   }
 
-  /** Paged KV arena bound for this step, or {@code null}. */
+  /**
+   * Paged KV arena bound for this step, or {@code null}.
+   */
   public KvCacheArena kvCache() {
     return this.kvCache;
   }
 
-  /** Short-conv state arena bound for this step, or {@code null}. */
+  /**
+   * Short-conv state arena bound for this step, or {@code null}.
+   */
   public ConvStateArena convCache() {
     return this.convCache;
   }
 
-  /** Matmul runtime bound for this step, or {@code null} for sequential kernels. */
+  /**
+   * Matmul runtime bound for this step, or {@code null} for sequential kernels.
+   */
   public MatmulRuntime matmul() {
     return this.matmul;
   }

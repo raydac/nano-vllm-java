@@ -84,8 +84,8 @@ public final class HybridRagIndex implements RagIndex {
    * Builds a dense index over {@code lexical} passages on the calling thread, then wraps both
    * in hybrid retrieval.
    *
-   * @param lexical         BM25 corpus whose chunks are embedded; must not be {@code null}
-   * @param embeddingModel  embedding encoder kept open for query-time embed; must not be {@code null}
+   * @param lexical        BM25 corpus whose chunks are embedded; must not be {@code null}
+   * @param embeddingModel embedding encoder kept open for query-time embed; must not be {@code null}
    * @return hybrid index over the same passages
    * @throws NullPointerException     if either argument is {@code null}
    * @throws IllegalArgumentException if {@code lexical} has no chunks or {@code embeddingModel} is
@@ -294,7 +294,9 @@ public final class HybridRagIndex implements RagIndex {
       .toList(), topK);
   }
 
-  /** {@inheritDoc} */
+  /**
+   * {@inheritDoc}
+   */
   @Override
   public String toString() {
     return "HybridRagIndex{passages=%d, sources=%d}".formatted(

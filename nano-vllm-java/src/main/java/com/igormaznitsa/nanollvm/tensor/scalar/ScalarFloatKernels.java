@@ -15,13 +15,13 @@ public final class ScalarFloatKernels extends FloatKernels {
 
   private static final int GEMV_PANEL = 8;
 
+  private static float geluPytorchTanh(final float x) {
+    return 0.5f * x * (1.0f + (float) Math.tanh(0.7978845608028654 * (x + 0.044715 * x * x * x)));
+  }
+
   @Override
   public String name() {
     return "scalar";
-  }
-
-  private static float geluPytorchTanh(final float x) {
-    return 0.5f * x * (1.0f + (float) Math.tanh(0.7978845608028654 * (x + 0.044715 * x * x * x)));
   }
 
   @Override

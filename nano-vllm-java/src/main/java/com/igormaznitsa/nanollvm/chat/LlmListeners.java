@@ -209,7 +209,9 @@ public final class LlmListeners {
    * Forwards each event to {@code left} then {@code right}.
    */
   private record Composite(LlmListener left, LlmListener right) implements LlmListener {
-    /** {@inheritDoc} */
+    /**
+     * {@inheritDoc}
+     */
     @Override
     public void onText(final LLM source, final LlmTextEvent event) {
       this.left.onText(source, event);
@@ -235,7 +237,9 @@ public final class LlmListeners {
       this.printer = requireNonNull(printer, "printer");
     }
 
-    /** {@inheritDoc} */
+    /**
+     * {@inheritDoc}
+     */
     @Override
     public void onText(final LLM source, final LlmTextEvent event) {
       switch (event.kind()) {

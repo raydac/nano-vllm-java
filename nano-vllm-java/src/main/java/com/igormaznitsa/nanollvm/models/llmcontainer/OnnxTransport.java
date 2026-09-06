@@ -43,9 +43,9 @@ public final class OnnxTransport implements ContainerTransport {
 
   private final String label;
   private final String configJson;
-  private OnnxGraphBundle graph;
   private final Path externalBase;
   private final ContainerCatalog catalog;
+  private OnnxGraphBundle graph;
 
   private OnnxTransport(
     final String label,

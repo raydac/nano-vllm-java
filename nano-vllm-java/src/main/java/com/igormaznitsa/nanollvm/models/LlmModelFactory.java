@@ -78,7 +78,7 @@ import java.util.Map;
  *     .thinkTags(ThinkTags.of("<think>", "</think>"))
  *     .make();
  * }</pre>
- *
+ * <p>
  * Existing {@link #make} / {@link #fromClasspath} overloads remain.
  *
  * <p>Optional load-time settings go in a {@code Map} (frozen as {@link java.util.Map#copyOf} on
@@ -912,10 +912,10 @@ public final class LlmModelFactory {
 
     private final Path modelPath;
     private final ModelFileSource source;
+    private final Map<String, Object> optionalData = new LinkedHashMap<>();
     private LlmListener io = LlmListeners.silent();
     private boolean allowUnpackParameters;
     private Map<String, ?> options = Map.of();
-    private final Map<String, Object> optionalData = new LinkedHashMap<>();
 
     private Builder(final Path modelPath, final ModelFileSource source) {
       this.modelPath = modelPath;

@@ -494,7 +494,7 @@ public final class RagSession {
    *
    * @param question non-blank user turn
    * @return finished {@link ChatReply}: {@code answer} for the user, optional {@code thinking},
-   *         and measured {@code stats}
+   * and measured {@code stats}
    * @throws IllegalArgumentException                                          if {@code question} is blank after strip
    * @throws com.igormaznitsa.nanollvm.exceptions.GenerationCancelledException if cancel fires
    * @throws com.igormaznitsa.nanollvm.exceptions.GenerationTimeoutException   if the session timeout elapses
@@ -689,7 +689,9 @@ public final class RagSession {
       return parse(rawModelText, ThinkTags.DEFAULT, ChatSpecials.DEFAULT);
     }
 
-    /** {@link #parse(String, ThinkTags, ChatSpecials)} with {@link ChatSpecials#DEFAULT}. */
+    /**
+     * {@link #parse(String, ThinkTags, ChatSpecials)} with {@link ChatSpecials#DEFAULT}.
+     */
     static Optional<String> parse(final String rawModelText, final ThinkTags tags) {
       return parse(rawModelText, tags, ChatSpecials.DEFAULT);
     }
@@ -780,7 +782,9 @@ public final class RagSession {
       return PreparedRag.tokenize(question).size() < SHORT_FOLLOW_UP_MAX_TOKENS;
     }
 
-    /** {@code true} when {@link RagIndex#retrieve(String, int)} returns at least one hit. */
+    /**
+     * {@code true} when {@link RagIndex#retrieve(String, int)} returns at least one hit.
+     */
     static boolean hasHits(final RagIndex index, final String query) {
       requireNonNull(index, "index");
       requireNonNull(query, "query");
@@ -812,7 +816,9 @@ public final class RagSession {
       return Optional.of(anchorExpandedQuery(question, anchor));
     }
 
-    /** {@code true} when {@code question} is long enough to replace the conversation anchor. */
+    /**
+     * {@code true} when {@code question} is long enough to replace the conversation anchor.
+     */
     static boolean updatesAnchorFromQuestion(final String question) {
       return !shortFollowUp(question);
     }

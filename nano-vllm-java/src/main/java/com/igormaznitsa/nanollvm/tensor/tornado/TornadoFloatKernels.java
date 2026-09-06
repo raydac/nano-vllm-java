@@ -24,6 +24,11 @@ public final class TornadoFloatKernels extends FloatKernels {
   }
 
   @Override
+  public boolean prefersSingleShotGemv() {
+    return true;
+  }
+
+  @Override
   public float dot(
     final float[] a, final int aOffset, final float[] b, final int bOffset, final int n
   ) {

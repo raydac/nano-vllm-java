@@ -61,8 +61,8 @@ public final class DenseRagIndex implements RagIndex {
   /**
    * Embeds every passage in {@code lexical} with {@code embeddingModel} on the calling thread.
    *
-   * @param lexical         BM25 corpus whose chunks are embedded; must not be {@code null}
-   * @param embeddingModel  embedding encoder kept open for query-time embed; must not be {@code null}
+   * @param lexical        BM25 corpus whose chunks are embedded; must not be {@code null}
+   * @param embeddingModel embedding encoder kept open for query-time embed; must not be {@code null}
    * @return dense index over {@code lexical} passages
    * @throws NullPointerException     if {@code lexical} or {@code embeddingModel} is {@code null}
    * @throws IllegalArgumentException if {@code lexical} has no chunks or {@code embeddingModel} is
@@ -79,9 +79,9 @@ public final class DenseRagIndex implements RagIndex {
    * {@link #of(PreparedRag, LlmModel)} and invokes {@code onPassageEmbedded} after each vector
    * with the 1-based completed count on the calling thread.
    *
-   * @param lexical             BM25 corpus whose chunks are embedded; must not be {@code null}
-   * @param embeddingModel      embedding encoder kept open for query-time embed; must not be {@code null}
-   * @param onPassageEmbedded   called with {@code 1..N} after each passage vector; must not be {@code null}
+   * @param lexical           BM25 corpus whose chunks are embedded; must not be {@code null}
+   * @param embeddingModel    embedding encoder kept open for query-time embed; must not be {@code null}
+   * @param onPassageEmbedded called with {@code 1..N} after each passage vector; must not be {@code null}
    * @return dense index over {@code lexical} passages
    * @throws NullPointerException     if any argument is {@code null}
    * @throws IllegalArgumentException if {@code lexical} has no chunks or {@code embeddingModel} is
@@ -102,9 +102,9 @@ public final class DenseRagIndex implements RagIndex {
    * {@link #of(PreparedRag, LlmModel)} with one BERT forward submitted per passage on
    * {@code executor}. The caller owns the executor; this index does not shut it down.
    *
-   * @param lexical         BM25 corpus whose chunks are embedded; must not be {@code null}
-   * @param embeddingModel  embedding encoder kept open for query-time embed; must not be {@code null}
-   * @param executor        runs each passage embed; must not be {@code null}; not shut down here
+   * @param lexical        BM25 corpus whose chunks are embedded; must not be {@code null}
+   * @param embeddingModel embedding encoder kept open for query-time embed; must not be {@code null}
+   * @param executor       runs each passage embed; must not be {@code null}; not shut down here
    * @return dense index over {@code lexical} passages
    * @throws NullPointerException     if any argument is {@code null}
    * @throws IllegalArgumentException if {@code lexical} has no chunks or {@code embeddingModel} is
@@ -149,8 +149,8 @@ public final class DenseRagIndex implements RagIndex {
   /**
    * Embeds each chunk text with {@code embeddingModel} on the calling thread.
    *
-   * @param chunks          passages to index; must not be empty
-   * @param embeddingModel  embedding encoder kept open for query-time embed; must not be {@code null}
+   * @param chunks         passages to index; must not be empty
+   * @param embeddingModel embedding encoder kept open for query-time embed; must not be {@code null}
    * @return dense index over {@code chunks}
    * @throws NullPointerException     if {@code chunks} or {@code embeddingModel} is {@code null}
    * @throws IllegalArgumentException if {@code chunks} is empty or {@code embeddingModel} is not an
@@ -356,6 +356,11 @@ public final class DenseRagIndex implements RagIndex {
     return sum;
   }
 
+  private static float[] encode(final LlmModel model, final String text) {
+    LlmOutEmbedding embedding = model.generate(LlmInText.of(text), LlmModality.EMBEDDING);
+    return embedding.vector();
+  }
+
   /**
    * {@inheritDoc}
    */
@@ -382,7 +387,9 @@ public final class DenseRagIndex implements RagIndex {
     return this.encoder;
   }
 
-  /** {@inheritDoc} Off-topic when the best cosine similarity is below a dense floor. */
+  /**
+   * {@inheritDoc} Off-topic when the best cosine similarity is below a dense floor.
+   */
   @Override
   public boolean isOutsideCorpus(final String query) {
     requireNonNull(query, "query");
@@ -392,7 +399,9 @@ public final class DenseRagIndex implements RagIndex {
     return this.bestSimilarity(query) < OUTSIDE_MAX_SIMILARITY;
   }
 
-  /** {@inheritDoc} Cosine (dot of L2-normalized embeddings), then a relative score floor. */
+  /**
+   * {@inheritDoc} Cosine (dot of L2-normalized embeddings), then a relative score floor.
+   */
   @Override
   public List<RagHit> retrieve(final String query, final int topK) {
     requireNonNull(query, "query");
@@ -417,7 +426,9 @@ public final class DenseRagIndex implements RagIndex {
     return List.copyOf(keepStrongHits(scored, topK));
   }
 
-  /** {@inheritDoc} */
+  /**
+   * {@inheritDoc}
+   */
   @Override
   public String toString() {
     return "DenseRagIndex{passages=%d, dim=%d, encoder=%s}".formatted(
@@ -433,11 +444,6 @@ public final class DenseRagIndex implements RagIndex {
       best = Math.max(best, dot(queryVector, vector));
     }
     return best;
-  }
-
-  private static float[] encode(final LlmModel model, final String text) {
-    LlmOutEmbedding embedding = model.generate(LlmInText.of(text), LlmModality.EMBEDDING);
-    return embedding.vector();
   }
 
   private float[] embedQuery(final String query) {

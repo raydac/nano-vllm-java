@@ -237,8 +237,8 @@ public final class RagFactory {
    * Hybrid BM25 + dense retrieval over an existing lexical index. Dense passage embeds run on
    * the calling thread.
    *
-   * @param lexical         BM25 corpus whose chunks are embedded; must not be {@code null}
-   * @param embeddingModel  embedding encoder kept open for query-time embed; must not be {@code null}
+   * @param lexical        BM25 corpus whose chunks are embedded; must not be {@code null}
+   * @param embeddingModel embedding encoder kept open for query-time embed; must not be {@code null}
    * @return hybrid index over the same passages
    * @throws NullPointerException     if either argument is {@code null}
    * @throws IllegalArgumentException if {@code lexical} has no chunks or {@code embeddingModel} is
@@ -342,9 +342,9 @@ public final class RagFactory {
   /**
    * Lexical BM25 plus dense embeddings, with corpus {@link RagLoadOptions}.
    *
-   * @param folderOrFile    file or directory to index; must exist
-   * @param options         load-time chunk/preprocess knobs; must not be {@code null}
-   * @param embeddingModel  encoder kept open for query-time embed; must not be {@code null}
+   * @param folderOrFile   file or directory to index; must exist
+   * @param options        load-time chunk/preprocess knobs; must not be {@code null}
+   * @param embeddingModel encoder kept open for query-time embed; must not be {@code null}
    * @return hybrid index over the same passages
    * @since 1.1.0
    */
@@ -359,10 +359,10 @@ public final class RagFactory {
   /**
    * Lexical BM25 plus dense embeddings, with load options and a progress listener.
    *
-   * @param folderOrFile    file or directory to index; must exist
-   * @param options         load-time chunk/preprocess knobs; must not be {@code null}
-   * @param io              progress sink; {@code null} is treated as silent
-   * @param embeddingModel  encoder kept open for query-time embed; must not be {@code null}
+   * @param folderOrFile   file or directory to index; must exist
+   * @param options        load-time chunk/preprocess knobs; must not be {@code null}
+   * @param io             progress sink; {@code null} is treated as silent
+   * @param embeddingModel encoder kept open for query-time embed; must not be {@code null}
    * @return hybrid index over the same passages
    * @since 1.1.0
    */
@@ -379,10 +379,10 @@ public final class RagFactory {
    * Like {@link #tryMake(Path, RagLoadOptions, LlmListener)} then {@link #withEmbeddings} when
    * the corpus is non-empty.
    *
-   * @param folderOrFile    file or directory to index; must exist
-   * @param options         load-time chunk/preprocess knobs; must not be {@code null}
-   * @param io              progress sink; {@code null} is treated as silent
-   * @param embeddingModel  encoder kept open for query-time embed; must not be {@code null}
+   * @param folderOrFile   file or directory to index; must exist
+   * @param options        load-time chunk/preprocess knobs; must not be {@code null}
+   * @param io             progress sink; {@code null} is treated as silent
+   * @param embeddingModel encoder kept open for query-time embed; must not be {@code null}
    * @return the hybrid index, or empty when nothing was indexable
    * @since 1.1.0
    */
@@ -607,8 +607,8 @@ public final class RagFactory {
     /**
      * Adds several classpath resources resolved with {@code loader}.
      *
-     * @param loader         class loader; must not be {@code null}
-     * @param resourcePaths  classpath paths; must not be {@code null}
+     * @param loader        class loader; must not be {@code null}
+     * @param resourcePaths classpath paths; must not be {@code null}
      * @return {@code this}
      * @since 1.1.0
      */

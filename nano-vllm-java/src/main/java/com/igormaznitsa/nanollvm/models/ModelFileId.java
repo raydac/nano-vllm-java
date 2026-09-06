@@ -33,7 +33,9 @@ public enum ModelFileId {
    * FP32 / default ONNX weight file (root or {@code onnx/}). @since 1.1.0
    */
   MODEL_ONNX("model.onnx"),
-  /** FP16 ONNX weight file (root or {@code onnx/}). @since 1.1.0 */
+  /**
+   * FP16 ONNX weight file (root or {@code onnx/}). @since 1.1.0
+   */
   MODEL_ONNX_FP16("model_fp16.onnx"),
   GGUF("model.gguf");
 

@@ -196,14 +196,18 @@ public final class PreparedRag implements RagIndex {
     return this.docCount;
   }
 
-  /** {@inheritDoc} */
+  /**
+   * {@inheritDoc}
+   */
   @Override
   public boolean isOutsideCorpus(final String query) {
     List<String> raw = List.copyOf(new LinkedHashSet<>(Lexicon.tokenizeSurface(query)));
     return QueryTerms.queryOutsideCorpus(this.docFreq, this.docCount, raw);
   }
 
-  /** {@inheritDoc} BM25 then re-rank by query-term coverage and passage length. */
+  /**
+   * {@inheritDoc} BM25 then re-rank by query-term coverage and passage length.
+   */
   @Override
   public List<RagHit> retrieve(final String query, final int topK) {
     List<String> terms = this.selectedQueryTerms(query);
@@ -221,7 +225,9 @@ public final class PreparedRag implements RagIndex {
       .toList();
   }
 
-  /** {@inheritDoc} */
+  /**
+   * {@inheritDoc}
+   */
   @Override
   public String toString() {
     return "PreparedRag{passages=%d, source=%s}".formatted(
@@ -311,17 +317,23 @@ public final class PreparedRag implements RagIndex {
       }
     }
 
-    /** Chunk id. */
+    /**
+     * Chunk id.
+     */
     public String id() {
       return this.chunk.id();
     }
 
-    /** Source label (path or {@code classpath:…}). */
+    /**
+     * Source label (path or {@code classpath:…}).
+     */
     public String source() {
       return this.chunk.source();
     }
 
-    /** Passage text fed to the model. */
+    /**
+     * Passage text fed to the model.
+     */
     public String modelText() {
       return this.chunk.text();
     }

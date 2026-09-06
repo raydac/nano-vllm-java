@@ -55,7 +55,7 @@ import java.util.stream.IntStream;
 
 /**
  * One engine bound to a loaded {@link LlmModel}: conversation, raw continuation, batch generate,
- * RAG, embeddings, Whisper, or Piper — depending on the checkpoint kind.
+ * RAG, embeddings, Whisper, Piper, or fastText classification — depending on the checkpoint kind.
  * {@link Builder} is the common construction path for every kind ({@code cpuThreads}, matmul pool).
  *
  * <h2>Typical use</h2>
@@ -106,6 +106,8 @@ import java.util.stream.IntStream;
  *       {@link com.igormaznitsa.nanollvm.models.LlmInSound} → {@link LlmModality#TEXT}.</li>
  *   <li><b>Text to speech</b> — {@link #generate(LlmInput, LlmModality)} with
  *       {@link LlmInText} → {@link LlmModality#AUDIO} ({@link com.igormaznitsa.nanollvm.models.LlmOutSoundData}).</li>
+ *   <li><b>Language id / text labels</b> — {@link #generate(LlmInput, LlmModality)} with
+ *       {@link LlmInText} → {@link LlmModality#LABELS} ({@link com.igormaznitsa.nanollvm.models.LlmOutLabels}).</li>
  * </ul>
  * Prefer {@link #chat()} / {@link #chatOnce} / typed {@link #generate(LlmInput, LlmModality)} unless you need a
  * batch of prompts or a token-id stream — that is {@link #generate(List, SamplingParams)} /
@@ -297,6 +299,13 @@ public final class LLM implements AutoCloseable {
     return new Builder(requireNonNull(model, "model"));
   }
 
+  private static Consumer<TokenEvent> adaptTokenCallback(final IntConsumer onToken) {
+    if (onToken == null) {
+      return null;
+    }
+    return event -> onToken.accept(event.tokenId());
+  }
+
   /**
    * The immutable loaded model bound to this engine. Safe to share with other {@code LLM}s; this
    * instance does not own it. Closing this engine does not unload weights.
@@ -318,6 +327,7 @@ public final class LLM implements AutoCloseable {
    *   <li>{@link LlmInTokenIds} → {@link LlmModality#EMBEDDING} — already-tokenized ids</li>
    *   <li>{@link LlmInText} → {@link LlmModality#AUDIO} — Piper synthesis ({@link com.igormaznitsa.nanollvm.models.LlmOutSoundData})</li>
    *   <li>{@link com.igormaznitsa.nanollvm.models.LlmInSound} → {@link LlmModality#TEXT} — Whisper transcription</li>
+   *   <li>{@link LlmInText} → {@link LlmModality#LABELS} — fastText classification ({@link com.igormaznitsa.nanollvm.models.LlmOutLabels})</li>
    * </ul>
    *
    * @param input          typed payload; must not be {@code null}
@@ -446,13 +456,6 @@ public final class LLM implements AutoCloseable {
    */
   public void cancel() {
     this.cancelRequested.set(true);
-  }
-
-  private static Consumer<TokenEvent> adaptTokenCallback(final IntConsumer onToken) {
-    if (onToken == null) {
-      return null;
-    }
-    return event -> onToken.accept(event.tokenId());
   }
 
   /**

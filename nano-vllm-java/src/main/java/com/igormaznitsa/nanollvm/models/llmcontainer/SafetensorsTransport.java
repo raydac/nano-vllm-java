@@ -27,10 +27,10 @@ public final class SafetensorsTransport implements ContainerTransport {
 
   private final String label;
   private final String configJson;
-  private List<Shard> shards;
-  private Map<String, Shard> shardsByLabel;
   private final List<TensorRef> tensorIndex;
   private final ContainerCatalog catalog;
+  private List<Shard> shards;
+  private Map<String, Shard> shardsByLabel;
   private boolean closed;
 
   private SafetensorsTransport(

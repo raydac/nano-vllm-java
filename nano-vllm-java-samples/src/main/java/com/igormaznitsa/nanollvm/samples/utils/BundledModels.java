@@ -163,10 +163,10 @@ public final class BundledModels {
    */
   public static Path requireWhisper() {
     return find(WHISPER_TINY)
-        .or(() -> find(WHISPER_BASE))
-        .orElseThrow(() -> new IllegalStateException(
-            "no Whisper checkpoint under " + modelsRoot()
-                + ". Run models/download-whisper-tiny.sh or models/download-whisper-base.sh"));
+      .or(() -> find(WHISPER_BASE))
+      .orElseThrow(() -> new IllegalStateException(
+        "no Whisper checkpoint under " + modelsRoot()
+          + ". Run models/download-whisper-tiny.sh or models/download-whisper-base.sh"));
   }
 
   /**
@@ -186,12 +186,12 @@ public final class BundledModels {
    */
   public static Path requireEmbeddingEncoder() {
     return find(MULTILINGUAL_E5_SMALL)
-        .or(() -> find(GTE_SMALL_GGUF))
-        .or(() -> find(XLM_ROBERTA_BASE))
-        .orElseThrow(() -> new IllegalStateException(
-            "no BERT embedding checkpoint under " + modelsRoot()
-              + ". Run models/download-multilingual-e5-small.sh, "
-              + "models/download-gte-small-gguf.sh, or models/download-xlm-roberta-base.sh"));
+      .or(() -> find(GTE_SMALL_GGUF))
+      .or(() -> find(XLM_ROBERTA_BASE))
+      .orElseThrow(() -> new IllegalStateException(
+        "no BERT embedding checkpoint under " + modelsRoot()
+          + ". Run models/download-multilingual-e5-small.sh, "
+          + "models/download-gte-small-gguf.sh, or models/download-xlm-roberta-base.sh"));
   }
 
   /**
@@ -199,13 +199,13 @@ public final class BundledModels {
    */
   public static Path requireChatDemo() {
     return find(GEMMA3_270M)
-        .or(() -> find(SMOLLM2_135M_INSTRUCT_ONNX))
-        .or(() -> find(QWEN3_0_6B))
-        .orElseThrow(() -> new IllegalStateException(
-            "no small chat checkpoint under " + modelsRoot()
-                +
-                ". Run models/download-gemma3-270m.sh, models/download-smollm2-135m-instruct-onnx.sh, "
-                + "or models/download-qwen3-0.6b.sh"));
+      .or(() -> find(SMOLLM2_135M_INSTRUCT_ONNX))
+      .or(() -> find(QWEN3_0_6B))
+      .orElseThrow(() -> new IllegalStateException(
+        "no small chat checkpoint under " + modelsRoot()
+          +
+          ". Run models/download-gemma3-270m.sh, models/download-smollm2-135m-instruct-onnx.sh, "
+          + "or models/download-qwen3-0.6b.sh"));
   }
 
   /**

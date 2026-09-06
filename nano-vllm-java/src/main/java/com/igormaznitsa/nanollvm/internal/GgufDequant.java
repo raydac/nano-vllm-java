@@ -90,7 +90,7 @@ public final class GgufDequant {
   public static final int BLOCK_TQ2_0 = 2 + QK_K / 4;
 
   private static final int[] KVALUES_IQ4NL = {
-      -127, -104, -83, -65, -49, -35, -22, -10, 1, 13, 25, 38, 53, 69, 89, 113
+    -127, -104, -83, -65, -49, -35, -22, -10, 1, 13, 25, 38, 53, 69, 89, 113
   };
 
   private GgufDequant() {
@@ -218,7 +218,7 @@ public final class GgufDequant {
       case TYPE_Q2_K -> dequantizeBlockedRange(packed, numel, elemStart, elemCount, dst, dstOff,
         QK_K, BLOCK_Q2_K, GgufDequant::dequantOneQ2_K);
       case TYPE_Q3_K -> dequantizeBlockedRange(packed, numel, elemStart, elemCount, dst, dstOff,
-          QK_K, BLOCK_Q3_K, GgufDequant::dequantOneQ3_K);
+        QK_K, BLOCK_Q3_K, GgufDequant::dequantOneQ3_K);
       case TYPE_Q4_K -> dequantizeBlockedRange(packed, numel, elemStart, elemCount, dst, dstOff,
         QK_K, BLOCK_Q4_K, GgufDequant::dequantOneQ4_K);
       case TYPE_Q5_K -> dequantizeBlockedRange(packed, numel, elemStart, elemCount, dst, dstOff,
@@ -228,7 +228,7 @@ public final class GgufDequant {
       case TYPE_Q8_K -> dequantizeBlockedRange(packed, numel, elemStart, elemCount, dst, dstOff,
         QK_K, BLOCK_Q8_K, GgufDequant::dequantOneQ8_K);
       case TYPE_IQ4_NL -> dequantizeBlockedRange(packed, numel, elemStart, elemCount, dst, dstOff,
-          QK4_NL, BLOCK_IQ4_NL, GgufDequant::dequantOneIq4Nl);
+        QK4_NL, BLOCK_IQ4_NL, GgufDequant::dequantOneIq4Nl);
       case TYPE_IQ4_XS -> dequantizeBlockedRange(packed, numel, elemStart, elemCount, dst, dstOff,
         QK_K, BLOCK_IQ4_XS, GgufIqDequant::dequantOneIq4Xs);
       case TYPE_IQ2_XXS -> dequantizeBlockedRange(packed, numel, elemStart, elemCount, dst, dstOff,
@@ -583,7 +583,7 @@ public final class GgufDequant {
   }
 
   private static void dequantOneQ3_K(
-      final byte[] packed, final int byteOff, final float[] dst, final int dstOff
+    final byte[] packed, final int byteOff, final float[] dst, final int dstOff
   ) {
     int hmaskOff = byteOff;
     int qsOff = byteOff + QK_K / 8;
@@ -636,7 +636,7 @@ public final class GgufDequant {
   }
 
   private static void dequantOneIq4Nl(
-      final byte[] packed, final int byteOff, final float[] dst, final int dstOff
+    final byte[] packed, final int byteOff, final float[] dst, final int dstOff
   ) {
     float d = Float.float16ToFloat((short) u16LE(packed, byteOff));
     int qsOff = byteOff + 2;

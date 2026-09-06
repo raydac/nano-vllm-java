@@ -85,8 +85,8 @@ public final class Scheduler {
    * Same as {@link #Scheduler(Config)}, plus {@code onSequenceReleased} when a sequence's KV is
    * deallocated (finish, cancel/{@link #clear()}, or preempt) so callers can drop short-conv state.
    *
-   * @param config              engine layout
-   * @param onSequenceReleased  {@link Sequence#seqId()} consumer; {@link Transformer#clearConvState(int)}
+   * @param config             engine layout
+   * @param onSequenceReleased {@link Sequence#seqId()} consumer; {@link Transformer#clearConvState(int)}
    * @throws NullPointerException if {@code config} or {@code onSequenceReleased} is {@code null}
    */
   public Scheduler(final Config config, final IntConsumer onSequenceReleased) {

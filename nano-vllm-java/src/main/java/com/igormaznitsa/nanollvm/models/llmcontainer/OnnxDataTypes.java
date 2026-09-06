@@ -160,9 +160,13 @@ public final class OnnxDataTypes {
      * FLOAT / FLOAT16 / BFLOAT16 / DOUBLE → decode to float32 weights.
      */
     LOADABLE_FLOAT,
-    /** Int / bool / string / complex / undefined graph constants — ignore. */
+    /**
+     * Int / bool / string / complex / undefined graph constants — ignore.
+     */
     SKIP_GRAPH_CONSTANT,
-    /** Float8 / nibble / unknown — fail loud; never silent-drop a weight. */
+    /**
+     * Float8 / nibble / unknown — fail loud; never silent-drop a weight.
+     */
     UNSUPPORTED_WEIGHT
   }
 }

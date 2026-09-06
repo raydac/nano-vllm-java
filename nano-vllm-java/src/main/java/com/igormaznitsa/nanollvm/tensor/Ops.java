@@ -468,9 +468,9 @@ public final class Ops {
    * <p>If {@code onePlusWeight}, {@code w' = 1 + weight[i]} (checkpoint stores a delta from 1).
    * Otherwise {@code w' = weight[i]}.
    *
-   * @param x          input; last dim = feature width
-   * @param weight     length-{@code H} scale vector
-   * @param eps        added under the square root for stability
+   * @param x             input; last dim = feature width
+   * @param weight        length-{@code H} scale vector
+   * @param eps           added under the square root for stability
    * @param onePlusWeight whether to use {@code (1 + w)} scales
    * @return same shape as {@code x}
    */
@@ -527,10 +527,10 @@ public final class Ops {
    * post-add residual stream to carry forward. Callers must keep both; dropping {@code summed}
    * breaks the residual highway. Same {@code onePlusWeight} weight rule as {@link #rmsNorm}.
    *
-   * @param x          branch output to add
-   * @param residual   incoming residual stream (same {@link Tensor#numel()} as {@code x})
-   * @param weight     RMSNorm scale
-   * @param eps        stability epsilon
+   * @param x             branch output to add
+   * @param residual      incoming residual stream (same {@link Tensor#numel()} as {@code x})
+   * @param weight        RMSNorm scale
+   * @param eps           stability epsilon
    * @param onePlusWeight {@code (1 + w)} if true
    * @return {@code new Tensor[] { normed, xPlusResidual }}
    * @throws IllegalArgumentException if {@code x} and {@code residual} sizes differ

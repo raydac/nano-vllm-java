@@ -118,11 +118,11 @@ public final class GgufModelLoader {
   /**
    * Loaded GGUF: config, weights, live transport, schema, and architecture processor.
    *
-   * @param config     GGUF metadata mapped onto Hugging Face-shaped config
-   * @param weights    filled parameter bag
-   * @param transport  open GGUF container (caller must close)
-   * @param schema     expected parameter names
-   * @param processor  family that bound and filled this file
+   * @param config    GGUF metadata mapped onto Hugging Face-shaped config
+   * @param weights   filled parameter bag
+   * @param transport open GGUF container (caller must close)
+   * @param schema    expected parameter names
+   * @param processor family that bound and filled this file
    * @since 1.1.0
    */
   public record LoadedGguf(

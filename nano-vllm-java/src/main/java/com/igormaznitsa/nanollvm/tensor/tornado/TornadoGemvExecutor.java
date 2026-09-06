@@ -7,19 +7,23 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.locks.ReentrantLock;
+import uk.ac.manchester.tornado.api.GridScheduler;
 import uk.ac.manchester.tornado.api.ImmutableTaskGraph;
+import uk.ac.manchester.tornado.api.KernelContext;
 import uk.ac.manchester.tornado.api.TaskGraph;
 import uk.ac.manchester.tornado.api.TornadoExecutionPlan;
+import uk.ac.manchester.tornado.api.WorkerGrid1D;
 import uk.ac.manchester.tornado.api.exceptions.TornadoExecutionPlanException;
 
 /**
- * Launches {@link TornadoGemvKernels#gemv} on the default TornadoVM device.
- *
  * @since 1.4.0
  */
 final class TornadoGemvExecutor {
 
   private static final int MAX_CACHED_PLANS = 32;
+  private static final String GRAPH_NAME = "nanollvm-gemv";
+  private static final String TASK_NAME = "gemv";
+  private static final String SCHEDULER_KEY = GRAPH_NAME + "." + TASK_NAME;
   private static final ReentrantLock EXEC_LOCK = new ReentrantLock();
   private static final Map<GemvSignature, GemvPlan> CACHED_PLANS =
     new LinkedHashMap<>(MAX_CACHED_PLANS, 0.75f, true) {
@@ -71,14 +75,14 @@ final class TornadoGemvExecutor {
     private final int yOff;
     private final int in;
     private final int out0;
-    private final int out1;
+    private final int outCount;
 
     private GemvSignature(
       final float[] x, final int xOff,
       final float[] w, final int wOff,
       final float[] bias,
       final float[] y, final int yOff,
-      final int in, final int out0, final int out1
+      final int in, final int out0, final int outCount
     ) {
       this.x = x;
       this.xOff = xOff;
@@ -89,7 +93,7 @@ final class TornadoGemvExecutor {
       this.yOff = yOff;
       this.in = in;
       this.out0 = out0;
-      this.out1 = out1;
+      this.outCount = outCount;
     }
 
     static GemvSignature of(
@@ -99,7 +103,7 @@ final class TornadoGemvExecutor {
       final float[] y, final int yOff,
       final int in, final int out0, final int out1
     ) {
-      return new GemvSignature(x, xOff, w, wOff, bias, y, yOff, in, out0, out1);
+      return new GemvSignature(x, xOff, w, wOff, bias, y, yOff, in, out0, out1 - out0);
     }
 
     @SuppressWarnings("ReferenceEquality")
@@ -139,6 +143,10 @@ final class TornadoGemvExecutor {
       return this.out0;
     }
 
+    int outCount() {
+      return this.outCount;
+    }
+
     boolean hasBias() {
       return this.bias != null;
     }
@@ -151,10 +159,6 @@ final class TornadoGemvExecutor {
       return this.hasBias() ? 1 : 0;
     }
 
-    int out1() {
-      return this.out1;
-    }
-
     @Override
     public boolean equals(final Object other) {
       if (!(other instanceof GemvSignature that)) {
@@ -164,7 +168,7 @@ final class TornadoGemvExecutor {
         && buffersIdentical(this.w, that.w) && this.wOff == that.wOff
         && buffersIdentical(this.bias, that.bias)
         && buffersIdentical(this.y, that.y) && this.yOff == that.yOff
-        && this.in == that.in && this.out0 == that.out0 && this.out1 == that.out1;
+        && this.in == that.in && this.out0 == that.out0 && this.outCount == that.outCount;
     }
 
     @Override
@@ -174,7 +178,7 @@ final class TornadoGemvExecutor {
         System.identityHashCode(this.w), this.wOff,
         System.identityHashCode(this.bias),
         System.identityHashCode(this.y), this.yOff,
-        this.in, this.out0, this.out1);
+        this.in, this.out0, this.outCount);
     }
   }
 
@@ -187,8 +191,23 @@ final class TornadoGemvExecutor {
     }
 
     static GemvPlan compile(final GemvSignature signature) throws TornadoExecutionPlanException {
+      try {
+        return compileKernelApi(signature);
+      } catch (Throwable kernelApiFailed) {
+        return compileLoopParallel(signature);
+      }
+    }
+
+    private static GemvPlan compileKernelApi(final GemvSignature signature)
+      throws TornadoExecutionPlanException {
       final float[] biasArg = signature.biasArg();
-      TaskGraph taskGraph = new TaskGraph("nanollvm-gemv")
+      final KernelContext context = new KernelContext();
+      final int outCount = signature.outCount();
+      final WorkerGrid1D worker = new WorkerGrid1D(outCount);
+      worker.setLocalWork(localWorkSize(outCount), 1, 1);
+      final GridScheduler scheduler = new GridScheduler(SCHEDULER_KEY, worker);
+
+      TaskGraph taskGraph = new TaskGraph(GRAPH_NAME)
         .transferToDevice(FIRST_EXECUTION, signature.w());
       if (signature.hasBias()) {
         taskGraph = taskGraph.transferToDevice(FIRST_EXECUTION, biasArg);
@@ -196,18 +215,55 @@ final class TornadoGemvExecutor {
       taskGraph = taskGraph
         .transferToDevice(EVERY_EXECUTION, signature.x())
         .task(
-          "gemv",
-          TornadoGemvKernels::gemv,
+          TASK_NAME,
+          TornadoGemvKernels::gemvKernel,
+          context,
           signature.x(), signature.xOff(),
           signature.w(), signature.wOff(),
           biasArg, signature.hasBiasFlag(),
           signature.y(), signature.yOff(),
-          signature.in(), signature.out0(), signature.out1()
+          signature.in(), signature.out0(), outCount
+        )
+        .transferToHost(EVERY_EXECUTION, signature.y());
+
+      final ImmutableTaskGraph snapshot = taskGraph.snapshot();
+      final TornadoExecutionPlan plan = new TornadoExecutionPlan(snapshot)
+        .withPreCompilation()
+        .withGridScheduler(scheduler);
+      return new GemvPlan(plan);
+    }
+
+    private static GemvPlan compileLoopParallel(final GemvSignature signature)
+      throws TornadoExecutionPlanException {
+      final float[] biasArg = signature.biasArg();
+      TaskGraph taskGraph = new TaskGraph(GRAPH_NAME)
+        .transferToDevice(FIRST_EXECUTION, signature.w());
+      if (signature.hasBias()) {
+        taskGraph = taskGraph.transferToDevice(FIRST_EXECUTION, biasArg);
+      }
+      taskGraph = taskGraph
+        .transferToDevice(EVERY_EXECUTION, signature.x())
+        .task(
+          TASK_NAME,
+          TornadoGemvKernels::gemvParallel,
+          signature.x(), signature.xOff(),
+          signature.w(), signature.wOff(),
+          biasArg, signature.hasBiasFlag(),
+          signature.y(), signature.yOff(),
+          signature.in(), signature.out0(), signature.outCount()
         )
         .transferToHost(EVERY_EXECUTION, signature.y());
       final ImmutableTaskGraph snapshot = taskGraph.snapshot();
       final TornadoExecutionPlan plan = new TornadoExecutionPlan(snapshot).withPreCompilation();
       return new GemvPlan(plan);
+    }
+
+    private static long localWorkSize(final int outCount) {
+      long local = 256L;
+      while (local > 1L && (outCount % local) != 0) {
+        local >>= 1;
+      }
+      return Math.max(1L, local);
     }
 
     void execute() throws TornadoExecutionPlanException {

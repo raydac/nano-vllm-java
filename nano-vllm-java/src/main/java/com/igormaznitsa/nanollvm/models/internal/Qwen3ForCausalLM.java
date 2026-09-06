@@ -95,6 +95,13 @@ public record Qwen3ForCausalLM(Qwen3Model model, ParallelLMHead lmHead) implemen
     return ropeTheta;
   }
 
+  private static void requireSilu(final Config.HfConfig config) {
+    if (!"silu".equals(config.effectiveActivation()) && !"silu".equals(config.hiddenAct())) {
+      throw new IllegalArgumentException(
+        "qwen3 architecture expects silu, got " + config.effectiveActivation());
+    }
+  }
+
   @Override
   public String architectureName() {
     return ARCH_QWEN3;
@@ -125,13 +132,6 @@ public record Qwen3ForCausalLM(Qwen3Model model, ParallelLMHead lmHead) implemen
   @Override
   public int hashCode() {
     return System.identityHashCode(this);
-  }
-
-  private static void requireSilu(final Config.HfConfig config) {
-    if (!"silu".equals(config.effectiveActivation()) && !"silu".equals(config.hiddenAct())) {
-      throw new IllegalArgumentException(
-        "qwen3 architecture expects silu, got " + config.effectiveActivation());
-    }
   }
 
   sealed interface Qwen3Attn {

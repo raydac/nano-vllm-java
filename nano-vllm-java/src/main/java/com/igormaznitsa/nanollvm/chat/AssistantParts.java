@@ -24,7 +24,9 @@ record AssistantParts(String thinking, String answer, boolean thinkOpen) {
     return parse(raw, ThinkTags.DEFAULT, ChatSpecials.DEFAULT);
   }
 
-  /** {@link #parse(String, ThinkTags, ChatSpecials)} with {@link ChatSpecials#DEFAULT}. */
+  /**
+   * {@link #parse(String, ThinkTags, ChatSpecials)} with {@link ChatSpecials#DEFAULT}.
+   */
   public static AssistantParts parse(final String raw, final ThinkTags tags) {
     return parse(raw, tags, ChatSpecials.DEFAULT);
   }
@@ -165,12 +167,16 @@ record AssistantParts(String thinking, String answer, boolean thinkOpen) {
     return finishSanitize(cleaned);
   }
 
-  /** {@link #stripChatMarkup(String, ThinkTags, ChatSpecials)} with library default markers. */
+  /**
+   * {@link #stripChatMarkup(String, ThinkTags, ChatSpecials)} with library default markers.
+   */
   public static String stripChatMarkup(final String text) {
     return stripChatMarkup(text, ThinkTags.DEFAULT, ChatSpecials.DEFAULT);
   }
 
-  /** {@link #stripChatMarkup(String, ThinkTags, ChatSpecials)} with {@link ChatSpecials#DEFAULT}. */
+  /**
+   * {@link #stripChatMarkup(String, ThinkTags, ChatSpecials)} with {@link ChatSpecials#DEFAULT}.
+   */
   public static String stripChatMarkup(final String text, final ThinkTags tags) {
     return stripChatMarkup(text, tags, ChatSpecials.DEFAULT);
   }
@@ -208,12 +214,16 @@ record AssistantParts(String thinking, String answer, boolean thinkOpen) {
     return LEADING_ASSISTANT.matcher(text).replaceFirst("").strip();
   }
 
-  /** {@link #cleanAssistantText(String, ThinkTags, ChatSpecials)} with library default markers. */
+  /**
+   * {@link #cleanAssistantText(String, ThinkTags, ChatSpecials)} with library default markers.
+   */
   public static String cleanAssistantText(final String raw) {
     return cleanAssistantText(raw, ThinkTags.DEFAULT, ChatSpecials.DEFAULT);
   }
 
-  /** {@link #cleanAssistantText(String, ThinkTags, ChatSpecials)} with {@link ChatSpecials#DEFAULT}. */
+  /**
+   * {@link #cleanAssistantText(String, ThinkTags, ChatSpecials)} with {@link ChatSpecials#DEFAULT}.
+   */
   public static String cleanAssistantText(final String raw, final ThinkTags tags) {
     return cleanAssistantText(raw, tags, ChatSpecials.DEFAULT);
   }
@@ -236,17 +246,23 @@ record AssistantParts(String thinking, String answer, boolean thinkOpen) {
     return answer.isEmpty() ? salvageFromThinking(parts.thinking()) : answer;
   }
 
-  /** Same as {@link #cleanAssistantText(String)} (CLI stream display). */
+  /**
+   * Same as {@link #cleanAssistantText(String)} (CLI stream display).
+   */
   public static String streamDisplayText(final String raw) {
     return streamDisplayText(raw, ThinkTags.DEFAULT, ChatSpecials.DEFAULT);
   }
 
-  /** Same as {@link #cleanAssistantText(String, ThinkTags)}. */
+  /**
+   * Same as {@link #cleanAssistantText(String, ThinkTags)}.
+   */
   public static String streamDisplayText(final String raw, final ThinkTags tags) {
     return streamDisplayText(raw, tags, ChatSpecials.DEFAULT);
   }
 
-  /** Same as {@link #cleanAssistantText(String, ThinkTags, ChatSpecials)}. */
+  /**
+   * Same as {@link #cleanAssistantText(String, ThinkTags, ChatSpecials)}.
+   */
   public static String streamDisplayText(
     final String raw,
     final ThinkTags tags,
