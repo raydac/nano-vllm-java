@@ -7,7 +7,7 @@
     <parent>
         <groupId>com.igormaznitsa</groupId>
         <artifactId>nano-vllm-java-pom</artifactId>
-        <version>1.4.0-SNAPSHOT</version>
+        <version>1.4.0</version>
     </parent>
 
     <artifactId>nano-vllm-java-samples</artifactId>
@@ -17,6 +17,12 @@
     <properties>
         <maven.deploy.skip>true</maven.deploy.skip>
         <exec.mainClass>com.igormaznitsa.nanollvm.samples.Example</exec.mainClass>
+        <tornado.executable>tornado</tornado.executable>
+        <tornado.exec.skip>true</tornado.exec.skip>
+        <tornado.params></tornado.params>
+        <!-- TornadoVM child JVM; override when Maven's JAVA_HOME is not the TornadoVM JDK. -->
+        <tornado.java.home>${java.home}</tornado.java.home>
+        <tornado.jvm.args>-Dnanollvm.kernels=tornado --add-modules=jdk.incubator.vector -Xmx16g</tornado.jvm.args>
     </properties>
 
     <dependencies>
@@ -57,4 +63,59 @@
             </plugin>
         </plugins>
     </build>
+
+    <profiles>
+        <!--
+          Run a sample under the TornadoVM launcher (must be on PATH as `tornado`).
+          Uses the SDK runtime/modules — not the Maven Central tornado jars — so the installed
+          TornadoVM distribution (e.g. 6.0 OpenCL) drives accelerators.
+
+            mvn -pl nano-vllm-java-samples -am -Ptornado compile exec:exec@tornado \
+              -Dtornado.java.home=/path/to/jdk-21
+            mvn -pl nano-vllm-java-samples -am -Ptornado compile exec:exec@tornado \
+              -Dtornado.java.home=/path/to/jdk-21 -Dtornado.params="models/Gemma3-270M"
+            mvn -pl nano-vllm-java-samples -am -Ptornado compile exec:exec@tornado \
+              -Dtornado.java.home=/path/to/jdk-21 \
+              -Dexec.mainClass=com.igormaznitsa.nanollvm.samples.Bench
+        -->
+        <profile>
+            <id>tornado</id>
+            <properties>
+                <tornado.exec.skip>false</tornado.exec.skip>
+            </properties>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.codehaus.mojo</groupId>
+                        <artifactId>exec-maven-plugin</artifactId>
+                        <executions>
+                            <execution>
+                                <id>tornado</id>
+                                <goals>
+                                    <goal>exec</goal>
+                                </goals>
+                                <configuration>
+                                    <skip>${tornado.exec.skip}</skip>
+                                    <executable>${tornado.executable}</executable>
+                                    <workingDirectory>${maven.multiModuleProjectDirectory}</workingDirectory>
+                                    <environmentVariables>
+                                        <JAVA_HOME>${tornado.java.home}</JAVA_HOME>
+                                    </environmentVariables>
+                                    <arguments>
+                                        <argument>--classpath</argument>
+                                        <argument>
+                                            ${project.build.outputDirectory}${path.separator}${maven.multiModuleProjectDirectory}/nano-vllm-java/target/classes
+                                        </argument>
+                                        <argument>--jvm=${tornado.jvm.args}</argument>
+                                        <argument>--params=${tornado.params}</argument>
+                                        <argument>${exec.mainClass}</argument>
+                                    </arguments>
+                                </configuration>
+                            </execution>
+                        </executions>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+    </profiles>
 </project>

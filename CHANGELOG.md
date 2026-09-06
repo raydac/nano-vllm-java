@@ -5,7 +5,11 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased] — 1.4.0-SNAPSHOT
+## [1.4.0] — 2026-09-06
+
+Public release of **nano-vllm-java** `1.4.0` (Maven coordinates `com.igormaznitsa:nano-vllm-java:1.4.0`).
+Meta fastText text classification, optional TornadoVM GEMV acceleration, and typed `generate` results
+(`LlmModality.resultType` / `cast` — no caller cast).
 
 ### Added
 - Meta fastText supervised text classification (`*.bin` / `*.ftz`), including the official
@@ -15,13 +19,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`__label__xx` codes with probabilities). Pure Java (no JNI); hierarchical softmax,
   softmax, and one-vs-all. Download: `models/download-fasttext-lid-176.sh` (or `.ps1` / `.cmd`)
   fetches the denser `lid.176.bin` (~126 MB). Sample: `LanguageIdHelloWorld`.
-- Optional TornadoVM acceleration compiled into the main library (`tornado-api` optional/provided,
-  `tornado-runtime` optional/runtime — not transitive for consumers). When TornadoVM is on the module
-  path and a TornadoVM-enabled JDK reports at least one device, `-Dnanollvm.kernels=auto` (default)
-  prefers TornadoVM for large dense GEMV; elementwise kernels stay on the Vector/scalar CPU backend.
-  Explicit modes: `tornado` / `gpu`, `vector` / `simd`, `scalar` / `plain`.
-  Tornado GEMV reuses compiled execution plans (LRU cache) and keeps weights on-device
-  between calls with the same buffers and shape.
+- Optional TornadoVM acceleration compiled into the main library (`tornado-api` /
+  `tornado-runtime` optional Maven deps at `6.0.0-jdk22plus`, not transitive). When TornadoVM is
+  on the module path and reports at least one device, `-Dnanollvm.kernels=auto` (default) prefers
+  TornadoVM for large dense GEMV; elementwise kernels stay on the Vector/scalar CPU backend.
+  Explicit modes: `tornado` / `gpu`, `vector` / `simd`, `scalar` / `plain`. Tornado GEMV prefers
+  the Kernel API (`KernelContext` + `WorkerGrid1D`, one thread per output row) per TornadoVM’s
+  [SGEMV guidance](https://www.tornadovm.org/), with Loop Parallel (`@Parallel` over `0..outCount`)
+  as fallback; reuses compiled plans (LRU), keeps weights on-device for matching buffers/shape,
+  and runs as one full-range launch (no CPU tile sharding against the device execute lock).
+  Hybrid cuBLAS needs a CUDA Tornado SDK (not the OpenCL-only path). Samples: Maven profile
+  `-Ptornado` launches via the `tornado` CLI with `-Dnanollvm.kernels=tornado`.
 
 ### Changed
 - `LlmModality` carries the concrete `generate` result class (`TEXT`→`LlmOutText`,

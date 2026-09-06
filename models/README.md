@@ -120,7 +120,7 @@ Load like any other model, then embed:
 
 ```java
 try (LlmModel model = LlmModelFactory.make(Path.of("models/gte-small.Q2_K.gguf"))) {
-  LlmOutEmbedding v = (LlmOutEmbedding) model.generate(LlmInText.of("hello world"), LlmModality.EMBEDDING);
+  LlmOutEmbedding v = model.generate(LlmInText.of("hello world"), LlmModality.EMBEDDING);
 }
 ```
 
@@ -145,7 +145,7 @@ Creates `models/multilingual-e5-small/`. Context length up to 512 tokens. E5 exp
 
 ```java
 try (LlmModel model = LlmModelFactory.make(Path.of("models/multilingual-e5-small"))) {
-  LlmOutEmbedding v = (LlmOutEmbedding) model.generate(LlmInText.of("query: hello world"), LlmModality.EMBEDDING);
+  LlmOutEmbedding v = model.generate(LlmInText.of("query: hello world"), LlmModality.EMBEDDING);
 }
 ```
 
@@ -176,7 +176,7 @@ probe, not a sequence-classification head.
 
 ```java
 try (LlmModel model = LlmModelFactory.make(Path.of("models/xlm-roberta-base"))) {
-  LlmOutEmbedding v = (LlmOutEmbedding) model.generate(LlmInText.of("hello world"), LlmModality.EMBEDDING);
+  LlmOutEmbedding v = model.generate(LlmInText.of("hello world"), LlmModality.EMBEDDING);
 }
 ```
 
@@ -201,7 +201,7 @@ optional language; 30 s chunking. No MP3, VAD, beam search, or word timestamps.
 
 ```java
 try (LlmModel model = LlmModelFactory.make(Path.of("models/whisper-base"))) {
-  LlmOutText text = (LlmOutText) model.generate(LlmInSound.ofWav(Files.readAllBytes(Path.of("clip.wav"))), LlmModality.TEXT);
+  LlmOutText text = model.generate(LlmInSound.ofWav(Files.readAllBytes(Path.of("clip.wav"))), LlmModality.TEXT);
 }
 ```
 
@@ -231,7 +231,7 @@ output is ranked `__label__xx` codes with probabilities.
 ```java
 try (LlmModel model = LlmModelFactory.make(Path.of("models/fasttext-lid-176"));
      LLM llm = LLM.builder(model).build()) {
-  LlmOutLabels labels = (LlmOutLabels) llm.generate(
+  LlmOutLabels labels = llm.generate(
     LlmInText.of("Bonjour, comment allez-vous ?"), LlmModality.LABELS);
   System.out.println(labels.topLabel() + " " + labels.top().score());
 }
@@ -257,7 +257,7 @@ Creates `models/piper-en-lessac-medium/`.
 try (LlmModel model = LlmModelFactory.open(Path.of("models/piper-en-lessac-medium"))
     .optionalData(LlmOptionalData.ESPEAK_DATA, Path.of("models/piper-en-lessac-medium/espeak-ng-data"))
     .make()) {
-  LlmOutSoundData wav = (LlmOutSoundData) model.generate(LlmInText.of("Hello world"), LlmModality.AUDIO);
+  LlmOutSoundData wav = model.generate(LlmInText.of("Hello world"), LlmModality.AUDIO);
 }
 ```
 
@@ -283,7 +283,7 @@ default `{model}/espeak-ng-data`):
 try (LlmModel model = LlmModelFactory.open(Path.of("models/piper-ru-irina-medium"))
     .optionalData(LlmOptionalData.ESPEAK_DATA, Path.of("models/piper-ru-irina-medium/espeak-ng-data"))
     .make()) {
-  LlmOutSoundData wav = (LlmOutSoundData) model.generate(LlmInText.of("Привет, мир"), LlmModality.AUDIO);
+  LlmOutSoundData wav = model.generate(LlmInText.of("Привет, мир"), LlmModality.AUDIO);
 }
 ```
 

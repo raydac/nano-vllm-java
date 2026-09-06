@@ -3,7 +3,7 @@
 [![License Apache 2.0](https://img.shields.io/badge/license-Apache%20License%202.0-green.svg)](http://www.apache.org/licenses/LICENSE-2.0)
 [![Java 21+](https://img.shields.io/badge/java-21.0%2b-green.svg)](https://bell-sw.com/pages/downloads/)
 [![Maven 3.8+](https://img.shields.io/badge/maven-3.8%2b-green.svg)](https://maven.apache.org/)
-[![Maven central](https://img.shields.io/badge/Maven%20central-1.3.0-green.svg)](http://search.maven.org/#artifactdetails|com.igormaznitsa|nano-vllm-java|1.3.0|jar)   
+[![Maven central](https://img.shields.io/badge/Maven%20central-1.4.0-green.svg)](http://search.maven.org/#artifactdetails|com.igormaznitsa|nano-vllm-java|1.4.0|jar)   
 [![Arthur's acres sanctuary donation](assets/arthur_sanctuary_banner.png)](https://www.arthursacresanimalsanctuary.org/donate)
 
 # Nano-vLLM Java
@@ -12,9 +12,9 @@ Pure **Java 21+** LLM inference library: continuous batching, paged KV cache, an
 loading on **CPU only** — no CUDA, PyTorch, or native runtime bindings. Add it to a Maven or Gradle app and call it
 from ordinary Java.
 
-The latest release is **1.3.0** on Maven Central (Whisper speech-to-text, Piper text-to-speech, typed
-`generate(LlmInput, LlmModality)` for embeddings / STT / TTS / raw completion, XLM-RoBERTa embeddings).
-Features marked **since 1.1.0**, **since 1.2.0**, and **since 1.3.0** are in that release.
+The latest release is **1.4.0** on Maven Central (Meta fastText classification, optional TornadoVM GEMV,
+typed `generate` results without a caller cast, plus Whisper / Piper / BERT embeddings from **1.3.0**).
+Features marked **since 1.1.0**, **since 1.2.0**, **since 1.3.0**, and **since 1.4.0** are in that release.
 
 Ideas in this project were inspired by the Python [nano-vllm](https://github.com/GeeeekExplorer/nano-vllm) educational
 engine.
@@ -28,8 +28,9 @@ Session recording (Gemma3 load + RAG questions about the Grimm brothers and thei
 
 ## Supported formats and variants
 
-One entry point: `LlmModelFactory.make(…)` (folder, `.gguf` file, or `ModelFileSource` / classpath). What you may load
-depends on the **container** and the **architecture** — this is a curated subset, not every hub file.
+One entry point: `LlmModelFactory.make(…)` (folder, `.gguf` file, fastText `*.bin`/`*.ftz`, or
+`ModelFileSource` / classpath). What you may load depends on the **container** and the **architecture** —
+this is a curated subset, not every hub file.
 
 ### Weight containers
 
@@ -38,6 +39,7 @@ depends on the **container** and the **architecture** — this is a curated subs
 | **Safetensors** | **1.0.0** | HF folder: `config.json` + tokenizer + `*.safetensors` | Dense float weights (`F32` / `F16` / `BF16` / `F64` → float32). **Since 1.1.0:** Gemma 4 text **QAT** stays packed (int2/4/8). **Since 1.3.0:** Whisper speech. If both safetensors and ONNX are present, **safetensors wins**. |
 | **GGUF** | **1.0.0** | Single `.gguf` file | Packed GGML blocks; dequant on matmul / embed. Mmap ≤ ~2 GiB. Architectures: **`qwen3`** / **`lfm2`** (chat) and **`bert`** (embeddings **since 1.1.0**). |
 | **ONNX** (Tier A) | **1.1.0** | HF folder: same sidecars + `model.onnx` / `model_fp16.onnx` (root or `onnx/`); Piper: `*.onnx` + `*.onnx.json` (**since 1.3.0**) | **Initializers only** — no ONNX Runtime, no graph execution. Preferred float exports; community `*_q4*` / `*_int8*` / `*_quantized*` / `with_past` names are skipped. |
+| **fastText** | **1.4.0** | File or folder: `*.bin` / `*.ftz` (e.g. `lid.176.bin`) | Supervised text classifier — pure Java (no JNI). Folder prefers denser `.bin` over `.ftz` when both exist. |
 
 Stream / classpath loads (`ModelFileSource`, `fromClasspath*`) are **since 1.1.0** (bytes → heap, no disk cache). ONNX
 `external_data` sidecars need `make(Path)`; stream loads reject them.
@@ -53,6 +55,9 @@ Stream / classpath loads (`ModelFileSource`, `fromClasspath*`) are **since 1.1.0
 | **BERT** sentence embeddings | **1.1.0** | GGUF `bert` (e.g. gte-small); ONNX `bert` / `roberta` / `xlm-roberta` | `LLM.builder` → `generate(LlmInText, EMBEDDING)` (`LlmModel.generate` is a sequential shortcut) |
 | **Whisper** speech-to-text | **1.3.0** | HF safetensors only (`openai/whisper-*`; not GGUF / ONNX / CTranslate2) | `LLM.builder` → `generate(LlmInSound, TEXT)` |
 | **Piper** text-to-speech | **1.3.0** | Voice folder: `*.onnx` + `*.onnx.json` (+ optional `espeak-ng-data`) | `LLM.builder` → `generate(LlmInText, AUDIO)` → `LlmOutSoundData` |
+| **fastText** classification | **1.4.0** | `*.bin` / `*.ftz` (e.g. lid.176) | `LLM.builder` → `generate(LlmInText, LABELS)` → `LlmOutLabels` |
+
+`generate` returns the concrete `LlmOut*` type for the modality (**since 1.4.0** — no caller cast).
 
 ### GGUF / ONNX dtype notes
 
@@ -61,7 +66,7 @@ Stream / classpath loads (`ModelFileSource`, `fromClasspath*`) are **since 1.1.0
 | GGUF GGML | Current llama.cpp weight dtypes (floats, K-quants, IQ, TQ, MXFP4/NVFP4, `Q*_0`/`Q*_1`) | Removed ggml types (`Q4_2`/`Q4_3`, SIMD-repack `*_4_4`); Gemma/Llama GGUF **architectures** (Qwen2 / MoE / VL too) |
 | ONNX TensorProto | FLOAT / FLOAT16 / BFLOAT16 / DOUBLE → float32 | Float8 / nibble / unknown weight types (fail loud); int/bool/string/complex initializers skipped as graph constants |
 
-Details and honest limits: [`description.md`](description.md) chapters **7** / **7a** / **7b** / **7c** / **7d** / **7e**. Download scripts and
+Details and honest limits: [`description.md`](description.md) chapters **7** / **7a** / **7b** / **7c** / **7d** / **7e** / **7f**. Download scripts and
 folder layout: [Download and load models](#download-and-load-models).
 
 <a id="hello-world--gemma3-log-triage-in-your-app"></a>
@@ -78,14 +83,14 @@ choose), ask a short business question, print the answer.
 <dependency>
   <groupId>com.igormaznitsa</groupId>
   <artifactId>nano-vllm-java</artifactId>
-  <version>1.3.0</version>
+  <version>1.4.0</version>
 </dependency>
 ```
 
 **Gradle (Groovy)**
 
 ```gradle
-implementation 'com.igormaznitsa:nano-vllm-java:1.3.0'
+implementation 'com.igormaznitsa:nano-vllm-java:1.4.0'
 ```
 
 JPMS module name: `com.igormaznitsa.nanollvm` (`requires com.igormaznitsa.nanollvm;`).
@@ -181,9 +186,10 @@ mvn -pl nano-vllm-java-samples -q exec:java \
 # optional: … -Dexec.args="models/multilingual-e5-small hello world"
 ```
 
-Speech-to-text and text-to-speech snippets (PCM arrays, WAV, and the in-repo samples) are in
-[Hello World — Whisper](#hello-world--whisper-speech-to-text) and
-[Hello World — Piper](#hello-world--piper-text-to-speech).
+Speech-to-text, text-to-speech, and language-id snippets are in
+[Hello World — Whisper](#hello-world--whisper-speech-to-text),
+[Hello World — Piper](#hello-world--piper-text-to-speech), and
+[Hello World — fastText](#hello-world--fasttext-language-id).
 
 Custom advisor **Alex** plus lexical **BM25** RAG over `rag/` (Grimm names and father; Gemma3-270M):
 
@@ -213,9 +219,9 @@ No MP3, VAD, or timestamps. Download: `./models/download-whisper-base.sh`.
 ```java
 try (LlmModel model = LlmModelFactory.make(Path.of("models/whisper-base"));
      LLM llm = LLM.builder(model).build()) {
-  LlmOutText fromPcm = (LlmOutText) llm.generate(
+  LlmOutText fromPcm = llm.generate(
       LlmInSound.ofPcm(pcm, 16_000), LlmModality.TEXT);
-  LlmOutText fromWav = (LlmOutText) llm.generate(
+  LlmOutText fromWav = llm.generate(
       LlmInSound.ofWav(Files.readAllBytes(Path.of("clip.wav"))), LlmModality.TEXT);
 }
 ```
@@ -241,7 +247,7 @@ try (LlmModel model = LlmModelFactory.open(voice)
          .optionalData(LlmOptionalData.ESPEAK_DATA, voice.resolve("espeak-ng-data"))
          .make();
      LLM llm = LLM.builder(model).build()) {
-  LlmOutSoundData sound = (LlmOutSoundData) llm.generate(
+  LlmOutSoundData sound = llm.generate(
       LlmInText.of("Hello world"), LlmModality.AUDIO);
   byte[] wav = sound.wav();
   int hz = sound.sampleRate();
@@ -274,14 +280,37 @@ mvn -pl nano-vllm-java-samples -q exec:java \
   -Dexec.mainClass=com.igormaznitsa.nanollvm.samples.VoiceReplyHelloWorld
 ```
 
+<a id="hello-world--fasttext-language-id"></a>
+## Hello World — fastText language id
+
+Text → ranked labels (**since 1.4.0**). Official [lid.176](https://fasttext.cc/docs/en/language-identification.html)
+(`lid.176.bin` preferred). Download: `./models/download-fasttext-lid-176.sh`.
+
+```java
+try (LlmModel model = LlmModelFactory.make(Path.of("models/fasttext-lid-176"));
+     LLM llm = LLM.builder(model).build()) {
+  LlmOutLabels labels = llm.generate(
+      LlmInText.of("Bonjour, comment allez-vous ?"), LlmModality.LABELS);
+  System.out.println(labels.topLabel() + " p=" + labels.top().score());
+}
+```
+
+Sample: [`LanguageIdHelloWorld.java`](nano-vllm-java-samples/src/main/java/com/igormaznitsa/nanollvm/samples/LanguageIdHelloWorld.java).
+
+```bash
+mvn -pl nano-vllm-java-samples -q exec:java \
+  -Dexec.mainClass=com.igormaznitsa.nanollvm.samples.LanguageIdHelloWorld
+```
+
 ## Key features
 
 - Continuous batching scheduler with paged KV cache and prefix caching
 - **Qwen3** (HF safetensors, ONNX **1.1.0**, or GGUF **1.1.0**), **Gemma3**, **Gemma 4 text** QAT mobile (**since 1.1.0**, packed safetensors), **Llama** (**since 1.1.0**), and **LFM2** (hybrid short-conv + GQA, GGUF) causal LMs
-- **Whisper** speech-to-text and **Piper** text-to-speech (**since 1.3.0**); BERT embeddings (**since 1.1.0**) share `LLM.builder` and typed `generate(LlmInput, LlmModality)`
-- Weight crates: HF **safetensors**, **GGUF**, and (**since 1.1.0**) ONNX Tier A — see [Supported formats and variants](#supported-formats-and-variants)
+- **Whisper** speech-to-text and **Piper** text-to-speech (**since 1.3.0**); **fastText** classification (**since 1.4.0**); BERT embeddings (**since 1.1.0**) share `LLM.builder` and typed `generate(LlmInput, LlmModality)` (concrete `LlmOut*` return **since 1.4.0**)
+- Weight crates: HF **safetensors**, **GGUF**, ONNX Tier A (**since 1.1.0**), and fastText `*.bin`/`*.ftz` (**since 1.4.0**) — see [Supported formats and variants](#supported-formats-and-variants)
 - Optional multi-thread CPU matmul (`cpuThreads` / `matmulExecutor` / `dedicatedMatmulPool` **since 1.2.0** /
   `disableMultiCpu`); default = all processors on a lazily shared pool
+- Optional **TornadoVM** large dense GEMV (**since 1.4.0**; `tornado-api` / `tornado-runtime` optional Maven deps, not transitive) via `-Dnanollvm.kernels=auto|tornado|vector|scalar`
 - GPT-2 byte BPE, Gemma Metaspace BPE, GGUF-embedded, BERT WordPiece, Unigram SentencePiece
   (including precompiled charsmap), WordLevel, character, and SentencePiece `tokenizer.model` tokenizers
 - Optional **BM25 text RAG** over a local `rag/` corpus (Example demo menu: none / BM25 / dense / hybrid); dense / hybrid embeddings **since 1.1.0**
@@ -297,7 +326,8 @@ mvn -pl nano-vllm-java-samples -q exec:java \
 | **Maven 3.8+**                       | Build and `exec:java` (`mvn` on `PATH`)                                    |
 | **~2–8 GB heap**                     | Enough for Qwen3-0.6B / Gemma3-270M                                         |
 | **~16 GB heap**                      | Default in [`.mvn/jvm.config`](.mvn/jvm.config) (`-Xmx16g`) for LFM2 GGUF and Gemma 4 E2B QAT |
-| **Optional:** `jdk.incubator.vector` | Faster kernels; enabled via [`.mvn/jvm.config`](.mvn/jvm.config) for Maven |
+| **Optional:** `jdk.incubator.vector` | Faster CPU kernels; enabled via [`.mvn/jvm.config`](.mvn/jvm.config) for Maven |
+| **Optional:** TornadoVM | Large dense GEMV offload (**since 1.4.0**); add `tornado-api` + `tornado-runtime` and a TornadoVM-enabled JDK; `-Dnanollvm.kernels=auto` |
 
 ## Build
 
@@ -317,7 +347,7 @@ integration tests when those files are absent. The concurrent model+RAG race
 
 Artifacts:
 
-- `nano-vllm-java/target/nano-vllm-java-1.3.0.jar` — library JAR (JPMS module `com.igormaznitsa.nanollvm`; no `Main-Class`)
+- `nano-vllm-java/target/nano-vllm-java-1.4.0.jar` — library JAR (JPMS module `com.igormaznitsa.nanollvm`; no `Main-Class`)
 - `nano-vllm-java-samples/target/…` — demo classes (not published to Maven Central)
 
 Tests use the Vector incubator module (`jvm.module.args` in the POM). Production runs should use the same flags
@@ -332,7 +362,7 @@ example.
 <dependency>
   <groupId>com.igormaznitsa</groupId>
   <artifactId>nano-vllm-java</artifactId>
-  <version>1.3.0</version>
+  <version>1.4.0</version>
 </dependency>
 ```
 
@@ -348,7 +378,7 @@ Weight-load internals (`models.llmcontainer`, `models.llmarch`, `models.internal
 `LlmModelFactory` / `LLM` / `RagFactory` from application code. Runnable demos
 (`HelloWorld`, `NextTokenHelloWorld`, `LogTriageHelloWorld`, `AdvisorRagHelloWorld`,
 `RagTunerHelloWorld`, `EmbeddingsHelloWorld`, `TranscribeHelloWorld`, `SynthesizeHelloWorld`,
-`VoiceReplyHelloWorld`, `Example`, `Bench`, `samples.utils`) live in the
+`VoiceReplyHelloWorld`, `LanguageIdHelloWorld`, `Example`, `Bench`, `samples.utils`) live in the
 separate `nano-vllm-java-samples` module.
 
 The packaged library JAR has no `Main-Class`. In-repo demos:
@@ -508,8 +538,13 @@ Linear demo: `TranscribeHelloWorld`.
 `./models/download-piper-en-lessac-medium.sh` (or `download-piper-ru-irina-medium.sh`).
 Linear demo: `SynthesizeHelloWorld`. Voice desk: `VoiceReplyHelloWorld`.
 
+**fasttext-lid-176 (language id, ~126 MB)** —
+`./models/download-fasttext-lid-176.sh` → `models/fasttext-lid-176/lid.176.bin`.
+Linear demo: `LanguageIdHelloWorld`.
+
 **Windows:** `.\models\download-qwen3-0.6b.ps1` / `.cmd` and the matching Gemma 3 / Gemma 4 / LFM / Tiny-LLM-ONNX /
-SmolLM2 Instruct ONNX / gte-small / multilingual-e5-small / xlm-roberta-base / whisper / piper scripts under `models/`.
+SmolLM2 Instruct ONNX / gte-small / multilingual-e5-small / xlm-roberta-base / whisper / piper /
+fastText scripts under `models/`.
 
 You can also point the engine at **any** local HF-style directory (your own path or another download).
 
@@ -626,6 +661,27 @@ Maven note: `exec:java` runs in the **same JVM as Maven**. Vector API flags and 
 `.mvn/jvm.config`](.mvn/jvm.config) (`--add-modules=jdk.incubator.vector`, `-Xmx16g`). The exec plugin does not fork, so
 `<jvmArgs>` in the POM are not applied — override with `MAVEN_OPTS` when needed.
 
+### Run with TornadoVM (`-Ptornado`)
+
+Requires the TornadoVM SDK on `PATH` (`tornado` command) and a matching JDK (this project targets JDK 21+).
+Profile `tornado` in `nano-vllm-java-samples` launches via `tornado` (not Maven’s JVM), forces
+`-Dnanollvm.kernels=tornado`, and puts only the sample + library classes on the classpath (SDK supplies
+TornadoVM modules):
+
+```bash
+# jdk21 TornadoVM SDK: point tornado.java.home at JDK 21 when Maven itself runs on a newer JDK
+mvn -pl nano-vllm-java-samples -am -Ptornado compile exec:exec@tornado \
+  -Dtornado.java.home=/path/to/jdk-21
+# optional model / args (use tornado.params — not exec.args, which overrides the launcher argv):
+mvn -pl nano-vllm-java-samples -am -Ptornado compile exec:exec@tornado \
+  -Dtornado.java.home=/path/to/jdk-21 -Dtornado.params="models/Gemma3-270M"
+```
+
+Override the main class with `-Dexec.mainClass=…` (default `Example`). Override JVM flags with
+`-Dtornado.jvm.args=…`, the launcher with `-Dtornado.executable=…`, or the TornadoVM JDK with
+`-Dtornado.java.home=…`.
+Use `exec:exec@tornado` (not plain `exec:exec`) so `-am` does not try to launch TornadoVM on the parent POM.
+
 ### Run packaged JARs (classpath)
 
 After `mvn package` (prefer `mvn -pl nano-vllm-java-samples exec:java` when possible):
@@ -633,7 +689,7 @@ After `mvn package` (prefer `mvn -pl nano-vllm-java-samples exec:java` when poss
 ```bash
 java --add-modules jdk.incubator.vector \
   -Xmx16g \
-  -cp nano-vllm-java/target/nano-vllm-java-1.3.0.jar:nano-vllm-java-samples/target/nano-vllm-java-samples-1.3.0.jar \
+  -cp nano-vllm-java/target/nano-vllm-java-1.4.0.jar:nano-vllm-java-samples/target/nano-vllm-java-samples-1.4.0.jar \
   com.igormaznitsa.nanollvm.samples.Example \
   models/Qwen3-0.6B
 ```
@@ -681,7 +737,7 @@ try (LlmModel model = LlmModelFactory.make(modelDir);  // or open(dir).listen(Ll
 
   String reply = llm.chat().send("Hello.").answer();
   String once = llm.chatOnce("What is 2+2?", 64);
-  LlmOutText completion = (LlmOutText) llm.generate(
+  LlmOutText completion = llm.generate(
       LlmInText.of("The capital of France is"), LlmModality.TEXT);
 }
 ```
@@ -697,16 +753,18 @@ try (LlmModel model = LlmModelFactory.make(Path.of("models/Qwen3-0.6B"));
 }
 ```
 
-### Embeddings, speech, and TTS (**since 1.3.0**)
+### Embeddings, speech, TTS, and labels
 
 Every graph kind uses `LlmModelFactory` then `LLM.builder`. Non-chat work is typed
-`generate(LlmInput, LlmModality)` (`LlmModel.generate` is a sequential shortcut — no engine pool).
+`generate(LlmInput, LlmModality)` and returns the concrete `LlmOut*` (**since 1.4.0** —
+`LlmModel.generate` is a sequential shortcut — no engine pool).
 PCM / WAV: [Whisper](#hello-world--whisper-speech-to-text), [Piper](#hello-world--piper-text-to-speech).
+Labels: [fastText](#hello-world--fasttext-language-id).
 
 ```java
 try (LlmModel model = LlmModelFactory.make(Path.of("models/multilingual-e5-small"));
      LLM llm = LLM.builder(model).build()) {
-  LlmOutEmbedding v = (LlmOutEmbedding) llm.generate(
+  LlmOutEmbedding v = llm.generate(
       LlmInText.of("query: hello world"), LlmModality.EMBEDDING);
 }
 ```

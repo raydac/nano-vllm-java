@@ -1,37 +1,34 @@
 ## 1. Implementation Progress
-- Maven multi-module **`1.4.0-SNAPSHOT`** (post **1.3.0** 2026-08-29; previous 1.2.0 / 1.1.0 / 1.0.0). Parent `nano-vllm-java-pom`, library `nano-vllm-java`, samples `nano-vllm-java-samples`. Enforcer Java `[21,)`, Maven `[3.8,)`. JPMS module `com.igormaznitsa.nanollvm` (library only).
-- Five graph kinds, one factory + `LLM.builder`: chat (Qwen3 / Gemma3 / Gemma 4 text QAT / Llama / LFM2 GGUF), BERT embeddings (`bert` / `roberta` / `xlm-roberta` GGUF or ONNX), Whisper STT (HF safetensors), Piper TTS (`*.onnx` + `*.onnx.json`), fastText classification (`*.bin` / `*.ftz`). Public non-chat entry is typed `generate(LlmInput, LlmModality)` — modality carries `resultType` / `cast` so the return is the concrete `LlmOut*` without a caller cast. Removed `embed` / `transcribe` / `synthesize` / `complete`. Chat stays `ChatSession` / `chatOnce`; batch stays `generate(List,…)`. Text completion needs `LLM`.
+- Maven multi-module **`1.4.0`** released **2026-09-06** (post **1.3.0** 2026-08-29; previous 1.2.0 / 1.1.0 / 1.0.0). Parent `nano-vllm-java-pom`, library `nano-vllm-java`, samples `nano-vllm-java-samples`. Enforcer Java `[21,)`, Maven `[3.8,)`. JPMS module `com.igormaznitsa.nanollvm` (library only).
+- Five graph kinds, one factory + `LLM.builder`: chat (Qwen3 / Gemma3 / Gemma 4 text QAT / Llama / LFM2 GGUF), BERT embeddings (`bert` / `roberta` / `xlm-roberta` GGUF or ONNX), Whisper STT (HF safetensors), Piper TTS (`*.onnx` + `*.onnx.json`), fastText classification (`*.bin` / `*.ftz`). Public non-chat entry is typed `generate(LlmInput, LlmModality)` — modality carries `resultType` / `cast` so the return is the concrete `LlmOut*` without a caller cast (**since 1.4.0**). Chat stays `ChatSession` / `chatOnce`; batch stays `generate(List,…)`. Text completion needs `LLM`.
 - Containers: safetensors (Whisper + chat; Gemma 4 QAT packed), GGUF packed by default (`qwen3` / `lfm2` chat, `bert` embed), ONNX Tier A initializers only (chat / BERT / Piper; no ORT), fastText binary/quantized. `make(Path)` vs `ModelFileSource` / classpath (heap, no disk cache; ONNX `external_data` needs Path).
-- `ModelSupport`: exact family + catalog on `UnsupportedModelException`. Look-alikes fail before weight load (Qwen2 / Qwen3.5 / Gemma2 / VLMs / GGUF Llama-Gemma / HF BERT safetensors / DistilBERT…). `-Dnanollvm.arch` may only confirm a matching id.
+- `ModelSupport`: exact family + catalog on `UnsupportedModelException`. Look-alikes fail before weight load. `-Dnanollvm.arch` may only confirm a matching id.
 - Tokenizers: package-private codecs behind public `Tokenizer` (GPT-2 BPE, Metaspace BPE, GGUF, WordPiece, Unigram+charsmap, WordLevel, Char, SentencePiece `tokenizer.model`).
-- CPU: panel GEMV, Vector-API 4-acc dots, SIMD Ops / RMSNorm / MLP / attention axpy; paged KV in place. `dedicatedMatmulPool` (1.2.0) is engine-owned. Nested pool work stays sequential (`POOL_WORKERS`). Optional TornadoVM (`tornado-api` optional/provided, `tornado-runtime` optional/runtime — not transitive) offloads large dense GEMV when a device is present; `-Dnanollvm.kernels=auto|tornado|vector|scalar`. `TornadoGemvExecutor` LRU-caches up to 32 `TornadoExecutionPlan`s keyed by buffer identity + offsets/shape; weights/bias use `FIRST_EXECUTION`, activations `EVERY_EXECUTION`, output host readback only.
-- Load extras: `open(path).optionalData(key, value)` → `OPTION_OPTIONAL_DATA` when non-empty. Piper: `LlmOptionalData.ESPEAK_DATA` (default `{model}/espeak-ng-data`; missing ignored).
-- Modalities: `modalities()` = checkpoint-declared; `usableModalities()` = what this port runs (text→text, text→embedding, audio→text, text→audio, text→labels). Gemma 4 QAT declares towers, runtime is text-only.
-- RAG: `RagFactory` → BM25 `PreparedRag`; optional dense/hybrid (`withEmbeddings` / `HybridRagIndex.of` = RRF, not corpus union). Tuners `RagTuner` / `RagResource` (1.2.0). UTF-8 extract only — no PDF. `AdvisorRagHelloWorld` / `RagTunerHelloWorld` stay BM25.
-- Samples: `HelloWorld`, `NextTokenHelloWorld`, `EmbeddingsHelloWorld`, `TranscribeHelloWorld` (uses `piper-hello.wav` from Synthesize if present, else `ofPcm` tone), `SynthesizeHelloWorld` (writes `piper-hello.wav`), `VoiceReplyHelloWorld` (STT → mood of transcript → chat → TTS; mic 15 s or canned Piper), `LanguageIdHelloWorld` (fastText lid.176), `LogTriageHelloWorld`, `AdvisorRagHelloWorld`, `RagTunerHelloWorld` (bundled *R.U.R.* EPUB), `Bench`, `Example` (chat / embed / classify / transcribe / TTS). Helpers: `BundledModels` / `BundledRag` / `OrderedConsole`.
-- Docs: README + Maven coords stay released **1.3.0** (never SNAPSHOT). Session GIF (`assets/java_nano_llvm_session_1.gif`) sits near the top (after intro, before format tables). README Whisper/Piper Hello Worlds are short snippets (`ofPcm`/`ofWav`, `wav()` + 44-byte PCM16 strip) with links to `TranscribeHelloWorld` / `SynthesizeHelloWorld` / `VoiceReplyHelloWorld`. `description.md` still matches 1.3.0 (Whisper §7d, Piper §7e); ch. 5 who-chooses / embedding width vs context window, ch. 8 QKV calculation, ch. 9 thinking tied to those sizes. CHANGELOG `[Unreleased] — 1.4.0-SNAPSHOT`.
-- `@since`: new 1.4.0 types/members get `@since 1.4.0`; do not retag older members. `ResourceLimits` is 1.0.
-- Download scripts under `models/` (`.sh` + Windows `.ps1`/`.cmd`): Qwen3, Gemma3, Gemma4 E2B QAT, LFM2 GGUF, gte-small, e5, xlm-roberta-base, whisper-base/tiny, piper Lessac/Irina, fastText lid.176, Tiny-LLM-ONNX, SmolLM2 Instruct ONNX. Qwen3 GGUF is bring-your-own.
+- CPU: panel GEMV, Vector-API 4-acc dots, SIMD Ops / RMSNorm / MLP / attention axpy; paged KV in place. `dedicatedMatmulPool` (1.2.0) is engine-owned. Nested pool work stays sequential (`POOL_WORKERS`). Optional TornadoVM (`tornado-api` optional/provided, `tornado-runtime` optional/runtime — not transitive) offloads large dense GEMV when a device is present; `-Dnanollvm.kernels=auto|tornado|vector|scalar`. `TornadoGemvExecutor` LRU-caches up to 32 `TornadoExecutionPlan`s.
+- Load extras: `open(path).optionalData(key, value)` → `OPTION_OPTIONAL_DATA` when non-empty. Piper: `LlmOptionalData.ESPEAK_DATA`.
+- Modalities: `modalities()` = checkpoint-declared; `usableModalities()` = what this port runs (text→text, text→embedding, audio→text, text→audio, text→labels).
+- RAG: `RagFactory` → BM25 `PreparedRag`; optional dense/hybrid (`withEmbeddings` / `HybridRagIndex.of` = RRF). Tuners `RagTuner` / `RagResource` (1.2.0). UTF-8 extract only — no PDF.
+- Samples: `HelloWorld`, `NextTokenHelloWorld`, `EmbeddingsHelloWorld`, `TranscribeHelloWorld`, `SynthesizeHelloWorld`, `VoiceReplyHelloWorld`, `LanguageIdHelloWorld` (fastText lid.176), `LogTriageHelloWorld`, `AdvisorRagHelloWorld`, `RagTunerHelloWorld`, `Bench`, `Example`. Helpers: `BundledModels` / `BundledRag` / `OrderedConsole`.
+- Docs: README + Maven coords + `description.md` match released **1.4.0**. CHANGELOG `[1.4.0] — 2026-09-06`. Session GIF near top of README. Whisper/Piper/fastText Hello Worlds are short snippets; full programs in sample classes. `description.md` ch. **7f** = fastText; typed generate / Tornado noted throughout.
+- `@since`: new 1.4.0 types/members get `@since 1.4.0`; do not retag older members (`LLM.generate` / `LlmModel.generate` stay `@since 1.3.0` with LABELS documented). `ResourceLimits` is 1.0. No `@since 1.3.1` tags.
+- Download scripts under `models/` (`.sh` + Windows `.ps1`/`.cmd`): Qwen3, Gemma3, Gemma4 E2B QAT, LFM2 GGUF, gte-small, e5, xlm-roberta-base, whisper-base/tiny, piper Lessac/Irina, fastText lid.176, Tiny-LLM-ONNX, SmolLM2 Instruct ONNX.
 - Concurrent test: `ConcurrentLibraryUseTest` (`-Pconcurrent_test`); needs SmolLM2 Instruct ONNX + gte-small. Default Surefire excludes it.
 - **fastText LID (1.4.0):** pure-Java `FastTextModel` (HS / softmax / OVA; dense `.bin` + PQ `.ftz`) + `TextClassifier` / `FastTextForClassification`; `LlmModality.LABELS` / `LlmOutLabels`; factory loads file or folder; prefers `lid.176.bin` over `.ftz`; sample `LanguageIdHelloWorld`; download `models/download-fasttext-lid-176.*` fetches `.bin` (~126 MB).
 
 ## 2. Architecture & Technical Discoveries
-- **Standing rule:** JDK-only runtime (Java 21+, optional Vector API). No third-party libs in library/sample JARs (test-scoped OK). TornadoVM is optional Maven deps (`tornado-api` provided, `tornado-runtime` runtime, both `optional`) — not transitive for consumers. No JNI/JNA/FFM/CLI for inference or G2P. ONNX/GGUF/safetensors parsed in Java.
-- Load: `ContainerTransport` → `ArchitectureProcessor` (Causal / Embedding / Speech / Synthesis) bind → fill → create for transformer graphs. Whisper = HF safetensors only; Piper = ONNX initializers + sidecar JSON (no chat/BERT remap). fastText = dedicated `loadFastText` (no WeightBag fill). No Gemma3+Gemma4 parent.
-- Share `LlmModel` / `PreparedRag`; one `LLM` is not concurrent-safe for generate (`cancel()` is). Close engines before model. `LlmModel` is `abstract sealed` → hidden `LlmModelImpl`. Peer graphs: `CausalLM` / `EmbeddingEncoder` / `SpeechToText` / `TextToSpeech` / `TextClassifier`. Non-chat engines skip KV (`numKvcacheBlocks` 0) — Piper used to overflow `int` on a large heap.
-- Matmul: builder `cpuThreads` wins over `-Dnanollvm.cpu.threads`. Default = process-wide daemon pool; `.dedicatedMatmulPool()` owned and shut down on close; `.matmulExecutor` caller-owned; `.disableMultiCpu()` / 1 thread = sequential. Last shared-pool checkout CAS-es to null and `shutdownNow()`.
-- `LLM` owns one `Random` (unseeded, or seed `1L` for synthesis; `Builder.random`). Injected into Sampler + Piper VITS. Generate lock is the only exclusive engine lock. Lifecycle flags `AtomicBoolean`; no `volatile`/`synchronized`/`ThreadLocal` in the tree. `ConvStateArena` is a plain `HashMap` (generate-thread confined).
-- ONNX: initializers only; payload field 9 or 13; MatMul B `[in,out]` → Linear `[out,in]`; `onnx::MatMul_*` remapped by node path. FLOAT/FP16/BF16/DOUBLE load; skip int/bool/string/complex; fail on float8/nibble. BERT prefixes are structural (`*.embeddings.` / `*.encoder.`). Conv vs ConvTranspose weight axes differ; spatial attrs live on `ConvLayout` from the consuming node (not voice-name guesses). Zero/missing ONNX `pads` do not override fused PyTorch padding.
-- Piper G2P: `dictsource` (`*_list`/`*_rules`) first, then compiled `phontab`+`{lang}_dict` (listed words **and** `$N` stress), else letter-to-sound. Phoneme map uses IPA `ɡ` (id 66), not ASCII `g`. English: `@2`/`@5` → schwa; en-us remap `ɹ`/`ɚ`/`ɑː`. Russian: letter groups A/B/C/F/G/H/Y, palatalization, vowel reduction, destressing. VITS reverse uses graph dilations; Irina is ResBlock2 `convs.0/1`. Hot path: identity-mask skip, channel-major LayerNorm, SIMD dots.
-- Whisper: greedy multilingual; incremental decoder self-attn KV; Bluestein FFT log-mel + sparse mels + optional parallel STFT; 30 s chunks in place. `LlmInSound.ofWav` / `ofPcm`; `Locale` null/ROOT = auto.
-- Gemma 4 text QAT: flatten `text_config`; skip towers; packed int2/4/8 + SRQ; PLE after MLP; KV share; RMS `onePlusWeight=false`; `<|turn>` chat. Shards > 2 GiB use positioned `FileChannel`; ≤ 2 GiB copy into heap so close can drop them.
+- **Standing rule:** JDK-only runtime (Java 21+, optional Vector API). No third-party libs in library/sample JARs (test-scoped OK). TornadoVM is optional Maven deps (`tornado-api` provided, `tornado-runtime` runtime, both `optional`) — not transitive for consumers. No JNI/JNA/FFM/CLI for inference or G2P. ONNX/GGUF/safetensors/fastText parsed in Java.
+- Load: `ContainerTransport` → `ArchitectureProcessor` (Causal / Embedding / Speech / Synthesis) bind → fill → create for transformer graphs. Whisper = HF safetensors only; Piper = ONNX initializers + sidecar JSON. fastText = dedicated `loadFastText` (no WeightBag fill).
+- Share `LlmModel` / `PreparedRag`; one `LLM` is not concurrent-safe for generate (`cancel()` is). Close engines before model. `LlmModel` is `abstract sealed` → hidden `LlmModelImpl`. Peer graphs: `CausalLM` / `EmbeddingEncoder` / `SpeechToText` / `TextToSpeech` / `TextClassifier`. Non-chat engines skip KV (`numKvcacheBlocks` 0).
+- Matmul: builder `cpuThreads` wins over `-Dnanollvm.cpu.threads`. Default = process-wide daemon pool; `.dedicatedMatmulPool()` owned and shut down on close; `.matmulExecutor` caller-owned; `.disableMultiCpu()` / 1 thread = sequential.
+- `LLM` owns one `Random` (unseeded, or seed `1L` for synthesis; `Builder.random`). Injected into Sampler + Piper VITS. Generate lock is the only exclusive engine lock.
+- ONNX: initializers only; FLOAT/FP16/BF16/DOUBLE load. BERT prefixes are structural. Conv vs ConvTranspose weight axes differ; spatial attrs on `ConvLayout`.
+- Piper G2P: `dictsource` first, then compiled `phontab`+`{lang}_dict`, else letter-to-sound. Phoneme map uses IPA `ɡ` (id 66).
+- Whisper: greedy multilingual; incremental decoder self-attn KV; Bluestein FFT log-mel. `LlmInSound.ofWav` / `ofPcm`; `Locale` null/ROOT = auto.
+- Gemma 4 text QAT: flatten `text_config`; skip towers; packed int2/4/8 + SRQ; PLE after MLP; KV share.
 - GGUF: packed default; late unpack when no other engine is live. Chat `qwen3` is unfused `blk.N.*`. Gemma/Llama GGUF rejected.
-- Unigram (XLM-R / E5): Viterbi + HF/SP charsmap; wrap accepts `<s>`/`</s>` and `[CLS]`/`[SEP]`.
-- Dense RAG: index embeds sequential unless caller `Executor`; each job uses `MatmulRuntime.sequential()` (do not nest the pool). Query cosine is brute-force. `PreparedRag`/`DenseRagIndex`/`HybridRagIndex` shareable after build; `RagSession` is not.
-- `TEXT_DEBUG` off unless `emitDebugPrompts(true)` (Example `--debug`). RAG corpus/advisor notes are trusted prompt input.
-- HF `curl -C -` on a complete file → HTTP 416; `models/_curl_resume.sh` / `.ps1` treat 200/206/416 as success.
-- SpotBugs `EI_EXPOSE_REP*` on tensors/KV/packed records is by design. Packed release is `packed.length == 0`. Props = `nanollvm.*` / `NANOLLVM_*` only.
-- JPMS exports: `models` / `llm` / `chat` / `rag` / `tokenizer` / `utils` / `exceptions`. Hidden: `engine` / `layers` / `tensor` / `internal` / `prompts` / `models.internal` / `models.llmcontainer` / `models.llmarch`. `ModuleExportsTest` locks this.
+- Dense RAG: index embeds sequential unless caller `Executor`; each job uses `MatmulRuntime.sequential()`.
+- SpotBugs `EI_EXPOSE_REP*` on tensors/KV/packed records is by design. Props = `nanollvm.*` / `NANOLLVM_*` only.
+- JPMS exports: `models` / `llm` / `chat` / `rag` / `tokenizer` / `utils` / `exceptions`. Hidden: `engine` / `layers` / `tensor` / `internal` / `prompts` / `models.internal` / `models.llmcontainer` / `models.llmarch`. `ModuleExportsTest` locks this. Public `KernelBackend` in `utils` (**since 1.4.0**).
 
 ## 3. Technical Debt & Refactoring
 - Attention O(n²); no float16 / TP / CUDA; most HF safetensors still FP32; fused packed dequant-dot still open
@@ -41,37 +38,46 @@
 - **Java Senior (2026-08-27):** narrative `//` in `Transformer` / `LLM`; some interface params missing `final`; `Example.ModelChoice` holds `Optional<Path>`. Keep array/`for` on hot numeric paths (tensor, sampler, mel, VITS, KV packing).
 
 ## 4. Current Work In Progress
-- Development line **`1.3.1-SNAPSHOT`** (after **1.3.0** 2026-08-29); Maven Central still **1.3.0**.
-- README is public docs for the **latest release** — never SNAPSHOT (badge, Maven/Gradle coords, JAR names stay **1.3.0**).
-- Notes compacted 2026-08-29: dropped completed WIP essays (Piper G2P diary, JavaDoc/SpotBugs pass, duplicate `@since` catalogs, description.md chapter index) and folded standing facts into §§1–2 / 8.
-- Javadoc `-Xdoclint:reference` fails the `javadoc:jar` publish goal on unresolved `{@link}`. Cross-package types that are not imported must use FQNs (`LlmInSound` / `LlmOutSoundData` in `LLM.generate` javadoc).
+- **TornadoVM samples profile (`-Ptornado`):** compile dep `6.0.0-jdk22plus`. GEMV: Kernel API
+  (`gemvKernel` + `GridScheduler`/`WorkerGrid1D`) first, Loop Parallel `0..outCount` fallback.
+  Ref: https://www.tornadovm.org/ SGEMV ladder (Loop → Kernel → Hybrid cuBLAS; Hybrid = CUDA only).
+  Profile forces `-Dnanollvm.kernels=tornado`. Single-shot GEMV when Tornado active. Run:
+  `mvn22 -pl nano-vllm-java-samples -am -Ptornado compile exec:exec@tornado`
+  (optional `-Dtornado.java.home=…`, `-Dtornado.params=…`). SDK: `tornadovm-6.0.0-opencl` jdk22plus.
+- **1.4.0 still unpublished** — TornadoVM 6.0 / samples `-Ptornado` / GEMV Kernel API stay in **1.4.0**
+  (`@since 1.4.0`, CHANGELOG under `[1.4.0]`). Do not introduce 1.4.1 until after 1.4.0 is shipped.
+- README / description stay on the **latest release** — never SNAPSHOT (badge, Maven/Gradle coords, JAR names).
+- Javadoc `-Xdoclint:reference` fails the `javadoc:jar` publish goal on unresolved `{@link}`. Cross-package types that are not imported must use FQNs (`LlmInSound` / `LlmOutSoundData` / `LlmOutLabels` in `LLM.generate` javadoc).
 
 ## 5. Known Issues & Limitations
-- CPU-only; weights not in git; LFM2 needs large heap. Security: `security_audit.txt` — parsers/corpus capped; RAG mixes corpus into prompts by design.
+- CPU-only by default; optional TornadoVM for large dense GEMV only. Weights not in git; LFM2 needs large heap. Security: `security_audit.txt` — parsers/corpus capped; RAG mixes corpus into prompts by design.
 - Closing `LlmModel` while an `LLM` still holds the graph leaves dense weights reachable until that LLM closes.
-- BERT HF safetensors still rejected. xlm-roberta-base fill-mask mean-pool is anisotropic (unrelated cosine often ~0.99); `Example` Classify is centered prototypes, not a Hub head. Use E5/GTE for retrieval.
-- Gemma 4 vision/audio, GGUF Gemma 4, MoE out of scope. Whisper: no MP3/VAD/beam/timestamps; no CTranslate2/GGUF/ONNX. Piper: no streaming/SSML/multi-speaker picker; compiled espeak rules bytecode is not a full VM; packaged `ru_dict` omits some lemmas (`это`, `мама`).
+- BERT HF safetensors still rejected. xlm-roberta-base fill-mask mean-pool is anisotropic; `Example` Classify is centered prototypes. Use E5/GTE for retrieval.
+- Gemma 4 vision/audio, GGUF Gemma 4, MoE out of scope. Whisper: no MP3/VAD/beam/timestamps. Piper: no streaming/SSML/multi-speaker picker; packaged `ru_dict` omits some lemmas.
 - Tests skip via `OptionalModelAssumptions` / `SampleModelAssumptions` when local weights or `./rag` are absent. Packed gte-small Q2_K is slow if left packed.
-- Tiny-LLM-ONNX is a toy (incoherent text, 1024 context). Tiny greedy Qwen3+RAG can still invent a famous book despite `RagPrompts.GROUNDING`.
-- Piper alphabet recitation follows espeak *word* entries (`в`/`с` short, `б` = “бы”). English secondary `ˌ` on function-adjacent words still approximate.
+- Tiny-LLM-ONNX is a toy. Tiny greedy Qwen3+RAG can still invent a famous book despite `RagPrompts.GROUNDING`.
 
 ## 6. Open Questions & Pending Decisions
-- Piper vs full espeak: compiled rules VM, `$`/`J`/`#`/`V` atoms, `langopts.numbers`, full phoneme programs — stay out of the Apache JAR (no GPL sources, no JNI).
+- Piper vs full espeak: compiled rules VM stays out of the Apache JAR (no GPL sources, no JNI).
 - Fold Sampler deeper into Transformer? BM25F? HF safetensors LFM2? Broader ONNX remaps for exotic exports?
 - Fara / Qwen3.5 (`qwen3_5`) stay unsupported (fail fast). Gemma 4 multimodal / MoE stay out of scope.
 
 ## 7. Useful References
-- `CHANGELOG.md` — **1.3.0** released 2026-08-29; active line **1.3.1-SNAPSHOT**. `README.md` — public latest-release docs (**1.3.0**, never SNAPSHOT). `description.md` — design tour matching 1.3.0 (ch. 5 sizes + who selects them; ch. 8 QKV; ch. 9 thinking). `security_audit.txt` — 1.0 threat model. `models/README.md` — download layout.
+- `CHANGELOG.md` — **1.4.0** (in progress / not yet published). `README.md` / `description.md` — public docs for **1.4.0**. `security_audit.txt` — 1.0 threat model. `models/README.md` — download layout (incl. fastText).
 - Build: `mvn22 -q test` (document as `mvn`). Samples: `mvn22 -pl nano-vllm-java-samples -q exec:java` (default `Example`; `-Dexec.mainClass=…` for others). SpotBugs: `mvn22 -pl nano-vllm-java -am compile spotbugs:check`. Concurrent: `mvn22 -pl nano-vllm-java -Pconcurrent_test test`. Heap/vector: `.mvn/jvm.config`.
+- Tornado: https://www.tornadovm.org/ (docs/examples; Kernel API ≫ Loop Parallel; Hybrid = cuBLAS/CUDA).
+  Sample: `mvn22 -pl nano-vllm-java-samples -am -Ptornado compile exec:exec@tornado`
+  (optional `-Dtornado.params=…`, `-Dtornado.java.home=…`). Dep: `6.0.0-jdk22plus`.
+  SDK: `/home/igorm/SDK/tornadovm-6.0.0-opencl`.
 - Load: `LlmModelFactory.make(path)` / `open(path).make()` — close LLM then model. Chat: `LLM.builder` → `chat` / `chatOnce`. Non-chat: `generate(LlmInput, LlmModality)` → concrete `LlmOut*` via modality `resultType`/`cast` (assign to a typed local; chaining alone does not infer `T`).
-- Demos: `EmbeddingsHelloWorld` (e5, `query: ` prefix); `TranscribeHelloWorld` (whisper-base; `piper-hello.wav` from Synthesize if present, else `ofPcm` tone); `SynthesizeHelloWorld` (Lessac else Irina, writes `piper-hello.wav`); `VoiceReplyHelloWorld`; `LanguageIdHelloWorld` (fastText lid.176); `AdvisorRagHelloWorld`; `RagTunerHelloWorld`; classify labels `nano-vllm-java-samples/classify-labels.example.txt`.
+- Demos: `EmbeddingsHelloWorld`; `TranscribeHelloWorld`; `SynthesizeHelloWorld`; `VoiceReplyHelloWorld`; `LanguageIdHelloWorld`; `AdvisorRagHelloWorld`; `RagTunerHelloWorld`; classify labels `nano-vllm-java-samples/classify-labels.example.txt`.
 
 ## 8. User Advice and Recommendations
-- Pure Java only; no JNI. Hot-path arrays/`for`, not Streams (tensor, attention, sampler, STFT/mel, VITS, KV).
-- README stays on the last shipped version — never write SNAPSHOT into badge/coords/JAR names. After a release, `description.md` matches that version; during SNAPSHOT it may lead README. Whisper/Piper README snippets stay short (API only); full programs live in the sample classes.
+- Pure Java only; no JNI. Hot-path arrays/`for`, not Streams (tensor, attention, sampler, STFT/mel, VITS, KV). TornadoVM is optional and not transitive.
+- README stays on the last shipped version — never write SNAPSHOT into badge/coords/JAR names. After a release, `description.md` matches that version. Whisper/Piper/fastText README snippets stay short (API only); full programs live in the sample classes.
 - Document Maven as `mvn`; this machine uses `mvn22`.
-- New public API in **1.3.1-SNAPSHOT** gets `@since 1.3.1`; do not retag older members. Do not vendor GPL Piper/espeak sources.
-- `LLM.builder` for every kind; `.deterministic()` for greedy (not `temperature(0)`). Server: `.dedicatedMatmulPool()`, `.matmulExecutor(appPool)`, or `.disableMultiCpu()` — do not rely on the process-wide pool. One `LLM` per in-flight generate; share `LlmModel`. `ResourceLimits.setCurrent` is JVM-global.
+- New public API after 1.4.0 gets the next version’s `@since`; do not retag older members. Do not vendor GPL Piper/espeak sources.
+- `LLM.builder` for every kind; `.deterministic()` for greedy (not `temperature(0)`). Server: `.dedicatedMatmulPool()`, `.matmulExecutor(appPool)`, or `.disableMultiCpu()`. One `LLM` per in-flight generate; share `LlmModel`. `ResourceLimits.setCurrent` is JVM-global.
 - Mix RAG origins on one `RagFactory.builder()`. Do not put hybrid indexing back on `AdvisorRagHelloWorld` / `RagTunerHelloWorld` unless asked.
 - Think tags / chat specials: `open(path).thinkTags(…).chatSpecials(…)`; omitted keys fill `DEFAULT`. Streaming `TEXT_RAW` keeps specials; `streamTo` ignores it.
 - Piper: `optionalData(ESPEAK_DATA, dir)` when data is not next to the voice; omit or leave missing — TTS still runs.

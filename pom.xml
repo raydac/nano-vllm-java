@@ -6,7 +6,7 @@
 
     <groupId>com.igormaznitsa</groupId>
     <artifactId>nano-vllm-java-pom</artifactId>
-    <version>1.4.0-SNAPSHOT</version>
+    <version>1.4.0</version>
     <packaging>pom</packaging>
     <name>nano-vllm-java-pom</name>
     <description>Parent POM for nano-vllm-java library and samples</description>
@@ -20,7 +20,7 @@
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <maven.compiler.release>21</maven.compiler.release>
         <junit.version>6.1.3</junit.version>
-        <tornadovm.version>5.2.0-jdk21</tornadovm.version>
+        <tornadovm.version>6.0.0-jdk22plus</tornadovm.version>
         <jvm.module.args>--add-modules jdk.incubator.vector</jvm.module.args>
         <surefire.groups></surefire.groups>
         <surefire.excludedGroups>concurrent_test</surefire.excludedGroups>
@@ -203,6 +203,37 @@
                 <surefire.groups>concurrent_test</surefire.groups>
                 <surefire.excludedGroups></surefire.excludedGroups>
             </properties>
+        </profile>
+        <!--
+          Stub so `exec:exec@tornado` with `-am` skips parent/library. Samples overrides
+          tornado.exec.skip=false and supplies classpath / JVM args.
+        -->
+        <profile>
+            <id>tornado</id>
+            <properties>
+                <tornado.executable>tornado</tornado.executable>
+                <tornado.exec.skip>true</tornado.exec.skip>
+            </properties>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.codehaus.mojo</groupId>
+                        <artifactId>exec-maven-plugin</artifactId>
+                        <executions>
+                            <execution>
+                                <id>tornado</id>
+                                <goals>
+                                    <goal>exec</goal>
+                                </goals>
+                                <configuration>
+                                    <skip>${tornado.exec.skip}</skip>
+                                    <executable>${tornado.executable}</executable>
+                                </configuration>
+                            </execution>
+                        </executions>
+                    </plugin>
+                </plugins>
+            </build>
         </profile>
     </profiles>
 </project>
