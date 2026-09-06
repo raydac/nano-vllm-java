@@ -1,5 +1,5 @@
 ## 1. Implementation Progress
-- Maven multi-module **`1.4.0`** released **2026-09-06** (post **1.3.0** 2026-08-29; previous 1.2.0 / 1.1.0 / 1.0.0). Parent `nano-vllm-java-pom`, library `nano-vllm-java`, samples `nano-vllm-java-samples`. Enforcer Java `[21,)`, Maven `[3.8,)`. JPMS module `com.igormaznitsa.nanollvm` (library only).
+- Maven multi-module **`1.4.1-SNAPSHOT`** in development (parent `nano-vllm-java-pom`). Last public release **`1.4.0`** **2026-09-06** (post **1.3.0** 2026-08-29; previous 1.2.0 / 1.1.0 / 1.0.0). Library `nano-vllm-java`, samples `nano-vllm-java-samples`. Enforcer Java `[21,)`, Maven `[3.8,)`. JPMS module `com.igormaznitsa.nanollvm` (library only).
 - Five graph kinds, one factory + `LLM.builder`: chat (Qwen3 / Gemma3 / Gemma 4 text QAT / Llama / LFM2 GGUF), BERT embeddings (`bert` / `roberta` / `xlm-roberta` GGUF or ONNX), Whisper STT (HF safetensors), Piper TTS (`*.onnx` + `*.onnx.json`), fastText classification (`*.bin` / `*.ftz`). Public non-chat entry is typed `generate(LlmInput, LlmModality)` — modality carries `resultType` / `cast` so the return is the concrete `LlmOut*` without a caller cast (**since 1.4.0**). Chat stays `ChatSession` / `chatOnce`; batch stays `generate(List,…)`. Text completion needs `LLM`.
 - Containers: safetensors (Whisper + chat; Gemma 4 QAT packed), GGUF packed by default (`qwen3` / `lfm2` chat, `bert` embed), ONNX Tier A initializers only (chat / BERT / Piper; no ORT), fastText binary/quantized. `make(Path)` vs `ModelFileSource` / classpath (heap, no disk cache; ONNX `external_data` needs Path).
 - `ModelSupport`: exact family + catalog on `UnsupportedModelException`. Look-alikes fail before weight load. `-Dnanollvm.arch` may only confirm a matching id.
@@ -9,8 +9,8 @@
 - Modalities: `modalities()` = checkpoint-declared; `usableModalities()` = what this port runs (text→text, text→embedding, audio→text, text→audio, text→labels).
 - RAG: `RagFactory` → BM25 `PreparedRag`; optional dense/hybrid (`withEmbeddings` / `HybridRagIndex.of` = RRF). Tuners `RagTuner` / `RagResource` (1.2.0). UTF-8 extract only — no PDF.
 - Samples: `HelloWorld`, `NextTokenHelloWorld`, `EmbeddingsHelloWorld`, `TranscribeHelloWorld`, `SynthesizeHelloWorld`, `VoiceReplyHelloWorld`, `LanguageIdHelloWorld` (fastText lid.176), `LogTriageHelloWorld`, `AdvisorRagHelloWorld`, `RagTunerHelloWorld`, `Bench`, `Example`. Helpers: `BundledModels` / `BundledRag` / `OrderedConsole`.
-- Docs: README + Maven coords + `description.md` match released **1.4.0**. CHANGELOG `[1.4.0] — 2026-09-06`. Session GIF near top of README. Whisper/Piper/fastText Hello Worlds are short snippets; full programs in sample classes. `description.md` ch. **7f** = fastText; typed generate / Tornado noted throughout.
-- `@since`: new 1.4.0 types/members get `@since 1.4.0`; do not retag older members (`LLM.generate` / `LlmModel.generate` stay `@since 1.3.0` with LABELS documented). `ResourceLimits` is 1.0. No `@since 1.3.1` tags.
+- Docs: README + Maven coords + `description.md` stay on last shipped **1.4.0** (never SNAPSHOT). CHANGELOG `[1.4.1-SNAPSHOT] — Unreleased` then `[1.4.0] — 2026-09-06`. Session GIF near top of README. Whisper/Piper/fastText Hello Worlds are short snippets; full programs in sample classes. `description.md` ch. **7f** = fastText; typed generate / Tornado noted throughout.
+- `@since`: new 1.4.1 types/members get `@since 1.4.1`; do not retag older members (`LLM.generate` / `LlmModel.generate` stay `@since 1.3.0` with LABELS documented). `ResourceLimits` is 1.0. No `@since 1.3.1` tags.
 - Download scripts under `models/` (`.sh` + Windows `.ps1`/`.cmd`): Qwen3, Gemma3, Gemma4 E2B QAT, LFM2 GGUF, gte-small, e5, xlm-roberta-base, whisper-base/tiny, piper Lessac/Irina, fastText lid.176, Tiny-LLM-ONNX, SmolLM2 Instruct ONNX.
 - Concurrent test: `ConcurrentLibraryUseTest` (`-Pconcurrent_test`); needs SmolLM2 Instruct ONNX + gte-small. Default Surefire excludes it.
 - **fastText LID (1.4.0):** pure-Java `FastTextModel` (HS / softmax / OVA; dense `.bin` + PQ `.ftz`) + `TextClassifier` / `FastTextForClassification`; `LlmModality.LABELS` / `LlmOutLabels`; factory loads file or folder; prefers `lid.176.bin` over `.ftz`; sample `LanguageIdHelloWorld`; download `models/download-fasttext-lid-176.*` fetches `.bin` (~126 MB).
@@ -44,9 +44,8 @@
   Profile forces `-Dnanollvm.kernels=tornado`. Single-shot GEMV when Tornado active. Run:
   `mvn22 -pl nano-vllm-java-samples -am -Ptornado compile exec:exec@tornado`
   (optional `-Dtornado.java.home=…`, `-Dtornado.params=…`). SDK: `tornadovm-6.0.0-opencl` jdk22plus.
-- **1.4.0 still unpublished** — TornadoVM 6.0 / samples `-Ptornado` / GEMV Kernel API stay in **1.4.0**
-  (`@since 1.4.0`, CHANGELOG under `[1.4.0]`). Do not introduce 1.4.1 until after 1.4.0 is shipped.
-- README / description stay on the **latest release** — never SNAPSHOT (badge, Maven/Gradle coords, JAR names).
+- **1.4.1-SNAPSHOT** opened after **1.4.0** (2026-09-06). New public API gets `@since 1.4.1`; fold unreleased work into CHANGELOG `[1.4.1-SNAPSHOT]`.
+- README / description stay on the **latest release** (**1.4.0**) — never SNAPSHOT (badge, Maven/Gradle coords, JAR names).
 - Javadoc `-Xdoclint:reference` fails the `javadoc:jar` publish goal on unresolved `{@link}`. Cross-package types that are not imported must use FQNs (`LlmInSound` / `LlmOutSoundData` / `LlmOutLabels` in `LLM.generate` javadoc).
 
 ## 5. Known Issues & Limitations
@@ -63,7 +62,7 @@
 - Fara / Qwen3.5 (`qwen3_5`) stay unsupported (fail fast). Gemma 4 multimodal / MoE stay out of scope.
 
 ## 7. Useful References
-- `CHANGELOG.md` — **1.4.0** (in progress / not yet published). `README.md` / `description.md` — public docs for **1.4.0**. `security_audit.txt` — 1.0 threat model. `models/README.md` — download layout (incl. fastText).
+- `CHANGELOG.md` — **1.4.1-SNAPSHOT** (Unreleased) then **1.4.0**. `README.md` / `description.md` — public docs for shipped **1.4.0**. `security_audit.txt` — 1.0 threat model. `models/README.md` — download layout (incl. fastText).
 - Build: `mvn22 -q test` (document as `mvn`). Samples: `mvn22 -pl nano-vllm-java-samples -q exec:java` (default `Example`; `-Dexec.mainClass=…` for others). SpotBugs: `mvn22 -pl nano-vllm-java -am compile spotbugs:check`. Concurrent: `mvn22 -pl nano-vllm-java -Pconcurrent_test test`. Heap/vector: `.mvn/jvm.config`.
 - Tornado: https://www.tornadovm.org/ (docs/examples; Kernel API ≫ Loop Parallel; Hybrid = cuBLAS/CUDA).
   Sample: `mvn22 -pl nano-vllm-java-samples -am -Ptornado compile exec:exec@tornado`
@@ -76,7 +75,7 @@
 - Pure Java only; no JNI. Hot-path arrays/`for`, not Streams (tensor, attention, sampler, STFT/mel, VITS, KV). TornadoVM is optional and not transitive.
 - README stays on the last shipped version — never write SNAPSHOT into badge/coords/JAR names. After a release, `description.md` matches that version. Whisper/Piper/fastText README snippets stay short (API only); full programs live in the sample classes.
 - Document Maven as `mvn`; this machine uses `mvn22`.
-- New public API after 1.4.0 gets the next version’s `@since`; do not retag older members. Do not vendor GPL Piper/espeak sources.
+- New public API after 1.4.0 gets `@since 1.4.1`; do not retag older members. Do not vendor GPL Piper/espeak sources.
 - `LLM.builder` for every kind; `.deterministic()` for greedy (not `temperature(0)`). Server: `.dedicatedMatmulPool()`, `.matmulExecutor(appPool)`, or `.disableMultiCpu()`. One `LLM` per in-flight generate; share `LlmModel`. `ResourceLimits.setCurrent` is JVM-global.
 - Mix RAG origins on one `RagFactory.builder()`. Do not put hybrid indexing back on `AdvisorRagHelloWorld` / `RagTunerHelloWorld` unless asked.
 - Think tags / chat specials: `open(path).thinkTags(…).chatSpecials(…)`; omitted keys fill `DEFAULT`. Streaming `TEXT_RAW` keeps specials; `streamTo` ignores it.
