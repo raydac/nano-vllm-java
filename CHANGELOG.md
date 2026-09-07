@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Development snapshot after the **1.4.0** public release.
 
+### Added
+- Sample `KernelChatBench` compares scalar Java, Vector API, and TornadoVM (skipped when no
+  device) on the same greedy chat: one child JVM per kernel, a console tok/s table, and a
+  well-formed `kernel-chat-bench.svg` bar chart. Default model is Gemma3-270M. Vector API always
+  runs in a child with `--add-modules=jdk.incubator.vector` (the TornadoVM parent launcher often
+  cannot see the incubator module, which previously dropped the vector bar).
+- `KernelBackend.availableModes()` lists kernels this JVM can run; `FloatKernelsFactory.isTornadoAvailable()`
+  mirrors the existing Vector API probe.
+
 ## [1.4.0] — 2026-09-06
 
 Public release of **nano-vllm-java** `1.4.0` (Maven coordinates `com.igormaznitsa:nano-vllm-java:1.4.0`).

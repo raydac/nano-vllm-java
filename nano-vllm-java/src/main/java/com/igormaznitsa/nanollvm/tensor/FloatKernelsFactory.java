@@ -98,6 +98,17 @@ public final class FloatKernelsFactory {
     return VECTOR_API_AVAILABLE;
   }
 
+  /**
+   * Cached result of the one-time TornadoVM probe at class initialization: optional add-on on the
+   * module path and at least one accelerator device.
+   *
+   * @return {@code true} when {@code -Dnanollvm.kernels=tornado} can succeed
+   * @since 1.4.1
+   */
+  public static boolean isTornadoAvailable() {
+    return TORNADO_AVAILABLE;
+  }
+
   private static FloatKernels createCpuFallback() {
     return VECTOR_API_AVAILABLE ? new VectorFloatKernels() : new ScalarFloatKernels();
   }

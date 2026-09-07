@@ -76,7 +76,7 @@
               -Dtornado.java.home=/path/to/jdk-21 -Dtornado.params="models/Gemma3-270M"
             mvn -pl nano-vllm-java-samples -am -Ptornado compile exec:exec@tornado \
               -Dtornado.java.home=/path/to/jdk-21 \
-              -Dexec.mainClass=com.igormaznitsa.nanollvm.samples.Bench
+              -Dexec.mainClass=com.igormaznitsa.nanollvm.samples.KernelChatBench
         -->
         <profile>
             <id>tornado</id>

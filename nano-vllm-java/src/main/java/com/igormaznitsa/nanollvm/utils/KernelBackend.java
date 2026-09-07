@@ -2,10 +2,13 @@ package com.igormaznitsa.nanollvm.utils;
 
 import static com.igormaznitsa.nanollvm.utils.NanoLlvmProps.PROP_KERNELS;
 
+import com.igormaznitsa.nanollvm.tensor.FloatKernelsFactory;
 import com.igormaznitsa.nanollvm.tensor.MatmulRuntime;
 import com.igormaznitsa.nanollvm.tensor.VectorMath;
+import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
+import java.util.stream.Stream;
 
 /**
  * Human-readable labels for the active float-kernel backend (scalar, Vector API, or TornadoVM).
@@ -42,6 +45,26 @@ public final class KernelBackend {
   public static String mode() {
     return Optional.ofNullable(NanoLlvmProps.systemProperty(PROP_KERNELS)).orElse("auto")
       .strip().toLowerCase(Locale.ROOT);
+  }
+
+  /**
+   * Kernel modes this JVM can actually run, in comparison order: {@code scalar}, then
+   * {@code vector} when the incubator Vector API is loadable, then {@code tornado} when TornadoVM
+   * reports a device. Does not include {@code auto}.
+   *
+   * @return unmodifiable list, never empty
+   * @since 1.4.1
+   */
+  public static List<String> availableModes() {
+    Stream.Builder<String> modes = Stream.builder();
+    modes.add("scalar");
+    if (FloatKernelsFactory.isVectorApiAvailable()) {
+      modes.add("vector");
+    }
+    if (FloatKernelsFactory.isTornadoAvailable()) {
+      modes.add("tornado");
+    }
+    return modes.build().toList();
   }
 
   /**

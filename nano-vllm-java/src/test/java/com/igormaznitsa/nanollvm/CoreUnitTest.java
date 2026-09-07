@@ -56,6 +56,7 @@ import com.igormaznitsa.nanollvm.tensor.MatmulRuntime;
 import com.igormaznitsa.nanollvm.tensor.Ops;
 import com.igormaznitsa.nanollvm.tensor.Tensor;
 import com.igormaznitsa.nanollvm.testsupport.OptionalModelAssumptions;
+import com.igormaznitsa.nanollvm.utils.KernelBackend;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.file.Path;
@@ -771,9 +772,18 @@ class CoreUnitTest {
 
   @Test
   void kernelBackendSummaryIncludesActiveLabel() {
-    String summary = com.igormaznitsa.nanollvm.utils.KernelBackend.summaryLine();
-    assertTrue(summary.contains(com.igormaznitsa.nanollvm.utils.KernelBackend.label()));
-    assertTrue(summary.contains("mode=" + com.igormaznitsa.nanollvm.utils.KernelBackend.mode()));
+    String summary = KernelBackend.summaryLine();
+    assertTrue(summary.contains(KernelBackend.label()));
+    assertTrue(summary.contains("mode=" + KernelBackend.mode()));
+  }
+
+  @Test
+  void kernelBackendAvailableModesMatchProbes() {
+    List<String> modes = KernelBackend.availableModes();
+    assertEquals("scalar", modes.getFirst());
+    assertEquals(FloatKernelsFactory.isVectorApiAvailable(), modes.contains("vector"));
+    assertEquals(FloatKernelsFactory.isTornadoAvailable(), modes.contains("tornado"));
+    assertTrue(modes.size() <= 3);
   }
 
   @Test
