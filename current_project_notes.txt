@@ -38,12 +38,9 @@
 - **Java Senior (2026-08-27):** narrative `//` in `Transformer` / `LLM`; some interface params missing `final`; `Example.ModelChoice` holds `Optional<Path>`. Keep array/`for` on hot numeric paths (tensor, sampler, mel, VITS, KV packing).
 
 ## 4. Current Work In Progress
-- **TornadoVM samples profile (`-Ptornado`):** compile dep `6.0.0-jdk22plus`. GEMV: Kernel API
-  (`gemvKernel` + `GridScheduler`/`WorkerGrid1D`) first, Loop Parallel `0..outCount` fallback.
-  Ref: https://www.tornadovm.org/ SGEMV ladder (Loop → Kernel → Hybrid cuBLAS; Hybrid = CUDA only).
-  Profile forces `-Dnanollvm.kernels=tornado`. Single-shot GEMV when Tornado active. Run:
+- **TornadoVM samples profile (`-Ptornado`):** compile dep `6.0.0-jdk22plus` — **latest on Maven Central / GitHub** (tag `v6.0.0` 2026-09-02; no 6.0.1+). Checked 2026-09-07. `master` is 24 commits ahead (CI, CUDA NVRTC toolkit, skip unchanged kernel frame) — not a published artifact. GEMV: Kernel API first, Loop Parallel fallback. Hybrid cuBLAS is CUDA-SDK only (`tornado-cublas` is not a Maven Central module). This machine: OpenCL SDK `tornadovm-6.0.0-opencl`. Run:
   `mvn22 -pl nano-vllm-java-samples -am -Ptornado compile exec:exec@tornado`
-  (optional `-Dtornado.java.home=…`, `-Dtornado.params=…`). SDK: `tornadovm-6.0.0-opencl` jdk22plus.
+  (optional `-Dtornado.java.home=…`, `-Dtornado.params=…`).
 - **1.4.1-SNAPSHOT** opened after **1.4.0** (2026-09-06). New public API gets `@since 1.4.1`; fold unreleased work into CHANGELOG `[1.4.1-SNAPSHOT]`.
 - README / description stay on the **latest release** (**1.4.0**) — never SNAPSHOT (badge, Maven/Gradle coords, JAR names).
 - Javadoc `-Xdoclint:reference` fails the `javadoc:jar` publish goal on unresolved `{@link}`. Cross-package types that are not imported must use FQNs (`LlmInSound` / `LlmOutSoundData` / `LlmOutLabels` in `LLM.generate` javadoc).
@@ -60,6 +57,7 @@
 - Piper vs full espeak: compiled rules VM stays out of the Apache JAR (no GPL sources, no JNI).
 - Fold Sampler deeper into Transformer? BM25F? HF safetensors LFM2? Broader ONNX remaps for exotic exports?
 - Fara / Qwen3.5 (`qwen3_5`) stay unsupported (fail fast). Gemma 4 multimodal / MoE stay out of scope.
+- TornadoVM: no Maven version bump available. Further GPU work would be **usage** (cuBLAS GEMV on CUDA SDK, keep activations on device) not a newer jar; OpenCL-only path cannot take Hybrid.
 
 ## 7. Useful References
 - `CHANGELOG.md` — **1.4.1-SNAPSHOT** (Unreleased) then **1.4.0**. `README.md` / `description.md` — public docs for shipped **1.4.0**. `security_audit.txt` — 1.0 threat model. `models/README.md` — download layout (incl. fastText).

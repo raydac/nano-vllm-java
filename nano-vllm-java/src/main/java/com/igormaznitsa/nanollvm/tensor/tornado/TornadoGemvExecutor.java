@@ -208,12 +208,12 @@ final class TornadoGemvExecutor {
       final GridScheduler scheduler = new GridScheduler(SCHEDULER_KEY, worker);
 
       TaskGraph taskGraph = new TaskGraph(GRAPH_NAME)
-        .transferToDevice(FIRST_EXECUTION, signature.w());
+        .transferToDevice(FIRST_EXECUTION, (Object) signature.w());
       if (signature.hasBias()) {
-        taskGraph = taskGraph.transferToDevice(FIRST_EXECUTION, biasArg);
+        taskGraph = taskGraph.transferToDevice(FIRST_EXECUTION, (Object) biasArg);
       }
       taskGraph = taskGraph
-        .transferToDevice(EVERY_EXECUTION, signature.x())
+        .transferToDevice(EVERY_EXECUTION, (Object) signature.x())
         .task(
           TASK_NAME,
           TornadoGemvKernels::gemvKernel,
@@ -224,7 +224,7 @@ final class TornadoGemvExecutor {
           signature.y(), signature.yOff(),
           signature.in(), signature.out0(), outCount
         )
-        .transferToHost(EVERY_EXECUTION, signature.y());
+        .transferToHost(EVERY_EXECUTION, (Object) signature.y());
 
       final ImmutableTaskGraph snapshot = taskGraph.snapshot();
       final TornadoExecutionPlan plan = new TornadoExecutionPlan(snapshot)
@@ -237,12 +237,12 @@ final class TornadoGemvExecutor {
       throws TornadoExecutionPlanException {
       final float[] biasArg = signature.biasArg();
       TaskGraph taskGraph = new TaskGraph(GRAPH_NAME)
-        .transferToDevice(FIRST_EXECUTION, signature.w());
+        .transferToDevice(FIRST_EXECUTION, (Object) signature.w());
       if (signature.hasBias()) {
-        taskGraph = taskGraph.transferToDevice(FIRST_EXECUTION, biasArg);
+        taskGraph = taskGraph.transferToDevice(FIRST_EXECUTION, (Object) biasArg);
       }
       taskGraph = taskGraph
-        .transferToDevice(EVERY_EXECUTION, signature.x())
+        .transferToDevice(EVERY_EXECUTION, (Object) signature.x())
         .task(
           TASK_NAME,
           TornadoGemvKernels::gemvParallel,
@@ -252,7 +252,7 @@ final class TornadoGemvExecutor {
           signature.y(), signature.yOff(),
           signature.in(), signature.out0(), signature.outCount()
         )
-        .transferToHost(EVERY_EXECUTION, signature.y());
+        .transferToHost(EVERY_EXECUTION, (Object) signature.y());
       final ImmutableTaskGraph snapshot = taskGraph.snapshot();
       final TornadoExecutionPlan plan = new TornadoExecutionPlan(snapshot).withPreCompilation();
       return new GemvPlan(plan);
