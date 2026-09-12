@@ -1,0 +1,1497 @@
+[Scia Reto](https://sciareto.org) mind map   
+> __version__=`1.1`,showJumps=`true`
+---
+
+# nano\-vLLM Java models
+> borderColor=`#1B2838`,fillColor=`#3D5A80`,mmd.emoticon=`brain`
+
+- FILE
+<pre>./models/README.md</pre>
+- LINK
+<pre>https://github.com/raydac/nano-vllm-java</pre>
+- NOTE
+<pre>Five graph kinds, one factory. Load with LlmModelFactory.make(path) or open(path).make(), then LLM.builder(model) for a shared matmul pool. Chat uses ChatSession / chatOnce. Non-chat uses typed generate(LlmInput, LlmModality) — TEXT, EMBEDDING, AUDIO, LABELS. Architecture is detected exactly by ModelSupport (no substring matching: qwen3_5 is not qwen3). This map is fully expanded: no topic is collapsed. Follow FILE extras into sources, LINK extras to Hub pages.</pre>
+
+## Chat \(text → text\)
+> fillColor=`#7AA3E5`,mmd.emoticon=`comment`,topicLinkUID=`A11CHAT00001`
+
+- FILE
+<pre>./nano-vllm-java/src/main/java/com/igormaznitsa/nanollvm/models/internal/CausalLM.java</pre>
+- NOTE
+<pre>Causal decoder-only graphs: qwen3, gemma3 / gemma3_text, gemma4 / gemma4_text (QAT mobile text), llama / llama2 / llama3, lfm2 (GGUF). Kind.CHAT. Paged KV cache. Usable modality is TEXT→TEXT even when Gemma 4 declares image/audio/video towers.</pre>
+```Java
+try (LlmModel model = LlmModelFactory.make(Path.of("models/Qwen3-0.6B"));
+     LLM llm = LLM.builder(model).deterministic().build()) {
+  String answer = llm.chatOnce("Say hello in one sentence.");
+}
+```
+
+### Qwen3
+> fillColor=`#4C84D9`,mmd.emoticon=`robot`
+
+- FILE
+<pre>./nano-vllm-java/src/main/java/com/igormaznitsa/nanollvm/models/internal/Qwen3ForCausalLM.java</pre>
+- LINK
+<pre>https://huggingface.co/Qwen/Qwen3-0.6B</pre>
+- NOTE
+<pre>Canonical id qwen3 (also qwen3_text). Qwen3ForCausalLM: Q/K RMSNorm GQA, RoPE, SiLU MLP. HF/ONNX fuse QKV and gate-up; GGUF keeps llama.cpp blk.N.* unfused so packed quants stay packed. Look-alikes rejected: Qwen2 / Qwen2.5, Qwen3.5 / Qwen3-Next / Fara, Qwen3-VL, Qwen3-MoE.</pre>
+
+#### Graph parts
+> fillColor=`#4C84D9`,mmd.emoticon=`module`
+
+- FILE
+<pre>./nano-vllm-java/src/main/java/com/igormaznitsa/nanollvm/models/llmarch/Qwen3Processor.java</pre>
+
+##### Token embeddings
+> fillColor=`#D6EAF8`,mmd.emoticon=`books`
+
+- FILE
+<pre>./nano-vllm-java/src/main/java/com/igormaznitsa/nanollvm/layers/VocabParallelEmbedding.java</pre>
+- NOTE
+<pre>VocabParallelEmbedding from embed_tokens or GGUF token_embd.</pre>
+
+##### Qwen3 decoder layer
+> fillColor=`#D6EAF8`,mmd.emoticon=`stairs`
+
+- FILE
+<pre>./nano-vllm-java/src/main/java/com/igormaznitsa/nanollvm/models/internal/Qwen3ForCausalLM.java</pre>
+- NOTE
+<pre>input RMSNorm → self-attn → post-attn RMSNorm → MLP. Residual is fused into RMSNorm when a previous residual exists.</pre>
+
+##### GQA attention \+ Q/K RMSNorm
+> fillColor=`#D6EAF8`,mmd.emoticon=`eye`
+
+- FILE
+<pre>./nano-vllm-java/src/main/java/com/igormaznitsa/nanollvm/layers/Attention.java</pre>
+- NOTE
+<pre>Grouped-query attention with per-head Q and K RMSNorm. RoPE on Q/K. Distinct from Llama (no Q/K norms) and from Qwen2.</pre>
+
+##### SiLU MLP
+> fillColor=`#D6EAF8`,mmd.emoticon=`molecule`
+
+- FILE
+<pre>./nano-vllm-java/src/main/java/com/igormaznitsa/nanollvm/layers/Linear.java</pre>
+- NOTE
+<pre>gate / up / down (HF fused gate_up_proj; GGUF unfused ffn_gate / ffn_up / ffn_down).</pre>
+
+##### Final RMSNorm \+ LM head
+> fillColor=`#D6EAF8`,mmd.emoticon=`transmit`
+
+- FILE
+<pre>./nano-vllm-java/src/main/java/com/igormaznitsa/nanollvm/layers/VocabParallelEmbedding.java</pre>
+- NOTE
+<pre>model.norm then ParallelLMHead. Head may be tied to embeddings, or GGUF output.weight.</pre>
+
+#### Weight sources
+> fillColor=`#4C84D9`,mmd.emoticon=`storage`
+
+
+##### Hugging Face safetensors folder
+> fillColor=`#D5F5E3`,mmd.emoticon=`folder`
+
+- NOTE
+<pre>config.json + *.safetensors. Default demo is models/Qwen3-0.6B (~1.5 GB).</pre>
+- TOPIC
+<pre>A11SAFE00001</pre>
+
+##### GGUF file
+> fillColor=`#D5F5E3`,mmd.emoticon=`compress`
+
+- LINK
+<pre>https://huggingface.co/Qwen/Qwen3-0.6B-GGUF</pre>
+- TOPIC
+<pre>A11GGUF00001</pre>
+
+##### ONNX folder
+> fillColor=`#D5F5E3`,mmd.emoticon=`plugin`
+
+- NOTE
+<pre>Tier A initializers only — no ONNX Runtime. Safetensors wins if both are present.</pre>
+- TOPIC
+<pre>A11ONNX00001</pre>
+
+#### Downloads and samples
+> fillColor=`#4C84D9`,mmd.emoticon=`basket`
+
+
+##### Qwen3\-0\.6B \(default\)
+> fillColor=`#FCF3CF`,mmd.emoticon=`ftp`
+
+- FILE
+<pre>./models/download-qwen3-0.6b.sh</pre>
+- LINK
+<pre>https://huggingface.co/Qwen/Qwen3-0.6B</pre>
+- NOTE
+<pre>Creates models/Qwen3-0.6B/. Used when no model path is set.</pre>
+
+##### HelloWorld chat
+> fillColor=`#E8DAEF`,mmd.emoticon=`application`
+
+- FILE
+<pre>./nano-vllm-java-samples/src/main/java/com/igormaznitsa/nanollvm/samples/HelloWorld.java</pre>
+- NOTE
+<pre>Short chat session on the default Qwen3 folder.</pre>
+
+##### KernelChatBench
+> fillColor=`#E8DAEF`,mmd.emoticon=`application`
+
+- FILE
+<pre>./nano-vllm-java-samples/src/main/java/com/igormaznitsa/nanollvm/samples/KernelChatBench.java</pre>
+- NOTE
+<pre>Forks one JVM per kernel (scalar / vector / tornado), prints tok/s and writes kernel-chat-bench.svg.</pre>
+
+### Gemma 3
+> fillColor=`#7B68EE`,mmd.emoticon=`pearl`
+
+- FILE
+<pre>./nano-vllm-java/src/main/java/com/igormaznitsa/nanollvm/models/internal/Gemma3ForCausalLM.java</pre>
+- LINK
+<pre>https://huggingface.co/google/gemma-3-270m-it</pre>
+- NOTE
+<pre>Canonical id gemma3 (also gemma3_text). Gemma3ForCausalLM. Four RMSNorms per block (input, post-attention, pre-FF, post-FF), Q/K RMSNorm, GELU-tanh MLP, sliding vs full attention by layer. HF safetensors or ONNX. Not GGUF. License-gated on Hugging Face. Gemma 1 / 2 and Gemma3 vision variants are rejected.</pre>
+
+#### Graph parts
+> fillColor=`#7B68EE`,mmd.emoticon=`module`
+
+- FILE
+<pre>./nano-vllm-java/src/main/java/com/igormaznitsa/nanollvm/models/llmarch/Gemma3Processor.java</pre>
+
+##### Token embeddings × embed scale
+> fillColor=`#D6EAF8`,mmd.emoticon=`books`
+
+- FILE
+<pre>./nano-vllm-java/src/main/java/com/igormaznitsa/nanollvm/models/internal/Gemma3ForCausalLM.java</pre>
+- NOTE
+<pre>VocabParallelEmbedding plus Gemma embedScale on the hidden states.</pre>
+
+##### Gemma3 decoder layer
+> fillColor=`#D6EAF8`,mmd.emoticon=`stairs`
+
+- FILE
+<pre>./nano-vllm-java/src/main/java/com/igormaznitsa/nanollvm/models/internal/Gemma3ForCausalLM.java</pre>
+- NOTE
+<pre>Four RMSNorms wrap attention and MLP (pre/post each). Residuals are explicit adds.</pre>
+
+##### Sliding / full GQA \+ Q/K RMSNorm
+> fillColor=`#D6EAF8`,mmd.emoticon=`eye`
+
+- FILE
+<pre>./nano-vllm-java/src/main/java/com/igormaznitsa/nanollvm/layers/Attention.java</pre>
+- NOTE
+<pre>config.isSlidingLayer(i) picks a local window vs global RoPE table.</pre>
+
+##### GELU\-tanh MLP
+> fillColor=`#D6EAF8`,mmd.emoticon=`molecule`
+
+- FILE
+<pre>./nano-vllm-java/src/main/java/com/igormaznitsa/nanollvm/models/internal/Gemma3ForCausalLM.java</pre>
+- NOTE
+<pre>Fused gate_up_proj then geluPytorchTanhAndMul then down_proj.</pre>
+
+##### Final RMSNorm \+ tied LM head
+> fillColor=`#D6EAF8`,mmd.emoticon=`transmit`
+
+- FILE
+<pre>./nano-vllm-java/src/main/java/com/igormaznitsa/nanollvm/models/internal/Gemma3ForCausalLM.java</pre>
+- NOTE
+<pre>lm_head may be absent; then embeddings are reused.</pre>
+
+#### Weight sources
+> fillColor=`#7B68EE`,mmd.emoticon=`storage`
+
+
+##### Hugging Face safetensors folder
+> fillColor=`#D5F5E3`,mmd.emoticon=`folder`
+
+- NOTE
+<pre>config.json + *.safetensors. GGUF Gemma is rejected.</pre>
+- TOPIC
+<pre>A11SAFE00001</pre>
+
+##### ONNX folder
+> fillColor=`#D5F5E3`,mmd.emoticon=`plugin`
+
+- NOTE
+<pre>Same family, initializer import only.</pre>
+- TOPIC
+<pre>A11ONNX00001</pre>
+
+#### Downloads and samples
+> fillColor=`#7B68EE`,mmd.emoticon=`basket`
+
+
+##### Gemma3\-270M\-IT
+> fillColor=`#FCF3CF`,mmd.emoticon=`ftp`
+
+- FILE
+<pre>./models/download-gemma3-270m.sh</pre>
+- LINK
+<pre>https://huggingface.co/google/gemma-3-270m-it</pre>
+- NOTE
+<pre>Creates models/Gemma3-270M/. Accept terms and set HF_TOKEN if gated.</pre>
+
+##### Example menu
+> fillColor=`#E8DAEF`,mmd.emoticon=`application`
+
+- FILE
+<pre>./nano-vllm-java-samples/src/main/java/com/igormaznitsa/nanollvm/samples/Example.java</pre>
+- NOTE
+<pre>Interactive model picker; Gemma 3 appears when the folder exists.</pre>
+
+### Gemma 4 text QAT
+> fillColor=`#9B59B6`,mmd.emoticon=`ruby`
+
+- FILE
+<pre>./nano-vllm-java/src/main/java/com/igormaznitsa/nanollvm/models/internal/Gemma4ForCausalLM.java</pre>
+- LINK
+<pre>https://huggingface.co/google/gemma-4-E2B-it-qat-mobile-transformers</pre>
+- NOTE
+<pre>Canonical id gemma4 / gemma4_text. Hugging Face QAT safetensors only (packed int2/4/8 + SRQ), not GGUF or ONNX. text_config is flattened; vision and audio towers are skipped. MoE (enable_moe_block) is rejected. Per-layer embeddings (PLE) after MLP; some layers share KV. Final logits may tanh-softcap. modalities() may list image/audio/video; usableModalities() stays text.</pre>
+
+#### Graph parts
+> fillColor=`#9B59B6`,mmd.emoticon=`module`
+
+- FILE
+<pre>./nano-vllm-java/src/main/java/com/igormaznitsa/nanollvm/models/llmarch/Gemma4Processor.java</pre>
+
+##### Token embeddings \(packed QAT\)
+> fillColor=`#D6EAF8`,mmd.emoticon=`books`
+
+- FILE
+<pre>./nano-vllm-java/src/main/java/com/igormaznitsa/nanollvm/tensor/kernels/PackedEmbeddingKernel.java</pre>
+- NOTE
+<pre>PackedEmbeddingKernel dequantizes rows on demand. Also embedTokensPerLayer for PLE.</pre>
+
+##### Gemma4 decoder layer
+> fillColor=`#D6EAF8`,mmd.emoticon=`stairs`
+
+- FILE
+<pre>./nano-vllm-java/src/main/java/com/igormaznitsa/nanollvm/models/internal/Gemma4ForCausalLM.java</pre>
+- NOTE
+<pre>Attention + MLP with four RMSNorms, then per-layer input gate/projection (PLE) and layer_scalar.</pre>
+
+##### Sliding / KV\-shared GQA
+> fillColor=`#D6EAF8`,mmd.emoticon=`eye`
+
+- FILE
+<pre>./nano-vllm-java/src/main/java/com/igormaznitsa/nanollvm/models/internal/Gemma4ForCausalLM.java</pre>
+- NOTE
+<pre>isSlidingLayer + isKvSharedLayer. Shared layers have no k_proj/v_proj; Attention reads the previous layer KV.</pre>
+
+##### GELU MLP \(unfused QAT linears\)
+> fillColor=`#D6EAF8`,mmd.emoticon=`molecule`
+
+- FILE
+<pre>./nano-vllm-java/src/main/java/com/igormaznitsa/nanollvm/tensor/kernels/PackedLinearKernel.java</pre>
+- NOTE
+<pre>gate_proj, up_proj, down_proj as packed Linear. PackedLinearKernel.</pre>
+
+##### Per\-layer embeddings \(PLE\)
+> fillColor=`#D6EAF8`,mmd.emoticon=`pearl`
+
+- FILE
+<pre>./nano-vllm-java/src/main/java/com/igormaznitsa/nanollvm/models/internal/Gemma4ForCausalLM.java</pre>
+- NOTE
+<pre>After MLP: gelu(per_layer_input_gate(h)) ⊙ perLayerInput → per_layer_projection → post_per_layer_input_norm, then × layer_scalar.</pre>
+
+##### LM head \+ logit softcap
+> fillColor=`#D6EAF8`,mmd.emoticon=`transmit`
+
+- FILE
+<pre>./nano-vllm-java/src/main/java/com/igormaznitsa/nanollvm/models/internal/Gemma4ForCausalLM.java</pre>
+- NOTE
+<pre>Packed ParallelLMHead; Ops.tanhSoftcap when finalLogitSoftcapping ≠ 0.</pre>
+
+#### Weight sources
+> fillColor=`#9B59B6`,mmd.emoticon=`storage`
+
+
+##### QAT safetensors only
+> fillColor=`#D5F5E3`,mmd.emoticon=`compress`
+
+- FILE
+<pre>./nano-vllm-java/src/main/java/com/igormaznitsa/nanollvm/models/llmarch/Gemma4QatLoader.java</pre>
+- NOTE
+<pre>Gemma4QatLoader.fill. GGUF and ONNX throw. Packed weights stay packed in RAM.</pre>
+- TOPIC
+<pre>A11SAFE00001</pre>
+
+#### Downloads and samples
+> fillColor=`#9B59B6`,mmd.emoticon=`basket`
+
+
+##### Gemma4\-E2B\-IT\-QAT\-Mobile \(~2\.3 GB\)
+> fillColor=`#FCF3CF`,mmd.emoticon=`ftp`
+
+- FILE
+<pre>./models/download-gemma4-e2b-qat-mobile.sh</pre>
+- LINK
+<pre>https://huggingface.co/google/gemma-4-E2B-it-qat-mobile-transformers</pre>
+- NOTE
+<pre>Creates models/Gemma4-E2B-IT-QAT-Mobile/. Apache 2.0, ungated. Plan on ~16 GB heap.</pre>
+
+### Llama
+> fillColor=`#3498DB`,mmd.emoticon=`user_yoda`
+
+- FILE
+<pre>./nano-vllm-java/src/main/java/com/igormaznitsa/nanollvm/models/internal/LlamaForCausalLM.java</pre>
+- LINK
+<pre>https://huggingface.co/onnx-community/SmolLM2-135M-Instruct-ONNX</pre>
+- NOTE
+<pre>Canonical id llama (also llama2, llama3, llama3_*). LlamaForCausalLM: RMSNorm, RoPE, GQA, SiLU MLP — no Q/K head norms. HF safetensors or ONNX. GGUF Llama is rejected (GGUF chat is qwen3 and lfm2). Llama 4 is rejected. Tiny-LLM-ONNX is a ~10M toy; SmolLM2 Instruct ONNX is ChatML (~135M).</pre>
+
+#### Graph parts
+> fillColor=`#3498DB`,mmd.emoticon=`module`
+
+- FILE
+<pre>./nano-vllm-java/src/main/java/com/igormaznitsa/nanollvm/models/llmarch/LlamaProcessor.java</pre>
+
+##### Token embeddings
+> fillColor=`#D6EAF8`,mmd.emoticon=`books`
+
+- FILE
+<pre>./nano-vllm-java/src/main/java/com/igormaznitsa/nanollvm/models/internal/LlamaForCausalLM.java</pre>
+- NOTE
+<pre>VocabParallelEmbedding from embed_tokens.</pre>
+
+##### Llama decoder layer
+> fillColor=`#D6EAF8`,mmd.emoticon=`stairs`
+
+- FILE
+<pre>./nano-vllm-java/src/main/java/com/igormaznitsa/nanollvm/models/internal/LlamaForCausalLM.java</pre>
+- NOTE
+<pre>input RMSNorm → self-attn → post-attn RMSNorm → MLP. Same residual fusion style as Qwen3.</pre>
+
+##### GQA attention \(no Q/K norms\)
+> fillColor=`#D6EAF8`,mmd.emoticon=`eye`
+
+- FILE
+<pre>./nano-vllm-java/src/main/java/com/igormaznitsa/nanollvm/layers/Attention.java</pre>
+- NOTE
+<pre>RoPE + grouped-query. Distinguishes Llama from Qwen3/Gemma.</pre>
+
+##### SiLU MLP
+> fillColor=`#D6EAF8`,mmd.emoticon=`molecule`
+
+- FILE
+<pre>./nano-vllm-java/src/main/java/com/igormaznitsa/nanollvm/models/internal/LlamaForCausalLM.java</pre>
+- NOTE
+<pre>Fused gate_up_proj then siluAndMul then down_proj.</pre>
+
+##### Final RMSNorm \+ LM head
+> fillColor=`#D6EAF8`,mmd.emoticon=`transmit`
+
+- FILE
+<pre>./nano-vllm-java/src/main/java/com/igormaznitsa/nanollvm/models/internal/LlamaForCausalLM.java</pre>
+- NOTE
+<pre>Tied embeddings when lm_head is missing.</pre>
+
+#### Weight sources
+> fillColor=`#3498DB`,mmd.emoticon=`storage`
+
+
+##### Hugging Face safetensors folder
+> fillColor=`#D5F5E3`,mmd.emoticon=`folder`
+
+- NOTE
+<pre>config.json + *.safetensors.</pre>
+- TOPIC
+<pre>A11SAFE00001</pre>
+
+##### ONNX folder
+> fillColor=`#D5F5E3`,mmd.emoticon=`plugin`
+
+- NOTE
+<pre>Use onnx/model.onnx or model_fp16.onnx. Skip community *_q4* / *_int8*.</pre>
+- TOPIC
+<pre>A11ONNX00001</pre>
+
+#### Downloads and samples
+> fillColor=`#3498DB`,mmd.emoticon=`basket`
+
+
+##### Tiny\-LLM\-ONNX \(~10M toy\)
+> fillColor=`#FCF3CF`,mmd.emoticon=`ftp`
+
+- FILE
+<pre>./models/download-tiny-llm-onnx.sh</pre>
+- LINK
+<pre>https://huggingface.co/onnx-community/Tiny-LLM-ONNX</pre>
+- NOTE
+<pre>Creates models/Tiny-LLM-ONNX/. Tokenizer from arnir0/Tiny-LLM.</pre>
+
+##### SmolLM2\-135M\-Instruct\-ONNX
+> fillColor=`#FCF3CF`,mmd.emoticon=`ftp`
+
+- FILE
+<pre>./models/download-smollm2-135m-instruct-onnx.sh</pre>
+- LINK
+<pre>https://huggingface.co/onnx-community/SmolLM2-135M-Instruct-ONNX</pre>
+- NOTE
+<pre>Creates models/SmolLM2-135M-Instruct-ONNX/. fp16 ~270 MiB. Used by ConcurrentLibraryUseTest.</pre>
+
+##### NextTokenHelloWorld
+> fillColor=`#E8DAEF`,mmd.emoticon=`application`
+
+- FILE
+<pre>./nano-vllm-java-samples/src/main/java/com/igormaznitsa/nanollvm/samples/NextTokenHelloWorld.java</pre>
+- NOTE
+<pre>Plain completion via generate(LlmInText, TEXT) / generateTokenIds — not a chat template.</pre>
+
+### LFM2 \(Liquid\)
+> fillColor=`#1ABC9C`,mmd.emoticon=`unicorn`
+
+- FILE
+<pre>./nano-vllm-java/src/main/java/com/igormaznitsa/nanollvm/models/internal/Lfm2ForCausalLM.java</pre>
+- LINK
+<pre>https://huggingface.co/LiquidAI/LFM2.5-2.6B-GGUF</pre>
+- NOTE
+<pre>Canonical id lfm2 (also lfm2_5 / lfm2.5). Lfm2ForCausalLM from GGUF only (general.architecture=lfm2). Hybrid: some layers are short-conv, others GQA attention, every layer has SiLU MLP. Weights stay packed in RAM (dequant on matmul). ~16 GB heap is the intended headroom for LFM2.5-2.6B Q4_K_M. HF safetensors and ONNX LFM2 are rejected. MoE LFM2 is rejected.</pre>
+
+#### Graph parts
+> fillColor=`#1ABC9C`,mmd.emoticon=`module`
+
+- FILE
+<pre>./nano-vllm-java/src/main/java/com/igormaznitsa/nanollvm/models/llmarch/Lfm2Processor.java</pre>
+
+##### Token embeddings \+ embedding RMSNorm
+> fillColor=`#D6EAF8`,mmd.emoticon=`books`
+
+- FILE
+<pre>./nano-vllm-java/src/main/java/com/igormaznitsa/nanollvm/models/internal/Lfm2ForCausalLM.java</pre>
+- NOTE
+<pre>GGUF token_embd and token_embd_norm. Final norm is at the embedding, not a separate model.norm.</pre>
+
+##### Hybrid decoder layer
+> fillColor=`#D6EAF8`,mmd.emoticon=`stairs`
+
+- FILE
+<pre>./nano-vllm-java/src/main/java/com/igormaznitsa/nanollvm/models/internal/Lfm2ForCausalLM.java</pre>
+- NOTE
+<pre>operatorNorm → (attention XOR short-conv) → add → ffnNorm → MLP. config.isConvLayer(i) picks the mixer.</pre>
+
+##### GQA attention layers
+> fillColor=`#D6EAF8`,mmd.emoticon=`eye`
+
+- FILE
+<pre>./nano-vllm-java/src/main/java/com/igormaznitsa/nanollvm/layers/Attention.java</pre>
+- NOTE
+<pre>RoPE GQA when the layer is not a conv layer.</pre>
+
+##### Short\-conv layers
+> fillColor=`#D6EAF8`,mmd.emoticon=`spring`
+
+- FILE
+<pre>./nano-vllm-java/src/main/java/com/igormaznitsa/nanollvm/layers/ShortConv.java</pre>
+- NOTE
+<pre>ShortConv: in_proj, depthwise conv, out_proj. Packed in/out projections when GGUF stays packed.</pre>
+
+##### SiLU MLP
+> fillColor=`#D6EAF8`,mmd.emoticon=`molecule`
+
+- FILE
+<pre>./nano-vllm-java/src/main/java/com/igormaznitsa/nanollvm/models/internal/Lfm2ForCausalLM.java</pre>
+- NOTE
+<pre>Every layer, after the mixer residual.</pre>
+
+##### LM head
+> fillColor=`#D6EAF8`,mmd.emoticon=`transmit`
+
+- FILE
+<pre>./nano-vllm-java/src/main/java/com/igormaznitsa/nanollvm/models/internal/Lfm2ForCausalLM.java</pre>
+- NOTE
+<pre>GGUF output.weight, or tied to token embeddings.</pre>
+
+#### Weight sources
+> fillColor=`#1ABC9C`,mmd.emoticon=`storage`
+
+
+##### GGUF file only
+> fillColor=`#D5F5E3`,mmd.emoticon=`compress`
+
+- NOTE
+<pre>Lfm2Processor.fill rejects non-GGUF. Packed default; unpackParameters() dequants at load.</pre>
+- TOPIC
+<pre>A11GGUF00001</pre>
+
+#### Downloads and samples
+> fillColor=`#1ABC9C`,mmd.emoticon=`basket`
+
+
+##### LFM2\.5\-2\.6B Q4\_K\_M GGUF \(~1\.67 GB\)
+> fillColor=`#FCF3CF`,mmd.emoticon=`ftp`
+
+- FILE
+<pre>./models/download-lfm2.5-2.6b-gguf.sh</pre>
+- LINK
+<pre>https://huggingface.co/LiquidAI/LFM2.5-2.6B-GGUF</pre>
+- NOTE
+<pre>Creates models/LFM2.5-2.6B-Q4_K_M.gguf. Dequant to ~10 GB float32 if unpacked.</pre>
+
+### Chat API
+> fillColor=`#E8DAEF`,mmd.emoticon=`source_code`
+
+- FILE
+<pre>./nano-vllm-java/src/main/java/com/igormaznitsa/nanollvm/llm/LLM.java</pre>
+- NOTE
+<pre>LLM.builder(model).deterministic() for greedy (do not use temperature(0)). llm.chat() / chatOnce() for dialog. Batched tokens: generate(List, SamplingParams). Think tags and chat specials: open(path).thinkTags(…).chatSpecials(…). One LLM per in-flight generate; share LlmModel.</pre>
+```Java
+try (LlmModel model = LlmModelFactory.make(Path.of("models/Qwen3-0.6B"));
+     LLM llm = LLM.builder(model).deterministic().build()) {
+  String answer = llm.chatOnce("Say hello in one sentence.");
+}
+```
+
+## Embeddings \(text → vector\)
+> fillColor=`#5CB85C`,mmd.emoticon=`magnet`,topicLinkUID=`A11EMBD00001`
+
+- FILE
+<pre>./nano-vllm-java/src/main/java/com/igormaznitsa/nanollvm/models/internal/EmbeddingEncoder.java</pre>
+- NOTE
+<pre>Kind.EMBEDDING. BERT-family encoder: bert / roberta / xlm-roberta from GGUF or ONNX. Hugging Face BERT safetensors is rejected. generate(LlmInText, EMBEDDING) → LlmOutEmbedding. No KV cache (numKvcacheBlocks 0). Do not call chat() on these checkpoints.</pre>
+```Java
+try (LlmModel model = LlmModelFactory.make(Path.of("models/gte-small.Q2_K.gguf"));
+     LLM llm = LLM.builder(model).build()) {
+  LlmOutEmbedding v = llm.generate(LlmInText.of("hello world"), LlmModality.EMBEDDING);
+}
+```
+
+### BERT / RoBERTa / XLM\-RoBERTa
+> fillColor=`#5CB85C`,mmd.emoticon=`chart`
+
+- FILE
+<pre>./nano-vllm-java/src/main/java/com/igormaznitsa/nanollvm/models/internal/BertForEmbedding.java</pre>
+- NOTE
+<pre>BertForEmbedding: token + position + type embeddings, post-LN transformer blocks, mean pool, L2 normalize. BidirectionalAttention (not causal). GELU FFN with bias. Deberta / DistilBERT / ALBERT / ELECTRA / ModernBERT are rejected look-alikes.</pre>
+
+#### Graph parts
+> fillColor=`#5CB85C`,mmd.emoticon=`module`
+
+- FILE
+<pre>./nano-vllm-java/src/main/java/com/igormaznitsa/nanollvm/models/llmarch/BertProcessor.java</pre>
+
+##### Token \+ position \+ type embeddings
+> fillColor=`#D6EAF8`,mmd.emoticon=`books`
+
+- FILE
+<pre>./nano-vllm-java/src/main/java/com/igormaznitsa/nanollvm/models/internal/BertForEmbedding.java</pre>
+- NOTE
+<pre>GGUF token_embd, position_embd, token_types. Each may stay packed.</pre>
+
+##### Embedding LayerNorm
+> fillColor=`#D6EAF8`,mmd.emoticon=`filter`
+
+- FILE
+<pre>./nano-vllm-java/src/main/java/com/igormaznitsa/nanollvm/layers/Norms.java</pre>
+- NOTE
+<pre>token_embd_norm weight+bias (not RMSNorm).</pre>
+
+##### Bidirectional encoder block
+> fillColor=`#D6EAF8`,mmd.emoticon=`eye`
+
+- FILE
+<pre>./nano-vllm-java/src/main/java/com/igormaznitsa/nanollvm/layers/BidirectionalAttention.java</pre>
+- NOTE
+<pre>Q/K/V/O with bias, BidirectionalAttention, attn LayerNorm, GELU up/down FFN, FFN LayerNorm.</pre>
+
+##### Mean pool \+ L2
+> fillColor=`#D6EAF8`,mmd.emoticon=`compass`
+
+- FILE
+<pre>./nano-vllm-java/src/main/java/com/igormaznitsa/nanollvm/models/internal/BertForEmbedding.java</pre>
+- NOTE
+<pre>Average over tokens then l2Normalize. This is the generate(EMBEDDING) vector.</pre>
+
+#### Weight sources
+> fillColor=`#5CB85C`,mmd.emoticon=`storage`
+
+
+##### GGUF \(preferred for tiny English\)
+> fillColor=`#D5F5E3`,mmd.emoticon=`compress`
+
+- NOTE
+<pre>e.g. gte-small.Q2_K.gguf. Packed Q2_K is slow if left packed — unpack if you care about speed.</pre>
+- TOPIC
+<pre>A11GGUF00001</pre>
+
+##### ONNX encoder
+> fillColor=`#D5F5E3`,mmd.emoticon=`plugin`
+
+- NOTE
+<pre>e5 and xlm-roberta-base scripts fetch onnx/model.onnx. HF safetensors BERT is not loaded.</pre>
+- TOPIC
+<pre>A11ONNX00001</pre>
+
+#### Downloads and samples
+> fillColor=`#5CB85C`,mmd.emoticon=`basket`
+
+
+##### gte\-small GGUF Q2\_K \(~25 MB\)
+> fillColor=`#FCF3CF`,mmd.emoticon=`ftp`
+
+- FILE
+<pre>./models/download-gte-small-gguf.sh</pre>
+- LINK
+<pre>https://huggingface.co/ChristianAzinn/gte-small-gguf</pre>
+- NOTE
+<pre>Creates models/gte-small.Q2_K.gguf. Context ≤ 512. MIT.</pre>
+
+##### multilingual\-e5\-small ONNX
+> fillColor=`#FCF3CF`,mmd.emoticon=`ftp`
+
+- FILE
+<pre>./models/download-multilingual-e5-small.sh</pre>
+- LINK
+<pre>https://huggingface.co/intfloat/multilingual-e5-small</pre>
+- NOTE
+<pre>Creates models/multilingual-e5-small/. Prefix query: / passage:. Default EmbeddingsHelloWorld folder.</pre>
+
+##### xlm\-roberta\-base ONNX \(~1\.9 GB\)
+> fillColor=`#FCF3CF`,mmd.emoticon=`ftp`
+
+- FILE
+<pre>./models/download-xlm-roberta-base.sh</pre>
+- LINK
+<pre>https://huggingface.co/FacebookAI/xlm-roberta-base</pre>
+- NOTE
+<pre>Fill-mask checkpoint. Mean-pool is anisotropic (cosine ~0.99). Example Classify uses centered prototypes, not a seq-class head.</pre>
+
+##### EmbeddingsHelloWorld
+> fillColor=`#E8DAEF`,mmd.emoticon=`application`
+
+- FILE
+<pre>./nano-vllm-java-samples/src/main/java/com/igormaznitsa/nanollvm/samples/EmbeddingsHelloWorld.java</pre>
+- NOTE
+<pre>Embeds a line; non-retrieval texts get query: on E5.</pre>
+
+##### AdvisorRagHelloWorld
+> fillColor=`#E8DAEF`,mmd.emoticon=`application`
+
+- FILE
+<pre>./nano-vllm-java-samples/src/main/java/com/igormaznitsa/nanollvm/samples/AdvisorRagHelloWorld.java</pre>
+- NOTE
+<pre>BM25 RAG over ./rag. Dense/hybrid is optional via RagFactory.withEmbeddings / HybridRagIndex.</pre>
+
+### Embedding API
+> fillColor=`#E8DAEF`,mmd.emoticon=`source_code`
+
+- FILE
+<pre>./nano-vllm-java/src/main/java/com/igormaznitsa/nanollvm/models/LlmOutEmbedding.java</pre>
+- NOTE
+<pre>LlmOutEmbedding v = llm.generate(LlmInText.of(text), LlmModality.EMBEDDING); Assign to a typed local — chaining alone does not infer T. E5 wants query: / passage: prefixes.</pre>
+```Java
+try (LlmModel model = LlmModelFactory.make(Path.of("models/gte-small.Q2_K.gguf"));
+     LLM llm = LLM.builder(model).build()) {
+  LlmOutEmbedding v = llm.generate(LlmInText.of("hello world"), LlmModality.EMBEDDING);
+}
+```
+
+## Speech\-to\-text \(audio → text\)
+> fillColor=`#E67E22`,mmd.emoticon=`headphone_mic`,topicLinkUID=`A11WHSP00001`
+
+- FILE
+<pre>./nano-vllm-java/src/main/java/com/igormaznitsa/nanollvm/models/internal/SpeechToText.java</pre>
+- NOTE
+<pre>Kind.SPEECH. OpenAI Whisper from Hugging Face safetensors only (config.json + model.safetensors + tokenizer). Greedy multilingual decode, optional Locale (null/ROOT = auto), 30 s chunking. WAV or 16 kHz mono PCM. No MP3, VAD, beam search, or word timestamps. Not CTranslate2 model.bin, not Whisper GGUF, not Whisper ONNX.</pre>
+```Java
+try (LlmModel model = LlmModelFactory.make(Path.of("models/whisper-base"));
+     LLM llm = LLM.builder(model).build()) {
+  LlmOutText text = llm.generate(LlmInSound.ofWav(Files.readAllBytes(Path.of("clip.wav"))), LlmModality.TEXT);
+}
+```
+
+### Whisper
+> fillColor=`#E67E22`,mmd.emoticon=`sound`
+
+- FILE
+<pre>./nano-vllm-java/src/main/java/com/igormaznitsa/nanollvm/models/internal/WhisperForAsr.java</pre>
+- LINK
+<pre>https://huggingface.co/openai/whisper-base</pre>
+
+#### Graph parts
+> fillColor=`#E67E22`,mmd.emoticon=`module`
+
+- FILE
+<pre>./nano-vllm-java/src/main/java/com/igormaznitsa/nanollvm/models/llmarch/WhisperProcessor.java</pre>
+
+##### Log\-mel frontend
+> fillColor=`#D6EAF8`,mmd.emoticon=`speedometer`
+
+- FILE
+<pre>./nano-vllm-java/src/main/java/com/igormaznitsa/nanollvm/models/internal/audio/WhisperLogMel.java</pre>
+- NOTE
+<pre>WhisperLogMel: Bluestein FFT, 80-bin log-mel, 30 s windows.</pre>
+
+##### Encoder conv stem
+> fillColor=`#D6EAF8`,mmd.emoticon=`spring`
+
+- FILE
+<pre>./nano-vllm-java/src/main/java/com/igormaznitsa/nanollvm/layers/Conv1d.java</pre>
+- NOTE
+<pre>Conv1d conv1 then conv2 on the mel, plus encoder position embeddings.</pre>
+
+##### Encoder block
+> fillColor=`#D6EAF8`,mmd.emoticon=`eye`
+
+- FILE
+<pre>./nano-vllm-java/src/main/java/com/igormaznitsa/nanollvm/models/internal/WhisperForAsr.java</pre>
+- NOTE
+<pre>Self-attn (scaled-dot, non-causal) + GELU MLP, LayerNorm, Q/K/V/O with bias.</pre>
+
+##### Decoder block
+> fillColor=`#D6EAF8`,mmd.emoticon=`comment`
+
+- FILE
+<pre>./nano-vllm-java/src/main/java/com/igormaznitsa/nanollvm/models/internal/WhisperForAsr.java</pre>
+- NOTE
+<pre>Causal self-attn with incremental KV, then cross-attn to encoder memory, then MLP.</pre>
+
+##### Greedy multilingual decode
+> fillColor=`#D6EAF8`,mmd.emoticon=`world`
+
+- FILE
+<pre>./nano-vllm-java/src/main/java/com/igormaznitsa/nanollvm/models/internal/WhisperLanguages.java</pre>
+- NOTE
+<pre>SOT → language (or auto) → transcribe → no-timestamps. Suppress mask. Locale selects &lt;|xx|&gt;.</pre>
+
+#### Weight sources
+> fillColor=`#E67E22`,mmd.emoticon=`storage`
+
+
+##### Hugging Face safetensors folder only
+> fillColor=`#D5F5E3`,mmd.emoticon=`folder`
+
+- NOTE
+<pre>WhisperProcessor / Source.HF_SAFETENSORS. GGUF, ONNX, and CTranslate2 fail before weight fill.</pre>
+- TOPIC
+<pre>A11SAFE00001</pre>
+
+#### Downloads and samples
+> fillColor=`#E67E22`,mmd.emoticon=`basket`
+
+
+##### whisper\-base \(~290 MB\)
+> fillColor=`#FCF3CF`,mmd.emoticon=`ftp`
+
+- FILE
+<pre>./models/download-whisper-base.sh</pre>
+- LINK
+<pre>https://huggingface.co/openai/whisper-base</pre>
+- NOTE
+<pre>Creates models/whisper-base/. MIT, ungated.</pre>
+
+##### whisper\-tiny \(~150 MB\)
+> fillColor=`#FCF3CF`,mmd.emoticon=`ftp`
+
+- FILE
+<pre>./models/download-whisper-tiny.sh</pre>
+- LINK
+<pre>https://huggingface.co/openai/whisper-tiny</pre>
+- NOTE
+<pre>Creates models/whisper-tiny/.</pre>
+
+##### TranscribeHelloWorld
+> fillColor=`#E8DAEF`,mmd.emoticon=`application`
+
+- FILE
+<pre>./nano-vllm-java-samples/src/main/java/com/igormaznitsa/nanollvm/samples/TranscribeHelloWorld.java</pre>
+- NOTE
+<pre>WAV → LlmInSound.ofWav → generate(..., TEXT).</pre>
+
+##### VoiceReplyHelloWorld
+> fillColor=`#E8DAEF`,mmd.emoticon=`application`
+
+- FILE
+<pre>./nano-vllm-java-samples/src/main/java/com/igormaznitsa/nanollvm/samples/VoiceReplyHelloWorld.java</pre>
+- NOTE
+<pre>Mic or WAV → Whisper → mood of transcript → chat → Piper → Java Sound playback.</pre>
+
+### Transcription API
+> fillColor=`#E8DAEF`,mmd.emoticon=`source_code`
+
+- FILE
+<pre>./nano-vllm-java/src/main/java/com/igormaznitsa/nanollvm/models/LlmInSound.java</pre>
+- NOTE
+<pre>LlmOutText text = llm.generate(LlmInSound.ofWav(bytes), LlmModality.TEXT); or LlmInSound.ofPcm(pcm, sampleRate). Optional language via input Locale.</pre>
+```Java
+try (LlmModel model = LlmModelFactory.make(Path.of("models/whisper-base"));
+     LLM llm = LLM.builder(model).build()) {
+  LlmOutText text = llm.generate(LlmInSound.ofWav(Files.readAllBytes(Path.of("clip.wav"))), LlmModality.TEXT);
+}
+```
+
+## Text\-to\-speech \(text → audio\)
+> fillColor=`#E91E63`,mmd.emoticon=`horn`,topicLinkUID=`A11PIPR00001`
+
+- FILE
+<pre>./nano-vllm-java/src/main/java/com/igormaznitsa/nanollvm/models/internal/TextToSpeech.java</pre>
+- NOTE
+<pre>Kind.SYNTHESIS. Piper VITS: voice folder with *.onnx + *.onnx.json (phoneme_id_map + espeak). Java generator graph on ONNX initializers — not ONNX Runtime. G2P uses espeak-ng-data next to the voice (or LlmOptionalData.ESPEAK_DATA). No streaming, SSML, or multi-speaker picker. Compiled ru_dict omits some lemmas. GPL espeak sources are not vendored in the Apache JAR.</pre>
+```Java
+try (LlmModel model = LlmModelFactory.open(Path.of("models/piper-en-lessac-medium"))
+        .optionalData(LlmOptionalData.ESPEAK_DATA, Path.of("models/piper-en-lessac-medium/espeak-ng-data"))
+        .make();
+     LLM llm = LLM.builder(model).build()) {
+  LlmOutSoundData wav = llm.generate(LlmInText.of("Hello world"), LlmModality.AUDIO);
+}
+```
+
+### Piper VITS
+> fillColor=`#E91E63`,mmd.emoticon=`acoustic_guitar`
+
+- FILE
+<pre>./nano-vllm-java/src/main/java/com/igormaznitsa/nanollvm/models/internal/PiperForTts.java</pre>
+- LINK
+<pre>https://huggingface.co/rhasspy/piper-voices</pre>
+
+#### Graph parts
+> fillColor=`#E91E63`,mmd.emoticon=`module`
+
+- FILE
+<pre>./nano-vllm-java/src/main/java/com/igormaznitsa/nanollvm/models/llmarch/PiperProcessor.java</pre>
+
+##### espeak\-ng G2P
+> fillColor=`#D6EAF8`,mmd.emoticon=`script`
+
+- FILE
+<pre>./nano-vllm-java/src/main/java/com/igormaznitsa/nanollvm/models/internal/EspeakNgG2p.java</pre>
+- NOTE
+<pre>dictsource first, then compiled phontab + {lang}_dict, else letter-to-sound. IPA ɡ is phoneme id 66.</pre>
+
+##### Text encoder
+> fillColor=`#D6EAF8`,mmd.emoticon=`text`
+
+- FILE
+<pre>./nano-vllm-java/src/main/java/com/igormaznitsa/nanollvm/models/internal/VitsSynthesizer.java</pre>
+- NOTE
+<pre>Phoneme embedding + transformer encoder layers + conv projection (enc_p.*).</pre>
+
+##### Duration predictor
+> fillColor=`#D6EAF8`,mmd.emoticon=`hourglass`
+
+- FILE
+<pre>./nano-vllm-java/src/main/java/com/igormaznitsa/nanollvm/models/internal/VitsSynthesizer.java</pre>
+- NOTE
+<pre>Predicts how long each phoneme lasts (noise_w).</pre>
+
+##### Flow couplings
+> fillColor=`#D6EAF8`,mmd.emoticon=`rainbow`
+
+- FILE
+<pre>./nano-vllm-java/src/main/java/com/igormaznitsa/nanollvm/models/internal/VitsSynthesizer.java</pre>
+- NOTE
+<pre>Normalizing-flow residual couplings from prior to latent z.</pre>
+
+##### Waveform generator
+> fillColor=`#D6EAF8`,mmd.emoticon=`sound`
+
+- FILE
+<pre>./nano-vllm-java/src/main/java/com/igormaznitsa/nanollvm/layers/ConvTranspose1d.java</pre>
+- NOTE
+<pre>HiFi-GAN style ConvTranspose1d vocoder. noise_scale / length_scale on infer().</pre>
+
+#### Weight sources
+> fillColor=`#E91E63`,mmd.emoticon=`storage`
+
+
+##### ONNX \+ \*\.onnx\.json sidecar
+> fillColor=`#D5F5E3`,mmd.emoticon=`plugin`
+
+- FILE
+<pre>./nano-vllm-java/src/main/java/com/igormaznitsa/nanollvm/models/llmarch/PiperOnnxNames.java</pre>
+- NOTE
+<pre>Source.ONNX. Sidecar must contain phoneme_id_map and espeak. PiperOnnxNames remaps decoder resblocks.</pre>
+- TOPIC
+<pre>A11ONNX00001</pre>
+
+##### espeak\-ng\-data \(optional extra\)
+> fillColor=`#D5F5E3`,mmd.emoticon=`folder`
+
+- FILE
+<pre>./nano-vllm-java/src/main/java/com/igormaznitsa/nanollvm/models/LlmOptionalData.java</pre>
+- NOTE
+<pre>open(path).optionalData(ESPEAK_DATA, dir). If omitted, {model}/espeak-ng-data is tried. Missing data still lets TTS run with weaker G2P.</pre>
+
+#### Downloads and samples
+> fillColor=`#E91E63`,mmd.emoticon=`basket`
+
+
+##### en\_US Lessac medium \(~63 MB\)
+> fillColor=`#FCF3CF`,mmd.emoticon=`ftp`
+
+- FILE
+<pre>./models/download-piper-en-lessac-medium.sh</pre>
+- LINK
+<pre>https://huggingface.co/rhasspy/piper-voices/tree/main/en/en_US/lessac/medium</pre>
+- NOTE
+<pre>Creates models/piper-en-lessac-medium/. Default SynthesizeHelloWorld voice when present.</pre>
+
+##### ru\_RU Irina medium \(~63 MB\)
+> fillColor=`#FCF3CF`,mmd.emoticon=`ftp`
+
+- FILE
+<pre>./models/download-piper-ru-irina-medium.sh</pre>
+- LINK
+<pre>https://huggingface.co/rhasspy/piper-voices/tree/main/ru/ru_RU/irina/medium</pre>
+- NOTE
+<pre>Creates models/piper-ru-irina-medium/. GPL espeak-ng-data is downloaded next to the voice, not into the library JAR.</pre>
+
+##### SynthesizeHelloWorld
+> fillColor=`#E8DAEF`,mmd.emoticon=`application`
+
+- FILE
+<pre>./nano-vllm-java-samples/src/main/java/com/igormaznitsa/nanollvm/samples/SynthesizeHelloWorld.java</pre>
+- NOTE
+<pre>Text → generate(..., AUDIO) → WAV bytes.</pre>
+
+### Synthesis API
+> fillColor=`#E8DAEF`,mmd.emoticon=`source_code`
+
+- FILE
+<pre>./nano-vllm-java/src/main/java/com/igormaznitsa/nanollvm/models/LlmOutSoundData.java</pre>
+- NOTE
+<pre>LlmOutSoundData wav = llm.generate(LlmInText.of(&quot;Hello world&quot;), LlmModality.AUDIO); LLM owns the Random used by VITS (seed 1L when Builder.random is not set for synthesis).</pre>
+```Java
+try (LlmModel model = LlmModelFactory.open(Path.of("models/piper-en-lessac-medium"))
+        .optionalData(LlmOptionalData.ESPEAK_DATA, Path.of("models/piper-en-lessac-medium/espeak-ng-data"))
+        .make();
+     LLM llm = LLM.builder(model).build()) {
+  LlmOutSoundData wav = llm.generate(LlmInText.of("Hello world"), LlmModality.AUDIO);
+}
+```
+
+## Classification \(text → labels\)
+> fillColor=`#F4D03F`,mmd.emoticon=`tag`,topicLinkUID=`A11LABL00001`
+
+- FILE
+<pre>./nano-vllm-java/src/main/java/com/igormaznitsa/nanollvm/models/internal/TextClassifier.java</pre>
+- NOTE
+<pre>Kind.CLASSIFICATION, since 1.4.0. Meta fastText supervised models (*.bin / *.ftz), magic 793712314. Pure Java — no JNI. Unsupervised word-vector crates (CBOW / skip-gram) are rejected. generate(LlmInText, LABELS) → LlmOutLabels with ranked __label__xx codes.</pre>
+```Java
+try (LlmModel model = LlmModelFactory.make(Path.of("models/fasttext-lid-176"));
+     LLM llm = LLM.builder(model).build()) {
+  LlmOutLabels labels = llm.generate(LlmInText.of("Bonjour"), LlmModality.LABELS);
+  System.out.println(labels.topLabel() + " " + labels.top().score());
+}
+```
+
+### fastText
+> fillColor=`#F4D03F`,mmd.emoticon=`world`
+
+- FILE
+<pre>./nano-vllm-java/src/main/java/com/igormaznitsa/nanollvm/models/internal/FastTextForClassification.java</pre>
+- LINK
+<pre>https://fasttext.cc/docs/en/language-identification.html</pre>
+
+#### Graph parts
+> fillColor=`#F4D03F`,mmd.emoticon=`module`
+
+- FILE
+<pre>./nano-vllm-java/src/main/java/com/igormaznitsa/nanollvm/models/internal/fasttext/FastTextModel.java</pre>
+
+##### Dictionary \+ n\-grams
+> fillColor=`#D6EAF8`,mmd.emoticon=`books`
+
+- FILE
+<pre>./nano-vllm-java/src/main/java/com/igormaznitsa/nanollvm/models/internal/fasttext/Dictionary.java</pre>
+- NOTE
+<pre>Word and character n-grams hashed into buckets (Args.minn/maxn/wordNgrams).</pre>
+
+##### Input / output matrices
+> fillColor=`#D6EAF8`,mmd.emoticon=`table`
+
+- FILE
+<pre>./nano-vllm-java/src/main/java/com/igormaznitsa/nanollvm/models/internal/fasttext/Matrix.java</pre>
+- NOTE
+<pre>DenseMatrix for .bin, QuantMatrix + ProductQuantizer for .ftz.</pre>
+
+##### Loss heads
+> fillColor=`#D6EAF8`,mmd.emoticon=`chart`
+
+- FILE
+<pre>./nano-vllm-java/src/main/java/com/igormaznitsa/nanollvm/models/internal/fasttext/HierarchicalSoftmax.java</pre>
+- NOTE
+<pre>Hierarchical softmax (HS), softmax, or one-vs-all (OVA). MODEL_SUP only.</pre>
+
+##### Predict top\-K
+> fillColor=`#D6EAF8`,mmd.emoticon=`find`
+
+- FILE
+<pre>./nano-vllm-java/src/main/java/com/igormaznitsa/nanollvm/models/internal/FastTextForClassification.java</pre>
+- NOTE
+<pre>TextClassifier.classify → ScoredLabel list. Factory prefers lid.176.bin over .ftz in a folder.</pre>
+
+#### Weight sources
+> fillColor=`#F4D03F`,mmd.emoticon=`storage`
+
+
+##### Meta \*\.bin \(dense\)
+> fillColor=`#D5F5E3`,mmd.emoticon=`database`
+
+- NOTE
+<pre>lid.176.bin ~126 MB. Preferred when both .bin and .ftz exist.</pre>
+- TOPIC
+<pre>A11FTBN00001</pre>
+
+##### Meta \*\.ftz \(product\-quantized\)
+> fillColor=`#D5F5E3`,mmd.emoticon=`compress`
+
+- NOTE
+<pre>lid.176.ftz ~917 KB. Same API, slightly less accurate per Meta.</pre>
+- TOPIC
+<pre>A11FTBN00001</pre>
+
+#### Downloads and samples
+> fillColor=`#F4D03F`,mmd.emoticon=`basket`
+
+
+##### lid\.176\.bin \(176 languages\)
+> fillColor=`#FCF3CF`,mmd.emoticon=`ftp`
+
+- FILE
+<pre>./models/download-fasttext-lid-176.sh</pre>
+- LINK
+<pre>https://dl.fbaipublicfiles.com/fasttext/supervised-models/lid.176.bin</pre>
+- NOTE
+<pre>Creates models/fasttext-lid-176/lid.176.bin. CC-BY-SA 3.0.</pre>
+
+##### LanguageIdHelloWorld
+> fillColor=`#E8DAEF`,mmd.emoticon=`application`
+
+- FILE
+<pre>./nano-vllm-java-samples/src/main/java/com/igormaznitsa/nanollvm/samples/LanguageIdHelloWorld.java</pre>
+- NOTE
+<pre>Prints topLabel and score for a sample sentence.</pre>
+
+##### LogTriageHelloWorld
+> fillColor=`#E8DAEF`,mmd.emoticon=`application`
+
+- FILE
+<pre>./nano-vllm-java-samples/src/main/java/com/igormaznitsa/nanollvm/samples/LogTriageHelloWorld.java</pre>
+- NOTE
+<pre>Uses labels together with other kinds in a desk-style demo.</pre>
+
+### Labels API
+> fillColor=`#E8DAEF`,mmd.emoticon=`source_code`
+
+- FILE
+<pre>./nano-vllm-java/src/main/java/com/igormaznitsa/nanollvm/models/LlmOutLabels.java</pre>
+- NOTE
+<pre>LlmOutLabels labels = llm.generate(LlmInText.of(text), LlmModality.LABELS); labels.topLabel() / labels.top().score(). Not a chat model.</pre>
+```Java
+try (LlmModel model = LlmModelFactory.make(Path.of("models/fasttext-lid-176"));
+     LLM llm = LLM.builder(model).build()) {
+  LlmOutLabels labels = llm.generate(LlmInText.of("Bonjour"), LlmModality.LABELS);
+  System.out.println(labels.topLabel() + " " + labels.top().score());
+}
+```
+
+## How to load
+> fillColor=`#26C6DA`,leftSide=`true`,mmd.emoticon=`gear_in`,topicLinkUID=`A11FACT00001`
+
+- FILE
+<pre>./nano-vllm-java/src/main/java/com/igormaznitsa/nanollvm/models/LlmModelFactory.java</pre>
+- NOTE
+<pre>make(Path) is the silent packed default. open(Path).listen(…).unpackParameters().thinkTags(…).optionalData(…).make() for named knobs. ModelFileSource / classpath reads into heap (no disk cache); ONNX external_data needs a Path. Close each LLM first, then the model. Share LlmModel across engines; one LLM is not concurrent-safe for generate (cancel() is).</pre>
+
+### LlmModelFactory
+> fillColor=`#26C6DA`,mmd.emoticon=`installer_box`
+
+- FILE
+<pre>./nano-vllm-java/src/main/java/com/igormaznitsa/nanollvm/models/LlmModelFactory.java</pre>
+
+#### make\(Path\) / open\(Path\)\.make\(\)
+> fillColor=`#F7F9FC`,mmd.emoticon=`information`
+
+- NOTE
+<pre>open() is the builder. Stream loads reject ONNX external_data.</pre>
+
+#### ModelFileSource
+> fillColor=`flashdisk`
+
+- NOTE
+<pre>Classpath / custom streams. FILE extras live on ModelFileId.</pre>
+
+#### optionalData\(ESPEAK\_DATA, dir\)
+> fillColor=`folder`
+
+- NOTE
+<pre>Piper G2P data. Omitted keys stay empty (OPTION_OPTIONAL_DATA only when non-empty).</pre>
+
+### ModelSupport
+> fillColor=`#26C6DA`,mmd.emoticon=`legend`,topicLinkUID=`A11SUPP00001`
+
+- FILE
+<pre>./nano-vllm-java/src/main/java/com/igormaznitsa/nanollvm/models/ModelSupport.java</pre>
+- NOTE
+<pre>Exact architecture detection. CATALOG is the user-facing list on UnsupportedModelException. -Dnanollvm.arch may only confirm a matching id (qwen3, gemma3, gemma4, llama, lfm2, bert, whisper, piper). Kind: CHAT / EMBEDDING / SPEECH / SYNTHESIS / CLASSIFICATION. Source: HF_SAFETENSORS / ONNX / GGUF / FASTTEXT.</pre>
+
+#### Kind enum
+> fillColor=`#F7F9FC`,mmd.emoticon=`information`
+
+- NOTE
+<pre>CHAT, EMBEDDING, SPEECH, SYNTHESIS, CLASSIFICATION.</pre>
+
+#### Source enum
+> fillColor=`#F7F9FC`,mmd.emoticon=`information`
+
+- NOTE
+<pre>HF_SAFETENSORS, ONNX, GGUF, FASTTEXT.</pre>
+
+#### Selection\(architectureId, kind\)
+> fillColor=`#F7F9FC`,mmd.emoticon=`information`
+
+- NOTE
+<pre>Returned by require / resolve / requireGguf.</pre>
+
+### ArchitectureProcessor
+> fillColor=`#26C6DA`,mmd.emoticon=`blueprint`
+
+- FILE
+<pre>./nano-vllm-java/src/main/java/com/igormaznitsa/nanollvm/models/llmarch/ArchitectureProcessor.java</pre>
+- NOTE
+<pre>ContainerTransport → bind → fill → createCausal / createEmbedding / createSpeech / createSynthesis. fastText skips WeightBag fill (loadFastText).</pre>
+
+#### CausalArchitecture
+> fillColor=`comment`
+
+- NOTE
+<pre>Qwen3, Gemma3, Gemma4, Llama, LFM2.</pre>
+
+#### EmbeddingArchitecture
+> fillColor=`magnet`
+
+- NOTE
+<pre>BERT.</pre>
+
+#### SpeechArchitecture
+> fillColor=`sound`
+
+- NOTE
+<pre>Whisper.</pre>
+
+#### SynthesisArchitecture
+> fillColor=`horn`
+
+- NOTE
+<pre>Piper.</pre>
+
+### LLM\.builder
+> fillColor=`#26C6DA`,mmd.emoticon=`cog`
+
+- FILE
+<pre>./nano-vllm-java/src/main/java/com/igormaznitsa/nanollvm/llm/LLM.java</pre>
+- NOTE
+<pre>cpuThreads wins over -Dnanollvm.cpu.threads. dedicatedMatmulPool is engine-owned. matmulExecutor is caller-owned. disableMultiCpu / 1 thread = sequential. Kernels: -Dnanollvm.kernels=auto|tornado|vector|scalar. TornadoVM is optional, not transitive.</pre>
+
+#### deterministic\(\)
+> fillColor=`#F7F9FC`,mmd.emoticon=`information`
+
+- NOTE
+<pre>Greedy decoding. Do not pass temperature(0).</pre>
+
+#### dedicatedMatmulPool\(\)
+> fillColor=`#F7F9FC`,mmd.emoticon=`information`
+
+- NOTE
+<pre>Owned and shut down on close. Prefer this on servers.</pre>
+
+#### usableModalities\(\)
+> fillColor=`#F7F9FC`,mmd.emoticon=`information`
+
+- NOTE
+<pre>What this port actually runs vs modalities() declared by the checkpoint.</pre>
+
+### Typed generate
+> fillColor=`#26C6DA`,mmd.emoticon=`source_code`
+
+- FILE
+<pre>./nano-vllm-java/src/main/java/com/igormaznitsa/nanollvm/models/LlmModality.java</pre>
+- NOTE
+<pre>TEXT→LlmOutText, AUDIO→LlmOutSoundData, EMBEDDING→LlmOutEmbedding, LABELS→LlmOutLabels. IMAGE and VIDEO are declaration-only.</pre>
+
+#### TEXT
+> fillColor=`#7AA3E5`,mmd.emoticon=`text`
+
+- NOTE
+<pre>Chat output, Whisper output, completion.</pre>
+- TOPIC
+<pre>A11CHAT00001</pre>
+
+#### EMBEDDING
+> fillColor=`#5CB85C`,mmd.emoticon=`magnet`
+
+- TOPIC
+<pre>A11EMBD00001</pre>
+
+#### AUDIO
+> fillColor=`#E91E63`,mmd.emoticon=`sound`
+
+- NOTE
+<pre>Piper output; Whisper input is LlmInSound.</pre>
+- TOPIC
+<pre>A11PIPR00001</pre>
+
+#### LABELS
+> fillColor=`#F4D03F`,mmd.emoticon=`tag`
+
+- TOPIC
+<pre>A11LABL00001</pre>
+
+#### IMAGE / VIDEO
+> fillColor=`#FADBD8`,mmd.emoticon=`photo`
+
+- NOTE
+<pre>Declared on some Gemma 4 checkpoints. Towers are skipped; generate with these modalities is not implemented.</pre>
+
+## Weight containers
+> fillColor=`#90A4AE`,leftSide=`true`,mmd.emoticon=`box`
+
+- FILE
+<pre>./nano-vllm-java/src/main/java/com/igormaznitsa/nanollvm/models/llmcontainer/package-info.java</pre>
+- NOTE
+<pre>Parsed in Java. No JNI, no ONNX Runtime. Application code never opens these transports directly — LlmModelFactory does.</pre>
+
+### Safetensors
+> fillColor=`#90A4AE`,mmd.emoticon=`folder`,topicLinkUID=`A11SAFE00001`
+
+- FILE
+<pre>./nano-vllm-java/src/main/java/com/igormaznitsa/nanollvm/models/llmcontainer/SafetensorsTransport.java</pre>
+- NOTE
+<pre>HF folder: config.json + *.safetensors. Chat (Qwen3, Gemma3, Gemma4 QAT, Llama) and Whisper. Most HF tensors still load as FP32; Gemma 4 stays packed QAT.</pre>
+
+#### Chat families
+> fillColor=`#F7F9FC`,mmd.emoticon=`information`
+
+- NOTE
+<pre>qwen3, gemma3, gemma4 (QAT packed), llama.</pre>
+
+#### Whisper
+> fillColor=`#F7F9FC`,mmd.emoticon=`information`
+
+- NOTE
+<pre>openai/whisper-* safetensors only.</pre>
+
+#### Gemma 4 QAT packed
+> fillColor=`#F7F9FC`,mmd.emoticon=`information`
+
+- NOTE
+<pre>int2/4/8 + SRQ via GemmaQatWeight / Gemma4QatLoader.</pre>
+
+### GGUF
+> fillColor=`#90A4AE`,mmd.emoticon=`compress`,topicLinkUID=`A11GGUF00001`
+
+- FILE
+<pre>./nano-vllm-java/src/main/java/com/igormaznitsa/nanollvm/models/llmcontainer/GgufTransport.java</pre>
+- NOTE
+<pre>Single .gguf file. Packed by default (dequant on matmul). unpackParameters() / allowUnpackGguf expands to float32 at load. Late unpack only when no other engine is live.</pre>
+
+#### Chat: qwen3, lfm2
+> fillColor=`#F7F9FC`,mmd.emoticon=`information`
+
+- NOTE
+<pre>Gemma/Llama GGUF rejected.</pre>
+
+#### Embeddings: bert encoder
+> fillColor=`#F7F9FC`,mmd.emoticon=`information`
+
+- NOTE
+<pre>gte-small and similar feature-extraction GGUFs.</pre>
+
+#### Packed vs dense
+> fillColor=`#F7F9FC`,mmd.emoticon=`information`
+
+- NOTE
+<pre>Packed saves RAM, costs matmul. Packed gte-small Q2_K is slow if left packed.</pre>
+
+### ONNX \(Tier A\)
+> fillColor=`#90A4AE`,mmd.emoticon=`plugin`,topicLinkUID=`A11ONNX00001`
+
+- FILE
+<pre>./nano-vllm-java/src/main/java/com/igormaznitsa/nanollvm/models/llmcontainer/OnnxTransport.java</pre>
+- NOTE
+<pre>Initializer import only — FLOAT / FP16 / BF16 / DOUBLE. No ORT, no QDQ/int8. BERT prefixes are structural. Conv vs ConvTranspose weight axes differ. external_data needs Path, not ModelFileSource.</pre>
+
+#### Chat: qwen3, gemma3, llama
+> fillColor=`#F7F9FC`,mmd.emoticon=`information`
+
+- NOTE
+<pre>Tiny-LLM-ONNX, SmolLM2 Instruct ONNX.</pre>
+
+#### Embeddings: bert / xlm\-roberta
+> fillColor=`#F7F9FC`,mmd.emoticon=`information`
+
+- NOTE
+<pre>e5, xlm-roberta-base. Skip *_qint8* / OpenVINO.</pre>
+
+#### Piper voice \*\.onnx
+> fillColor=`#F7F9FC`,mmd.emoticon=`information`
+
+- NOTE
+<pre>Plus *.onnx.json sidecar. Not ORT execution.</pre>
+
+### fastText binary
+> fillColor=`#90A4AE`,mmd.emoticon=`database`,topicLinkUID=`A11FTBN00001`
+
+- FILE
+<pre>./nano-vllm-java/src/main/java/com/igormaznitsa/nanollvm/models/internal/fasttext/FastTextModel.java</pre>
+- NOTE
+<pre>Magic 793712314. Dedicated loadFastText — no WeightBag. Folder load prefers lid.176.bin, then lid.176.ftz, then model.bin / model.ftz, then any matching *.bin/*.ftz.</pre>
+
+#### \*\.bin dense
+> fillColor=`#F7F9FC`,mmd.emoticon=`information`
+
+
+#### \*\.ftz product\-quantized
+> fillColor=`#F7F9FC`,mmd.emoticon=`information`
+
+
+## Tokenizers
+> fillColor=`#A1887F`,leftSide=`true`,mmd.emoticon=`quill`
+
+- FILE
+<pre>./nano-vllm-java/src/main/java/com/igormaznitsa/nanollvm/tokenizer/Tokenizer.java</pre>
+- NOTE
+<pre>Public Tokenizer; codecs are package-private. Loaded from tokenizer.json (+ tokenizer_config.json / generation_config.json), SentencePiece tokenizer.model, or GGUF tokenizer.ggml.* metadata. Chat layout is ChatFormat from template/vocab markers, not product names.</pre>
+
+### GPT\-2 byte\-level BPE
+> fillColor=`#F7F9FC`,mmd.emoticon=`script`
+
+- NOTE
+<pre>Common with ChatML exports.</pre>
+
+### Metaspace BPE \(▁\)
+> fillColor=`#F7F9FC`,mmd.emoticon=`text`
+
+- NOTE
+<pre>SentencePiece-style word boundaries.</pre>
+
+### WordPiece
+> fillColor=`#F7F9FC`,mmd.emoticon=`bookmark`
+
+- NOTE
+<pre>HF ## or GGUF metaspace. BERT / RoBERTa.</pre>
+
+### Unigram \+ charsmap
+> fillColor=`#F7F9FC`,mmd.emoticon=`world`
+
+- NOTE
+<pre>XLM-RoBERTa / E5. Precompiled charsmap normalization.</pre>
+
+### WordLevel / Char
+> fillColor=`#F7F9FC`,mmd.emoticon=`keyboard`
+
+- NOTE
+<pre>Smaller vocabularies.</pre>
+
+### SentencePiece tokenizer\.model
+> fillColor=`#F7F9FC`,mmd.emoticon=`page`
+
+- NOTE
+<pre>When JSON sidecar is absent.</pre>
+
+### GGUF tokenizer\.ggml\.\*
+> fillColor=`#F7F9FC`,mmd.emoticon=`compress`
+
+- NOTE
+<pre>Embedded in the same .gguf file as weights.</pre>
+
+## Not supported
+> fillColor=`#E74C3C`,leftSide=`true`,mmd.emoticon=`cancel`
+
+- FILE
+<pre>./nano-vllm-java/src/main/java/com/igormaznitsa/nanollvm/models/ModelSupport.java</pre>
+- NOTE
+<pre>Look-alikes fail at ModelSupport before weight load, with CATALOG on UnsupportedModelException. Do not rely on -Dnanollvm.arch to coerce a family.</pre>
+
+### Rejected chat families
+> fillColor=`#FADBD8`,mmd.emoticon=`warning`
+
+
+#### Qwen2 / Qwen2\.5
+> fillColor=`#F7F9FC`,mmd.emoticon=`error`
+
+- NOTE
+<pre>Not Qwen3 (no Q/K RMSNorm GQA of that shape).</pre>
+
+#### Qwen3\.5 / Qwen3\-Next / Fara
+> fillColor=`#F7F9FC`,mmd.emoticon=`error`
+
+- NOTE
+<pre>Hybrid Gated DeltaNet + gated attention; often a vision tower.</pre>
+
+#### Qwen3\-VL / Qwen3\-MoE
+> fillColor=`#F7F9FC`,mmd.emoticon=`error`
+
+- NOTE
+<pre>Vision or mixture-of-experts.</pre>
+
+#### Gemma 1 / Gemma 2
+> fillColor=`#F7F9FC`,mmd.emoticon=`error`
+
+- NOTE
+<pre>Only gemma3 / gemma3_text and gemma4 text QAT.</pre>
+
+#### Gemma 4 vision / audio / MoE
+> fillColor=`#F7F9FC`,mmd.emoticon=`error`
+
+- NOTE
+<pre>Towers skipped; MoE enable_moe_block rejected.</pre>
+
+#### Llama 4
+> fillColor=`#F7F9FC`,mmd.emoticon=`error`
+
+- NOTE
+<pre>Supported Llama is llama / llama2 / llama3.</pre>
+
+#### Mistral / Mixtral / Phi / GPT\-2
+> fillColor=`#F7F9FC`,mmd.emoticon=`error`
+
+- NOTE
+<pre>And DeepSeek, MiniCPM, GLM, Falcon, MPT, BLOOM, OLMo, …</pre>
+
+#### GGUF Llama / Gemma
+> fillColor=`#F7F9FC`,mmd.emoticon=`error`
+
+- NOTE
+<pre>GGUF chat is qwen3 and lfm2 only.</pre>
+
+### Rejected other graphs
+> fillColor=`#FADBD8`,mmd.emoticon=`bomb`
+
+
+#### HF BERT safetensors
+> fillColor=`#F7F9FC`,mmd.emoticon=`error`
+
+- NOTE
+<pre>Embeddings are GGUF or ONNX.</pre>
+
+#### Deberta / DistilBERT / ALBERT / ELECTRA
+> fillColor=`#F7F9FC`,mmd.emoticon=`error`
+
+- NOTE
+<pre>Non-BERT embedding look-alikes.</pre>
+
+#### Whisper GGUF / ONNX / CTranslate2
+> fillColor=`#F7F9FC`,mmd.emoticon=`error`
+
+- NOTE
+<pre>HF safetensors only.</pre>
+
+#### ONNX Runtime Piper
+> fillColor=`#F7F9FC`,mmd.emoticon=`error`
+
+- NOTE
+<pre>Initializers are imported; ORT is never called.</pre>
+
+#### Unsupervised fastText vectors
+> fillColor=`#F7F9FC`,mmd.emoticon=`error`
+
+- NOTE
+<pre>CBOW / skip-gram crates. Supervised MODEL_SUP only.</pre>
+
+#### JNI fastText bindings
+> fillColor=`#F7F9FC`,mmd.emoticon=`error`
+
+- NOTE
+<pre>This port is pure Java.</pre>
