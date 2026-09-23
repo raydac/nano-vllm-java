@@ -24,16 +24,17 @@ public final class TornadoFloatKernelsProvider {
   }
 
   /**
-   * Wraps {@code cpuFallback} with TornadoVM GEMV offload when dimensions are large enough.
+   * Builds TornadoVM kernels. {@code cpuFallback} is accepted so callers keep a CPU backend ready;
+   * the TornadoVM instance does not run that backend.
    *
    * @param cpuFallback Vector or scalar kernels used for non-GEMV work and small GEMV
    * @return hybrid kernels, or {@code null} when {@link #isAvailable()} is {@code false}
    * @since 1.4.0
    */
   public static FloatKernels create(final FloatKernels cpuFallback) {
-    if (!TornadoAvailability.isReady()) {
+    if (cpuFallback == null || !TornadoAvailability.isReady()) {
       return null;
     }
-    return new TornadoFloatKernels(cpuFallback);
+    return new TornadoFloatKernels();
   }
 }

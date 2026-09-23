@@ -1,5 +1,5 @@
 /**
- * Optional TornadoVM GEMV offload for {@link com.igormaznitsa.nanollvm.tensor.FloatKernels}.
+ * Optional TornadoVM implementation of {@link com.igormaznitsa.nanollvm.tensor.FloatKernels}.
  *
  * @since 1.4.0
  */

@@ -6,7 +6,6 @@ import static uk.ac.manchester.tornado.api.enums.DataTransferMode.FIRST_EXECUTIO
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
-import java.util.concurrent.locks.ReentrantLock;
 import uk.ac.manchester.tornado.api.GridScheduler;
 import uk.ac.manchester.tornado.api.ImmutableTaskGraph;
 import uk.ac.manchester.tornado.api.KernelContext;
@@ -27,7 +26,6 @@ final class TornadoGemvExecutor {
   private static final String GRAPH_NAME = "nanollvm-gemv";
   private static final String TASK_NAME = "gemv";
   private static final String SCHEDULER_KEY = GRAPH_NAME + "." + TASK_NAME;
-  private static final ReentrantLock EXEC_LOCK = new ReentrantLock();
   private static final Map<WeightKey, GemvPlan> CACHED_PLANS =
     new LinkedHashMap<>(MAX_CACHED_PLANS, 0.75f, true) {
       @Override
@@ -69,7 +67,7 @@ final class TornadoGemvExecutor {
       throw new IllegalArgumentException("TornadoVM GEMV launch exceeds Integer range");
     }
     WeightKey key = WeightKey.of(w, wOff, bias, in, out0, outCount, rows);
-    EXEC_LOCK.lock();
+    TornadoLaunchLock.lock();
     try {
       GemvPlan plan = CACHED_PLANS.get(key);
       if (plan == null) {
@@ -80,7 +78,7 @@ final class TornadoGemvExecutor {
     } catch (TornadoExecutionPlanException e) {
       throw new IllegalStateException("TornadoVM GEMV failed", e);
     } finally {
-      EXEC_LOCK.unlock();
+      TornadoLaunchLock.unlock();
     }
   }
 

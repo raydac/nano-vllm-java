@@ -103,6 +103,23 @@ public final class VectorMath {
     KERNELS.tanhSoftcap(src, srcOff, cap, dst, dstOff, n);
   }
 
+  public static boolean attend(
+    final float[] query, final int queryOffset,
+    final float[] key, final int keyOffset,
+    final float[] value, final int valueOffset,
+    final float[] result, final int resultOffset,
+    final int queryStart, final int queryLength, final int keyIndexBase, final int keyLength,
+    final int numHeads, final int numKvHeads, final int headDim,
+    final float scale, final int slidingWindow,
+    final boolean causal, final int[] keySlots
+  ) {
+    return KERNELS.attend(
+      query, queryOffset, key, keyOffset, value, valueOffset, result, resultOffset,
+      queryStart, queryLength, keyIndexBase, keyLength,
+      numHeads, numKvHeads, headDim, scale, slidingWindow, causal, keySlots
+    );
+  }
+
   public static String backendInfo() {
     return KERNELS.name();
   }

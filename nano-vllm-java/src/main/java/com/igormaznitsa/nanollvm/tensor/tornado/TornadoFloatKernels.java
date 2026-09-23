@@ -1,26 +1,27 @@
 package com.igormaznitsa.nanollvm.tensor.tornado;
 
 import com.igormaznitsa.nanollvm.tensor.FloatKernels;
+import com.igormaznitsa.nanollvm.tensor.scalar.ScalarFloatKernels;
 
 /**
- * Hybrid {@link FloatKernels}: large dense GEMV on TornadoVM, everything else on a CPU backend.
+ * TornadoVM {@link FloatKernels}. Dense GEMV uses the Kernel API. Chat attention is one Loop
+ * Parallel task per query range. Elementwise work uses Loop Parallel only when the slice is long
+ * enough to hide the launch; shorter slices use scalar loops.
  *
  * @since 1.4.0
  */
 public final class TornadoFloatKernels extends FloatKernels {
 
-  static final int MIN_OUT = 256;
-  static final int MIN_IN = 256;
+  private static final int MIN_DEVICE_SPAN = 65536;
 
-  private final FloatKernels delegate;
+  private static final FloatKernels SCALAR = new ScalarFloatKernels();
 
-  TornadoFloatKernels(final FloatKernels delegate) {
-    this.delegate = delegate;
+  TornadoFloatKernels() {
   }
 
   @Override
   public String name() {
-    return "TornadoVM gemv + " + this.delegate.name();
+    return "TornadoVM";
   }
 
   @Override
@@ -32,12 +33,26 @@ public final class TornadoFloatKernels extends FloatKernels {
   public float dot(
     final float[] a, final int aOffset, final float[] b, final int bOffset, final int n
   ) {
-    return this.delegate.dot(a, aOffset, b, bOffset, n);
+    if (n <= 0) {
+      return 0f;
+    }
+    return this.value(
+      n,
+      () -> TornadoElementExecutor.dot(a, aOffset, b, bOffset, n),
+      () -> SCALAR.dot(a, aOffset, b, bOffset, n)
+    );
   }
 
   @Override
   public float sumSquares(final float[] a, final int offset, final int n) {
-    return this.delegate.sumSquares(a, offset, n);
+    if (n <= 0) {
+      return 0f;
+    }
+    return this.value(
+      n,
+      () -> TornadoElementExecutor.sumSquares(a, offset, n),
+      () -> SCALAR.sumSquares(a, offset, n)
+    );
   }
 
   @Override
@@ -45,7 +60,11 @@ public final class TornadoFloatKernels extends FloatKernels {
     final float[] src, final int srcOff, final float[] weight, final int wOff, final float scale,
     final float[] dst, final int dstOff, final int n
   ) {
-    this.delegate.scaleAdd(src, srcOff, weight, wOff, scale, dst, dstOff, n);
+    this.run(
+      () -> TornadoElementExecutor.scaleAdd(src, srcOff, weight, wOff, scale, dst, dstOff, n),
+      () -> SCALAR.scaleAdd(src, srcOff, weight, wOff, scale, dst, dstOff, n),
+      n
+    );
   }
 
   @Override
@@ -53,7 +72,12 @@ public final class TornadoFloatKernels extends FloatKernels {
     final float[] src, final int srcOff, final float[] weight, final int wOff, final float scale,
     final float[] dst, final int dstOff, final int n
   ) {
-    this.delegate.scaleAddOnePlus(src, srcOff, weight, wOff, scale, dst, dstOff, n);
+    this.run(
+      () -> TornadoElementExecutor.scaleAddOnePlus(src, srcOff, weight, wOff, scale, dst, dstOff,
+        n),
+      () -> SCALAR.scaleAddOnePlus(src, srcOff, weight, wOff, scale, dst, dstOff, n),
+      n
+    );
   }
 
   @Override
@@ -64,14 +88,13 @@ public final class TornadoFloatKernels extends FloatKernels {
     final float[] y, final int yOff,
     final int in, final int out0, final int out1
   ) {
-    if (!this.shouldOffloadGemv(in, out0, out1)) {
-      this.delegate.gemv(x, xOff, w, wOff, bias, y, yOff, in, out0, out1);
+    if (out1 <= out0 || in < 0) {
       return;
     }
     try {
       TornadoGemvExecutor.gemv(x, xOff, w, wOff, bias, y, yOff, in, out0, out1);
     } catch (RuntimeException failed) {
-      this.delegate.gemv(x, xOff, w, wOff, bias, y, yOff, in, out0, out1);
+      SCALAR.gemv(x, xOff, w, wOff, bias, y, yOff, in, out0, out1);
     }
   }
 
@@ -84,19 +107,14 @@ public final class TornadoFloatKernels extends FloatKernels {
     final int rows, final int in, final int rowStride,
     final int out0, final int out1
   ) {
-    if (rows == 1) {
-      this.gemv(x, xOff, w, wOff, bias, y, yOff, in, out0, out1);
-      return;
-    }
-    if (!this.shouldOffloadGemv(in, out0, out1)) {
-      this.delegate.gemvRows(x, xOff, w, wOff, bias, y, yOff, rows, in, rowStride, out0, out1);
+    if (rows <= 0 || out1 <= out0 || in < 0) {
       return;
     }
     try {
       TornadoGemvExecutor.gemvRows(
         x, xOff, w, wOff, bias, y, yOff, rows, in, rowStride, out0, out1);
     } catch (RuntimeException failed) {
-      this.delegate.gemvRows(x, xOff, w, wOff, bias, y, yOff, rows, in, rowStride, out0, out1);
+      SCALAR.gemvRows(x, xOff, w, wOff, bias, y, yOff, rows, in, rowStride, out0, out1);
     }
   }
 
@@ -105,7 +123,11 @@ public final class TornadoFloatKernels extends FloatKernels {
     final float[] a, final int aOff, final float[] b, final int bOff,
     final float[] dst, final int dstOff, final int n
   ) {
-    this.delegate.add(a, aOff, b, bOff, dst, dstOff, n);
+    this.run(
+      () -> TornadoElementExecutor.add(a, aOff, b, bOff, dst, dstOff, n),
+      () -> SCALAR.add(a, aOff, b, bOff, dst, dstOff, n),
+      n
+    );
   }
 
   @Override
@@ -113,7 +135,11 @@ public final class TornadoFloatKernels extends FloatKernels {
     final float[] a, final int aOff, final float[] b, final int bOff,
     final float[] dst, final int dstOff, final int n
   ) {
-    this.delegate.mul(a, aOff, b, bOff, dst, dstOff, n);
+    this.run(
+      () -> TornadoElementExecutor.mul(a, aOff, b, bOff, dst, dstOff, n),
+      () -> SCALAR.mul(a, aOff, b, bOff, dst, dstOff, n),
+      n
+    );
   }
 
   @Override
@@ -121,7 +147,11 @@ public final class TornadoFloatKernels extends FloatKernels {
     final float[] src, final int srcOff, final float factor,
     final float[] dst, final int dstOff, final int n
   ) {
-    this.delegate.scale(src, srcOff, factor, dst, dstOff, n);
+    this.run(
+      () -> TornadoElementExecutor.scale(src, srcOff, factor, dst, dstOff, n),
+      () -> SCALAR.scale(src, srcOff, factor, dst, dstOff, n),
+      n
+    );
   }
 
   @Override
@@ -129,7 +159,11 @@ public final class TornadoFloatKernels extends FloatKernels {
     final float[] dst, final int dstOff, final float alpha,
     final float[] src, final int srcOff, final int n
   ) {
-    this.delegate.axpy(dst, dstOff, alpha, src, srcOff, n);
+    this.run(
+      () -> TornadoElementExecutor.axpy(dst, dstOff, alpha, src, srcOff, n),
+      () -> SCALAR.axpy(dst, dstOff, alpha, src, srcOff, n),
+      n
+    );
   }
 
   @Override
@@ -137,7 +171,14 @@ public final class TornadoFloatKernels extends FloatKernels {
     final float[] a, final int aOff, final float[] b, final int bOff,
     final float[] dst, final int dstOff, final int n
   ) {
-    return this.delegate.addSumSquares(a, aOff, b, bOff, dst, dstOff, n);
+    if (n <= 0) {
+      return 0f;
+    }
+    return this.value(
+      n,
+      () -> TornadoElementExecutor.addSumSquares(a, aOff, b, bOff, dst, dstOff, n),
+      () -> SCALAR.addSumSquares(a, aOff, b, bOff, dst, dstOff, n)
+    );
   }
 
   @Override
@@ -145,14 +186,22 @@ public final class TornadoFloatKernels extends FloatKernels {
     final float[] gate, final int gateOff, final float[] up, final int upOff,
     final float[] dst, final int dstOff, final int n
   ) {
-    this.delegate.siluMul(gate, gateOff, up, upOff, dst, dstOff, n);
+    this.run(
+      () -> TornadoElementExecutor.siluMul(gate, gateOff, up, upOff, dst, dstOff, n),
+      () -> SCALAR.siluMul(gate, gateOff, up, upOff, dst, dstOff, n),
+      n
+    );
   }
 
   @Override
   public void geluTanh(
     final float[] src, final int srcOff, final float[] dst, final int dstOff, final int n
   ) {
-    this.delegate.geluTanh(src, srcOff, dst, dstOff, n);
+    this.run(
+      () -> TornadoElementExecutor.geluTanh(src, srcOff, dst, dstOff, n),
+      () -> SCALAR.geluTanh(src, srcOff, dst, dstOff, n),
+      n
+    );
   }
 
   @Override
@@ -160,7 +209,29 @@ public final class TornadoFloatKernels extends FloatKernels {
     final float[] gate, final int gateOff, final float[] up, final int upOff,
     final float[] dst, final int dstOff, final int n
   ) {
-    this.delegate.geluTanhMul(gate, gateOff, up, upOff, dst, dstOff, n);
+    this.run(
+      () -> TornadoElementExecutor.geluTanhMul(gate, gateOff, up, upOff, dst, dstOff, n),
+      () -> SCALAR.geluTanhMul(gate, gateOff, up, upOff, dst, dstOff, n),
+      n
+    );
+  }
+
+  @Override
+  public boolean attend(
+    final float[] query, final int queryOffset,
+    final float[] key, final int keyOffset,
+    final float[] value, final int valueOffset,
+    final float[] result, final int resultOffset,
+    final int queryStart, final int queryLength, final int keyIndexBase, final int keyLength,
+    final int numHeads, final int numKvHeads, final int headDim,
+    final float scale, final int slidingWindow,
+    final boolean causal, final int[] keySlots
+  ) {
+    return TornadoAttentionExecutor.attend(
+      query, queryOffset, key, keyOffset, value, valueOffset, result, resultOffset,
+      queryStart, queryLength, keyIndexBase, keyLength,
+      numHeads, numKvHeads, headDim, scale, slidingWindow, causal, keySlots
+    );
   }
 
   @Override
@@ -168,11 +239,41 @@ public final class TornadoFloatKernels extends FloatKernels {
     final float[] src, final int srcOff, final float cap,
     final float[] dst, final int dstOff, final int n
   ) {
-    this.delegate.tanhSoftcap(src, srcOff, cap, dst, dstOff, n);
+    this.run(
+      () -> TornadoElementExecutor.tanhSoftcap(src, srcOff, cap, dst, dstOff, n),
+      () -> SCALAR.tanhSoftcap(src, srcOff, cap, dst, dstOff, n),
+      n
+    );
   }
 
-  private boolean shouldOffloadGemv(final int in, final int out0, final int out1) {
-    int outCount = out1 - out0;
-    return outCount >= MIN_OUT && in >= MIN_IN;
+  private void run(final Runnable tornado, final Runnable scalar, final int n) {
+    if (n <= 0) {
+      return;
+    }
+    if (n < MIN_DEVICE_SPAN) {
+      scalar.run();
+      return;
+    }
+    try {
+      tornado.run();
+    } catch (RuntimeException failed) {
+      scalar.run();
+    }
+  }
+
+  private float value(final int n, final FloatSupplier tornado, final FloatSupplier scalar) {
+    if (n < MIN_DEVICE_SPAN) {
+      return scalar.get();
+    }
+    try {
+      return tornado.get();
+    } catch (RuntimeException failed) {
+      return scalar.get();
+    }
+  }
+
+  @FunctionalInterface
+  private interface FloatSupplier {
+    float get();
   }
 }

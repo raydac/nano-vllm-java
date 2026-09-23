@@ -312,6 +312,15 @@ public final class Attention {
     final Context ctx
   ) {
     int qLen = qEnd - qStart;
+    if (VectorMath.attend(
+      q.data(), q.offset(), k.data(), k.offset(), v.data(), v.offset(),
+      out.data(), out.offset(),
+      qStart, qLen, kIndexBase, kLen,
+      this.numHeads, this.numKvHeads, this.headDim, this.scale, this.slidingWindow,
+      causal, kvSlots
+    )) {
+      return;
+    }
     int work = qLen * this.numHeads;
     MatmulRuntime runtime = ctx.matmul() == null ? MatmulRuntime.sequential() : ctx.matmul();
     int cost = work * Math.max(kLen, 1);

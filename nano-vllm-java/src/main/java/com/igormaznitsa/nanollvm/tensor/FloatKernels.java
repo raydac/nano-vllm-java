@@ -13,10 +13,10 @@ package com.igormaznitsa.nanollvm.tensor;
  * <ul>
  *   <li><strong>Scalar</strong> — plain Java loops ({@code ScalarFloatKernels})</li>
  *   <li><strong>Vector</strong> — JDK incubator Vector API / SIMD ({@code VectorFloatKernels})</li>
- *   <li><strong>TornadoVM</strong> — optional heterogeneous GEMV when {@code tornado.api} and
- *       {@code tornado.runtime} are on the module path. A weight matrix stays compiled on the
- *       device and is reused across calls; several tokens run as one launch. Elementwise ops
- *       stay on the CPU backend</li>
+ *   <li><strong>TornadoVM</strong> — optional heterogeneous backend when {@code tornado.api} and
+ *       {@code tornado.runtime} are on the module path. Dense GEMV and chat attention run as
+ *       TornadoVM tasks. A single short vector stays on a scalar loop, because one device launch
+ *       per vector stalls generation. The Vector API is a separate mode</li>
  * </ul>
  * Selection is done once by {@link FloatKernelsFactory} (see {@code -Dnanollvm.kernels}).
  * The process-wide default instance is {@link #get()}; {@link VectorMath} delegates to it.
@@ -74,6 +74,26 @@ public abstract class FloatKernels {
    * @since 1.4.0
    */
   public boolean prefersSingleShotGemv() {
+    return false;
+  }
+
+  /**
+   * Grouped-query attention over one query range. The default returns {@code false} and the caller
+   * keeps its own loop. A device backend may run the whole range as one task and return {@code true}.
+   *
+   * @return {@code true} when {@code result} holds the attended values
+   * @since 1.5.0
+   */
+  public boolean attend(
+    final float[] query, final int queryOffset,
+    final float[] key, final int keyOffset,
+    final float[] value, final int valueOffset,
+    final float[] result, final int resultOffset,
+    final int queryStart, final int queryLength, final int keyIndexBase, final int keyLength,
+    final int numHeads, final int numKvHeads, final int headDim,
+    final float scale, final int slidingWindow,
+    final boolean causal, final int[] keySlots
+  ) {
     return false;
   }
 
