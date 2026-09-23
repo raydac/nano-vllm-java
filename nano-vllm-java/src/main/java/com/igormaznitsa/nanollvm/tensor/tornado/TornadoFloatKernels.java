@@ -76,6 +76,31 @@ public final class TornadoFloatKernels extends FloatKernels {
   }
 
   @Override
+  public void gemvRows(
+    final float[] x, final int xOff,
+    final float[] w, final int wOff,
+    final float[] bias,
+    final float[] y, final int yOff,
+    final int rows, final int in, final int rowStride,
+    final int out0, final int out1
+  ) {
+    if (rows == 1) {
+      this.gemv(x, xOff, w, wOff, bias, y, yOff, in, out0, out1);
+      return;
+    }
+    if (!this.shouldOffloadGemv(in, out0, out1)) {
+      this.delegate.gemvRows(x, xOff, w, wOff, bias, y, yOff, rows, in, rowStride, out0, out1);
+      return;
+    }
+    try {
+      TornadoGemvExecutor.gemvRows(
+        x, xOff, w, wOff, bias, y, yOff, rows, in, rowStride, out0, out1);
+    } catch (RuntimeException failed) {
+      this.delegate.gemvRows(x, xOff, w, wOff, bias, y, yOff, rows, in, rowStride, out0, out1);
+    }
+  }
+
+  @Override
   public void add(
     final float[] a, final int aOff, final float[] b, final int bOff,
     final float[] dst, final int dstOff, final int n

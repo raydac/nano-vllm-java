@@ -5,9 +5,14 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.4.1-SNAPSHOT] — Unreleased
+## [1.5.0-SNAPSHOT] — Unreleased
 
 Development snapshot after the **1.4.0** public release.
+
+### Changed
+- Optional TornadoVM dependencies are `7.0.0-jdk22plus`. Dense GEMV stays on the Kernel API
+  (TileContext is CUDA-only and is not used). A weight matrix is compiled once and kept on the
+  device across tokens, and a multi-token layer runs as one launch.
 
 ### Added
 - Sample `KernelChatBench` compares scalar Java, Vector API, and TornadoVM (skipped when no

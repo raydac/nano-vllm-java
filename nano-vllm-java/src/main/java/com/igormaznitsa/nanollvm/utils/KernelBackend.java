@@ -53,7 +53,7 @@ public final class KernelBackend {
    * reports a device. Does not include {@code auto}.
    *
    * @return unmodifiable list, never empty
-   * @since 1.4.1
+   * @since 1.5.0
    */
   public static List<String> availableModes() {
     Stream.Builder<String> modes = Stream.builder();

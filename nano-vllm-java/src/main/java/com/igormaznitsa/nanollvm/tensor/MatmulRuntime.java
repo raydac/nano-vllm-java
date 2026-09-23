@@ -404,10 +404,8 @@ public final class MatmulRuntime implements AutoCloseable {
     final int rows, final int in, final int out,
     final int out0, final int out1
   ) {
-    for (int r = 0; r < rows; r++) {
-      KERNELS.gemv(
-        x, xOffset + r * in, w, wOffset, bias, y, yOffset + r * out, in, out0, out1);
-    }
+    KERNELS.gemvRows(
+      x, xOffset, w, wOffset, bias, y, yOffset, rows, in, out, out0, out1);
   }
 
   private void requireOpen() {

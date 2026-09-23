@@ -7,7 +7,7 @@
     <parent>
         <groupId>com.igormaznitsa</groupId>
         <artifactId>nano-vllm-java-pom</artifactId>
-        <version>1.4.1-SNAPSHOT</version>
+        <version>1.5.0-SNAPSHOT</version>
     </parent>
 
     <artifactId>nano-vllm-java-samples</artifactId>
@@ -68,7 +68,7 @@
         <!--
           Run a sample under the TornadoVM launcher (must be on PATH as `tornado`).
           Uses the SDK runtime/modules — not the Maven Central tornado jars — so the installed
-          TornadoVM distribution (e.g. 6.0 OpenCL) drives accelerators.
+          TornadoVM distribution (e.g. 7.0 OpenCL) drives accelerators.
 
             mvn -pl nano-vllm-java-samples -am -Ptornado compile exec:exec@tornado \
               -Dtornado.java.home=/path/to/jdk-21

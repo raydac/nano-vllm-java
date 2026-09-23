@@ -103,7 +103,7 @@ public final class FloatKernelsFactory {
    * module path and at least one accelerator device.
    *
    * @return {@code true} when {@code -Dnanollvm.kernels=tornado} can succeed
-   * @since 1.4.1
+   * @since 1.5.0
    */
   public static boolean isTornadoAvailable() {
     return TORNADO_AVAILABLE;

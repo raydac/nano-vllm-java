@@ -14,7 +14,9 @@ package com.igormaznitsa.nanollvm.tensor;
  *   <li><strong>Scalar</strong> — plain Java loops ({@code ScalarFloatKernels})</li>
  *   <li><strong>Vector</strong> — JDK incubator Vector API / SIMD ({@code VectorFloatKernels})</li>
  *   <li><strong>TornadoVM</strong> — optional heterogeneous GEMV when {@code tornado.api} and
- *       {@code tornado.runtime} are on the module path; elementwise ops stay on the CPU backend</li>
+ *       {@code tornado.runtime} are on the module path. A weight matrix stays compiled on the
+ *       device and is reused across calls; several tokens run as one launch. Elementwise ops
+ *       stay on the CPU backend</li>
  * </ul>
  * Selection is done once by {@link FloatKernelsFactory} (see {@code -Dnanollvm.kernels}).
  * The process-wide default instance is {@link #get()}; {@link VectorMath} delegates to it.
@@ -147,6 +149,25 @@ public abstract class FloatKernels {
     final float[] y, final int yOff,
     final int in, final int out0, final int out1
   );
+
+  /**
+   * Batched GEMV. Row {@code r} reads {@code x[xOff + r * in ..)} and writes
+   * {@code y[yOff + r * rowStride + o]} for {@code o} in {@code [out0, out1)}.
+   *
+   * @since 1.5.0
+   */
+  public void gemvRows(
+    final float[] x, final int xOff,
+    final float[] w, final int wOff,
+    final float[] bias,
+    final float[] y, final int yOff,
+    final int rows, final int in, final int rowStride,
+    final int out0, final int out1
+  ) {
+    for (int r = 0; r < rows; r++) {
+      this.gemv(x, xOff + r * in, w, wOff, bias, y, yOff + r * rowStride, in, out0, out1);
+    }
+  }
 
   public abstract void add(
     final float[] a, final int aOff, final float[] b, final int bOff,
