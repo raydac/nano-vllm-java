@@ -58,7 +58,7 @@ final class TornadoAttentionKernels {
           score += query[vector + lane] * key[keyBase + lane];
         }
         score *= scale;
-        float nextMax = score > max ? score : max;
+        float nextMax = Math.max(score, max);
         float alpha = seenScore == 0 ? 0f : (float) Math.exp(max - nextMax);
         sum *= alpha;
         for (int lane = 0; lane < headDim; lane++) {

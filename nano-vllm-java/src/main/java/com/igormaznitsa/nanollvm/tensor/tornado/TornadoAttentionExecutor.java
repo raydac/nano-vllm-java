@@ -106,34 +106,9 @@ final class TornadoAttentionExecutor {
                          int keyCapacity) {
   }
 
-  private static final class AttendPlan implements AutoCloseable {
-
-    private final TornadoExecutionPlan plan;
-    private final float[] query;
-    private final float[] key;
-    private final float[] value;
-    private final float[] result;
-    private final float[] params;
-    private final int numHeads;
-    private final int numKvHeads;
-    private final int headDim;
-
-    private AttendPlan(
-      final TornadoExecutionPlan plan,
-      final float[] query, final float[] key, final float[] value, final float[] result,
-      final float[] params,
-      final int numHeads, final int numKvHeads, final int headDim
-    ) {
-      this.plan = plan;
-      this.query = query;
-      this.key = key;
-      this.value = value;
-      this.result = result;
-      this.params = params;
-      this.numHeads = numHeads;
-      this.numKvHeads = numKvHeads;
-      this.headDim = headDim;
-    }
+  private record AttendPlan(TornadoExecutionPlan plan, float[] query, float[] key, float[] value,
+                            float[] result, float[] params, int numHeads, int numKvHeads,
+                            int headDim) implements AutoCloseable {
 
     static AttendPlan compile(final PlanKey key) throws TornadoExecutionPlanException {
       int queryWidth = key.numHeads * key.headDim;
