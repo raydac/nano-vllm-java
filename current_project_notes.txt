@@ -60,6 +60,7 @@
 - TornadoVM 7.0.0 is in the parent POM. Do not port GEMV to TileContext on the OpenCL path. A later CUDA SDK could add an optional tile GEMM for batched prefill (fixed tile shape, fp16/fp32 `tc.mma`); decode GEMV and PoCL stay on KernelContext. OpenCL cannot take Hybrid cuBLAS.
 
 ## 7. Useful References
+- `.github/instructions/` — repository Copilot guidance imported from `~/.cursor/rules` (Java, project notes/security, changelog, Maven launcher).
 - `CHANGELOG.md` — **1.5.0-SNAPSHOT** (Unreleased) then **1.4.0**. `README.md` / `description.md` — public docs for shipped **1.4.0**. `security_audit.txt` — 1.0 threat model. `models/README.md` — download layout (incl. fastText). `Models.mmd` — visual catalog of supported families, collapsed graph internals, containers, and Hub/source links (open in Scia Reto).
 - Build: `mvn22 -q test` (document as `mvn`). Samples: `mvn22 -pl nano-vllm-java-samples -q exec:java` (default `Example`; `-Dexec.mainClass=…` for others). SpotBugs: `mvn22 -pl nano-vllm-java -am compile spotbugs:check`. Concurrent: `mvn22 -pl nano-vllm-java -Pconcurrent_test test`. Heap/vector: `.mvn/jvm.config`.
 - Tornado: https://www.tornadovm.org/ (KernelContext ≫ Loop Parallel; TileContext = CUDA GEMM only, https://www.tornadovm.org/blogs/getting-started-with-the-tilecontext-api-in-tornadovm).

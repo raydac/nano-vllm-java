@@ -243,6 +243,21 @@ class TornadoFloatKernelsTest {
   }
 
   @Test
+  void largeReductionsMatchScalar() {
+    assumeTrue(TornadoFloatKernelsProvider.isAvailable(), "TornadoVM device required");
+
+    FloatKernels cpu = FloatKernelsFactory.create("scalar");
+    FloatKernels tornado = TornadoFloatKernelsProvider.create(cpu);
+    assumeTrue(tornado != null);
+
+    int n = 65536;
+    float[] left = fill(n, 0.01f);
+    float[] right = fill(n, 0.02f);
+    assertEquals(cpu.dot(left, 0, right, 0, n), tornado.dot(left, 0, right, 0, n), 0.1f);
+    assertEquals(cpu.sumSquares(left, 0, n), tornado.sumSquares(left, 0, n), 0.1f);
+  }
+
+  @Test
   void attentionRangeMatchesScalar() {
     assumeTrue(TornadoFloatKernelsProvider.isAvailable(), "TornadoVM device required");
 

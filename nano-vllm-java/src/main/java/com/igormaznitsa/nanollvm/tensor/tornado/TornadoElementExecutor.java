@@ -18,6 +18,7 @@ import uk.ac.manchester.tornado.api.exceptions.TornadoExecutionPlanException;
  */
 final class TornadoElementExecutor {
 
+  private static final int REDUCTION_PARTITIONS = 256;
   private static final int MAX_CACHED_PLANS = 128;
   private static final Map<PlanKey, ElementPlan> CACHED_PLANS =
     new LinkedHashMap<>(MAX_CACHED_PLANS, 0.75f, true) {
@@ -40,18 +41,16 @@ final class TornadoElementExecutor {
     return withPlan(Kind.DOT, n, plan -> {
       copy(left, leftOff, plan.left, n);
       copy(right, rightOff, plan.right, n);
-      plan.sum[0] = 0f;
       plan.execute();
-      return plan.sum[0];
+      return total(plan.sum);
     });
   }
 
   static float sumSquares(final float[] values, final int offset, final int n) {
     return withPlan(Kind.SUM_SQUARES, n, plan -> {
       copy(values, offset, plan.left, n);
-      plan.sum[0] = 0f;
       plan.execute();
-      return plan.sum[0];
+      return total(plan.sum);
     });
   }
 
@@ -214,6 +213,14 @@ final class TornadoElementExecutor {
     System.arraycopy(src, srcOff, dst, dstOff, n);
   }
 
+  private static float total(final float[] partials) {
+    float sum = 0f;
+    for (float partial : partials) {
+      sum += partial;
+    }
+    return sum;
+  }
+
   private static <T> T withPlan(final Kind kind, final int n, final PlanWork<T> work) {
     TornadoLaunchLock.lock();
     try {
@@ -286,7 +293,7 @@ final class TornadoElementExecutor {
       float[] right = needsRight(kind) ? new float[n] : null;
       float[] out = needsOut(kind) ? new float[n] : null;
       float[] scalar = needsScalar(kind) ? new float[1] : null;
-      float[] sum = needsSum(kind) ? new float[1] : null;
+      float[] sum = needsSum(kind) ? new float[REDUCTION_PARTITIONS] : null;
       String graphName = "nanollvm-" + kind.name().toLowerCase(ROOT);
       TaskGraph graph = new TaskGraph(graphName);
       graph = transferInputs(graph, left, right, scalar, sum);
@@ -328,8 +335,8 @@ final class TornadoElementExecutor {
       final float[] sum
     ) {
       return switch (kind) {
-        case DOT -> graph.task("run", TornadoElementKernels::dotProduct, left, right, sum);
-        case SUM_SQUARES -> graph.task("run", TornadoElementKernels::sumSquares, left, sum);
+        case DOT -> graph.task("run", TornadoElementKernels::dotProduct, left, right, sum, n);
+        case SUM_SQUARES -> graph.task("run", TornadoElementKernels::sumSquares, left, sum, n);
         case ADD -> graph.task("run", TornadoElementKernels::add, left, right, out, n);
         case MUL -> graph.task("run", TornadoElementKernels::mul, left, right, out, n);
         case SCALE -> graph.task("run", TornadoElementKernels::scale, left, scalar, out, n);

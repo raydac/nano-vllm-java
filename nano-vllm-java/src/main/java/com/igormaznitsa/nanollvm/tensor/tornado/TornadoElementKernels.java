@@ -1,7 +1,6 @@
 package com.igormaznitsa.nanollvm.tensor.tornado;
 
 import uk.ac.manchester.tornado.api.annotations.Parallel;
-import uk.ac.manchester.tornado.api.annotations.Reduce;
 
 /**
  * TornadoVM Loop Parallel kernels for the elementwise and reduction half of {@code FloatKernels}.
@@ -14,16 +13,26 @@ final class TornadoElementKernels {
   private TornadoElementKernels() {
   }
 
-  static void dotProduct(final float[] left, final float[] right, @Reduce final float[] sum) {
-    for (@Parallel int i = 0; i < left.length; i++) {
-      sum[0] += left[i] * right[i];
+  static void dotProduct(
+    final float[] left, final float[] right, final float[] partials, final int n
+  ) {
+    for (@Parallel int partition = 0; partition < partials.length; partition++) {
+      float sum = 0f;
+      for (int i = partition; i < n; i += partials.length) {
+        sum += left[i] * right[i];
+      }
+      partials[partition] = sum;
     }
   }
 
-  static void sumSquares(final float[] values, @Reduce final float[] sum) {
-    for (@Parallel int i = 0; i < values.length; i++) {
-      float value = values[i];
-      sum[0] += value * value;
+  static void sumSquares(final float[] values, final float[] partials, final int n) {
+    for (@Parallel int partition = 0; partition < partials.length; partition++) {
+      float sum = 0f;
+      for (int i = partition; i < n; i += partials.length) {
+        float value = values[i];
+        sum += value * value;
+      }
+      partials[partition] = sum;
     }
   }
 

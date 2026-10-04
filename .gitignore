@@ -29,3 +29,8 @@ models/fasttext-lid-176/
 /current_project_notes.txt
 /.editorconfig
 /security_audit.txt
+/.github/instructions/changelog-maintenance.instructions.md
+/.github/instructions/java-senior.instructions.md
+/.github/instructions/maven-mvn22.instructions.md
+/.github/instructions/software-projects.instructions.md
+/kernel-chat-bench.svg
