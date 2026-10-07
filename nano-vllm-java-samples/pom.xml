@@ -68,7 +68,7 @@
         <!--
           Run a sample under the TornadoVM launcher (must be on PATH as `tornado`).
           Uses the SDK runtime/modules — not the Maven Central tornado jars — so the installed
-          TornadoVM 7.1.0 distribution (e.g. OpenCL) drives accelerators.
+          TornadoVM 7.2.0 distribution (e.g. OpenCL) drives accelerators.
 
             mvn -pl nano-vllm-java-samples -am -Ptornado compile exec:exec@tornado \
               -Dtornado.java.home=/path/to/jdk-22

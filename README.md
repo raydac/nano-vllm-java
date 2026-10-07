@@ -310,7 +310,7 @@ mvn -pl nano-vllm-java-samples -q exec:java \
 - Weight crates: HF **safetensors**, **GGUF**, ONNX Tier A (**since 1.1.0**), and fastText `*.bin`/`*.ftz` (**since 1.4.0**) — see [Supported formats and variants](#supported-formats-and-variants)
 - Optional multi-thread CPU matmul (`cpuThreads` / `matmulExecutor` / `dedicatedMatmulPool` **since 1.2.0** /
   `disableMultiCpu`); default = all processors on a lazily shared pool
-- Optional **TornadoVM** large dense GEMV (**since 1.4.0**; `tornado-api` / `tornado-runtime` optional Maven deps at `7.1.0-jdk22plus`, not transitive) via `-Dnanollvm.kernels=auto|tornado|vector|scalar`
+- Optional **TornadoVM** large dense GEMV (**since 1.4.0**; `tornado-api` / `tornado-runtime` optional Maven deps at `7.2.0-jdk22plus`, not transitive) via `-Dnanollvm.kernels=auto|tornado|vector|scalar`
 - GPT-2 byte BPE, Gemma Metaspace BPE, GGUF-embedded, BERT WordPiece, Unigram SentencePiece
   (including precompiled charsmap), WordLevel, character, and SentencePiece `tokenizer.model` tokenizers
 - Optional **BM25 text RAG** over a local `rag/` corpus (Example demo menu: none / BM25 / dense / hybrid); dense / hybrid embeddings **since 1.1.0**
@@ -327,7 +327,7 @@ mvn -pl nano-vllm-java-samples -q exec:java \
 | **~2–8 GB heap**                     | Enough for Qwen3-0.6B / Gemma3-270M                                         |
 | **~16 GB heap**                      | Default in [`.mvn/jvm.config`](.mvn/jvm.config) (`-Xmx16g`) for LFM2 GGUF and Gemma 4 E2B QAT |
 | **Optional:** `jdk.incubator.vector` | Faster CPU kernels; enabled via [`.mvn/jvm.config`](.mvn/jvm.config) for Maven |
-| **Optional:** TornadoVM `7.1.0-jdk22plus` | Large dense GEMV offload (**since 1.4.0**); add `tornado-api` + `tornado-runtime` and a TornadoVM SDK/JDK **22+**; `-Dnanollvm.kernels=auto` |
+| **Optional:** TornadoVM `7.2.0-jdk22plus` | Large dense GEMV offload (**since 1.4.0**); add `tornado-api` + `tornado-runtime` and a TornadoVM SDK/JDK **22+**; `-Dnanollvm.kernels=auto` |
 
 ## Build
 
@@ -663,8 +663,8 @@ Maven note: `exec:java` runs in the **same JVM as Maven**. Vector API flags and 
 
 ### Run with TornadoVM (`-Ptornado`)
 
-Requires the TornadoVM **7.1.0** SDK (`jdk22plus` build) on `PATH` (`tornado` command) and a matching
-**JDK 22+**. The project targets Java 21 bytecode, but building with the `7.1.0-jdk22plus` Maven
+Requires the TornadoVM **7.2.0** SDK (`jdk22plus` build) on `PATH` (`tornado` command) and a matching
+**JDK 22+**. The project targets Java 21 bytecode, but building with the `7.2.0-jdk22plus` Maven
 artifacts requires JDK 22+. Profile `tornado` in `nano-vllm-java-samples` launches via `tornado`
 (not Maven’s JVM), forces `-Dnanollvm.kernels=tornado`, and puts only the sample + library classes on
 the classpath (SDK supplies TornadoVM modules):

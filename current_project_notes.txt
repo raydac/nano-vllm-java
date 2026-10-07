@@ -38,7 +38,7 @@
 - **Java Senior (2026-08-27):** narrative `//` in `Transformer` / `LLM`; some interface params missing `final`; `Example.ModelChoice` holds `Optional<Path>`. Keep array/`for` on hot numeric paths (tensor, sampler, mel, VITS, KV packing).
 
 ## 4. Current Work In Progress
-- **TornadoVM samples profile (`-Ptornado`):** compile dep `7.0.0-jdk22plus` (tag `v7.0.0` 2026-09-22). Tornado mode: Kernel API GEMV, one `@Parallel` attention task per query range, elementwise Tornado only for spans ≥ 65536. **TileContext is not used** (CUDA-only). `@Reduce` loop bound must be `array.length`. A Java method named `dot` is an OpenCL token. This machine: OpenCL SDK `/home/igorm/SDK/tornadovm-opencl`, PoCL on Intel i7-8550U. Device check 2026-09-23: `gemvTiled` and element kernels matched scalar. A head-sized `dot` launch is ~2 ms (that stalled chat). Fused `scoreHeads` matched scalar, including a second execute on the same plan with a shorter key length and a different window; steady launches are ~8 ms. Plain `mvn test` still skips Tornado tests (runtime SPI needs the `tornado` launcher). Run:
+- **TornadoVM samples profile (`-Ptornado`):** compile dep `7.2.0-jdk22plus` (tag `v7.2.0`, 2026-10-07). Tornado mode: Kernel API GEMV, one `@Parallel` attention task per query range, elementwise Tornado only for spans ≥ 65536. **TileContext is not used** (CUDA-only). `@Reduce` loop bound must be `array.length`. A Java method named `dot` is an OpenCL token. This machine: OpenCL SDK `/home/igorm/SDK/tornadovm-opencl`, PoCL on Intel i7-8550U. Device check 2026-09-23: `gemvTiled` and element kernels matched scalar. A head-sized `dot` launch is ~2 ms (that stalled chat). Fused `scoreHeads` matched scalar, including a second execute on the same plan with a shorter key length and a different window; steady launches are ~8 ms. TornadoVM 7.2.0 is installed and reports that same PoCL CPU device. The release's new >2^31 native-array support does not apply to the current `float[]` kernels; CUDA `HalfFloatArray` MMA/tile changes do not apply to the FP32 OpenCL path. Plain Maven tests still skip Tornado tests (runtime SPI needs the `tornado` launcher). Run:
   `mvn22 -pl nano-vllm-java-samples -am -Ptornado compile exec:exec@tornado`
   (optional `-Dtornado.java.home=…`, `-Dtornado.params=…`).
 - **1.5.0-SNAPSHOT** opened after **1.4.0** (2026-09-06). New public API gets `@since 1.5.0`; fold unreleased work into CHANGELOG `[1.5.0-SNAPSHOT]`.
@@ -57,7 +57,7 @@
 - Piper vs full espeak: compiled rules VM stays out of the Apache JAR (no GPL sources, no JNI).
 - Fold Sampler deeper into Transformer? BM25F? HF safetensors LFM2? Broader ONNX remaps for exotic exports?
 - Fara / Qwen3.5 (`qwen3_5`) stay unsupported (fail fast). Gemma 4 multimodal / MoE stay out of scope.
-- TornadoVM 7.0.0 is in the parent POM. Do not port GEMV to TileContext on the OpenCL path. A later CUDA SDK could add an optional tile GEMM for batched prefill (fixed tile shape, fp16/fp32 `tc.mma`); decode GEMV and PoCL stay on KernelContext. OpenCL cannot take Hybrid cuBLAS.
+- TornadoVM 7.2.0 is in the parent POM. Do not port GEMV to TileContext on the OpenCL path. A later CUDA SDK could add an optional tile GEMM for batched prefill (fixed tile shape, fp16/fp32 `tc.mma`); decode GEMV and PoCL stay on KernelContext. OpenCL cannot take Hybrid cuBLAS.
 
 ## 7. Useful References
 - `.github/instructions/` — repository Copilot guidance imported from `~/.cursor/rules` (Java, project notes/security, changelog, Maven launcher).
@@ -65,8 +65,8 @@
 - Build: `mvn22 -q test` (document as `mvn`). Samples: `mvn22 -pl nano-vllm-java-samples -q exec:java` (default `Example`; `-Dexec.mainClass=…` for others). SpotBugs: `mvn22 -pl nano-vllm-java -am compile spotbugs:check`. Concurrent: `mvn22 -pl nano-vllm-java -Pconcurrent_test test`. Heap/vector: `.mvn/jvm.config`.
 - Tornado: https://www.tornadovm.org/ (KernelContext ≫ Loop Parallel; TileContext = CUDA GEMM only, https://www.tornadovm.org/blogs/getting-started-with-the-tilecontext-api-in-tornadovm).
   Sample: `mvn22 -pl nano-vllm-java-samples -am -Ptornado compile exec:exec@tornado`
-  (optional `-Dtornado.params=…`, `-Dtornado.java.home=…`). Dep: `7.0.0-jdk22plus`.
-  SDK: `/home/igorm/SDK/tornadovm-opencl` (7.0.0 OpenCL; `tornado` on PATH). Device: PoCL CPU.
+  (optional `-Dtornado.params=…`, `-Dtornado.java.home=…`). Dep: `7.2.0-jdk22plus`.
+  SDK: `/home/igorm/SDK/tornadovm-opencl` (7.2.0 OpenCL; `tornado` on PATH). Device: PoCL CPU.
 - Load: `LlmModelFactory.make(path)` / `open(path).make()` — close LLM then model. Chat: `LLM.builder` → `chat` / `chatOnce`. Non-chat: `generate(LlmInput, LlmModality)` → concrete `LlmOut*` via modality `resultType`/`cast` (assign to a typed local; chaining alone does not infer `T`).
 - Demos: `EmbeddingsHelloWorld`; `TranscribeHelloWorld`; `SynthesizeHelloWorld`; `VoiceReplyHelloWorld`; `LanguageIdHelloWorld`; `AdvisorRagHelloWorld`; `RagTunerHelloWorld`; `KernelChatBench` (`-Dexec.mainClass=…KernelChatBench`); classify labels `nano-vllm-java-samples/classify-labels.example.txt`.
 
