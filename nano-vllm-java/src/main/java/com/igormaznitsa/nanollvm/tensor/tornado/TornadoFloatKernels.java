@@ -25,6 +25,11 @@ public final class TornadoFloatKernels extends FloatKernels {
   }
 
   @Override
+  public void releaseWeights(final float[]... weights) {
+    TornadoGemvExecutor.releaseWeights(weights);
+  }
+
+  @Override
   public boolean prefersSingleShotGemv() {
     return true;
   }

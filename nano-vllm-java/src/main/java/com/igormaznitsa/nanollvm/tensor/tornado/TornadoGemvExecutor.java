@@ -3,11 +3,13 @@ package com.igormaznitsa.nanollvm.tensor.tornado;
 import static uk.ac.manchester.tornado.api.enums.DataTransferMode.EVERY_EXECUTION;
 import static uk.ac.manchester.tornado.api.enums.DataTransferMode.FIRST_EXECUTION;
 
+import java.util.Collections;
+import java.util.IdentityHashMap;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import uk.ac.manchester.tornado.api.GridScheduler;
-import uk.ac.manchester.tornado.api.ImmutableTaskGraph;
 import uk.ac.manchester.tornado.api.KernelContext;
 import uk.ac.manchester.tornado.api.TaskGraph;
 import uk.ac.manchester.tornado.api.TornadoExecutionPlan;
@@ -39,6 +41,42 @@ final class TornadoGemvExecutor {
     };
 
   private TornadoGemvExecutor() {
+  }
+
+  static void releaseWeights(final float[]... weights) {
+    if (weights == null || weights.length == 0) {
+      return;
+    }
+    Set<float[]> drop = Collections.newSetFromMap(new IdentityHashMap<>());
+    for (float[] weight : weights) {
+      if (weight != null) {
+        drop.add(weight);
+      }
+    }
+    if (drop.isEmpty()) {
+      return;
+    }
+    TornadoLaunchLock.lock();
+    try {
+      CACHED_PLANS.entrySet().removeIf(entry -> {
+        if (!drop.contains(entry.getKey().weight())) {
+          return false;
+        }
+        entry.getValue().closeQuietly();
+        return true;
+      });
+    } finally {
+      TornadoLaunchLock.unlock();
+    }
+  }
+
+  static int cachedPlanCount() {
+    TornadoLaunchLock.lock();
+    try {
+      return CACHED_PLANS.size();
+    } finally {
+      TornadoLaunchLock.unlock();
+    }
   }
 
   static void gemv(
@@ -276,8 +314,7 @@ final class TornadoGemvExecutor {
           key.in(), key.out0(), key.outCount(), key.work()
         )
         .transferToHost(EVERY_EXECUTION, (Object) yScratch);
-      ImmutableTaskGraph snapshot = taskGraph.snapshot();
-      TornadoExecutionPlan plan = new TornadoExecutionPlan(snapshot).withPreCompilation();
+      TornadoExecutionPlan plan = TornadoPlans.open(taskGraph.snapshot());
       return new GemvPlan(plan, xScratch, yScratch, key.rows(), key.in(), key.out0(),
         key.outCount());
     }
@@ -297,9 +334,7 @@ final class TornadoGemvExecutor {
       final TaskGraph taskGraph, final GridScheduler scheduler,
       final float[] xScratch, final float[] yScratch, final WeightKey key
     ) throws TornadoExecutionPlanException {
-      ImmutableTaskGraph snapshot = taskGraph.snapshot();
-      TornadoExecutionPlan plan = new TornadoExecutionPlan(snapshot)
-        .withPreCompilation()
+      TornadoExecutionPlan plan = TornadoPlans.open(taskGraph.snapshot())
         .withGridScheduler(scheduler);
       return new GemvPlan(plan, xScratch, yScratch, key.rows(), key.in(), key.out0(),
         key.outCount());

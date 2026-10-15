@@ -10,10 +10,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Development snapshot after the **1.4.0** public release.
 
 ### Changed
-- Optional TornadoVM dependencies are `7.2.0-jdk22plus`. TornadoVM mode keeps dense GEMV on the
+- Optional TornadoVM dependencies are `7.3.0-jdk22plus`. TornadoVM mode keeps dense GEMV on the
   device (a weight matrix stays resident, and a multi-token layer is one launch) and runs chat
   attention as one TornadoVM task per query range. Short vectors stay in scalar loops so generation
-  does not pay a device launch per attention score. The Vector API stays a separate mode.
+  does not pay a device launch per attention score. Cached plans keep only the latest execution
+  result, so a long chat does not retain one result per token. Closing a model releases that
+  model's resident weight copies. Later layers of the same token reuse keys already copied for
+  that token. The Vector API stays a separate mode.
   TileContext is CUDA-only and is not used.
 
 ### Added

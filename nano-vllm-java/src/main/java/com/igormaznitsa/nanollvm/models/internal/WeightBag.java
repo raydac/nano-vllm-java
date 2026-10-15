@@ -144,6 +144,15 @@ public final class WeightBag {
     return this.byName.size();
   }
 
+  float[][] denseBackingArrays() {
+    return this.byName.values().stream()
+      .filter(Tensor.class::isInstance)
+      .map(Tensor.class::cast)
+      .map(Tensor::data)
+      .distinct()
+      .toArray(float[][]::new);
+  }
+
   public Set<String> names() {
     return this.byName.keySet();
   }

@@ -6,7 +6,6 @@ import static uk.ac.manchester.tornado.api.enums.DataTransferMode.EVERY_EXECUTIO
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
-import uk.ac.manchester.tornado.api.ImmutableTaskGraph;
 import uk.ac.manchester.tornado.api.TaskGraph;
 import uk.ac.manchester.tornado.api.TornadoExecutionPlan;
 import uk.ac.manchester.tornado.api.exceptions.TornadoExecutionPlanException;
@@ -307,8 +306,7 @@ final class TornadoElementExecutor {
       if (kind == Kind.AXPY) {
         graph = graph.transferToHost(EVERY_EXECUTION, (Object) left);
       }
-      ImmutableTaskGraph snapshot = graph.snapshot();
-      TornadoExecutionPlan execution = new TornadoExecutionPlan(snapshot).withPreCompilation();
+      TornadoExecutionPlan execution = TornadoPlans.open(graph.snapshot());
       return new ElementPlan(execution, left, right, out, scalar, sum);
     }
 

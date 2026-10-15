@@ -7,7 +7,6 @@ import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
-import uk.ac.manchester.tornado.api.ImmutableTaskGraph;
 import uk.ac.manchester.tornado.api.TaskGraph;
 import uk.ac.manchester.tornado.api.TornadoExecutionPlan;
 import uk.ac.manchester.tornado.api.exceptions.TornadoExecutionPlanException;
@@ -108,7 +107,7 @@ final class TornadoAttentionExecutor {
 
   private record AttendPlan(TornadoExecutionPlan plan, float[] query, float[] key, float[] value,
                             float[] result, float[] params, int numHeads, int numKvHeads,
-                            int headDim) implements AutoCloseable {
+                            int headDim, PackCursor cursor) implements AutoCloseable {
 
     static AttendPlan compile(final PlanKey key) throws TornadoExecutionPlanException {
       int queryWidth = key.numHeads * key.headDim;
@@ -142,10 +141,9 @@ final class TornadoAttentionExecutor {
           query, keyScratch, value, result, headOfJob, queryOfJob, kvHeadOfJob, params
         )
         .transferToHost(EVERY_EXECUTION, (Object) result);
-      ImmutableTaskGraph snapshot = graph.snapshot();
-      TornadoExecutionPlan execution = new TornadoExecutionPlan(snapshot).withPreCompilation();
+      TornadoExecutionPlan execution = TornadoPlans.open(graph.snapshot());
       return new AttendPlan(execution, query, keyScratch, value, result, params,
-        key.numHeads, key.numKvHeads, key.headDim);
+        key.numHeads, key.numKvHeads, key.headDim, new PackCursor());
     }
 
     void execute(
@@ -182,13 +180,74 @@ final class TornadoAttentionExecutor {
       final int keyIndexBase, final int keyLength, final int keyWidth, final int[] keySlots
     ) {
       if (keySlots == null) {
-        System.arraycopy(key, keyOffset + keyIndexBase * keyWidth, this.key, 0,
-          keyLength * keyWidth);
-        System.arraycopy(value, valueOffset + keyIndexBase * keyWidth, this.value, 0,
-          keyLength * keyWidth);
+        this.packDense(key, keyOffset, value, valueOffset, keyIndexBase, keyLength, keyWidth);
         return;
       }
-      for (int token = 0; token < keyLength; token++) {
+      this.packPaged(key, keyOffset, value, valueOffset, keyLength, keyWidth, keySlots);
+    }
+
+    private void packDense(
+      final float[] key, final int keyOffset,
+      final float[] value, final int valueOffset,
+      final int keyIndexBase, final int keyLength, final int keyWidth
+    ) {
+      if (this.cursor.sameDense(key, keyOffset, value, valueOffset, keyIndexBase)) {
+        if (keyLength == this.cursor.packed) {
+          return;
+        }
+        if (keyLength > this.cursor.packed) {
+          this.copyDense(key, keyOffset, value, valueOffset, keyIndexBase, this.cursor.packed,
+            keyLength, keyWidth);
+          this.cursor.packed = keyLength;
+          return;
+        }
+      }
+      this.copyDense(key, keyOffset, value, valueOffset, keyIndexBase, 0, keyLength, keyWidth);
+      this.cursor.rememberDense(key, keyOffset, value, valueOffset, keyIndexBase, keyLength);
+    }
+
+    private void packPaged(
+      final float[] key, final int keyOffset,
+      final float[] value, final int valueOffset,
+      final int keyLength, final int keyWidth, final int[] keySlots
+    ) {
+      if (this.cursor.samePaged(key, keyOffset, value, valueOffset)
+        && this.cursor.slotsExtend(keySlots)) {
+        if (keyLength == this.cursor.packed) {
+          return;
+        }
+        if (keyLength > this.cursor.packed) {
+          this.copySlots(key, keyOffset, value, valueOffset, keyWidth, keySlots, this.cursor.packed,
+            keyLength);
+          this.cursor.rememberPaged(key, keyOffset, value, valueOffset, keySlots, keyLength);
+          return;
+        }
+      }
+      this.copySlots(key, keyOffset, value, valueOffset, keyWidth, keySlots, 0, keyLength);
+      this.cursor.rememberPaged(key, keyOffset, value, valueOffset, keySlots, keyLength);
+    }
+
+    private void copyDense(
+      final float[] key, final int keyOffset,
+      final float[] value, final int valueOffset,
+      final int keyIndexBase, final int from, final int to, final int keyWidth
+    ) {
+      if (to <= from) {
+        return;
+      }
+      int count = (to - from) * keyWidth;
+      System.arraycopy(
+        key, keyOffset + (keyIndexBase + from) * keyWidth, this.key, from * keyWidth, count);
+      System.arraycopy(
+        value, valueOffset + (keyIndexBase + from) * keyWidth, this.value, from * keyWidth, count);
+    }
+
+    private void copySlots(
+      final float[] key, final int keyOffset,
+      final float[] value, final int valueOffset,
+      final int keyWidth, final int[] keySlots, final int from, final int to
+    ) {
+      for (int token = from; token < to; token++) {
         int slot = keySlots[token];
         int destination = token * keyWidth;
         if (slot < 0) {
@@ -212,6 +271,74 @@ final class TornadoAttentionExecutor {
       } catch (TornadoExecutionPlanException failure) {
         Objects.requireNonNull(failure);
       }
+    }
+  }
+
+  private static final class PackCursor {
+
+    private float[] key;
+    private float[] value;
+    private int keyOffset;
+    private int valueOffset;
+    private int keyIndexBase;
+    private int packed;
+    private int[] slots;
+
+    private boolean sameDense(
+      final float[] key, final int keyOffset,
+      final float[] value, final int valueOffset, final int keyIndexBase
+    ) {
+      return this.slots == null && this.key == key && this.value == value
+        && this.keyOffset == keyOffset && this.valueOffset == valueOffset
+        && this.keyIndexBase == keyIndexBase;
+    }
+
+    private boolean samePaged(
+      final float[] key, final int keyOffset, final float[] value, final int valueOffset
+    ) {
+      return this.slots != null && this.key == key && this.value == value
+        && this.keyOffset == keyOffset && this.valueOffset == valueOffset;
+    }
+
+    private boolean slotsExtend(final int[] keySlots) {
+      int[] previous = this.slots;
+      if (previous == null || keySlots.length < this.packed) {
+        return false;
+      }
+      for (int i = 0; i < this.packed; i++) {
+        if (previous[i] != keySlots[i]) {
+          return false;
+        }
+      }
+      return true;
+    }
+
+    private void rememberDense(
+      final float[] key, final int keyOffset,
+      final float[] value, final int valueOffset,
+      final int keyIndexBase, final int keyLength
+    ) {
+      this.key = key;
+      this.value = value;
+      this.keyOffset = keyOffset;
+      this.valueOffset = valueOffset;
+      this.keyIndexBase = keyIndexBase;
+      this.packed = keyLength;
+      this.slots = null;
+    }
+
+    private void rememberPaged(
+      final float[] key, final int keyOffset,
+      final float[] value, final int valueOffset,
+      final int[] keySlots, final int keyLength
+    ) {
+      this.key = key;
+      this.value = value;
+      this.keyOffset = keyOffset;
+      this.valueOffset = valueOffset;
+      this.keyIndexBase = 0;
+      this.packed = keyLength;
+      this.slots = Arrays.copyOf(keySlots, keyLength);
     }
   }
 }

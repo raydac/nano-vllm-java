@@ -24,6 +24,7 @@ import com.igormaznitsa.nanollvm.models.LlmOutText;
 import com.igormaznitsa.nanollvm.models.LlmOutput;
 import com.igormaznitsa.nanollvm.models.ModelSupport;
 import com.igormaznitsa.nanollvm.models.internal.audio.WavPcm;
+import com.igormaznitsa.nanollvm.tensor.FloatKernels;
 import com.igormaznitsa.nanollvm.tensor.MatmulRuntime;
 import com.igormaznitsa.nanollvm.tokenizer.Tokenizer;
 import java.nio.file.Path;
@@ -605,6 +606,7 @@ public final class LlmModelImpl extends LlmModel {
       this.synthesis.set(null);
       this.classifier.set(null);
       if (bag != null) {
+        FloatKernels.releaseRetainedWeights(bag.denseBackingArrays());
         bag.releaseResources();
       }
     } finally {

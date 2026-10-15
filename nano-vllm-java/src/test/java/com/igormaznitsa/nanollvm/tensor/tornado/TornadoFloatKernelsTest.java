@@ -288,4 +288,66 @@ class TornadoFloatKernelsTest {
     ));
     assertClose(expected, actual);
   }
+
+  @Test
+  void releasedWeightDropsDevicePlanAndRecomputes() {
+    assumeTrue(TornadoFloatKernelsProvider.isAvailable(), "TornadoVM device required");
+
+    FloatKernels cpu = FloatKernelsFactory.create("scalar");
+    FloatKernels tornado = TornadoFloatKernelsProvider.create(cpu);
+    assumeTrue(tornado != null);
+
+    int in = 32;
+    int out = 32;
+    float[] x = fill(in, 0.1f);
+    float[] weight = fill(out * in, 0.01f);
+    float[] expected = new float[out];
+    float[] actual = new float[out];
+    int before = TornadoGemvExecutor.cachedPlanCount();
+    cpu.gemv(x, 0, weight, 0, null, expected, 0, in, 0, out);
+    tornado.gemv(x, 0, weight, 0, null, actual, 0, in, 0, out);
+    assertClose(expected, actual);
+    assertEquals(before + 1, TornadoGemvExecutor.cachedPlanCount());
+
+    tornado.releaseWeights(weight);
+    assertEquals(before, TornadoGemvExecutor.cachedPlanCount());
+
+    x[0] += 0.25f;
+    cpu.gemv(x, 0, weight, 0, null, expected, 0, in, 0, out);
+    tornado.gemv(x, 0, weight, 0, null, actual, 0, in, 0, out);
+    assertClose(expected, actual);
+    assertEquals(before + 1, TornadoGemvExecutor.cachedPlanCount());
+  }
+
+  @Test
+  void attentionReusesPackedPrefixWhenKeysGrow() {
+    assumeTrue(TornadoFloatKernelsProvider.isAvailable(), "TornadoVM device required");
+
+    int queryLength = 1;
+    int headDim = 4;
+    int numHeads = 2;
+    int numKvHeads = 1;
+    float[] query = fill(queryLength * numHeads * headDim, 0.05f);
+    float[] key = fill(4 * numKvHeads * headDim, 0.03f);
+    float[] value = fill(key.length, 0.04f);
+    float[] expected = new float[query.length];
+    float[] actual = new float[query.length];
+    int[] slots = {0, 2, -1, 1};
+    scalarAttend(query, key, value, expected, queryLength, 3, numHeads, numKvHeads, headDim,
+      0.5f, 0, false, slots);
+    assumeTrue(TornadoAttentionExecutor.attend(
+      query, 0, key, 0, value, 0, actual, 0,
+      0, queryLength, 0, 3, numHeads, numKvHeads, headDim, 0.5f, 0, false, slots
+    ));
+    assertClose(expected, actual);
+
+    key[1 * headDim] = 1.5f;
+    scalarAttend(query, key, value, expected, queryLength, 4, numHeads, numKvHeads, headDim,
+      0.5f, 0, false, slots);
+    assumeTrue(TornadoAttentionExecutor.attend(
+      query, 0, key, 0, value, 0, actual, 0,
+      0, queryLength, 0, 4, numHeads, numKvHeads, headDim, 0.5f, 0, false, slots
+    ));
+    assertClose(expected, actual);
+  }
 }

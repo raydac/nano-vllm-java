@@ -60,6 +60,27 @@ public abstract class FloatKernels {
   }
 
   /**
+   * Drops device-resident plans that captured these weight arrays. CPU backends do nothing.
+   * Closing a model calls this so TornadoVM can free that model's copies.
+   *
+   * @param weights backing arrays of dense weight tensors; {@code null} elements are ignored
+   * @since 1.5.0
+   */
+  public static void releaseRetainedWeights(final float[]... weights) {
+    INSTANCE.releaseWeights(weights);
+  }
+
+  /**
+   * @param weights backing arrays of dense weight tensors; may be empty
+   * @since 1.5.0
+   */
+  public void releaseWeights(final float[]... weights) {
+    if (weights == null) {
+      return;
+    }
+  }
+
+  /**
    * Human-readable backend label for logs and {@link VectorMath#backendInfo()}.
    *
    * @return e.g. {@code "scalar"} or {@code "Vector API Species[float, 8, S_256_BIT] (len=8)"}
