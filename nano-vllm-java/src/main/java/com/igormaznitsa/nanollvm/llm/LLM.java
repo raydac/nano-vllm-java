@@ -16,6 +16,8 @@ import com.igormaznitsa.nanollvm.engine.Transformer;
 import com.igormaznitsa.nanollvm.exceptions.GenerationCancelledException;
 import com.igormaznitsa.nanollvm.exceptions.GenerationTimeoutException;
 import com.igormaznitsa.nanollvm.exceptions.ModelLoadException;
+import com.igormaznitsa.nanollvm.jev.Jev;
+import com.igormaznitsa.nanollvm.jev.JevLevel;
 import com.igormaznitsa.nanollvm.models.LlmInText;
 import com.igormaznitsa.nanollvm.models.LlmInTokenIds;
 import com.igormaznitsa.nanollvm.models.LlmInput;
@@ -31,6 +33,7 @@ import com.igormaznitsa.nanollvm.rag.RagFactory;
 import com.igormaznitsa.nanollvm.rag.RagIndex;
 import com.igormaznitsa.nanollvm.rag.RagSession;
 import com.igormaznitsa.nanollvm.tensor.MatmulRuntime;
+import com.igormaznitsa.nanollvm.tensor.Tensor;
 import com.igormaznitsa.nanollvm.tokenizer.Tokenizer;
 import com.igormaznitsa.nanollvm.utils.NanoLlvmProps;
 import java.nio.file.Path;
@@ -108,6 +111,8 @@ import java.util.stream.IntStream;
  *       {@link LlmInText} → {@link LlmModality#AUDIO} ({@link com.igormaznitsa.nanollvm.models.LlmOutSoundData}).</li>
  *   <li><b>Language id / text labels</b> — {@link #generate(LlmInput, LlmModality)} with
  *       {@link LlmInText} → {@link LlmModality#LABELS} ({@link com.igormaznitsa.nanollvm.models.LlmOutLabels}).</li>
+ *   <li><b>A typed decision with probabilities</b> — {@link Builder#toJev()} on a causal chat
+ *       model, then {@link com.igormaznitsa.nanollvm.jev.Jev#decide}.</li>
  * </ul>
  * Prefer {@link #chat()} / {@link #chatOnce} / typed {@link #generate(LlmInput, LlmModality)} unless you need a
  * batch of prompts or a token-id stream — that is {@link #generate(List, SamplingParams)} /
@@ -122,8 +127,10 @@ import java.util.stream.IntStream;
  *
  * <h2>Thread safety</h2>
  * <ul>
- *   <li>One {@code LLM} must not run concurrent {@link #generate}, chat, RAG, or typed
- *       {@link #generate(LlmInput, LlmModality)} — those share one generate lock.</li>
+ *   <li>One {@code LLM} must not run concurrent {@link #generate}, chat, RAG, typed
+ *       {@link #generate(LlmInput, LlmModality)}, or {@link #readNextToken} — those share one
+ *       generate lock. A {@link com.igormaznitsa.nanollvm.jev.Jev} from {@link Builder#toJev()}
+ *       uses that same lock.</li>
  *   <li>Prefer one instance per thread, or external locking. Share one immutable {@link LlmModel}
  *       across many {@code LLM}s.</li>
  *   <li>{@link #cancel()} is safe from another thread and aborts an in-flight generate with
@@ -1269,6 +1276,120 @@ public final class LLM implements AutoCloseable {
     return this.tokenizer;
   }
 
+  private static NextTokenRead logProbabilities(final Tensor logits, final int[] labelTokenIds) {
+    int vocab = logits.size(1);
+    float[] data = logits.data();
+    int base = logits.offset();
+    double max = Double.NEGATIVE_INFINITY;
+    for (int index = 0; index < vocab; index++) {
+      max = Math.max(max, data[base + index]);
+    }
+    double sumExp = 0d;
+    for (int index = 0; index < vocab; index++) {
+      sumExp += Math.exp(data[base + index] - max);
+    }
+    double logNormalizer = max + Math.log(sumExp);
+    List<Double> logProbabilities = new ArrayList<>(labelTokenIds.length);
+    double mass = 0d;
+    for (int id : labelTokenIds) {
+      if (id < 0 || id >= vocab) {
+        throw new IllegalArgumentException(
+          "label token id %d is outside the vocabulary of %d".formatted(id, vocab));
+      }
+      double logProbability = data[base + id] - logNormalizer;
+      logProbabilities.add(logProbability);
+      mass += Math.exp(logProbability);
+    }
+    return new NextTokenRead(logProbabilities, mass);
+  }
+
+  /**
+   * Prefills {@code promptTokenIds} and returns the full-vocabulary log-probability of each
+   * {@code labelTokenIds} entry at the next-token position. Does not sample and does not append
+   * a completion token. Exclusive on this instance (same lock as {@link #generate(List, SamplingParams)}).
+   *
+   * @param promptTokenIds prompt vocabulary ids; must not be empty or longer than
+   *                       {@link Config#maxModelLen()}
+   * @param labelTokenIds  vocabulary ids to read; must not be empty or outside the vocabulary
+   * @return log-probabilities aligned with {@code labelTokenIds}, plus their total probability
+   * @throws NullPointerException         if either argument is {@code null}
+   * @throws IllegalArgumentException     if a list is empty, the prompt does not fit, or an id is
+   *                                      outside the vocabulary
+   * @throws IllegalStateException        if this engine is closed or is not a chat model
+   * @throws GenerationCancelledException if {@link #cancel()} fires during a multi-chunk prefill
+   * @since 1.5.0
+   */
+  public NextTokenRead readNextToken(final List<Integer> promptTokenIds,
+                                     final int[] labelTokenIds) {
+    requireNonNull(promptTokenIds, "promptTokenIds");
+    requireNonNull(labelTokenIds, "labelTokenIds");
+    if (promptTokenIds.isEmpty()) {
+      throw new IllegalArgumentException("promptTokenIds must not be empty");
+    }
+    if (labelTokenIds.length == 0) {
+      throw new IllegalArgumentException("labelTokenIds must not be empty");
+    }
+    this.assertNotClosed();
+    this.requireCausal();
+    int maxLen = this.config.maxModelLen();
+    if (promptTokenIds.size() > maxLen) {
+      throw new IllegalArgumentException(
+        "prompt has %d tokens but maxModelLen is %d".formatted(promptTokenIds.size(), maxLen));
+    }
+    int blockSize = this.config.kvcacheBlockSize();
+    int blocksNeeded = (promptTokenIds.size() + blockSize - 1) / blockSize;
+    if (blocksNeeded > this.config.numKvcacheBlocks()) {
+      throw new IllegalArgumentException(
+        "prompt needs %d KV blocks but this engine has %d".formatted(
+          blocksNeeded, this.config.numKvcacheBlocks()));
+    }
+
+    this.generateLock.lock();
+    try {
+      this.assertNotClosed();
+      this.beginGeneration();
+      try {
+        return this.readNextTokenUnlocked(promptTokenIds, labelTokenIds, blockSize);
+      } finally {
+        this.finishGeneration();
+      }
+    } finally {
+      this.generateLock.unlock();
+    }
+  }
+
+  private NextTokenRead readNextTokenUnlocked(
+    final List<Integer> promptTokenIds,
+    final int[] labelTokenIds,
+    final int blockSize
+  ) {
+    if (!this.scheduler.isFinished()) {
+      this.scheduler.clear();
+    }
+    Sequence sequence = new Sequence(promptTokenIds, null, blockSize);
+    this.scheduler.add(sequence);
+    Tensor logits = null;
+    while (sequence.numCachedTokens() < sequence.numTokens()) {
+      this.requireNotCancelled();
+      Scheduler.ScheduleResult scheduled = this.scheduler.schedule();
+      if (!scheduled.prefill()) {
+        throw new IllegalStateException("label readout expected a prefill batch");
+      }
+      boolean completes = sequence.numCachedTokens() + sequence.numScheduledTokens()
+        >= sequence.numTokens();
+      if (completes) {
+        logits = this.transformer.prefillLogits(scheduled.sequences());
+        break;
+      }
+      this.transformer.prefillCache(scheduled.sequences());
+      this.scheduler.postprocess(scheduled.sequences(), List.of(0), true);
+    }
+    if (logits == null) {
+      throw new IllegalStateException("label readout did not reach the answer position");
+    }
+    return logProbabilities(logits, labelTokenIds);
+  }
+
   /**
    * Scratchpad markers from {@link LlmModel#thinkTags()} — the pair belongs to the checkpoint,
    * not this engine. Override per conversation with {@link ChatSession#thinkTags(ThinkTags)}.
@@ -1477,7 +1598,8 @@ public final class LLM implements AutoCloseable {
    * {@link SamplingDefaults#neutral()} until {@link #sampling(SamplingParams)} or
    * {@link #deterministic()}.
    *
-   * <p>Provide a shared {@link LlmModel} via {@link LLM#builder(LlmModel)}. Call {@link #build()} last.
+   * <p>Provide a shared {@link LlmModel} via {@link LLM#builder(LlmModel)}. Call {@link #build()} or
+   * {@link #toJev()} last.
    *
    * <h2>Which setter?</h2>
    * <ul>
@@ -1492,9 +1614,11 @@ public final class LLM implements AutoCloseable {
    *       {@link #maxModelLen}, {@link #maxNumSeqs}</li>
    *   <li><b>When a reply must stop</b> — {@link #stopTokenIds} (plus sampling {@code maxTokens})</li>
    *   <li><b>Load / progress logs</b> — {@link #listen} ({@link LlmListeners#toSystem()} for CLI)</li>
+   *   <li><b>Typed decisions</b> — {@link #jevLevel(JevLevel)} then {@link #toJev()} instead of
+   *       {@link #build()}</li>
    * </ul>
    * Leave {@link #kvcacheBlockSize} and {@link #maxNumBatchedTokens} at defaults unless you are
-   * tuning memory under a large batch.
+   * tuning memory under a large batch. {@link #build()} and {@link #toJev()} are the terminals.
    *
    * <p><strong>Validation (enforced at {@link #build()} / {@link Config} construction):</strong>
    * {@code kvcacheBlockSize} multiple of 256; {@code cpuThreads >= 1}; chat
@@ -1527,6 +1651,7 @@ public final class LLM implements AutoCloseable {
     private boolean deterministic;
     private List<Integer> stopTokenIds;
     private Random random;
+    private JevLevel jevLevel = JevLevel.L0;
 
     private Builder(final LlmModel model) {
       this.sharedModel = requireNonNull(model, "model");
@@ -1958,6 +2083,43 @@ public final class LLM implements AutoCloseable {
      *                                  {@link #dedicatedMatmulPool()} were both set
      */
     public LLM build() {
+      this.validate();
+      return new LLM(this);
+    }
+
+    /**
+     * Readout level for {@link #toJev()}. Default {@link JevLevel#L0}.
+     *
+     * @param level raw or L0; must not be {@code null}
+     * @return {@code this}
+     * @throws NullPointerException if {@code level} is {@code null}
+     * @since 1.5.0
+     */
+    public Builder jevLevel(final JevLevel level) {
+      this.jevLevel = requireNonNull(level, "level");
+      return this;
+    }
+
+    /**
+     * Builds the chat engine and returns a decision view that closes that engine. The loaded
+     * model stays open. Only a causal chat checkpoint is accepted.
+     *
+     * @return decision view; caller should {@link Jev#close()} when finished
+     * @throws IllegalStateException    if the model is closed, is not a chat model, or
+     *                                  {@link #matmulExecutor(ExecutorService)} and
+     *                                  {@link #dedicatedMatmulPool()} were both set
+     * @throws ModelLoadException       if engine construction fails
+     * @throws IllegalArgumentException if builder constraints fail
+     * @since 1.5.0
+     */
+    public Jev toJev() {
+      if (!this.sharedModel.isCausalModel()) {
+        throw new IllegalStateException(this.causalMisuseMessage());
+      }
+      return new Jev(this.build(), this.jevLevel);
+    }
+
+    private void validate() {
       if (this.sharedModel.isClosed()) {
         throw new IllegalStateException("LlmModel is closed");
       }
@@ -1970,7 +2132,20 @@ public final class LLM implements AutoCloseable {
       if (!this.advisors.isEmpty()) {
         this.advisors = Builder.requireUniqueAdvisors(this.advisors);
       }
-      return new LLM(this);
+    }
+
+    private String causalMisuseMessage() {
+      String architecture = this.sharedModel.architectureName();
+      if (this.sharedModel.isClassificationModel()) {
+        return ModelSupport.classificationEngineMisuseMessage(architecture);
+      }
+      if (this.sharedModel.isSpeechModel()) {
+        return ModelSupport.speechEngineMisuseMessage(architecture);
+      }
+      if (this.sharedModel.isSynthesisModel()) {
+        return ModelSupport.synthesisEngineMisuseMessage(architecture);
+      }
+      return ModelSupport.chatMisuseMessage(architecture);
     }
 
     private LlmModel resolveModel() {

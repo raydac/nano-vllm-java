@@ -13,7 +13,8 @@ CUDA or other native backends: continuing text or short chat with a **causal** l
 encoding sentences to vectors with a **BERT-family embedding** GGUF or ONNX; (**since 1.3.0**) transcribing speech
 with **Whisper** safetensors and synthesizing speech with **Piper** ONNX voices; (**since 1.4.0**) classifying text
 with **Meta fastText** (`*.bin` / `*.ftz`), and optionally offloading large dense GEMV through **TornadoVM** when that
-add-on is present. Java package / JPMS module: `com.igormaznitsa.nanollvm`. This guide matches **1.4.0**
+add-on is present. (**since 1.5.0**, unreleased) a causal chat model can also answer a typed
+**Jev** decision — a choice, a yes/no, or a score — with a probability for every option. Java package / JPMS module: `com.igormaznitsa.nanollvm`. This guide matches **1.4.0**
 (released 2026-09-06; previous **1.3.0** 2026-08-29).
 
 Where a topic has a standard paper or format specification, a short **Further reading** note lists links. Those are
@@ -42,6 +43,7 @@ file paths.
 7d. [Whisper speech-to-text (**since 1.3.0**)](#7d-whisper-speech-to-text-since-130)
 7e. [Piper text-to-speech (**since 1.3.0**)](#7e-piper-text-to-speech-since-130)
 7f. [fastText classification (**since 1.4.0**)](#7f-fasttext-classification-since-140)
+7g. [Typed decisions (**since 1.5.0**)](#7g-typed-decisions-since-150)
 8. [Attention: kinds of looking-back, and how they work](#8-attention-kinds-of-looking-back-and-how-they-work) —
     **how Query, Key, and Value are made**
 9. [The thinking process: how it is organized and how it works with the model](#9-the-thinking-process-how-it-is-organized-and-how-it-works-with-the-model)
@@ -1957,6 +1959,62 @@ dot products).
 
 ---
 
+## 7g. Typed decisions (**since 1.5.0**)
+
+A causal chat model already knows how to continue a prompt. A **Jev** decision does not ask it to
+write a sentence. You give a state and a typed question — a choice, a yes/no, or a score — and
+read the next-token distribution over a few answer labels (`A` / `B`, `Yes` / `No`, or `1` / `2`).
+The answer is the option with the highest probability. Nothing is parsed and nothing is trained.
+
+| Level | What it reads |
+|-------|----------------|
+| `RAW` | One prefill, options in the order you passed |
+| `L0` (default) | Every cyclic rotation of a choice (both phrasings of a yes/no), averaged in log space. After eight states of the same question, a label prior estimated from those states is divided out. Ordered scores stay one prefill. |
+
+Each label must be a single vocabulary token. A choice has at most 26 options. L0 costs one prefill
+per option.
+
+```java
+try (LlmModel model = LlmModelFactory.make(path);
+     Jev jev = LLM.builder(model).toJev()) {
+  JevDecision route = jev.decide(
+      "My card was charged twice for one order.",
+      JevQuestion.choice("Which team should handle this?",
+          List.of("billing", "technical", "sales", "other")));
+  route.answer();
+  route.probability("billing");
+  route.require(JevLevel.L0);
+}
+```
+
+`JevQuestion.yesNo(text)` and `JevQuestion.score(text)` (or `score(text, bins).between(low, high)` /
+`score(text, levels)`) are the other two kinds. `builder.jevLevel(JevLevel.RAW).toJev()` skips
+the rotations. Closing the `Jev` closes the engine and does not close the model. Embeddings,
+Whisper, Piper, and fastText are refused.
+
+**In the code:** `LLM.Builder.toJev`, `Jev`, `JevQuestion`, `JevDecision`, `JevLevel`; the prefill
+read is `LLM.readNextToken`. Sample `JevHelloWorld`. The training-free contract follows
+[AnyJev](https://github.com/nokia-applied-research/AnyJev) (Zhang et al.,
+[arXiv:2610.00831](https://arxiv.org/abs/2610.00831)). Self-distilled Tacit checkpoints are ordinary
+causal models if their family already loads; this library does not train them.
+
+### Limits (honest)
+
+- Causal chat only. One prefill per rotation; a 20-way choice is 20 prefills.
+- No early-stop rotation budget and no capped “think, then re-read” route.
+- The label prior stays off until eight states of that question have been decided on the same `Jev`.
+
+### Summary
+
+> **Since 1.5.0, `LLM.builder(model).toJev()` turns a causal chat checkpoint into a typed decision
+> function. `decide(state, JevQuestion)` returns the option and a probability for every option.**
+
+**Further reading:** [AnyJev](https://github.com/nokia-applied-research/AnyJev);
+[Zhang et al., AnyJev Technical Report (arXiv)](https://arxiv.org/abs/2610.00831).
+
+
+---
+
 ## 8. Attention: kinds of looking-back, and how they work
 
 Attention is the part people mean when they say the model “pays attention” to something you wrote earlier. It is not a
@@ -3765,6 +3823,7 @@ packages. Demos live in the separate Maven module `nano-vllm-java-samples`.
 | Speech to text (Whisper)         | `LLM` / `LlmModel` (internal `WhisperForAsr`)                                      | `make(whisperDir)` → `isSpeechModel()` → `generate(LlmInSound, TEXT)` (**since 1.3.0**, chapter **7d**) |
 | Text to speech (Piper)           | `LLM` / `LlmModel` (internal `PiperForTts`)                                        | `open(voice).optionalData(ESPEAK_DATA, dir).make()` → `generate(LlmInText, AUDIO)` → `LlmOutSoundData` (**since 1.3.0**, chapter **7e**) |
 | Text classification (fastText)   | `LLM` / `LlmModel` (internal `FastTextForClassification`)                          | `make(lidBinOrFolder)` → `isClassificationModel()` → `generate(LlmInText, LABELS)` → `LlmOutLabels` (**since 1.4.0**, chapter **7f**) |
+| Typed decision (Jev)             | `Jev`, `JevQuestion`, `JevDecision`                                                | `LLM.builder(model).toJev()` → `decide(state, question)` (**since 1.5.0**, chapter **7g**) |
 | Named advisors                   | `LlmAdvisor`, `LlmAdvisorMixer`, `AdvisorEnrichment`, `ChatHistory`        | `Builder.advisors(mixer, …)` — unique non-blank names; `LLM#runAdvisors` → `AdvisorEnrichment`; one batched `generate` |
 | Chat turn                        | `ChatSession`                                                        | `llm.chat(maxTokens)`, `.listen(…)`, `.streamTo(…)` (`TEXT_THINKING` / `TEXT_ASSISTANT`; ignores `TEXT_RAW`), `.send(user)`, `.clear()`; `emitDebugPrompts(true)` opts in `TEXT_DEBUG` (off by default); `recoverUnusableAnswers` / `unusableAnswer` opt-in |
 | Stream unparsed decode           | `LlmTextKind.TEXT_RAW`, `LlmListener`                                  | `ChatSession.listen`; deltas of tokenizer decode with think tags / chat specials kept (**since 1.1.0**) |
@@ -4148,6 +4207,19 @@ LLM.builder(model).build().generate(LlmInText.of(text), LABELS)
 ```
 
 Narrative: **chapter 7f**. Demo: `samples.LanguageIdHelloWorld`.
+
+### Sample G0f — typed decisions (**since 1.5.0**)
+
+```text
+LlmModelFactory.make(chatCheckpoint)
+    → causal graph
+
+LLM.builder(model).toJev()          // closes the engine; does not close the model
+    → Jev.decide(state, JevQuestion.choice | yesNo | score)
+    → JevDecision (answer, probability per option, level L0 or RAW)
+```
+
+Narrative: **chapter 7g**. Demo: `samples.JevHelloWorld` (L0 and RAW on one choice, a yes/no, a score, then eight states until the label prior turns on).
 
 ### Sample G — text RAG (prepare once, ask many times)
 

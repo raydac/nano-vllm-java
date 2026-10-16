@@ -20,6 +20,11 @@ Development snapshot after the **1.4.0** public release.
   TileContext is CUDA-only and is not used.
 
 ### Added
+- Causal chat models can answer a typed decision. `LLM.builder(model).toJev()` reads a choice, a
+  yes/no, or a score from the next-token distribution and returns a probability for every option.
+  The default level, L0, rotates the options and removes the label prior without any training
+  labels. `jevLevel(JevLevel.RAW)` is one prefill in the order given. `JevHelloWorld` prints a choice
+  at L0 and RAW, a yes/no, a score, and the label prior turning on after eight states.
 - Sample `KernelChatBench` compares scalar Java, Vector API, and TornadoVM (skipped when no
   device) on the same greedy chat: one child JVM per kernel, a console tok/s table, and a
   well-formed `kernel-chat-bench.svg` bar chart. Default model is Gemma3-270M. Vector API always

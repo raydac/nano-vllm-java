@@ -302,11 +302,38 @@ mvn -pl nano-vllm-java-samples -q exec:java \
   -Dexec.mainClass=com.igormaznitsa.nanollvm.samples.LanguageIdHelloWorld
 ```
 
+<a id="hello-world--typed-decisions"></a>
+## Hello World — typed decisions (Jev)
+
+A causal chat model can answer a choice, a yes/no, or a score with a probability for every option
+(**since 1.5.0**). Nothing is parsed. `toJev()` builds the engine; close the `Jev` to close that
+engine. The default level, L0, reads every rotation of a choice (one prefill per option).
+
+```java
+try (LlmModel model = LlmModelFactory.make(Path.of("models/Gemma3-270M"));
+     Jev jev = LLM.builder(model).toJev()) {
+  JevDecision route = jev.decide(
+      "My card was charged twice for one order.",
+      JevQuestion.choice("Which team should handle this?",
+          List.of("billing", "technical", "sales", "other")));
+  System.out.println(route.answer() + " p=" + route.probability(route.answer()));
+}
+```
+
+Sample: [`JevHelloWorld.java`](nano-vllm-java-samples/src/main/java/com/igormaznitsa/nanollvm/samples/JevHelloWorld.java)
+walks the same choice at L0 and RAW, a yes/no, a score, and the label prior turning on after eight states.
+
+```bash
+mvn -pl nano-vllm-java-samples -q exec:java \
+  -Dexec.mainClass=com.igormaznitsa.nanollvm.samples.JevHelloWorld
+```
+
 ## Key features
 
 - Continuous batching scheduler with paged KV cache and prefix caching
 - **Qwen3** (HF safetensors, ONNX **1.1.0**, or GGUF **1.1.0**), **Gemma3**, **Gemma 4 text** QAT mobile (**since 1.1.0**, packed safetensors), **Llama** (**since 1.1.0**), and **LFM2** (hybrid short-conv + GQA, GGUF) causal LMs
 - **Whisper** speech-to-text and **Piper** text-to-speech (**since 1.3.0**); **fastText** classification (**since 1.4.0**); BERT embeddings (**since 1.1.0**) share `LLM.builder` and typed `generate(LlmInput, LlmModality)` (concrete `LlmOut*` return **since 1.4.0**)
+- **Typed decisions** (**since 1.5.0**): `LLM.builder(model).toJev()` reads a choice, yes/no, or score from the next-token distribution (`JevQuestion`, `JevDecision`)
 - Weight crates: HF **safetensors**, **GGUF**, ONNX Tier A (**since 1.1.0**), and fastText `*.bin`/`*.ftz` (**since 1.4.0**) — see [Supported formats and variants](#supported-formats-and-variants)
 - Optional multi-thread CPU matmul (`cpuThreads` / `matmulExecutor` / `dedicatedMatmulPool` **since 1.2.0** /
   `disableMultiCpu`); default = all processors on a lazily shared pool
@@ -372,13 +399,13 @@ On the module path:
 requires com.igormaznitsa.nanollvm;
 ```
 
-Public API packages: `models`, `llm`, `chat`, `rag`, `tokenizer`, `utils`, `exceptions`.
+Public API packages: `models`, `llm`, `chat`, `rag`, `jev`, `tokenizer`, `utils`, `exceptions`.
 Weight-load internals (`models.llmcontainer`, `models.llmarch`, `models.internal`),
 `prompts`, `engine`, `layers`, `tensor`, and `internal` are **not** exported — use
 `LlmModelFactory` / `LLM` / `RagFactory` from application code. Runnable demos
 (`HelloWorld`, `NextTokenHelloWorld`, `LogTriageHelloWorld`, `AdvisorRagHelloWorld`,
 `RagTunerHelloWorld`, `EmbeddingsHelloWorld`, `TranscribeHelloWorld`, `SynthesizeHelloWorld`,
-`VoiceReplyHelloWorld`, `LanguageIdHelloWorld`, `Example`, `Bench`, `samples.utils`) live in the
+`VoiceReplyHelloWorld`, `LanguageIdHelloWorld`, `JevHelloWorld`, `Example`, `Bench`, `samples.utils`) live in the
 separate `nano-vllm-java-samples` module.
 
 The packaged library JAR has no `Main-Class`. In-repo demos:
@@ -999,6 +1026,8 @@ Prompt wording is module-private (`prompts`); `RagSession.formatUserMessage` bui
 | [`description.md`](description.md) | Design tour: attention, tensors, scheduler, GGUF, ONNX, embeddings, Whisper, Piper, call chain, RAG |
 | [`models/README.md`](models/README.md) | Download scripts and model layout |
 | [`TranscribeHelloWorld.java`](nano-vllm-java-samples/src/main/java/com/igormaznitsa/nanollvm/samples/TranscribeHelloWorld.java) | Whisper sample: `piper-hello.wav` if present, else `ofPcm` tone, or `ofWav` |
+| [`LanguageIdHelloWorld.java`](nano-vllm-java-samples/src/main/java/com/igormaznitsa/nanollvm/samples/LanguageIdHelloWorld.java) | fastText language id |
+| [`JevHelloWorld.java`](nano-vllm-java-samples/src/main/java/com/igormaznitsa/nanollvm/samples/JevHelloWorld.java) | Choice at L0 and RAW, yes/no, score, label prior (**since 1.5.0**) |
 | [`SynthesizeHelloWorld.java`](nano-vllm-java-samples/src/main/java/com/igormaznitsa/nanollvm/samples/SynthesizeHelloWorld.java) | Piper sample: `generate` → `LlmOutSoundData.wav()` |
 | [`VoiceReplyHelloWorld.java`](nano-vllm-java-samples/src/main/java/com/igormaznitsa/nanollvm/samples/VoiceReplyHelloWorld.java) | Whisper → chat → Piper |
 | [`rag/`](rag/) | Demo corpus (fairy tales + fact cards) |

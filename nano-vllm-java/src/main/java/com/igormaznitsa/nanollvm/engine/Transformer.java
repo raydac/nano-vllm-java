@@ -218,6 +218,59 @@ public final class Transformer implements AutoCloseable {
     }
   }
 
+  private static List<Sequence> requirePrefill(final List<Sequence> seqs) {
+    requireNonNull(seqs, "seqs");
+    if (seqs.isEmpty()) {
+      throw new IllegalArgumentException("seqs must not be empty");
+    }
+    return seqs;
+  }
+
+  /**
+   * Prefills {@code seqs} and returns vocabulary logits at the last scheduled token of each
+   * sequence. Does not sample and does not append a completion token.
+   *
+   * @param seqs sequences whose scheduled window is a prefill chunk; must not be empty
+   * @return logits {@code [seqs.size(), vocab]}
+   * @throws IllegalStateException    if this transformer is closed
+   * @throws IllegalArgumentException if {@code seqs} is empty
+   */
+  public Tensor prefillLogits(final List<Sequence> seqs) {
+    this.requireOpen();
+    this.bindStep();
+    try {
+      return this.computeLogits(this.forwardHidden(this.preparePrefill(requirePrefill(seqs))));
+    } finally {
+      this.stepContext.clear();
+    }
+  }
+
+  /**
+   * Prefills {@code seqs} so attention writes KV for the scheduled window, and discards the
+   * hidden states. Used for a prompt chunk that is not yet the answer position.
+   *
+   * @param seqs sequences whose scheduled window is a prefill chunk; must not be empty
+   * @throws IllegalStateException    if this transformer is closed
+   * @throws IllegalArgumentException if {@code seqs} is empty
+   */
+  public void prefillCache(final List<Sequence> seqs) {
+    this.requireOpen();
+    this.bindStep();
+    try {
+      this.forwardHidden(this.preparePrefill(requirePrefill(seqs)));
+    } finally {
+      this.stepContext.clear();
+    }
+  }
+
+  private void bindStep() {
+    this.stepContext.bindKvCache(this.kvCache);
+    this.stepContext.bindMatmul(this.matmul);
+    if (this.convCache != null) {
+      this.stepContext.bindConvCache(this.convCache);
+    }
+  }
+
   /**
    * Runs {@link CausalLM#forward} on the prepared input-id and position tensors.
    */

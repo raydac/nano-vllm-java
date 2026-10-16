@@ -2,7 +2,7 @@
  * JPMS module for the nano-vllm-java library.
  *
  * <p><b>Exported (application API):</b> {@code models}, {@code llm}, {@code chat}, {@code rag},
- * {@code exceptions}, {@code tokenizer}, {@code utils}.
+ * {@code jev}, {@code exceptions}, {@code tokenizer}, {@code utils}.
  *
  * <p><b>Not exported:</b> {@code prompts} (engine wording), {@code models.internal} (CausalLM graph /
  * weights; sealed {@code LlmModel} / hidden {@code LlmModelImpl}), {@code engine}, {@code layers}, {@code tensor},
@@ -29,6 +29,7 @@ module com.igormaznitsa.nanollvm {
   exports com.igormaznitsa.nanollvm.exceptions;
   exports com.igormaznitsa.nanollvm.chat;
   exports com.igormaznitsa.nanollvm.rag;
+  exports com.igormaznitsa.nanollvm.jev;
   exports com.igormaznitsa.nanollvm.tokenizer;
   exports com.igormaznitsa.nanollvm.utils;
 }

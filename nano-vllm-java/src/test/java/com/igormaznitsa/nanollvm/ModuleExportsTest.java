@@ -46,6 +46,7 @@ final class ModuleExportsTest {
     LIBRARY + ".llm",
     LIBRARY + ".chat",
     LIBRARY + ".rag",
+    LIBRARY + ".jev",
     LIBRARY + ".exceptions",
     LIBRARY + ".tokenizer",
     LIBRARY + ".utils");
