@@ -606,11 +606,12 @@ first (Qwen3-0.6B preferred for chat quality, then Gemma3, Gemma 4 QAT, LFM2, co
 
 ### Interactive chat (`Example`)
 
-Line-oriented terminal demo. Setup questions, then a chat, embed, transcribe, or TTS loop:
+Line-oriented terminal demo. Setup questions, then a chat, Jev, embed, transcribe, or TTS loop:
 
 1. **Model** — bundled catalog (Enter = first downloaded; Qwen3-0.6B preferred), or a path via CLI / `-Dnanollvm.model` / `NANOLLVM_MODEL`. If none are on disk, the demo exits with download commands.
-2. **RAG mode** — none / BM25 / dense / hybrid (Enter = none; skipped for embedding, speech, and TTS models)
-3. **Advisor count** — `0`–`3` roles (Enter = none; skipped for embedding, speech, and TTS)
+2. **Session** — chat or Jev (Enter = chat; chat models only). Jev skips RAG and advisors.
+3. **RAG mode** — none / BM25 / dense / hybrid (Enter = none; skipped for embedding, speech, TTS, and Jev)
+4. **Advisor count** — `0`–`3` roles (Enter = none; skipped for embedding, speech, TTS, and Jev)
 
 Thinking, advisor notes, and load status go to **stderr**; answers and prompts go to **stdout**.
 Safetensors, GGUF, and ONNX loads share one in-place percent/ETA bar on that status stream.
@@ -644,6 +645,10 @@ choose None / BM25 / dense / hybrid. Dense and hybrid scan `models/` for any BER
 (`0` = off). Notes appear on the thinking stream as `[Name] …`; the default mixer folds useful
 notes into the main prompt.
 
+**Jev (since 1.5.0):** choose Jev instead of Chat. `/choice`, `/yesno`, and `/score` set the
+question; each later line is a state. `/level l0` rotates the options; `/level raw` is one prefill.
+`/reset` drops the label prior.
+
 Example session (ask about the demo corpus):
 
 ```text
@@ -651,6 +656,9 @@ Select model to load:
   1) Qwen3-0.6B (chat, safetensors)
   …
 Choice [1-14, Enter=1]:
+Select session:
+  1) Chat
+Choice [1-3, Enter=1]:
 Select RAG index and use mode:
   2) BM25 lexical
 Choice [1-5, Enter=1]: 2

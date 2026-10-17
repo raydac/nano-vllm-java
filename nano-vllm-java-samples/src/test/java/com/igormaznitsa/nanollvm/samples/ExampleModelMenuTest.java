@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 import com.igormaznitsa.nanollvm.llm.LlmAdvisor;
+import com.igormaznitsa.nanollvm.samples.Example.CausalSession;
 import com.igormaznitsa.nanollvm.samples.Example.ModelChoice;
 import com.igormaznitsa.nanollvm.samples.Example.RagMode;
 import com.igormaznitsa.nanollvm.samples.utils.OrderedConsole;
@@ -156,6 +157,30 @@ class ExampleModelMenuTest {
   @Test
   void encoderMenuExit() throws Exception {
     Optional<Example.EncoderSession> session = Example.selectEncoderSession(
+      new BufferedReader(new StringReader("3\n")),
+      silentConsole());
+    assertTrue(session.isEmpty());
+  }
+
+  @Test
+  void causalMenuEnterSelectsChat() throws Exception {
+    Optional<CausalSession> session = Example.selectCausalSession(
+      new BufferedReader(new StringReader("\n")),
+      silentConsole());
+    assertEquals(Optional.of(CausalSession.CHAT), session);
+  }
+
+  @Test
+  void causalMenuSelectsJev() throws Exception {
+    Optional<CausalSession> session = Example.selectCausalSession(
+      new BufferedReader(new StringReader("2\n")),
+      silentConsole());
+    assertEquals(Optional.of(CausalSession.JEV), session);
+  }
+
+  @Test
+  void causalMenuExit() throws Exception {
+    Optional<CausalSession> session = Example.selectCausalSession(
       new BufferedReader(new StringReader("3\n")),
       silentConsole());
     assertTrue(session.isEmpty());

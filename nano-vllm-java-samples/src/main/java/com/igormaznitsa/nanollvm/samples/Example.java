@@ -8,6 +8,10 @@ import static java.util.stream.Collectors.joining;
 import com.igormaznitsa.nanollvm.chat.ChatReply;
 import com.igormaznitsa.nanollvm.chat.ChatSession;
 import com.igormaznitsa.nanollvm.chat.LlmListener;
+import com.igormaznitsa.nanollvm.jev.Jev;
+import com.igormaznitsa.nanollvm.jev.JevDecision;
+import com.igormaznitsa.nanollvm.jev.JevLevel;
+import com.igormaznitsa.nanollvm.jev.JevQuestion;
 import com.igormaznitsa.nanollvm.llm.LLM;
 import com.igormaznitsa.nanollvm.llm.LlmAdvisor;
 import com.igormaznitsa.nanollvm.llm.LlmAdvisorMixer;
@@ -60,8 +64,8 @@ import java.util.function.Supplier;
 import java.util.stream.Stream;
 
 /**
- * Interactive terminal sample: pick a model, pick a RAG mode, pick how many advisors, then chat
- * (or embed / few-shot classify).
+ * Interactive terminal sample: pick a model, then chat, Jev, embed, classify, transcribe, or
+ * synthesize. Chat also picks a RAG mode and an advisor count.
  *
  * <p>Read {@link #main} top to bottom. Each RAG / embed path is a named method that shows the
  * matching library API in order.
@@ -106,8 +110,8 @@ public final class Example {
   }
 
   /**
-   * Terminal flow: model → RAG mode → advisor count → load → session.
-   * Embedding checkpoints skip RAG and advisors, then {@link #selectEncoderSession}.
+   * Terminal flow: model → chat (RAG mode, advisor count) or Jev → load → session.
+   * Embedding, speech, and TTS checkpoints skip that menu.
    */
   public static void main(final String[] args) throws Exception {
     OrderedConsole console = new OrderedConsole(System.out, System.err);
@@ -124,16 +128,23 @@ public final class Example {
 
       Optional<RagMode> ragMode = Optional.of(RagMode.NONE);
       Optional<Integer> advisorCount = Optional.of(0);
+      Optional<CausalSession> causalSession = Optional.of(CausalSession.CHAT);
       if (!ModelSupport.isEmbeddingCheckpoint(modelPath)
         && !ModelSupport.isSpeechCheckpoint(modelPath)
         && !ModelSupport.isSynthesisCheckpoint(modelPath)) {
-        ragMode = selectRagMode(in, console);
-        if (ragMode.isEmpty()) {
+        causalSession = selectCausalSession(in, console);
+        if (causalSession.isEmpty()) {
           return;
         }
-        advisorCount = selectAdvisorCount(in, console);
-        if (advisorCount.isEmpty()) {
-          return;
+        if (causalSession.get() == CausalSession.CHAT) {
+          ragMode = selectRagMode(in, console);
+          if (ragMode.isEmpty()) {
+            return;
+          }
+          advisorCount = selectAdvisorCount(in, console);
+          if (advisorCount.isEmpty()) {
+            return;
+          }
         }
       }
 
@@ -172,6 +183,17 @@ public final class Example {
               case CLASSIFY -> runClassificationSession(llm, in, console);
             }
           }
+          return;
+        }
+
+        if (causalSession.orElse(CausalSession.CHAT) == CausalSession.JEV) {
+          if (!model.isCausalModel()) {
+            console.println(
+              "Jev needs a causal chat model. This checkpoint is " + model.architectureName() +
+                ".");
+            return;
+          }
+          runJevSession(model, status, in, console);
           return;
         }
 
@@ -826,6 +848,293 @@ public final class Example {
       seconds);
     prediction.scores().forEach(score ->
       console.printf(Locale.ROOT, "  %-12s  %.4f%n", score.label(), score.cosine()));
+  }
+
+  /**
+   * After a chat checkpoint is chosen: conversation, or a typed Jev decision loop.
+   *
+   * @return the session, or empty if the user exits
+   */
+  static Optional<CausalSession> selectCausalSession(
+    final BufferedReader in,
+    final OrderedConsole console
+  ) throws Exception {
+    while (true) {
+      console.println("Select session:");
+      console.println("  1) Chat");
+      console.println("  2) Jev (typed decisions: choice, yes/no, score)");
+      console.println("  3) Exit");
+      console.print("Choice [1-3, Enter=1]: ");
+
+      String line = in.readLine();
+      if (line == null) {
+        return Optional.empty();
+      }
+
+      String choice = line.strip();
+      if (choice.isEmpty()) {
+        choice = "1";
+      }
+      switch (choice) {
+        case "1" -> {
+          console.printlnInfo("Session: chat.");
+          return Optional.of(CausalSession.CHAT);
+        }
+        case "2" -> {
+          console.printlnInfo("Session: Jev. RAG and advisors do not apply.");
+          return Optional.of(CausalSession.JEV);
+        }
+        case "3", "q", "quit", "exit" -> {
+          console.println("Bye.");
+          return Optional.empty();
+        }
+        default -> console.println("Enter 1, 2, or 3, or press Enter for 1.");
+      }
+    }
+  }
+
+  /**
+   * Jev REPL: {@code LLM.builder(model).toJev()} then {@link Jev#decide} for each state line.
+   * {@code /choice}, {@code /yesno}, and {@code /score} replace the question. {@code /level}
+   * rebuilds the engine; the label prior lives on that engine and resets with it.
+   */
+  private static void runJevSession(
+    final LlmModel model,
+    final LlmListener status,
+    final BufferedReader in,
+    final OrderedConsole console
+  ) throws Exception {
+    JevLevel level = JevLevel.L0;
+    JevQuestion question = JevQuestion.choice(
+      "Which team should handle this?",
+      List.of("billing", "technical", "sales"));
+    printJevHelp(console);
+    printJevQuestion(level, question, console);
+
+    Jev jev = openJev(model, level, status);
+    try {
+      while (true) {
+        console.print("jev?> ");
+        String line = in.readLine();
+        if (line == null) {
+          console.println();
+          return;
+        }
+
+        String user = line.strip();
+        if (user.isEmpty()) {
+          continue;
+        }
+        if (isQuitCommand(user)) {
+          return;
+        }
+
+        Optional<JevReplCommand> command = JevReplCommand.parse(user);
+        if (user.startsWith("/") && command.isEmpty()) {
+          console.println("Unknown command. /help lists them.");
+          continue;
+        }
+        if (command.isPresent()) {
+          switch (command.get()) {
+            case HELP -> printJevHelp(console);
+            case QUESTION -> printJevQuestion(level, question, console);
+            case RESET -> {
+              jev = replaceJev(jev, openJev(model, level, status));
+              console.println("(label prior reset)");
+            }
+            case CHOICE ->
+              question = acceptQuestion(question, parseChoice(user, console), level, console);
+            case YES_NO ->
+              question = acceptQuestion(question, parseYesNo(user, console), level, console);
+            case SCORE ->
+              question = acceptQuestion(question, parseScore(user, console), level, console);
+            case LEVEL -> {
+              Optional<JevLevel> next = parseLevel(user, console);
+              if (next.isPresent() && next.get() != level) {
+                level = next.get();
+                jev = replaceJev(jev, openJev(model, level, status));
+                console.printlnInfo("Jev level: " + level + " (label prior reset).");
+                printJevQuestion(level, question, console);
+              }
+            }
+          }
+          continue;
+        }
+
+        int prefills = prefillCount(level, question);
+        console.printlnInfo(
+          "reading " + prefills + (prefills == 1 ? " prefill…" : " prefills…"));
+        long started = System.nanoTime();
+        try {
+          printDecision(
+            jev.decide(user, question),
+            (System.nanoTime() - started) / 1e9,
+            console);
+        } catch (IllegalArgumentException ex) {
+          console.println(ex.getMessage());
+        }
+        console.println();
+      }
+    } finally {
+      jev.close();
+    }
+  }
+
+  private static Jev openJev(
+    final LlmModel model,
+    final JevLevel level,
+    final LlmListener status
+  ) {
+    return LLM.builder(model).listen(status).jevLevel(level).toJev();
+  }
+
+  private static JevQuestion acceptQuestion(
+    final JevQuestion current,
+    final Optional<JevQuestion> parsed,
+    final JevLevel level,
+    final OrderedConsole console
+  ) {
+    if (parsed.isEmpty()) {
+      return current;
+    }
+    printJevQuestion(level, parsed.get(), console);
+    return parsed.get();
+  }
+
+  private static Jev replaceJev(final Jev current, final Jev next) {
+    current.close();
+    return next;
+  }
+
+  private static int prefillCount(final JevLevel level, final JevQuestion question) {
+    if (level == JevLevel.RAW || question.isScore()) {
+      return 1;
+    }
+    return question.options().size();
+  }
+
+  private static void printJevHelp(final OrderedConsole console) {
+    console.println("Jev reads the next-token distribution. It does not generate a sentence.");
+    console.println("Set the question, then type a state (one line).");
+    console.println("  /choice Which team? | billing | technical | sales");
+    console.println("  /yesno Is this a technical failure?");
+    console.println("  /score How urgent? | low | medium | high");
+    console.println("  /score How full?                 (five bins from 0 to 1)");
+    console.println("  /level l0|raw                    (l0 rotates; raw is one prefill)");
+    console.println("  /question   /reset   /help   /exit   /quit");
+    console.println("L0 costs one prefill per option. The prior turns on after eight states");
+    console.println("of the same question. /level and /reset start that count over.");
+    console.println();
+  }
+
+  private static void printJevQuestion(
+    final JevLevel level,
+    final JevQuestion question,
+    final OrderedConsole console
+  ) {
+    console.println(
+      level + "  " + question.kind() + "  " + question.text()
+        + "  [" + String.join(", ", question.options()) + "]");
+    console.println();
+  }
+
+  private static void printDecision(
+    final JevDecision decision,
+    final double seconds,
+    final OrderedConsole console
+  ) {
+    console.printf(
+      Locale.ROOT,
+      "%s  %s  rotations=%d  prior=%s  orderFlip=%.2f  labelMass=%.2f  %.2fs%n",
+      decision.answer(),
+      decision.level(),
+      decision.rotations(),
+      decision.priorApplied() ? "on" : "off",
+      decision.orderFlipRate(),
+      decision.labelMass(),
+      seconds);
+    decision.distribution().forEach(option ->
+      console.printf(Locale.ROOT, "  %-16s  %.3f%n", option.option(), option.probability()));
+    decision.score().ifPresent(score ->
+      console.printf(Locale.ROOT, "  score=%.3f%n", score));
+  }
+
+  private static Optional<JevQuestion> parseChoice(
+    final String user,
+    final OrderedConsole console
+  ) {
+    List<String> parts = splitCommand(user);
+    if (parts.size() < 3) {
+      console.println("Usage: /choice question | option | option");
+      return Optional.empty();
+    }
+    return questionOrEmpty(
+      () -> JevQuestion.choice(parts.getFirst(), parts.subList(1, parts.size())),
+      console);
+  }
+
+  private static Optional<JevQuestion> parseYesNo(
+    final String user,
+    final OrderedConsole console
+  ) {
+    String text = commandBody(user);
+    if (text.isEmpty()) {
+      console.println("Usage: /yesno question");
+      return Optional.empty();
+    }
+    return questionOrEmpty(() -> JevQuestion.yesNo(text), console);
+  }
+
+  private static Optional<JevQuestion> parseScore(
+    final String user,
+    final OrderedConsole console
+  ) {
+    List<String> parts = splitCommand(user);
+    if (parts.isEmpty() || parts.getFirst().isEmpty()) {
+      console.println("Usage: /score question    or    /score question | low | medium | high");
+      return Optional.empty();
+    }
+    if (parts.size() == 1) {
+      return questionOrEmpty(() -> JevQuestion.score(parts.getFirst()), console);
+    }
+    return questionOrEmpty(
+      () -> JevQuestion.score(parts.getFirst(), parts.subList(1, parts.size())),
+      console);
+  }
+
+  private static Optional<JevLevel> parseLevel(final String user, final OrderedConsole console) {
+    String text = commandBody(user).toLowerCase(Locale.ROOT);
+    return switch (text) {
+      case "l0" -> Optional.of(JevLevel.L0);
+      case "raw" -> Optional.of(JevLevel.RAW);
+      default -> {
+        console.println("Usage: /level l0    or    /level raw");
+        yield Optional.empty();
+      }
+    };
+  }
+
+  private static Optional<JevQuestion> questionOrEmpty(
+    final Supplier<JevQuestion> factory,
+    final OrderedConsole console
+  ) {
+    try {
+      return Optional.of(factory.get());
+    } catch (IllegalArgumentException ex) {
+      console.println(ex.getMessage());
+      return Optional.empty();
+    }
+  }
+
+  private static List<String> splitCommand(final String user) {
+    return Arrays.stream(commandBody(user).split("\\|"))
+      .map(String::strip)
+      .toList();
+  }
+
+  private static String commandBody(final String user) {
+    int space = user.indexOf(' ');
+    return space < 0 ? "" : user.substring(space + 1).strip();
   }
 
   /**
@@ -1618,6 +1927,37 @@ public final class Example {
   enum EncoderSession {
     EMBED,
     CLASSIFY
+  }
+
+  enum CausalSession {
+    CHAT,
+    JEV
+  }
+
+  private enum JevReplCommand {
+    HELP,
+    QUESTION,
+    RESET,
+    CHOICE,
+    YES_NO,
+    SCORE,
+    LEVEL;
+
+    static Optional<JevReplCommand> parse(final String user) {
+      String command = user.toLowerCase(Locale.ROOT);
+      int space = command.indexOf(' ');
+      String head = space < 0 ? command : command.substring(0, space);
+      return switch (head) {
+        case "/help", "help" -> Optional.of(HELP);
+        case "/question" -> Optional.of(QUESTION);
+        case "/reset" -> Optional.of(RESET);
+        case "/choice" -> Optional.of(CHOICE);
+        case "/yesno" -> Optional.of(YES_NO);
+        case "/score" -> Optional.of(SCORE);
+        case "/level" -> Optional.of(LEVEL);
+        default -> Optional.empty();
+      };
+    }
   }
 
   private enum ClassifyCommand {
