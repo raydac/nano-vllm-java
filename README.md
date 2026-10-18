@@ -36,7 +36,7 @@ this is a curated subset, not every hub file.
 
 | Format | Since | What you point at | Role |
 |--------|-------|-------------------|------|
-| **Safetensors** | **1.0.0** | HF folder: `config.json` + tokenizer + `*.safetensors` | Dense float weights (`F32` / `F16` / `BF16` / `F64` → float32). **Since 1.1.0:** Gemma 4 text **QAT** stays packed (int2/4/8). **Since 1.3.0:** Whisper speech. If both safetensors and ONNX are present, **safetensors wins**. |
+| **Safetensors** | **1.0.0** | HF folder: `config.json` + tokenizer + `*.safetensors` | Dense float weights (`F32` / `F16` / `BF16` / `F64` → float32). **Since 1.1.0:** Gemma 4 text **QAT** stays packed (int2/4/8). **Since 1.3.0:** Whisper speech. **Since 1.5.0:** Qwen3.5 text (vision tower skipped; not GGUF / ONNX). If both safetensors and ONNX are present, **safetensors wins**. |
 | **GGUF** | **1.0.0** | Single `.gguf` file | Packed GGML blocks; dequant on matmul / embed. Mmap ≤ ~2 GiB. Architectures: **`qwen3`** / **`lfm2`** (chat) and **`bert`** (embeddings **since 1.1.0**). |
 | **ONNX** (Tier A) | **1.1.0** | HF folder: same sidecars + `model.onnx` / `model_fp16.onnx` (root or `onnx/`); Piper: `*.onnx` + `*.onnx.json` (**since 1.3.0**) | **Initializers only** — no ONNX Runtime, no graph execution. Preferred float exports; community `*_q4*` / `*_int8*` / `*_quantized*` / `with_past` names are skipped. |
 | **fastText** | **1.4.0** | File or folder: `*.bin` / `*.ftz` (e.g. `lid.176.bin`) | Supervised text classifier — pure Java (no JNI). Folder prefers denser `.bin` over `.ftz` when both exist. |
@@ -49,6 +49,7 @@ Stream / classpath loads (`ModelFileSource`, `fromClasspath*`) are **since 1.1.0
 | Kind | Since | Typical crate | Public use |
 |------|-------|---------------|------------|
 | **Qwen3** / **Gemma3** causal chat | **1.0.0** | HF safetensors (also ONNX **1.1.0**; Qwen3 GGUF **1.1.0**) | `LLM.builder(model)` → chat / generate |
+| **Qwen3.5 text** causal chat | **1.5.0** | HF safetensors only (`qwen3_5`; vision tower skipped; not GGUF / ONNX) | Same `LLM` path, including `toJev()` |
 | **Gemma 4 text** (QAT mobile) | **1.1.0** | HF safetensors only (packed int2/4/8; **not** GGUF / ONNX) | Same `LLM` path; vision/audio towers in the crate are skipped |
 | **LFM2** hybrid causal chat | **1.0.0** | GGUF only (`lfm2`) | Same `LLM` path; not from HF safetensors / ONNX |
 | **Llama** causal (incl. Tiny-LLM / SmolLM2 Instruct demos) | **1.1.0** | HF safetensors or ONNX | Same `LLM` path |
@@ -331,7 +332,7 @@ mvn -pl nano-vllm-java-samples -q exec:java \
 ## Key features
 
 - Continuous batching scheduler with paged KV cache and prefix caching
-- **Qwen3** (HF safetensors, ONNX **1.1.0**, or GGUF **1.1.0**), **Gemma3**, **Gemma 4 text** QAT mobile (**since 1.1.0**, packed safetensors), **Llama** (**since 1.1.0**), and **LFM2** (hybrid short-conv + GQA, GGUF) causal LMs
+- **Qwen3** (HF safetensors, ONNX **1.1.0**, or GGUF **1.1.0**), **Qwen3.5 text** (HF safetensors **since 1.5.0**, vision tower skipped), **Gemma3**, **Gemma 4 text** QAT mobile (**since 1.1.0**, packed safetensors), **Llama** (**since 1.1.0**), and **LFM2** (hybrid short-conv + GQA, GGUF) causal LMs
 - **Whisper** speech-to-text and **Piper** text-to-speech (**since 1.3.0**); **fastText** classification (**since 1.4.0**); BERT embeddings (**since 1.1.0**) share `LLM.builder` and typed `generate(LlmInput, LlmModality)` (concrete `LlmOut*` return **since 1.4.0**)
 - **Typed decisions** (**since 1.5.0**): `LLM.builder(model).toJev()` reads a choice, yes/no, or score from the next-token distribution (`JevQuestion`, `JevDecision`)
 - Weight crates: HF **safetensors**, **GGUF**, ONNX Tier A (**since 1.1.0**), and fastText `*.bin`/`*.ftz` (**since 1.4.0**) — see [Supported formats and variants](#supported-formats-and-variants)
@@ -579,7 +580,7 @@ Linear demo: `SynthesizeHelloWorld`. Voice desk: `VoiceReplyHelloWorld`.
 `./models/download-fasttext-lid-176.sh` → `models/fasttext-lid-176/lid.176.bin`.
 Linear demo: `LanguageIdHelloWorld`.
 
-**Windows:** `.\models\download-qwen3-0.6b.ps1` / `.cmd` and the matching Gemma 3 / Gemma 4 / LFM / Tiny-LLM-ONNX /
+**Windows:** `.\models\download-qwen3-0.6b.ps1` / `.cmd` and the matching Jeff-Qwen3.5 / Gemma 3 / Gemma 4 / LFM / Tiny-LLM-ONNX /
 SmolLM2 Instruct ONNX / gte-small / multilingual-e5-small / xlm-roberta-base / whisper / piper /
 fastText scripts under `models/`.
 

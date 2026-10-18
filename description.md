@@ -132,6 +132,7 @@ is [The Annotated Transformer](https://nlp.seas.harvard.edu/annotated-transforme
 Two families of Hugging Face checkpoints were the original teaching crates (different “editions” of the book, same kind
 of reading process): **Qwen3** and **Gemma3**. **Since 1.1.0** the same causal path also loads **Llama**-style graphs
 (including small ONNX demos) and **Gemma 4 text** (QAT mobile) — vision and audio towers in that crate are skipped.
+**Since 1.5.0** it also loads **Qwen3.5 text** from Hugging Face safetensors (hybrid Gated DeltaNet; the vision tower is skipped).
 The same Qwen3 graph also loads from a **GGUF** file (**since 1.1.0**). A further GGUF path loads **LFM2**
 (hybrid short-convolution + GQA). Sentence embeddings use **BERT**-family GGUF or ONNX (**since 1.1.0**, chapter 7b).
 **Since 1.3.0**, the same factory also loads **Whisper** speech-to-text (Hugging Face safetensors, chapter **7d**) and
@@ -140,7 +141,7 @@ classifiers (`*.bin` / `*.ftz`, chapter **7f**). You usually need not care which
 which files you pointed it at.
 
 **In the code:** architecture pick is `ArchitectureProcessors.of` → `Qwen3ForCausalLM`,
-`Gemma3ForCausalLM`, `Gemma4ForCausalLM`, `LlamaForCausalLM`, or `Lfm2ForCausalLM`; GGUF entry is `LlmModelFactory` →
+`Qwen35ForCausalLM`, `Gemma3ForCausalLM`, `Gemma4ForCausalLM`, `LlamaForCausalLM`, or `Lfm2ForCausalLM`; GGUF entry is `LlmModelFactory` →
 `models.llmcontainer.GgufTransport` (container catalog) → `models.llmarch.ArchitectureProcessor.bind` / `fill` / `create`;
 ONNX folders use `models.llmcontainer.OnnxTransport` → the same architecture processor (chapter **7c**); Whisper uses
 `SpeechArchitecture` / `WhisperForAsr` (chapter **7d**); Piper uses `SynthesisArchitecture` / `PiperForTts`
@@ -209,7 +210,7 @@ You (or a download script in this project’s `models/` folder) fetch weights fr
 
 | Crate shape | What you point at | Typical cargo |
 |-------------|-------------------|---------------|
-| **Hugging Face folder** | A directory | `config.json` + tokenizer (`tokenizer.json`, else SentencePiece `tokenizer.model` **since 1.2.0**) + `*.safetensors` **or** supported `*.onnx` (Qwen3 / Gemma3 / **Gemma 4 text** / **Llama**; BERT embeddings from ONNX; **Whisper** speech safetensors **since 1.3.0**) — **since 1.1.0** for ONNX and Gemma 4. **Piper** voices are a folder of `*.onnx` + `*.onnx.json` (**since 1.3.0**, chapter **7e**). |
+| **Hugging Face folder** | A directory | `config.json` + tokenizer (`tokenizer.json`, else SentencePiece `tokenizer.model` **since 1.2.0**) + `*.safetensors` **or** supported `*.onnx` (Qwen3 / Gemma3 / **Gemma 4 text** / **Llama**; **Qwen3.5 text** safetensors **since 1.5.0**, vision tower skipped, not ONNX; BERT embeddings from ONNX; **Whisper** speech safetensors **since 1.3.0**) — **since 1.1.0** for ONNX and Gemma 4. **Piper** voices are a folder of `*.onnx` + `*.onnx.json` (**since 1.3.0**, chapter **7e**). |
 | **Single GGUF file** | One `.gguf` | Metadata + embedded tokenizer + quantized weights (**Qwen3** or **LFM2** chat, or **BERT** embeddings — not Gemma/Llama GGUF) |
 | **fastText file / folder** (**since 1.4.0**) | `*.bin` / `*.ftz` or a directory containing one | Supervised classifier (e.g. lid.176); no `config.json` — chapter **7f** |
 | **Stream / classpath** (**since 1.1.0**) | A `ModelFileSource` (or `fromClasspath*` helpers) | Same roles as HF/GGUF above, but bytes come from streams into **heap** (no disk cache); `make(Path)` stays direct disk I/O |
@@ -437,7 +438,7 @@ number is “intelligence” by itself; both bound what silent inner work (chapt
 
 | Field           | Means                                                                                 | Used for                                              | If missing                                         |
 |-----------------|---------------------------------------------------------------------------------------|-------------------------------------------------------|----------------------------------------------------|
-| `model_type`    | Short family name (`qwen3`, `gemma3_text`, `gemma4`, `llama`, …)                    | Exact match via `ModelSupport` (Qwen3 / Gemma3 text / Gemma 4 text / Llama; GGUF `qwen3` / `lfm2`; embeddings BERT encoder: `bert` / `roberta` / `xlm-roberta`) | Unsupported families fail with `UnsupportedModelException` and a support catalog. Optional `-Dnanollvm.arch=…` only when it **matches** the checkpoint. |
+| `model_type`    | Short family name (`qwen3`, `qwen3_5`, `gemma3_text`, `gemma4`, `llama`, …)                    | Exact match via `ModelSupport` (Qwen3 / Qwen3.5 text / Gemma3 text / Gemma 4 text / Llama; GGUF `qwen3` / `lfm2`; embeddings BERT encoder: `bert` / `roberta` / `xlm-roberta`) | Unsupported families fail with `UnsupportedModelException` and a support catalog. Optional `-Dnanollvm.arch=…` only when it **matches** the checkpoint. |
 | `architectures` | List of class-style names from Hugging Face (`Qwen3ForCausalLM`, `Qwen3_5ForConditionalGeneration`, `LlamaForCausalLM`, …) | Same detection if `model_type` is unclear. Qwen3.5 text keeps the language tower and skips the vision tower. Other `*ForConditionalGeneration` / vision classes are rejected | Optional                                           |
 
 You can override causal detection with `-Dnanollvm.arch=qwen3`, `qwen3_5`, `gemma3`, `gemma4`, `llama`, or `lfm2` **only when that id matches the checkpoint**. A forced id cannot turn Qwen2, Qwen3-Next, or a vision tower into a supported graph. Look-alike names stay distinct (`qwen3_5` is its own text graph, not `qwen3`; `gemma2` is not `gemma3`; `gemma4` is its own text graph, not Gemma 3). BERT-encoder families (`bert`, `roberta`, `xlm-roberta`) load as embeddings from GGUF or ONNX (**since 1.3.0** for RoBERTa / XLM-R); DistilBERT / ALBERT / DeBERTa / ELECTRA are still rejected. Whisper is `whisper` from Hugging Face safetensors (**since 1.3.0**). Piper is detected from `*.onnx` + `*.onnx.json`. fastText is detected from `*.bin` / `*.ftz` (**since 1.4.0**). The error lists what this library actually loads (`ModelSupport.CATALOG`).
@@ -464,7 +465,7 @@ Detection looks at **keys on the root of `config.json`** (GGUF-mapped configs do
 
 | Input type | Declared when the root object has | Typical files |
 |------------|-----------------------------------|---------------|
-| **text** | Always, for every chat graph | Qwen3, Gemma3, Llama, LFM2, Gemma 4 |
+| **text** | Always, for every chat graph | Qwen3, Qwen3.5 text, Gemma3, Llama, LFM2, Gemma 4 |
 | **image** | `vision_config` **or** `image_token_id` | Gemma 4 QAT mobile |
 | **audio** | `audio_config` **or** `audio_token_id` | Gemma 4 QAT mobile |
 | **video** | `video_config` **or** `video_token_id` | Gemma 4 QAT mobile (`video_token_id`) |
@@ -852,7 +853,7 @@ The blueprint says what the **model is**. The builder says how hard you ask your
 | Comes from `config.json` / GGUF metadata  | Comes from this program’s builder / runtime                                         |
 |-------------------------------------------|-------------------------------------------------------------------------------------|
 | Layer count, widths, heads, RoPE, windows | `maxModelLen` (capped by blueprint), KV page size, number of KV pages, batch limits |
-| Which recipe (Qwen3 / Gemma3 / Gemma 4 text / Llama / LFM2 / BERT) | `-Dnanollvm.arch=…` override (causal); embedding GGUFs detected separately; ONNX folders use same HF `config.json` (not Gemma 4) |
+| Which recipe (Qwen3 / Qwen3.5 text / Gemma3 / Gemma 4 text / Llama / LFM2 / BERT) | `-Dnanollvm.arch=…` override (causal); embedding GGUFs detected separately; ONNX folders use same HF `config.json` (not Gemma 4 or Qwen3.5) |
 | `torch_dtype` hint                        | Always float32 activations; GGUF weights may stay packed until unpack               |
 | (not in blueprint)                        | `kvHeapFraction` (default **0.25**) — share of heap used to size the KV arena       |
 | (not in blueprint)                        | CPU matmul threads / optional caller `ExecutorService`; warmup on/off               |
@@ -1138,7 +1139,7 @@ delivers named weight tensors into RAM.
 | Allowed | Not in this port |
 |---------|------------------|
 | Element dtypes **`F32`**, **`F16`**, **`BF16`**, **`F64`** → float32 weights | Other catalog dtypes except Gemma 4 QAT packed int2/4/8 (+ SRQ) |
-| HF folder causal graphs: **Qwen3**, **Gemma3**, **Gemma 4 text** (QAT mobile, packed), **Llama** (when `config.json` + names match) | **LFM2** from an HF safetensors directory (use **GGUF**, ch. 7a); Gemma 4 **GGUF** / **MoE** / vision-audio generation |
+| HF folder causal graphs: **Qwen3**, **Qwen3.5 text** (**since 1.5.0**, vision tower skipped), **Gemma3**, **Gemma 4 text** (QAT mobile, packed), **Llama** (when `config.json` + names match) | **LFM2** from an HF safetensors directory (use **GGUF**, ch. 7a); Qwen3.5 **GGUF** / **ONNX** / **MoE**; Gemma 4 **GGUF** / **MoE** / vision-audio generation |
 | Same folder may also use ONNX instead (ch. **7c**, not Gemma 4); if **both** `*.safetensors` and `*.onnx` exist, **safetensors wins** | Full HF **BERT** safetensors directory load (BERT embeddings: GGUF ch. 7b, or ONNX BERT when names map) |
 | Activations / KV always float32 after load | Keeping BF16/F16 math at runtime |
 
@@ -1293,7 +1294,7 @@ and **GGML-typed weight blocks** (often quantized). This engine supports **GGUF 
 - architecture **`lfm2`** — hybrid short-convolution + GQA **chat** models (this section);
 - architecture **`bert`** — sentence-embedding encoders (**chapter 7b**, **since 1.1.0**).
 
-Load is three layers for every container: **transport** opens the file or folder (`GgufTransport`, `SafetensorsTransport`, `OnnxTransport`) and reports a catalog (metadata + tensor names). **Architecture processing** (`ArchitectureProcessor`) then decodes the family (`qwen3` / `gemma3` / `gemma4` / `llama` / `lfm2` / `bert`). Chat families share a causal template (`CausalArchitecture`: Hugging Face bind by default, required `createCausal`); BERT uses `EmbeddingArchitecture`. Processors bind config + schema, fill weights, and build the graph. Gemma 4 still overrides fill (QAT safetensors only) and LFM2 overrides bind/fill (GGUF only) — they are not subclasses of Gemma 3 or of each other. Unsupported families (Qwen2, Gemma/Llama GGUF, MoE, VL) still fail before weights are copied, with
+Load is three layers for every container: **transport** opens the file or folder (`GgufTransport`, `SafetensorsTransport`, `OnnxTransport`) and reports a catalog (metadata + tensor names). **Architecture processing** (`ArchitectureProcessor`) then decodes the family (`qwen3` / `qwen3_5` / `gemma3` / `gemma4` / `llama` / `lfm2` / `bert`). Chat families share a causal template (`CausalArchitecture`: Hugging Face bind by default, required `createCausal`); BERT uses `EmbeddingArchitecture`. Processors bind config + schema, fill weights, and build the graph. Gemma 4 still overrides fill (QAT safetensors only) and LFM2 overrides bind/fill (GGUF only) — they are not subclasses of Gemma 3 or of each other. `qwen3_5` is Hugging Face safetensors text only. Unsupported families (Qwen2, Qwen3-Next, Qwen3.5 MoE, Gemma/Llama GGUF, other MoE, VL) still fail before weights are copied, with
 `ModelSupport.CATALOG`.
 
 There is **no** in-repo download for a Qwen3 GGUF. Place any `general.architecture=qwen3` file yourself (for example
