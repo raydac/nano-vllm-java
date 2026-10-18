@@ -71,6 +71,7 @@ public final class Transformer implements AutoCloseable {
   private CausalLM network;
   private KvCacheArena kvCache;
   private ConvStateArena convCache;
+  private DeltaNetStateArena deltaCache;
 
   /**
    * Builds a transformer with silent engine I/O (no load-progress lines).
@@ -161,6 +162,18 @@ public final class Transformer implements AutoCloseable {
     } else {
       this.convCache = null;
     }
+    if (hf.isQwen35() && hf.qwen35() != null) {
+      boolean[] linear = new boolean[hf.numHiddenLayers()];
+      for (int i = 0; i < linear.length; i++) {
+        linear[i] = hf.isLinearAttentionLayer(i);
+      }
+      this.deltaCache = new DeltaNetStateArena(
+        linear, hf.qwen35().convChannels(), hf.qwen35().linearConvKernelDim(),
+        hf.qwen35().recurrentFloats());
+      LlmListeners.info(progress, null, "DeltaNet state arena ready");
+    } else {
+      this.deltaCache = null;
+    }
   }
 
   /**
@@ -230,6 +243,9 @@ public final class Transformer implements AutoCloseable {
     if (this.convCache != null) {
       this.stepContext.bindConvCache(this.convCache);
     }
+    if (this.deltaCache != null) {
+      this.stepContext.bindDeltaCache(this.deltaCache);
+    }
   }
 
   private Tensor forwardHidden(final PreparedInputs prepared) {
@@ -287,6 +303,10 @@ public final class Transformer implements AutoCloseable {
         this.convCache.close();
         this.convCache = null;
       }
+      if (this.deltaCache != null) {
+        this.deltaCache.close();
+        this.deltaCache = null;
+      }
       this.network = null;
     }
   }
@@ -300,6 +320,10 @@ public final class Transformer implements AutoCloseable {
     ConvStateArena arena = this.convCache;
     if (arena != null) {
       arena.clear(seqId);
+    }
+    DeltaNetStateArena delta = this.deltaCache;
+    if (delta != null) {
+      delta.clear(seqId);
     }
   }
 
@@ -324,7 +348,7 @@ public final class Transformer implements AutoCloseable {
     boolean[] allocate = new boolean[layers];
     for (int i = 0; i < layers; i++) {
       headDims[i] = hf.layerHeadDim(i);
-      allocate[i] = !hf.isKvSharedLayer(i);
+      allocate[i] = hf.allocatesKv(i);
     }
     return new KvCacheArena(
       this.config.numKvcacheBlocks(),

@@ -18,6 +18,7 @@ final class ArchitectureProcessorTest {
   @Test
   void registryReturnsOneProcessorPerFamily() {
     assertSame(Qwen3Processor.INSTANCE, ArchitectureProcessors.of(WeightNames.ARCH_QWEN3));
+    assertSame(Qwen35Processor.INSTANCE, ArchitectureProcessors.of(WeightNames.ARCH_QWEN3_5));
     assertSame(Gemma3Processor.INSTANCE, ArchitectureProcessors.of(WeightNames.ARCH_GEMMA3));
     assertSame(Gemma4Processor.INSTANCE, ArchitectureProcessors.of(WeightNames.ARCH_GEMMA4));
     assertSame(LlamaProcessor.INSTANCE, ArchitectureProcessors.of(WeightNames.ARCH_LLAMA));
@@ -30,6 +31,7 @@ final class ArchitectureProcessorTest {
   @Test
   void chatFamiliesAreNotEmbedding() {
     assertFalse(ArchitectureProcessors.of(WeightNames.ARCH_QWEN3).isEmbedding());
+    assertFalse(ArchitectureProcessors.of(WeightNames.ARCH_QWEN3_5).isEmbedding());
     assertFalse(ArchitectureProcessors.of(WeightNames.ARCH_GEMMA3).isEmbedding());
     assertFalse(ArchitectureProcessors.of(WeightNames.ARCH_GEMMA4).isEmbedding());
     assertFalse(ArchitectureProcessors.of(WeightNames.ARCH_LLAMA).isEmbedding());
@@ -54,6 +56,7 @@ final class ArchitectureProcessorTest {
   @Test
   void chatFamiliesShareCausalTemplateAndBertIsEmbedding() {
     assertInstanceOf(CausalArchitecture.class, ArchitectureProcessors.of(WeightNames.ARCH_QWEN3));
+    assertInstanceOf(CausalArchitecture.class, ArchitectureProcessors.of(WeightNames.ARCH_QWEN3_5));
     assertInstanceOf(CausalArchitecture.class, ArchitectureProcessors.of(WeightNames.ARCH_GEMMA3));
     assertInstanceOf(CausalArchitecture.class, ArchitectureProcessors.of(WeightNames.ARCH_GEMMA4));
     assertInstanceOf(CausalArchitecture.class, ArchitectureProcessors.of(WeightNames.ARCH_LLAMA));

@@ -7,9 +7,11 @@ import static com.igormaznitsa.nanollvm.models.internal.WeightNames.ARCH_LFM2;
 import static com.igormaznitsa.nanollvm.models.internal.WeightNames.ARCH_LLAMA;
 import static com.igormaznitsa.nanollvm.models.internal.WeightNames.ARCH_PIPER;
 import static com.igormaznitsa.nanollvm.models.internal.WeightNames.ARCH_QWEN3;
+import static com.igormaznitsa.nanollvm.models.internal.WeightNames.ARCH_QWEN3_5;
 import static com.igormaznitsa.nanollvm.models.internal.WeightNames.ARCH_WHISPER;
 import static com.igormaznitsa.nanollvm.models.internal.WeightNames.DOWN_PROJ_WEIGHT;
 import static com.igormaznitsa.nanollvm.models.internal.WeightNames.EMBED_TOKENS;
+import static com.igormaznitsa.nanollvm.models.internal.WeightNames.GATE_UP_PROJ;
 import static com.igormaznitsa.nanollvm.models.internal.WeightNames.GATE_UP_PROJ_WEIGHT;
 import static com.igormaznitsa.nanollvm.models.internal.WeightNames.GGUF_OUTPUT;
 import static com.igormaznitsa.nanollvm.models.internal.WeightNames.GGUF_OUTPUT_NORM;
@@ -31,6 +33,7 @@ import static com.igormaznitsa.nanollvm.models.internal.WeightNames.QKV_PROJ_WEI
 import static com.igormaznitsa.nanollvm.models.internal.WeightNames.Q_NORM_WEIGHT;
 import static com.igormaznitsa.nanollvm.models.internal.WeightNames.ggufBlk;
 import static com.igormaznitsa.nanollvm.models.internal.WeightNames.layer;
+import static com.igormaznitsa.nanollvm.models.internal.WeightNames.linearAttn;
 import static com.igormaznitsa.nanollvm.models.internal.WeightNames.mlp;
 import static com.igormaznitsa.nanollvm.models.internal.WeightNames.selfAttn;
 import static java.util.Objects.requireNonNull;
@@ -45,6 +48,10 @@ import java.util.Set;
  */
 public final class WeightSchema {
 
+  private static final Map<String, Object[]> GATE_UP_ONLY = Map.of(
+    "gate_proj", new Object[] {GATE_UP_PROJ, 0},
+    "up_proj", new Object[] {GATE_UP_PROJ, 1}
+  );
   private final Map<String, Object[]> packedModulesMapping;
   private final Set<String> expectedParameters;
   private final Set<String> optionalParameters;
@@ -64,6 +71,7 @@ public final class WeightSchema {
       case ARCH_GEMMA3 -> gemma3(config);
       case ARCH_GEMMA4 -> gemma4(config);
       case ARCH_QWEN3 -> qwen3(config);
+      case ARCH_QWEN3_5 -> qwen35(config);
       case ARCH_LLAMA -> llama(config);
       case ARCH_LFM2 -> lfm2(config);
       case ARCH_BERT -> bert(config);
@@ -137,6 +145,52 @@ public final class WeightSchema {
       expected.add(LM_HEAD);
     }
     return new WeightSchema(PACKED_MODULES_MAPPING, expected, optional);
+  }
+
+  /**
+   * Qwen3.5 text schema. Query stays unfused because {@code q_proj} also carries the attention
+   * gate. Gate and up projections are still merged. Linear layers use Gated DeltaNet names.
+   *
+   * @since 1.5.0
+   */
+  public static WeightSchema qwen35(final Config.HfConfig config) {
+    Set<String> expected = new LinkedHashSet<>();
+    Set<String> optional = new LinkedHashSet<>();
+    expected.add(EMBED_TOKENS);
+    for (int i = 0; i < config.numHiddenLayers(); i++) {
+      String prefix = layer(i);
+      expected.add(prefix + INPUT_LAYERNORM);
+      expected.add(prefix + POST_ATTENTION_LAYERNORM);
+      expected.add(mlp(i) + GATE_UP_PROJ_WEIGHT);
+      expected.add(mlp(i) + DOWN_PROJ_WEIGHT);
+      if (config.isLinearAttentionLayer(i)) {
+        String linear = linearAttn(i);
+        expected.add(linear + "in_proj_qkv.weight");
+        expected.add(linear + "in_proj_z.weight");
+        expected.add(linear + "in_proj_b.weight");
+        expected.add(linear + "in_proj_a.weight");
+        expected.add(linear + "conv1d.weight");
+        expected.add(linear + "A_log");
+        expected.add(linear + "dt_bias");
+        expected.add(linear + "norm.weight");
+        expected.add(linear + "out_proj.weight");
+      } else {
+        String attn = selfAttn(i);
+        expected.add(attn + "q_proj.weight");
+        expected.add(attn + "k_proj.weight");
+        expected.add(attn + "v_proj.weight");
+        expected.add(attn + O_PROJ_WEIGHT);
+        expected.add(attn + Q_NORM_WEIGHT);
+        expected.add(attn + K_NORM_WEIGHT);
+      }
+    }
+    expected.add(MODEL_NORM);
+    if (config.tieWordEmbeddings()) {
+      optional.add(LM_HEAD);
+    } else {
+      expected.add(LM_HEAD);
+    }
+    return new WeightSchema(GATE_UP_ONLY, expected, optional);
   }
 
   public static WeightSchema qwen3Gguf(final Config.HfConfig config) {

@@ -154,9 +154,12 @@ public final class Norms {
    * <p>{@link #of} uses full-head inv-freq ({@code rotaryDim == headSize}).
    * {@link #proportional} leaves a tail of angles at inv-freq {@code 0} (identity rotation) for
    * Gemma 4 global RoPE ({@code partial_rotary_factor}).
+   * {@link #leading} rotates only the first {@code rotaryDim} channels (Qwen3.5 partial RoPE);
+   * the frequency base is that width, and the tail is copied unchanged.
    */
   public static final class RotaryEmbedding {
     private final int headSize;
+    private final int rotaryDim;
     private final Tensor cosSinCache;
 
     /**
@@ -170,25 +173,34 @@ public final class Norms {
      */
     public RotaryEmbedding(final int headSize, final int rotaryDim, final int maxPositionEmbeddings,
                            final float base) {
-      this(headSize, maxPositionEmbeddings, defaultInvFreq(headSize, rotaryDim, base));
+      this(headSize, rotaryDim, maxPositionEmbeddings, defaultInvFreq(headSize, rotaryDim, base));
     }
 
-    private RotaryEmbedding(final int headSize, final int maxPositionEmbeddings,
-                            final float[] invFreq) {
-      if (invFreq.length != headSize / 2) {
-        throw new IllegalArgumentException("invFreq length must be headSize/2");
+    private RotaryEmbedding(
+      final int headSize,
+      final int rotaryDim,
+      final int maxPositionEmbeddings,
+      final float[] invFreq
+    ) {
+      if (rotaryDim <= 0 || rotaryDim > headSize || (rotaryDim & 1) != 0) {
+        throw new IllegalArgumentException(
+          "rotaryDim must be a positive even width no larger than headSize");
+      }
+      if (invFreq.length != rotaryDim / 2) {
+        throw new IllegalArgumentException("invFreq length must be rotaryDim/2");
       }
       this.headSize = headSize;
-      int half = headSize / 2;
-      float[] cache = new float[maxPositionEmbeddings * headSize];
+      this.rotaryDim = rotaryDim;
+      int pairs = invFreq.length;
+      float[] cache = new float[maxPositionEmbeddings * rotaryDim];
       for (int pos = 0; pos < maxPositionEmbeddings; pos++) {
-        for (int i = 0; i < half; i++) {
+        for (int i = 0; i < pairs; i++) {
           double freq = pos * invFreq[i];
-          cache[pos * headSize + i] = (float) Math.cos(freq);
-          cache[pos * headSize + half + i] = (float) Math.sin(freq);
+          cache[pos * rotaryDim + i] = (float) Math.cos(freq);
+          cache[pos * rotaryDim + pairs + i] = (float) Math.sin(freq);
         }
       }
-      this.cosSinCache = Tensor.of(cache, maxPositionEmbeddings, headSize);
+      this.cosSinCache = Tensor.of(cache, maxPositionEmbeddings, rotaryDim);
     }
 
     private static float[] defaultInvFreq(final int headSize, final int rotaryDim,
@@ -245,7 +257,33 @@ public final class Norms {
       for (int i = 0; i < ropeAngles; i++) {
         invFreq[i] = (float) (1.0 / Math.pow(base, (2.0 * i) / headSize));
       }
-      return new RotaryEmbedding(headSize, maxPosition, invFreq);
+      return new RotaryEmbedding(headSize, headSize, maxPosition, invFreq);
+    }
+
+    /**
+     * Partial RoPE on the leading {@code rotaryDim} channels. Inverse frequencies use
+     * {@code rotaryDim} as the base width (Qwen3.5), and channels past {@code rotaryDim} are
+     * copied unchanged. Text-only positions make Qwen3.5 multimodal RoPE the same table.
+     *
+     * @param headSize    per-head width
+     * @param rotaryDim   even rotated width in {@code (0, headSize]}
+     * @param maxPosition table length
+     * @param base        RoPE theta
+     * @return internable table
+     * @since 1.5.0
+     */
+    public static RotaryEmbedding leading(
+      final int headSize,
+      final int rotaryDim,
+      final int maxPosition,
+      final float base
+    ) {
+      int pairs = rotaryDim / 2;
+      float[] invFreq = new float[pairs];
+      for (int i = 0; i < pairs; i++) {
+        invFreq[i] = (float) (1.0 / Math.pow(base, (2.0 * i) / rotaryDim));
+      }
+      return new RotaryEmbedding(headSize, rotaryDim, maxPosition, invFreq);
     }
 
     /**
@@ -283,7 +321,6 @@ public final class Norms {
       int headsK = key.size(1);
       Tensor qOut = Tensor.zeros(query.shape());
       Tensor kOut = Tensor.zeros(key.shape());
-      int half = this.headSize / 2;
       int maxPos = this.cosSinCache.size(0);
       MatmulRuntime runtime = context != null && context.matmul() != null
         ? context.matmul()
@@ -291,13 +328,13 @@ public final class Norms {
       int cost = tokens * this.headSize * (headsQ + headsK);
       if (cost < 4096) {
         this.rotateTokens(
-          0, tokens, positions, query, key, qOut, kOut, headsQ, headsK, half, maxPos);
+          0, tokens, positions, query, key, qOut, kOut, headsQ, headsK, maxPos);
         return new Tensor[] {qOut, kOut};
       }
       runtime.parallelRanges(
         tokens,
         (start, end) -> this.rotateTokens(
-          start, end, positions, query, key, qOut, kOut, headsQ, headsK, half, maxPos));
+          start, end, positions, query, key, qOut, kOut, headsQ, headsK, maxPos));
       return new Tensor[] {qOut, kOut};
     }
 
@@ -311,7 +348,6 @@ public final class Norms {
       final Tensor kOut,
       final int headsQ,
       final int headsK,
-      final int half,
       final int maxPos
     ) {
       for (int t = tokenStart; t < tokenEnd; t++) {
@@ -320,9 +356,9 @@ public final class Norms {
           throw new IllegalArgumentException(
             "RoPE position %d out of range [0, %d)".formatted(pos, maxPos));
         }
-        int cBase = this.cosSinCache.offset() + pos * this.headSize;
-        this.apply(query, qOut, t, headsQ, half, cBase);
-        this.apply(key, kOut, t, headsK, half, cBase);
+        int cBase = this.cosSinCache.offset() + pos * this.rotaryDim;
+        this.apply(query, qOut, t, headsQ, cBase);
+        this.apply(key, kOut, t, headsK, cBase);
       }
     }
 
@@ -330,17 +366,21 @@ public final class Norms {
      * Applies the cos/sin pair at {@code cBase} to every head of one token.
      */
     private void apply(final Tensor in, final Tensor out, final int token, final int heads,
-                       final int half, final int cBase) {
+                       final int cBase) {
+      int pairs = this.rotaryDim / 2;
       for (int h = 0; h < heads; h++) {
         int base = in.offset() + (token * heads + h) * this.headSize;
         int oBase = (token * heads + h) * this.headSize;
-        for (int i = 0; i < half; i++) {
+        for (int i = 0; i < pairs; i++) {
           float x1 = in.data()[base + i];
-          float x2 = in.data()[base + half + i];
+          float x2 = in.data()[base + pairs + i];
           float cos = this.cosSinCache.data()[cBase + i];
-          float sin = this.cosSinCache.data()[cBase + half + i];
+          float sin = this.cosSinCache.data()[cBase + pairs + i];
           out.data()[oBase + i] = x1 * cos - x2 * sin;
-          out.data()[oBase + half + i] = x2 * cos + x1 * sin;
+          out.data()[oBase + pairs + i] = x2 * cos + x1 * sin;
+        }
+        for (int i = this.rotaryDim; i < this.headSize; i++) {
+          out.data()[oBase + i] = in.data()[base + i];
         }
       }
     }
@@ -383,6 +423,23 @@ public final class Norms {
         return this.byKey.computeIfAbsent(
           "p:" + headSize + ":" + maxPosition + ":" + base + ":" + partialRotaryFactor,
           k -> RotaryEmbedding.proportional(headSize, maxPosition, base, partialRotaryFactor));
+      }
+
+      /**
+       * Leading partial-RoPE table for Qwen3.5 full attention, created once per key.
+       *
+       * @return cached {@link RotaryEmbedding#leading}
+       * @since 1.5.0
+       */
+      public RotaryEmbedding leading(
+        final int headSize,
+        final int rotaryDim,
+        final int maxPosition,
+        final float base
+      ) {
+        return this.byKey.computeIfAbsent(
+          "lead:" + headSize + ":" + rotaryDim + ":" + maxPosition + ":" + base,
+          k -> RotaryEmbedding.leading(headSize, rotaryDim, maxPosition, base));
       }
     }
   }

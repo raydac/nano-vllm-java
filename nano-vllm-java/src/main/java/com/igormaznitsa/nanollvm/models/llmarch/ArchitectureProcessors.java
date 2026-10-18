@@ -7,6 +7,7 @@ import static com.igormaznitsa.nanollvm.models.internal.WeightNames.ARCH_LFM2;
 import static com.igormaznitsa.nanollvm.models.internal.WeightNames.ARCH_LLAMA;
 import static com.igormaznitsa.nanollvm.models.internal.WeightNames.ARCH_PIPER;
 import static com.igormaznitsa.nanollvm.models.internal.WeightNames.ARCH_QWEN3;
+import static com.igormaznitsa.nanollvm.models.internal.WeightNames.ARCH_QWEN3_5;
 import static com.igormaznitsa.nanollvm.models.internal.WeightNames.ARCH_WHISPER;
 import static java.util.Objects.requireNonNull;
 
@@ -22,8 +23,8 @@ public final class ArchitectureProcessors {
   }
 
   /**
-   * Processor for {@code architectureId} ({@code qwen3}, {@code gemma3}, {@code gemma4},
-   * {@code llama}, {@code lfm2}, {@code bert}, {@code whisper}, {@code piper}).
+   * Processor for {@code architectureId} ({@code qwen3}, {@code qwen3_5}, {@code gemma3},
+   * {@code gemma4}, {@code llama}, {@code lfm2}, {@code bert}, {@code whisper}, {@code piper}).
    *
    * @param architectureId canonical backend id
    * @return singleton processor for that family
@@ -33,6 +34,7 @@ public final class ArchitectureProcessors {
   public static ArchitectureProcessor of(final String architectureId) {
     return switch (requireNonNull(architectureId, "architectureId")) {
       case ARCH_QWEN3 -> Qwen3Processor.INSTANCE;
+      case ARCH_QWEN3_5 -> Qwen35Processor.INSTANCE;
       case ARCH_GEMMA3 -> Gemma3Processor.INSTANCE;
       case ARCH_GEMMA4 -> Gemma4Processor.INSTANCE;
       case ARCH_LLAMA -> LlamaProcessor.INSTANCE;

@@ -99,6 +99,12 @@ class ExampleModelMenuTest {
   }
 
   @Test
+  void catalogIncludesJeffQwen35() {
+    assertTrue(Example.catalog().stream()
+      .anyMatch(choice -> choice.label().contains("Jeff-Qwen3.5-0.8B")));
+  }
+
+  @Test
   void modelMenuSelectsXlmRobertaWhenPresent() throws Exception {
     Path xlm = SampleModelAssumptions.requireXlmRobertaBase();
     Path chosen = Example.resolveModel(

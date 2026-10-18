@@ -1254,7 +1254,7 @@ class CoreUnitTest {
                 1e6f, null, "float32", "gemma3_text",
                 List.of("Gemma3ForCausalLM"), "gelu_pytorch_tanh",
               512, List.of("sliding_attention"), 10_000f, 256f, 0, false, false, false, false,
-              false, null, null, null)));
+              false, null, null, null, null)));
 
     Path dir = createTempDirectory("gemma-tok");
     try {

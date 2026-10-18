@@ -24,6 +24,19 @@ Qwen3 also loads from a **single `.gguf`** (`general.architecture=qwen3`, **sinc
 script for that crate — place a file yourself (for example
 [Qwen/Qwen3-0.6B-GGUF](https://huggingface.co/Qwen/Qwen3-0.6B-GGUF)) and pass its path to `LlmModelFactory.make`.
 
+## Jeff-Qwen3.5-0.8B (optional)
+
+Text checkpoint of a Qwen3.5-0.8B fine-tune. Apache 2.0, ungated. The script skips the vision files
+and the Jeff readout head. Chat and `toJev()` use the causal language model.
+
+```bash
+./models/download-jeff-qwen3.5-0.8b.sh
+```
+
+Windows: `.\models\download-jeff-qwen3.5-0.8b.ps1` or `models\download-jeff-qwen3.5-0.8b.cmd`.
+
+Creates `models/Jeff-Qwen3.5-0.8B/` (~1.7GB).
+
 ## Gemma3-270M (optional)
 
 Instruction-tuned text Gemma 3 (270M). **License-gated** on Hugging Face — accept terms at

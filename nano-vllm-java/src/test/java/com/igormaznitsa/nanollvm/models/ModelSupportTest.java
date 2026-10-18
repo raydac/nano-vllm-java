@@ -71,23 +71,45 @@ class ModelSupportTest {
   }
 
   @Test
-  void rejectsQwen35AndDoesNotCallItQwen3() {
-    Config.HfConfig fara = parse("""
+  void acceptsQwen35TextAndDoesNotCallItQwen3() {
+    Config.HfConfig jeff = parse("""
       {
         "model_type": "qwen3_5",
         "architectures": ["Qwen3_5ForConditionalGeneration"],
         "image_token_id": 1,
         "vision_config": {"hidden_size": 1024},
-        "text_config": {"hidden_size": 2560, "layer_types": ["linear_attention"]}
+        "text_config": {
+          "model_type": "qwen3_5_text",
+          "hidden_size": 1024,
+          "num_hidden_layers": 4,
+          "num_attention_heads": 8,
+          "num_key_value_heads": 2,
+          "head_dim": 64,
+          "intermediate_size": 512,
+          "vocab_size": 128,
+          "partial_rotary_factor": 0.25,
+          "rope_parameters": {"rope_theta": 1000000, "partial_rotary_factor": 0.5},
+          "layer_types": ["linear_attention", "linear_attention", "linear_attention", "full_attention"]
+        }
       }
       """);
-    UnsupportedModelException ex = assertThrows(
-      UnsupportedModelException.class, () -> CausalLMFactory.detect(fara));
-    assertEquals("qwen3_5", ex.modelType());
-    assertTrue(ex.getMessage().contains("Qwen3.5"));
-    assertFalse(ex.getMessage().contains("unsupported chat architecture after detect"));
-    assertTrue(ex.getMessage().contains("qwen3"));
-    assertTrue(ex.getMessage().contains(ModelSupport.CATALOG.split("\n", 2)[0]));
+    assertEquals(WeightNames.ARCH_QWEN3_5, CausalLMFactory.detect(jeff));
+    assertEquals(1024, jeff.hiddenSize());
+    assertEquals(4, jeff.numHiddenLayers());
+    assertTrue(jeff.isQwen35());
+    assertTrue(jeff.visionConfigPresent());
+    assertTrue(jeff.nestedTextConfig());
+    assertTrue(jeff.isLinearAttentionLayer(0));
+    assertFalse(jeff.isLinearAttentionLayer(3));
+    assertFalse(jeff.allocatesKv(0));
+    assertTrue(jeff.allocatesKv(3));
+    assertEquals(0.5f, jeff.qwen35().partialRotaryFactor());
+    assertEquals(WeightNames.ARCH_QWEN3_5, ModelSupport.resolve(jeff).architectureId());
+
+    UnsupportedModelException next = assertThrows(
+      UnsupportedModelException.class,
+      () -> ModelSupport.resolve(parse("{\"model_type\":\"qwen3_next\"}")));
+    assertTrue(next.getMessage().contains("Qwen3-Next"));
   }
 
   @Test

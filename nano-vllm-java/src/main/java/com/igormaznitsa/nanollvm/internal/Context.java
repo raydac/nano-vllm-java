@@ -1,6 +1,7 @@
 package com.igormaznitsa.nanollvm.internal;
 
 import com.igormaznitsa.nanollvm.engine.ConvStateArena;
+import com.igormaznitsa.nanollvm.engine.DeltaNetStateArena;
 import com.igormaznitsa.nanollvm.engine.KvCacheArena;
 import com.igormaznitsa.nanollvm.tensor.MatmulRuntime;
 
@@ -22,6 +23,7 @@ public final class Context {
   private int[] seqIds;
   private KvCacheArena kvCache;
   private ConvStateArena convCache;
+  private DeltaNetStateArena deltaCache;
   private MatmulRuntime matmul;
 
   /**
@@ -36,6 +38,15 @@ public final class Context {
    */
   public void bindConvCache(final ConvStateArena arena) {
     this.convCache = arena;
+  }
+
+  /**
+   * Binds the Qwen3.5 Gated DeltaNet state arena for this step. {@code null} clears the binding.
+   *
+   * @since 1.5.0
+   */
+  public void bindDeltaCache(final DeltaNetStateArena arena) {
+    this.deltaCache = arena;
   }
 
   /**
@@ -96,6 +107,7 @@ public final class Context {
     this.seqIds = null;
     this.kvCache = null;
     this.convCache = null;
+    this.deltaCache = null;
     this.matmul = null;
   }
 
@@ -174,6 +186,15 @@ public final class Context {
    */
   public ConvStateArena convCache() {
     return this.convCache;
+  }
+
+  /**
+   * Gated DeltaNet state arena bound for this step, or {@code null}.
+   *
+   * @since 1.5.0
+   */
+  public DeltaNetStateArena deltaCache() {
+    return this.deltaCache;
   }
 
   /**

@@ -1506,6 +1506,10 @@ public final class Example {
         BundledModels.QWEN3_0_6B,
         "Run models/download-qwen3-0.6b.sh"),
       choice(
+        "Jeff-Qwen3.5-0.8B (chat, safetensors, ~1.7GB)",
+        BundledModels.JEFF_QWEN35_0_8B,
+        "Run models/download-jeff-qwen3.5-0.8b.sh"),
+      choice(
         "Gemma3-270M (chat, safetensors)",
         BundledModels.GEMMA3_270M,
         "Run models/download-gemma3-270m.sh (HF license + HF_TOKEN)"),
@@ -1615,6 +1619,7 @@ public final class Example {
     console.println("Download a chat checkpoint (recommended) and retry:");
     console.println();
     console.println("  ./models/download-qwen3-0.6b.sh");
+    console.println("  ./models/download-jeff-qwen3.5-0.8b.sh");
     console.println();
     console.println("Other checkpoints:");
     console.println("  ./models/download-gemma3-270m.sh      (HF license + HF_TOKEN)");

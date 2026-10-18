@@ -23,6 +23,7 @@ models/whisper-tiny/
 models/piper-ru-irina-medium/
 models/piper-en-lessac-medium/
 models/fasttext-lid-176/
+models/Jeff-Qwen3.5-0.8B
 
 *.wav
 

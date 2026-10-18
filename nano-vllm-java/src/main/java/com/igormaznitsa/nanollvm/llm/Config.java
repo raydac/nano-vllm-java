@@ -125,7 +125,7 @@ public final class Config {
   private static long kvBytesPerBlock(final HfConfig hf, final int blockSize) {
     long bytesPerBlock = 0L;
     for (int layer = 0; layer < hf.numHiddenLayers(); layer++) {
-      if (hf.isKvSharedLayer(layer)) {
+      if (!hf.allocatesKv(layer)) {
         continue;
       }
       bytesPerBlock +=
@@ -133,6 +133,9 @@ public final class Config {
     }
     if (bytesPerBlock > 0L) {
       return bytesPerBlock;
+    }
+    if (hf.hasLinearAttentionLayers()) {
+      return 1L;
     }
     return 2L * hf.numHiddenLayers() * blockSize
       * hf.numKeyValueHeads() * hf.headDim() * Float.BYTES;
@@ -522,6 +525,7 @@ public final class Config {
    * @param gemma4                Gemma 4 text extras; {@code null} for other families
    * @param whisper               Whisper encoder/decoder extras; {@code null} for other families
    * @param piper                 Piper VITS extras; {@code null} for other families
+   * @param qwen35                Qwen3.5 linear-attention extras; {@code null} for other families
    */
   public record HfConfig(
     int vocabSize,
@@ -554,7 +558,8 @@ public final class Config {
     boolean nestedTextConfig,
     Gemma4Text gemma4,
     WhisperSpec whisper,
-    PiperSpec piper
+    PiperSpec piper,
+    Qwen35Text qwen35
   ) {
     public HfConfig {
       ropeScaling = freezeStringKeyedMap(ropeScaling);
@@ -612,9 +617,12 @@ public final class Config {
       Map<String, Object> root = Json.parseObject(requireNonNull(configJson, "configJson"));
       String modelType = Json.asString(root.get("model_type"));
       boolean nestedText = root.get("text_config") instanceof Map<?, ?>;
+      boolean qwen35Family = isQwen35Family(modelType);
       ModalityFlags flags = modalityFlags(root);
       Map<String, Object> m = isGemma4Family(modelType) && nestedText
         ? flattenGemma4Text(root)
+        : qwen35Family && nestedText
+        ? flattenQwen35Text(root)
         : root;
       if (isGemma4Family(modelType)) {
         modelType = Json.asString(root.get("model_type"));
@@ -704,6 +712,7 @@ public final class Config {
         }
       }
       RopeBases rope = resolveRopeBases(m);
+      Qwen35Text qwen35 = qwen35Family ? parseQwen35(m, rope.partialRotaryFactor()) : null;
       return new HfConfig(
         vocabSize,
         hiddenSize,
@@ -736,7 +745,8 @@ public final class Config {
         nestedText,
         isGemma4Family(modelType) ? parseGemma4Text(m, rope.partialRotaryFactor()) : null,
         whisper,
-        piper
+        piper,
+        qwen35
       );
     }
 
@@ -769,6 +779,33 @@ public final class Config {
       Map<String, Object> merged = new LinkedHashMap<>(text);
       merged.put("model_type", Json.asString(root.get("model_type")));
       return merged;
+    }
+
+    private static Map<String, Object> flattenQwen35Text(final Map<String, Object> root) {
+      Map<String, Object> text = Json.asObject(root.get("text_config"));
+      Map<String, Object> merged = new LinkedHashMap<>(text);
+      merged.put("model_type", Json.asString(root.get("model_type")));
+      return merged;
+    }
+
+    static boolean isQwen35Family(final String modelType) {
+      return "qwen3_5".equals(modelType) || "qwen3_5_text".equals(modelType);
+    }
+
+    private static Qwen35Text parseQwen35(final Map<String, Object> m,
+                                          final float partialFromRope) {
+      float partial = Json.asFloat(m.get("partial_rotary_factor"), partialFromRope);
+      Map<String, Object> ropeParams = Json.asObject(m.get("rope_parameters"));
+      if (ropeParams != null && ropeParams.containsKey("partial_rotary_factor")) {
+        partial = Json.asFloat(ropeParams.get("partial_rotary_factor"), partial);
+      }
+      return new Qwen35Text(
+        Json.asInt(m.get("linear_conv_kernel_dim"), 4),
+        Json.asInt(m.get("linear_key_head_dim"), 128),
+        Json.asInt(m.get("linear_num_key_heads"), 16),
+        Json.asInt(m.get("linear_num_value_heads"), 16),
+        Json.asInt(m.get("linear_value_head_dim"), 128),
+        partial);
     }
 
     private static RopeBases resolveRopeBases(final Map<String, Object> m) {
@@ -849,7 +886,8 @@ public final class Config {
         false,
         null,
         null,
-        spec);
+        spec,
+        null);
     }
 
     /**
@@ -896,6 +934,7 @@ public final class Config {
         false,
         false,
         false,
+        null,
         null,
         null,
         null);
@@ -990,9 +1029,8 @@ public final class Config {
     }
 
     /**
-     * {@code true} when {@link #layerTypes()} names a linear-attention layer. Those hybrids
-     * (Qwen3.5 / Fara-style Gated DeltaNet) are not supported; load fails via
-     * {@link com.igormaznitsa.nanollvm.models.ModelSupport} before weights bind.
+     * {@code true} when {@link #layerTypes()} names a linear-attention layer (Qwen3.5 Gated
+     * DeltaNet). Those layers keep conv and recurrent state instead of a KV page.
      *
      * @return whether any layer type contains {@code linear_attention}
      * @since 1.1.0
@@ -1001,6 +1039,43 @@ public final class Config {
       return this.layerTypes.stream()
         .anyMatch(
           type -> type != null && type.toLowerCase(Locale.ROOT).contains("linear_attention"));
+    }
+
+    /**
+     * {@code true} when layer {@code layerIndex} is Qwen3.5 Gated DeltaNet rather than full
+     * attention.
+     *
+     * @param layerIndex zero-based transformer layer
+     * @return whether this layer runs the delta-rule mixer
+     * @since 1.5.0
+     */
+    public boolean isLinearAttentionLayer(final int layerIndex) {
+      if (layerIndex < 0 || layerIndex >= this.layerTypes.size()) {
+        return false;
+      }
+      String type = this.layerTypes.get(layerIndex);
+      return type != null && type.toLowerCase(Locale.ROOT).contains("linear_attention");
+    }
+
+    /**
+     * {@code true} when layer {@code layerIndex} writes its own KV cache. Linear-attention
+     * layers and Gemma 4 shared-KV consumers do not.
+     *
+     * @param layerIndex zero-based transformer layer
+     * @return whether the KV arena allocates pages for this layer
+     * @since 1.5.0
+     */
+    public boolean allocatesKv(final int layerIndex) {
+      return !this.isLinearAttentionLayer(layerIndex) && !this.isKvSharedLayer(layerIndex);
+    }
+
+    /**
+     * {@code true} when this blueprint is Qwen3.5 text (hybrid Gated DeltaNet).
+     *
+     * @since 1.5.0
+     */
+    public boolean isQwen35() {
+      return this.qwen35 != null;
     }
 
     /**
@@ -1281,5 +1356,40 @@ public final class Config {
     float finalLogitSoftcapping,
     boolean enableMoeBlock
   ) {
+  }
+
+  /**
+   * Qwen3.5 Gated DeltaNet widths and the fraction of each full-attention head that RoPE rotates.
+   *
+   * @param linearConvKernelDim causal conv kernel
+   * @param linearKeyHeadDim    key head width inside the delta rule
+   * @param linearNumKeyHeads   key heads
+   * @param linearNumValueHeads value heads
+   * @param linearValueHeadDim  value head width
+   * @param partialRotaryFactor leading fraction of the full-attention head that rotates
+   * @since 1.5.0
+   */
+  public record Qwen35Text(
+    int linearConvKernelDim,
+    int linearKeyHeadDim,
+    int linearNumKeyHeads,
+    int linearNumValueHeads,
+    int linearValueHeadDim,
+    float partialRotaryFactor
+  ) {
+    /**
+     * Depthwise conv channels: two key projections plus the value projection.
+     */
+    public int convChannels() {
+      return this.linearKeyHeadDim * this.linearNumKeyHeads * 2
+        + this.linearValueHeadDim * this.linearNumValueHeads;
+    }
+
+    /**
+     * Recurrent state length {@code valueHeads * keyHeadDim * valueHeadDim}.
+     */
+    public int recurrentFloats() {
+      return this.linearNumValueHeads * this.linearKeyHeadDim * this.linearValueHeadDim;
+    }
   }
 }

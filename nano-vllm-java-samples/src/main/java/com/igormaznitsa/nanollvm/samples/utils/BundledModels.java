@@ -24,6 +24,12 @@ public final class BundledModels {
   public static final String DEFAULT_MODELS_DIR = "models";
   public static final String DEFAULT_MODEL_NAME = "Qwen3-0.6B";
   public static final String QWEN3_0_6B = DEFAULT_MODELS_DIR + "/" + DEFAULT_MODEL_NAME;
+  /**
+   * Jeff v1.2 Qwen3.5-0.8B text folder under {@link #DEFAULT_MODELS_DIR}.
+   *
+   * @since 1.5.0
+   */
+  public static final String JEFF_QWEN35_0_8B = DEFAULT_MODELS_DIR + "/Jeff-Qwen3.5-0.8B";
   public static final String GEMMA3_270M = DEFAULT_MODELS_DIR + "/Gemma3-270M";
   /**
    * Bundled Gemma 4 E2B QAT mobile folder under {@link #DEFAULT_MODELS_DIR}.
@@ -281,6 +287,7 @@ public final class BundledModels {
     String key = stripModelsPrefix(modelPathOrName.strip());
     String script = switch (key) {
       case DEFAULT_MODEL_NAME -> "models/download-qwen3-0.6b.sh";
+      case "Jeff-Qwen3.5-0.8B" -> "models/download-jeff-qwen3.5-0.8b.sh";
       case "Gemma3-270M" -> "models/download-gemma3-270m.sh (HF license + HF_TOKEN)";
       case "Gemma4-E2B-IT-QAT-Mobile" -> "models/download-gemma4-e2b-qat-mobile.sh";
       case "LFM2.5-2.6B-Q4_K_M.gguf" -> "models/download-lfm2.5-2.6b-gguf.sh";

@@ -27,6 +27,9 @@ Development snapshot after the **1.4.0** public release.
   at L0 and RAW, a yes/no, a score, and the label prior turning on after eight states. `Example`
   can open the same API as a prompt: pick Jev after the model, set `/choice`, `/yesno`, or
   `/score`, then type a state on each line.
+- Qwen3.5 text chat loads from Hugging Face safetensors (`model_type` `qwen3_5`), including
+  Jeff-Qwen3.5-0.8B via `models/download-jeff-qwen3.5-0.8b.sh`. The vision tower is skipped.
+  `LLM.builder(model).toJev()` works on that causal model the same way as on Qwen3.
 - Sample `KernelChatBench` compares scalar Java, Vector API, and TornadoVM (skipped when no
   device) on the same greedy chat: one child JVM per kernel, a console tok/s table, and a
   well-formed `kernel-chat-bench.svg` bar chart. Default model is Gemma3-270M. Vector API always

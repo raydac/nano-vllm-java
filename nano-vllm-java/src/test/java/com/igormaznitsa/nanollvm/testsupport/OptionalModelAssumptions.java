@@ -35,8 +35,16 @@ public final class OptionalModelAssumptions {
   private static final String PIPER_RU_IRINA_MEDIUM = "piper-ru-irina-medium";
   private static final String PIPER_EN_LESSAC_MEDIUM = "piper-en-lessac-medium";
   private static final String FASTTEXT_LID_176 = "fasttext-lid-176";
+  private static final String JEFF_QWEN35_0_8B = "Jeff-Qwen3.5-0.8B";
 
   private OptionalModelAssumptions() {
+  }
+
+  public static Path requireJeffQwen35() {
+    return require(
+      findModel(JEFF_QWEN35_0_8B),
+      "Jeff-Qwen3.5-0.8B",
+      "models/download-jeff-qwen3.5-0.8b.sh");
   }
 
   public static Path requireQwen3() {

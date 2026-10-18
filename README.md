@@ -433,9 +433,9 @@ models/Qwen3-0.6B/
 ```
 
 At load time, `LlmModelFactory` reads `config.json`, checks the architecture against `ModelSupport` (exact family
-names — `qwen3_5` is not `qwen3`), builds the matching graph (Qwen3, Gemma3, Gemma 4 text, Llama, Whisper, Piper, …), loads
+names — `qwen3_5` is its own graph, not `qwen3`), builds the matching graph (Qwen3, Qwen3.5 text, Gemma3, Gemma 4 text, Llama, Whisper, Piper, …), loads
 weights from safetensors (including packed Gemma 4 QAT) **or** ONNX initializers (Qwen3 / Gemma3 / Llama / BERT / Piper — not
-Gemma 4), and constructs the tokenizer. `-Dnanollvm.arch=qwen3|gemma3|gemma4|llama|lfm2|bert|whisper|piper` may only confirm a
+Gemma 4 or Qwen3.5), and constructs the tokenizer. `-Dnanollvm.arch=qwen3|qwen3_5|gemma3|gemma4|llama|lfm2|bert|whisper|piper` may only confirm a
 matching checkpoint, not override a different family. Unsupported models throw `UnsupportedModelException` with the
 support catalog. If both `*.safetensors` and `*.onnx` are present, safetensors wins (BERT folders prefer ONNX because
 HF BERT safetensors is not supported). Piper voices are a folder of `*.onnx` + `*.onnx.json` (no `config.json`).
@@ -521,6 +521,16 @@ is still **16 GB** (safe headroom for KV / scratch); packed weights alone are 
 
 ```bash
 ./models/download-qwen3-0.6b.sh
+```
+
+**Jeff-Qwen3.5-0.8B (optional, Apache 2.0, ~1.7 GB)**
+
+[jeff-legacy/Jeff-Qwen3.5-0.8B](https://huggingface.co/jeff-legacy/Jeff-Qwen3.5-0.8B). Creates
+`models/Jeff-Qwen3.5-0.8B/`. Text chat only (vision tower skipped). Load it like any other causal
+model, then `LLM.builder(model).toJev()` reads the next-token decision.
+
+```bash
+./models/download-jeff-qwen3.5-0.8b.sh
 ```
 
 **Gemma3-270M (optional, license on Hugging Face)**

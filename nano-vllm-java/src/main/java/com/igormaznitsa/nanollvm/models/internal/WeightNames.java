@@ -15,6 +15,12 @@ public final class WeightNames {
    */
   public static final String ARCH_GEMMA4 = "gemma4";
   public static final String ARCH_QWEN3 = "qwen3";
+  /**
+   * Hugging Face {@code model_type} for Qwen3.5 text (hybrid Gated DeltaNet).
+   *
+   * @since 1.5.0
+   */
+  public static final String ARCH_QWEN3_5 = "qwen3_5";
   public static final String ARCH_LFM2 = "lfm2";
   /**
    * Hugging Face {@code model_type} for Llama (including SmolLM2 / Tiny-LLM).
@@ -106,6 +112,15 @@ public final class WeightNames {
 
   public static String selfAttn(final int layerIndex) {
     return layer(layerIndex) + "self_attn.";
+  }
+
+  /**
+   * Qwen3.5 Gated DeltaNet parameter prefix for one layer.
+   *
+   * @since 1.5.0
+   */
+  public static String linearAttn(final int layerIndex) {
+    return layer(layerIndex) + "linear_attn.";
   }
 
   public static String mlp(final int layerIndex) {

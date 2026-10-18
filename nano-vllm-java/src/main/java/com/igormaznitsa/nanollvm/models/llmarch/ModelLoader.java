@@ -158,21 +158,39 @@ public final class ModelLoader {
     final WeightSchema schema,
     final Map<String, Object[]> packed
   ) {
+    String canonical = canonicalWeightName(weightName);
     for (var e : packed.entrySet()) {
       String key = e.getKey();
-      if (weightName.contains(key)) {
-        Object[] mapping = e.getValue();
-        String paramName = weightName.replace(key, (String) mapping[0]);
-        if (!schema.accepts(paramName)) {
-          return null;
-        }
+      if (!canonical.contains(key)) {
+        continue;
+      }
+      Object[] mapping = e.getValue();
+      String paramName = canonical.replace(key, (String) mapping[0]);
+      if (schema.accepts(paramName)) {
         return new ResolvedParam(paramName, mapping[1]);
       }
     }
-    if (!schema.accepts(weightName)) {
+    if (!schema.accepts(canonical)) {
       return null;
     }
-    return new ResolvedParam(weightName, null);
+    return new ResolvedParam(canonical, null);
+  }
+
+  /**
+   * Maps a multimodal language-tower name onto the text schema.
+   * {@code model.language_model.*} and {@code language_model.*} both become {@code model.*}.
+   * Other names are unchanged.
+   */
+  static String canonicalWeightName(final String weightName) {
+    String nested = "model.language_model.";
+    if (weightName.startsWith(nested)) {
+      return "model." + weightName.substring(nested.length());
+    }
+    String root = "language_model.";
+    if (weightName.startsWith(root)) {
+      return "model." + weightName.substring(root.length());
+    }
+    return weightName;
   }
 
   private interface ShardMerge {

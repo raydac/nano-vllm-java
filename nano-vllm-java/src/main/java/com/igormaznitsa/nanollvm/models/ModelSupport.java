@@ -8,6 +8,7 @@ import static com.igormaznitsa.nanollvm.models.internal.WeightNames.ARCH_LFM2;
 import static com.igormaznitsa.nanollvm.models.internal.WeightNames.ARCH_LLAMA;
 import static com.igormaznitsa.nanollvm.models.internal.WeightNames.ARCH_PIPER;
 import static com.igormaznitsa.nanollvm.models.internal.WeightNames.ARCH_QWEN3;
+import static com.igormaznitsa.nanollvm.models.internal.WeightNames.ARCH_QWEN3_5;
 import static com.igormaznitsa.nanollvm.models.internal.WeightNames.ARCH_WHISPER;
 import static com.igormaznitsa.nanollvm.utils.NanoLlvmProps.PROP_ARCH;
 import static java.nio.charset.StandardCharsets.UTF_8;
@@ -43,14 +44,14 @@ public final class ModelSupport {
    */
   public static final String CATALOG = """
     Supported by this library:
-      Chat from a Hugging Face folder (config.json + *.safetensors or *.onnx): qwen3, gemma3 / gemma3_text, \
+      Chat from a Hugging Face folder (config.json + *.safetensors or *.onnx): qwen3, qwen3_5 (text; vision tower skipped), gemma3 / gemma3_text, \
     gemma4 (text / QAT mobile), llama
       Chat from a GGUF file: qwen3, lfm2
       Embeddings from GGUF or ONNX: bert encoder (bert / roberta / xlm-roberta)
       Speech from a Hugging Face folder (config.json + *.safetensors): whisper (openai/whisper-*)
       Speech synthesis from a Piper voice folder (*.onnx + *.onnx.json): piper
       Text classification / language id from a Meta fastText file (*.bin / *.ftz): fasttext (lid.176)
-    Not supported: Qwen2 / Qwen2.5, Qwen3.5 / Qwen3-Next / Fara, vision-language models, Gemma 1 / 2, \
+    Not supported: Qwen2 / Qwen2.5, Qwen3-Next, Qwen3.5 MoE, vision-language inputs, Gemma 1 / 2, \
     Gemma 4 vision/audio towers, Mistral / Mixtral, Phi, MoE, GGUF Llama / Gemma, Hugging Face BERT safetensors, \
     CTranslate2 / faster-whisper model.bin, Whisper GGUF / ONNX, ONNX Runtime Piper execution, \
     unsupervised fastText word vectors, JNI fastText bindings.""";
@@ -489,7 +490,8 @@ public final class ModelSupport {
       }
       if (isMultimodalClass(raw.toLowerCase(ROOT))) {
         if (fromName != null && (ARCH_GEMMA4.equals(fromName.selection().architectureId())
-          || ARCH_WHISPER.equals(fromName.selection().architectureId()))) {
+          || ARCH_WHISPER.equals(fromName.selection().architectureId())
+          || ARCH_QWEN3_5.equals(fromName.selection().architectureId()))) {
           if (firstSupported == null) {
             firstSupported = fromName;
           }
@@ -513,18 +515,21 @@ public final class ModelSupport {
       }
       return Optional.empty();
     }
+    if (config.isQwen35()) {
+      return Optional.empty();
+    }
     if (config.visionConfigPresent() || config.audioConfigPresent()) {
       return Optional.of(multimodalReason(config.modelType()));
     }
     if (config.nestedTextConfig()) {
       return Optional.of(
-        "This checkpoint uses a nested text_config / composite layout (typical of Qwen3.5 and "
+        "This checkpoint uses a nested text_config / composite layout (typical of "
           + "vision-language models), which this library does not load.");
     }
     if (config.hasLinearAttentionLayers()) {
       return Optional.of(
-        "This checkpoint declares linear_attention layers (Gated DeltaNet / Qwen3.5-style hybrid). "
-          + "This library only implements dense GQA transformer blocks.");
+        "This checkpoint declares linear_attention layers outside the qwen3_5 text graph. "
+          + "This library implements that mixer only for model_type qwen3_5.");
     }
     return Optional.empty();
   }
@@ -544,7 +549,7 @@ public final class ModelSupport {
     String forcedId = normalizeForcedAlias(forced);
     if (forcedId == null) {
       throw unsupported(
-        "'%s' is not a valid -D%s value (use qwen3, gemma3, gemma4, llama, lfm2, bert, whisper, or piper)."
+        "'%s' is not a valid -D%s value (use qwen3, qwen3_5, gemma3, gemma4, llama, lfm2, bert, whisper, or piper)."
           .formatted(forced, PROP_ARCH),
         modelType,
         architectures);
@@ -568,6 +573,14 @@ public final class ModelSupport {
     String modelType = config == null ? id : config.modelType();
     List<String> architectures = config == null ? List.of() : config.architectures();
     boolean hfFolderOnlyChat = ARCH_GEMMA3.equals(id) || ARCH_LLAMA.equals(id);
+    if (ARCH_QWEN3_5.equals(id) && source != Source.HF_SAFETENSORS) {
+      throw unsupported(
+        ("Architecture '%s' loads from a Hugging Face folder (config.json + *.safetensors). "
+          + "The text decoder runs; the vision tower is skipped. GGUF and ONNX are not supported.")
+          .formatted(id),
+        modelType,
+        architectures);
+    }
     if (ARCH_GEMMA4.equals(id) && source != Source.HF_SAFETENSORS) {
       throw unsupported(
         ("Architecture '%s' loads from a Hugging Face folder (config.json + *.safetensors QAT), "
@@ -627,12 +640,14 @@ public final class ModelSupport {
     if (isQwen3Text(token)) {
       return Verdict.ok(ARCH_QWEN3, Kind.CHAT);
     }
+    if (token.equals("qwen3_5") || token.equals("qwen3_5_text")) {
+      return Verdict.ok(ARCH_QWEN3_5, Kind.CHAT);
+    }
     if (token.startsWith("qwen3_5") || token.startsWith("qwen3_next") ||
       token.equals("qwen3next")) {
       return Verdict.rejected(
-        "Qwen3.5 / Qwen3-Next / Fara use hybrid Gated DeltaNet + gated attention"
-          + (token.contains("5") ? " (and often a vision tower)" : "")
-          + ". This library implements Qwen3 text-only, not Qwen3.5.");
+        "Qwen3.5 MoE / Qwen3-Next are not implemented. This library runs dense Qwen3.5 text "
+          + "(model_type qwen3_5) and Qwen3.");
     }
     if (token.contains("qwen3_vl") || token.contains("qwen3vl") || token.startsWith("qwen3_moe")) {
       return Verdict.rejected(
@@ -760,7 +775,8 @@ public final class ModelSupport {
 
   private static String multimodalReason(final String label) {
     return ("Vision-language / multimodal checkpoint '%s' is not supported. This library runs "
-      + "text-only chat (qwen3, gemma3, gemma4, llama, lfm2) and BERT-encoder embeddings.")
+      +
+      "text-only chat (qwen3, qwen3_5 text, gemma3, gemma4, llama, lfm2) and BERT-encoder embeddings.")
       .formatted(blank(label));
   }
 
@@ -835,6 +851,7 @@ public final class ModelSupport {
   private static String normalizeForcedAlias(final String forced) {
     return switch (forced) {
       case ARCH_QWEN3 -> ARCH_QWEN3;
+      case ARCH_QWEN3_5, "qwen3_5_text" -> ARCH_QWEN3_5;
       case ARCH_GEMMA3, "gemma3_text" -> ARCH_GEMMA3;
       case ARCH_GEMMA4, "gemma4_text" -> ARCH_GEMMA4;
       case ARCH_LLAMA, "llama2", "llama3" -> ARCH_LLAMA;

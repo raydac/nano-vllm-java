@@ -17,7 +17,8 @@ import com.igormaznitsa.nanollvm.models.llmcontainer.ContainerCatalog;
  * @since 1.1.0
  */
 abstract sealed class CausalArchitecture implements ArchitectureProcessor
-  permits Qwen3Processor, Gemma3Processor, Gemma4Processor, LlamaProcessor, Lfm2Processor {
+  permits Qwen3Processor, Qwen35Processor, Gemma3Processor, Gemma4Processor, LlamaProcessor,
+  Lfm2Processor {
 
   /**
    * Chat families are never embedding encoders.
