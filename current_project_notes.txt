@@ -1,85 +1,36 @@
 ## 1. Implementation Progress
-- Maven multi-module **`1.5.0-SNAPSHOT`** in development (parent `nano-vllm-java-pom`). Last public release **`1.4.0`** **2026-09-06** (post **1.3.0** 2026-08-29; previous 1.2.0 / 1.1.0 / 1.0.0). Library `nano-vllm-java`, samples `nano-vllm-java-samples`. Enforcer Java `[21,)`, Maven `[3.8,)`. JPMS module `com.igormaznitsa.nanollvm` (library only).
-- Five graph kinds, one factory + `LLM.builder`: chat (Qwen3 / Gemma3 / Gemma 4 text QAT / Llama / LFM2 GGUF), BERT embeddings (`bert` / `roberta` / `xlm-roberta` GGUF or ONNX), Whisper STT (HF safetensors), Piper TTS (`*.onnx` + `*.onnx.json`), fastText classification (`*.bin` / `*.ftz`). Public non-chat entry is typed `generate(LlmInput, LlmModality)` — modality carries `resultType` / `cast` so the return is the concrete `LlmOut*` without a caller cast (**since 1.4.0**). Chat stays `ChatSession` / `chatOnce`; batch stays `generate(List,…)`. Text completion needs `LLM`.
-- Containers: safetensors (Whisper + chat; Gemma 4 QAT packed), GGUF packed by default (`qwen3` / `lfm2` chat, `bert` embed), ONNX Tier A initializers only (chat / BERT / Piper; no ORT), fastText binary/quantized. `make(Path)` vs `ModelFileSource` / classpath (heap, no disk cache; ONNX `external_data` needs Path).
-- `ModelSupport`: exact family + catalog on `UnsupportedModelException`. Look-alikes fail before weight load. `-Dnanollvm.arch` may only confirm a matching id.
-- Tokenizers: package-private codecs behind public `Tokenizer` (GPT-2 BPE, Metaspace BPE, GGUF, WordPiece, Unigram+charsmap, WordLevel, Char, SentencePiece `tokenizer.model`).
-- CPU: panel GEMV, Vector-API 4-acc dots, SIMD Ops / RMSNorm / MLP / attention axpy; paged KV in place. `dedicatedMatmulPool` (1.2.0) is engine-owned. Nested pool work stays sequential (`POOL_WORKERS`). Optional TornadoVM (`tornado-api` optional/provided, `tornado-runtime` optional/runtime — not transitive). `-Dnanollvm.kernels=auto|tornado|vector|scalar`. **Tornado mode does not call the Vector API.** GEMV stays Kernel API (LRU 256, resident weights, one launch per layer). Chat attention is one `@Parallel` task per query range (`FloatKernels.attend`); lengths that change per token are read from a buffer. A single vector shorter than 65536 stays on scalar loops — one OpenCL launch is ~2 ms on PoCL, and a launch per attention score stalls the first token for minutes. Scalar is also the failure fallback.
-- Load extras: `open(path).optionalData(key, value)` → `OPTION_OPTIONAL_DATA` when non-empty. Piper: `LlmOptionalData.ESPEAK_DATA`.
-- Modalities: `modalities()` = checkpoint-declared; `usableModalities()` = what this port runs (text→text, text→embedding, audio→text, text→audio, text→labels).
-- RAG: `RagFactory` → BM25 `PreparedRag`; optional dense/hybrid (`withEmbeddings` / `HybridRagIndex.of` = RRF). Tuners `RagTuner` / `RagResource` (1.2.0). UTF-8 extract only — no PDF.
-- Samples: `HelloWorld`, `NextTokenHelloWorld`, `EmbeddingsHelloWorld`, `TranscribeHelloWorld`, `SynthesizeHelloWorld`, `VoiceReplyHelloWorld`, `LanguageIdHelloWorld` (fastText lid.176), `JevHelloWorld`, `LogTriageHelloWorld`, `AdvisorRagHelloWorld`, `RagTunerHelloWorld`, `Bench`, `KernelChatBench` (sequential child JVMs per kernel, console tok/s + `kernel-chat-bench.svg`), `Example`. Helpers: `BundledModels` / `BundledRag` / `OrderedConsole` / `KernelChatBenchSvg`.
-- Docs: README + Maven coords + `description.md` stay on last shipped **1.4.0** (never SNAPSHOT). CHANGELOG `[1.5.0-SNAPSHOT] — Unreleased` then `[1.4.0] — 2026-09-06`. Session GIF near top of README. Whisper/Piper/fastText Hello Worlds are short snippets; full programs in sample classes. `description.md` ch. **7f** = fastText; ch. **7g** = Jev decisions (**since 1.5.0**); typed generate / Tornado noted throughout. Root **`Models.mmd`** (Scia Reto) catalogs the five graph kinds, distinctive graph internals (collapsed), containers, load path, tokenizers, and Hub/source FILE+LINK extras. Family nodes flatten weights and downloads; arrows jump to containers and How to load.
-- `@since`: new 1.5.0 types/members get `@since 1.5.0`; do not retag older members (`LLM.generate` / `LlmModel.generate` stay `@since 1.3.0` with LABELS documented). `ResourceLimits` is 1.0. No `@since 1.3.1` tags.
-- Download scripts under `models/` (`.sh` + Windows `.ps1`/`.cmd`): Qwen3, Gemma3, Gemma4 E2B QAT, LFM2 GGUF, gte-small, e5, xlm-roberta-base, whisper-base/tiny, piper Lessac/Irina, fastText lid.176, Tiny-LLM-ONNX, SmolLM2 Instruct ONNX.
-- Concurrent test: `ConcurrentLibraryUseTest` (`-Pconcurrent_test`); needs SmolLM2 Instruct ONNX + gte-small. Default Surefire excludes it.
-- **fastText LID (1.4.0):** pure-Java `FastTextModel` (HS / softmax / OVA; dense `.bin` + PQ `.ftz`) + `TextClassifier` / `FastTextForClassification`; `LlmModality.LABELS` / `LlmOutLabels`; factory loads file or folder; prefers `lid.176.bin` over `.ftz`; sample `LanguageIdHelloWorld`; download `models/download-fasttext-lid-176.*` fetches `.bin` (~126 MB).
-- **Jev decisions (1.5.0-SNAPSHOT):** `LLM.builder(model).toJev()` on a causal chat model. `JevQuestion.choice` / `yesNo` / `score` (`.between(low, high)` or explicit levels). `Jev.decide` returns `JevDecision` (answer, per-option probability, level). Default `L0`: cyclic rotations in canonical option order, log-mean, batch label prior after 8 states of the same question (strength 0.75). `jevLevel(RAW)` is one prefill. Labels must be one real vocabulary token (score digits fall back to letters). `LLM.readNextToken` is the prefill log-prob read. Sample `JevHelloWorld` prints a choice at L0 and RAW, a yes/no, a score, and the prior turning on at the eighth state. `Example` offers the same API interactively (menu item Jev; `/choice`, `/yesno`, `/score`, then one state per line; `/level` and `/reset` rebuild the engine and clear the prior). No rotation-budget early stop, no Tacit training, no HTTP gateway.
+- Compacted causal-graph construction and the generate tick without changing the public API.
+- Shared packed-or-dense layer loading in `WeightLayers` (Qwen3, LFM2, BERT, Llama RoPE theta).
+- Gemma 3 residual add and embed scale now go through `Ops` (vector kernels) instead of scalar loops.
+- Head RMSNorm no longer flattens to rank-2; `RMSNorm.forward` already norms the last axis.
+- `WeightBag.asDense` and `asDenseReleasingPacked` share one materialize path.
+- Engine step binds KV/conv once via `bindStep`. Prefill slot mapping is its own method.
+- `EspeakNgCompiledDict.latinMap()` is gone. `LATIN_MAP` is a `byte[]` of the same 288 entries (values 0–57).
+- IQ4NL codebook lives once as `GgufIqTables.kvalues_iq4nl` (signed bytes). `GgufDequant` and `GgufIqDequant` no longer each keep an `int[]` copy.
 
 ## 2. Architecture & Technical Discoveries
-- **Standing rule:** JDK-only runtime (Java 21+, optional Vector API). No third-party libs in library/sample JARs (test-scoped OK). TornadoVM is optional Maven deps (`tornado-api` provided, `tornado-runtime` runtime, both `optional`) — not transitive for consumers. No JNI/JNA/FFM/CLI for inference or G2P. ONNX/GGUF/safetensors/fastText parsed in Java.
-- Load: `ContainerTransport` → `ArchitectureProcessor` (Causal / Embedding / Speech / Synthesis) bind → fill → create for transformer graphs. Whisper = HF safetensors only; Piper = ONNX initializers + sidecar JSON. fastText = dedicated `loadFastText` (no WeightBag fill).
-- Share `LlmModel` / `PreparedRag`; one `LLM` is not concurrent-safe for generate (`cancel()` is). Close engines before model. `LlmModel` is `abstract sealed` → hidden `LlmModelImpl`. Peer graphs: `CausalLM` / `EmbeddingEncoder` / `SpeechToText` / `TextToSpeech` / `TextClassifier`. Non-chat engines skip KV (`numKvcacheBlocks` 0).
-- Jev is a view of a causal engine, not a sixth graph. `toJev()` owns and closes the `LLM`; the `LlmModel` stays shared. L0 prior state lives on that `Jev` instance. `readNextToken` holds the generate lock, prefills (chunked when the prompt exceeds `maxNumBatchedTokens`), and reads the last-position logit row. Intermediate chunks call `prefillCache` plus scheduler `postprocess`; the last chunk calls `prefillLogits` and does not append a token.
-- Matmul: builder `cpuThreads` wins over `-Dnanollvm.cpu.threads`. Default = process-wide daemon pool; `.dedicatedMatmulPool()` owned and shut down on close; `.matmulExecutor` caller-owned; `.disableMultiCpu()` / 1 thread = sequential.
-- `LLM` owns one `Random` (unseeded, or seed `1L` for synthesis; `Builder.random`). Injected into Sampler + Piper VITS. Generate lock is the only exclusive engine lock.
-- ONNX: initializers only; FLOAT/FP16/BF16/DOUBLE load. BERT prefixes are structural. Conv vs ConvTranspose weight axes differ; spatial attrs on `ConvLayout`.
-- Piper G2P: `dictsource` first, then compiled `phontab`+`{lang}_dict`, else letter-to-sound. Phoneme map uses IPA `ɡ` (id 66).
-- Whisper: greedy multilingual; incremental decoder self-attn KV; Bluestein FFT log-mel. `LlmInSound.ofWav` / `ofPcm`; `Locale` null/ROOT = auto.
-- Gemma 4 text QAT: flatten `text_config`; skip towers; packed int2/4/8 + SRQ; PLE after MLP; KV share.
-- GGUF: packed default; late unpack when no other engine is live. Chat `qwen3` is unfused `blk.N.*`. Gemma/Llama GGUF rejected.
-- Dense RAG: index embeds sequential unless caller `Executor`; each job uses `MatmulRuntime.sequential()`.
-- SpotBugs `EI_EXPOSE_REP*` on tensors/KV/packed records is by design. Props = `nanollvm.*` / `NANOLLVM_*` only.
-- JPMS exports: `models` / `llm` / `chat` / `rag` / `jev` / `tokenizer` / `utils` / `exceptions`. Hidden: `engine` / `layers` / `tensor` / `internal` / `prompts` / `models.internal` / `models.llmcontainer` / `models.llmarch`. `ModuleExportsTest` locks this. Public `KernelBackend` in `utils` (**since 1.4.0**; `availableModes()` **since 1.5.0**). Kernels are process-wide (`FloatKernels` class init) — `KernelChatBench` forks one JVM per mode. Vector API is always a child with `--add-modules=jdk.incubator.vector`; do not gate it on the parent Tornado launcher’s incubator probe.
+- `RMSNorm.forward` walks `numel / lastDim` rows, so a `[tokens, heads, headDim]` tensor matches the old reshape-to-2d-then-back path.
+- `HfConfig` compact constructor freezes a null `ropeScaling` to an empty map, so `WeightLayers.ropeTheta` can call `containsKey` directly.
+- `IntStream.toList()` is already unmodifiable; `List.copyOf` around it was an extra copy.
+- Public `LLM.generate` / `generateTokenIds` overloads stay: they are the caller-facing surface.
 
 ## 3. Technical Debt & Refactoring
-- Attention O(n²); no float16 / TP / CUDA; most HF safetensors still FP32; fused packed dequant-dot still open
-- RMSNorm / LayerNorm / Sampler still sequential over tokens or logit rows
-- Optional GGUF: mmap; smaller default KV; ModelFileSource still rejects ONNX `external_data`
-- No ANN / vector DB; no ONNX QDQ/int8; no LFM2-from-ONNX
-- **Java Senior (2026-08-27):** narrative `//` in `Transformer` / `LLM`; some interface params missing `final`; `Example.ModelChoice` holds `Optional<Path>`. Keep array/`for` on hot numeric paths (tensor, sampler, mel, VITS, KV packing).
+- GGUF IQ tables, Tornado kernels, and espeak dictionaries are data or numeric kernels. Do not “compact” them into shared abstractions.
+- Causal graphs still repeat decoder-layer shape (attention + MLP + norms). A shared layer skeleton would hide architecture differences.
+- `LLM` still has many one-line generate overloads. They exist so callers do not pass unused flags.
 
 ## 4. Current Work In Progress
-- **TornadoVM samples profile (`-Ptornado`):** compile dep `7.3.0-jdk22plus` (tag `v7.3.0`, 2026-10-14). Tornado mode: Kernel API GEMV, one `@Parallel` attention task per query range, elementwise Tornado only for spans ≥ 65536. **TileContext is not used** (CUDA-only). `@Reduce` loop bound must be `array.length`. A Java method named `dot` is an OpenCL token. This machine: OpenCL SDK `/home/igorm/SDK/tornadovm-opencl`, PoCL on Intel i7-8550U (`tornado --version` = 7.3.0 OpenCL). Device check 2026-09-23: `gemvTiled` and element kernels matched scalar. A head-sized `dot` launch is ~2 ms (that stalled chat). Fused `scoreHeads` matched scalar, including a second execute on the same plan with a shorter key length and a different window; steady launches are ~8 ms. Plans call `withoutPlanResultsHistory()` (7.3 default is latest-only; explicit so a long chat does not retain one result per token). `LlmModel.close()` releases GEMV plans for that model's dense weight arrays (the static cache otherwise pins the arrays and their device copies). Attention keeps a packed key prefix on the plan and recopies only when the cache identity, slot prefix, or length changes. Prefill and decode still use separate GEMV plans for the same matrix (different row counts), so both copies exist until the model closes. 7.3 speed features that do **not** apply to this OpenCL SDK: Metal shared command buffers (~6× LLM decode), CUDA/Metal full thread blocks when the loop bound has no divisor, `FloatArray`/`HalfFloatArray` vector loads, CUDA graphs, `withStagedTransfers`, `withIntraPlanConcurrency` (both CUDA no-ops on OpenCL). Free 7.3 runtime fixes we already get: concurrent sketches keep their own argument accesses; closing a plan releases device-only intermediate buffers; Graal will not reassociate nested divisions. Plain Maven tests still skip Tornado tests (runtime SPI needs the `tornado` launcher). Run:
-  `mvn22 -pl nano-vllm-java-samples -am -Ptornado compile exec:exec@tornado`
-  (optional `-Dtornado.java.home=…`, `-Dtornado.params=…`).
-- **1.5.0-SNAPSHOT** opened after **1.4.0** (2026-09-06). New public API gets `@since 1.5.0`; fold unreleased work into CHANGELOG `[1.5.0-SNAPSHOT]`.
-- README / description stay on the **latest release** (**1.4.0**) — never SNAPSHOT (badge, Maven/Gradle coords, JAR names).
-- Javadoc `-Xdoclint:reference` fails the `javadoc:jar` publish goal on unresolved `{@link}`. Cross-package types that are not imported must use FQNs (`LlmInSound` / `LlmOutSoundData` / `LlmOutLabels` in `LLM.generate` javadoc).
+- Source compaction of `nano-vllm-java/src/main/java` (engine + causal graphs). Unit tests passed (353 run, 8 Tornado skips).
 
 ## 5. Known Issues & Limitations
-- CPU-only by default; `-Dnanollvm.kernels=tornado` (or `auto` when a device exists) runs float kernels on TornadoVM. Weights not in git; LFM2 needs large heap. Security: `security_audit.txt` — parsers/corpus capped; RAG mixes corpus into prompts by design.
-- Closing `LlmModel` while an `LLM` still holds the graph leaves dense weights reachable until that LLM closes.
-- BERT HF safetensors still rejected. xlm-roberta-base fill-mask mean-pool is anisotropic; `Example` Classify is centered prototypes. Use E5/GTE for retrieval.
-- Gemma 4 vision/audio, GGUF Gemma 4, MoE out of scope. Whisper: no MP3/VAD/beam/timestamps. Piper: no streaming/SSML/multi-speaker picker; packaged `ru_dict` omits some lemmas.
-- Tests skip via `OptionalModelAssumptions` / `SampleModelAssumptions` when local weights or `./rag` are absent. Packed gte-small Q2_K is slow if left packed.
-- Tiny-LLM-ONNX is a toy. Tiny greedy Qwen3+RAG can still invent a famous book despite `RagPrompts.GROUNDING`.
+- Tornado kernel tests skip when no Tornado device is on the module path.
 
 ## 6. Open Questions & Pending Decisions
-- Piper vs full espeak: compiled rules VM stays out of the Apache JAR (no GPL sources, no JNI).
-- Fold Sampler deeper into Transformer? BM25F? HF safetensors LFM2? Broader ONNX remaps for exotic exports?
-- Fara / Qwen3.5 (`qwen3_5`) stay unsupported (fail fast). Gemma 4 multimodal / MoE stay out of scope.
-- TornadoVM 7.3.0 is in the parent POM. Do not port GEMV to TileContext on the OpenCL path. Do not call CUDA-only plan options (`withCUDAGraph`, `withStagedTransfers`, `withIntraPlanConcurrency`, `withStrictFloatingPoint`) for speed on the OpenCL SDK — they are no-ops or CUDA-only. A later CUDA or Metal SDK could use 7.3 command-buffer / full-block / vector-load work; decode GEMV and PoCL stay on KernelContext. OpenCL cannot take Hybrid cuBLAS.
+- None from this compaction.
 
 ## 7. Useful References
-- `.github/instructions/` — repository Copilot guidance imported from `~/.cursor/rules` (Java, project notes/security, changelog, Maven launcher).
-- `CHANGELOG.md` — **1.5.0-SNAPSHOT** (Unreleased) then **1.4.0**. `README.md` / `description.md` — public docs for shipped **1.4.0**. `security_audit.txt` — 1.0 threat model. `models/README.md` — download layout (incl. fastText). `Models.mmd` — visual catalog of supported families, collapsed graph internals, containers, and Hub/source links (open in Scia Reto).
-- Build: `mvn22 -q test` (document as `mvn`). Samples: `mvn22 -pl nano-vllm-java-samples -q exec:java` (default `Example`; `-Dexec.mainClass=…` for others). SpotBugs: `mvn22 -pl nano-vllm-java -am compile spotbugs:check`. Concurrent: `mvn22 -pl nano-vllm-java -Pconcurrent_test test`. Heap/vector: `.mvn/jvm.config`.
-- Tornado: https://www.tornadovm.org/ (KernelContext ≫ Loop Parallel; TileContext = CUDA GEMM only, https://www.tornadovm.org/blogs/getting-started-with-the-tilecontext-api-in-tornadovm).
-  Sample: `mvn22 -pl nano-vllm-java-samples -am -Ptornado compile exec:exec@tornado`
-  (optional `-Dtornado.params=…`, `-Dtornado.java.home=…`). Dep: `7.3.0-jdk22plus`.
-  SDK: `/home/igorm/SDK/tornadovm-opencl` (7.3.0 OpenCL; `tornado` on PATH). Device: PoCL CPU.
-  Release: https://github.com/beehive-lab/TornadoVM/releases/tag/v7.3.0
-- Load: `LlmModelFactory.make(path)` / `open(path).make()` — close LLM then model. Chat: `LLM.builder` → `chat` / `chatOnce`. Non-chat: `generate(LlmInput, LlmModality)` → concrete `LlmOut*` via modality `resultType`/`cast` (assign to a typed local; chaining alone does not infer `T`).
-- Demos: `EmbeddingsHelloWorld`; `TranscribeHelloWorld`; `SynthesizeHelloWorld`; `VoiceReplyHelloWorld`; `LanguageIdHelloWorld`; `JevHelloWorld`; `Example` (chat or interactive Jev); `AdvisorRagHelloWorld`; `RagTunerHelloWorld`; `KernelChatBench` (`-Dexec.mainClass=…KernelChatBench`); classify labels `nano-vllm-java-samples/classify-labels.example.txt`.
+- Build/test: `mvn22 -pl nano-vllm-java test`
+- Changelog is only for user-facing behavior. This pass did not change it.
 
 ## 8. User Advice and Recommendations
-- Pure Java only; no JNI. Hot-path arrays/`for`, not Streams (tensor, attention, sampler, STFT/mel, VITS, KV). TornadoVM is optional and not transitive.
-- README stays on the last shipped version — never write SNAPSHOT into badge/coords/JAR names. After a release, `description.md` matches that version. Whisper/Piper/fastText README snippets stay short (API only); full programs live in the sample classes.
-- Document Maven as `mvn`; this machine uses `mvn22`.
-- New public API after 1.4.0 gets `@since 1.5.0`; do not retag older members. Do not vendor GPL Piper/espeak sources.
-- `LLM.builder` for every kind; `.deterministic()` for greedy (not `temperature(0)`). Server: `.dedicatedMatmulPool()`, `.matmulExecutor(appPool)`, or `.disableMultiCpu()`. One `LLM` per in-flight generate; share `LlmModel`. `ResourceLimits.setCurrent` is JVM-global.
-- Mix RAG origins on one `RagFactory.builder()`. Do not put hybrid indexing back on `AdvisorRagHelloWorld` / `RagTunerHelloWorld` unless asked.
-- Think tags / chat specials: `open(path).thinkTags(…).chatSpecials(…)`; omitted keys fill `DEFAULT`. Streaming `TEXT_RAW` keeps specials; `streamTo` ignores it.
-- Piper: `optionalData(ESPEAK_DATA, dir)` when data is not next to the voice; omit or leave missing — TTS still runs.
-- Tiny-LLM-ONNX: `onnx/model.onnx` or `model_fp16.onnx`; skip community `*_q4*` / `*_int8*`.
+- Keep public generate overloads. Compact internals, not the caller API.

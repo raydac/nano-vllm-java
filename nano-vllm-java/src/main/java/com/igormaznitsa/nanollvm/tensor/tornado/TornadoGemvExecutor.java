@@ -120,29 +120,8 @@ final class TornadoGemvExecutor {
     }
   }
 
-  private static final class WeightKey {
-
-    private final float[] weight;
-    private final int weightOffset;
-    private final float[] bias;
-    private final int in;
-    private final int out0;
-    private final int outCount;
-    private final int rows;
-
-    private WeightKey(
-      final float[] weight, final int weightOffset,
-      final float[] bias,
-      final int in, final int out0, final int outCount, final int rows
-    ) {
-      this.weight = weight;
-      this.weightOffset = weightOffset;
-      this.bias = bias;
-      this.in = in;
-      this.out0 = out0;
-      this.outCount = outCount;
-      this.rows = rows;
-    }
+  private record WeightKey(float[] weight, int weightOffset, float[] bias, int in, int out0,
+                           int outCount, int rows) {
 
     static WeightKey of(
       final float[] weight, final int weightOffset,
@@ -150,30 +129,6 @@ final class TornadoGemvExecutor {
       final int in, final int out0, final int outCount, final int rows
     ) {
       return new WeightKey(weight, weightOffset, bias, in, out0, outCount, rows);
-    }
-
-    float[] weight() {
-      return this.weight;
-    }
-
-    int weightOffset() {
-      return this.weightOffset;
-    }
-
-    int in() {
-      return this.in;
-    }
-
-    int out0() {
-      return this.out0;
-    }
-
-    int outCount() {
-      return this.outCount;
-    }
-
-    int rows() {
-      return this.rows;
     }
 
     int work() {
@@ -213,29 +168,8 @@ final class TornadoGemvExecutor {
     }
   }
 
-  private static final class GemvPlan implements AutoCloseable {
-
-    private final TornadoExecutionPlan plan;
-    private final float[] xScratch;
-    private final float[] yScratch;
-    private final int rows;
-    private final int in;
-    private final int out0;
-    private final int outCount;
-
-    private GemvPlan(
-      final TornadoExecutionPlan plan,
-      final float[] xScratch, final float[] yScratch,
-      final int rows, final int in, final int out0, final int outCount
-    ) {
-      this.plan = plan;
-      this.xScratch = xScratch;
-      this.yScratch = yScratch;
-      this.rows = rows;
-      this.in = in;
-      this.out0 = out0;
-      this.outCount = outCount;
-    }
+  private record GemvPlan(TornadoExecutionPlan plan, float[] xScratch, float[] yScratch, int rows,
+                          int in, int out0, int outCount) implements AutoCloseable {
 
     static GemvPlan compile(final WeightKey key) throws TornadoExecutionPlanException {
       float[] xScratch = new float[key.rows() * key.in()];

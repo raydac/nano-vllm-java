@@ -1,5 +1,6 @@
 package com.igormaznitsa.nanollvm.llm;
 
+import static java.util.Collections.nCopies;
 import static java.util.Objects.requireNonNull;
 
 import com.igormaznitsa.nanollvm.chat.ChatMessage;
@@ -369,7 +370,6 @@ public final class LLM implements AutoCloseable {
   }
 
   private void warmup() {
-    // JIT / cache warm-up: one short generate so the first real request is not cold
     LlmListeners.info(this.listener, this, "Warming up (prefill + decode)…");
     long startedAtNanos = System.nanoTime();
     this.generateTokenIds(
@@ -387,26 +387,13 @@ public final class LLM implements AutoCloseable {
   }
 
   private List<Integer> syntheticWarmupPrompt() {
-    // Fixed synthetic token ids — shape matters for warmup, not linguistic content
-    return IntStream.range(0, WARMUP_PREFILL_TOKENS)
-      .map(i -> 1 + (i % 97))
-      .boxed()
-      .toList();
+    return IntStream.range(0, WARMUP_PREFILL_TOKENS).map(i -> 1 + (i % 97)).boxed().toList();
   }
 
   private StepResult stepUnlocked() {
-    // Business tick: pick a prefill or decode batch, run the model, commit tokens
-
-    // 1) Scheduler chooses which sequences run this tick (prefill vs decode)
     Scheduler.ScheduleResult scheduled = this.scheduler.schedule();
-
-    // 2) Forward pass + sampling → one next-token id per scheduled sequence
     List<Integer> nextTokenIds = this.runForwardAndSample(scheduled);
-
-    // 3) Append tokens, update KV bookkeeping, finish sequences that hit stop / maxTokens
     List<int[]> appendedTokens = this.applySchedulerPostprocess(scheduled, nextTokenIds);
-
-    // 4) Package finished completions, per-token events, and workload metric for callers
     return new StepResult(
       this.collectFinishedOutputs(scheduled.sequences()),
       this.toTokenEvents(appendedTokens),
@@ -414,7 +401,6 @@ public final class LLM implements AutoCloseable {
   }
 
   private List<Integer> runForwardAndSample(final Scheduler.ScheduleResult scheduled) {
-    // Internal: Transformer.step → CausalLM forward → logits → Sampler
     return this.transformer.step(scheduled.sequences(), scheduled.prefill());
   }
 
@@ -422,7 +408,6 @@ public final class LLM implements AutoCloseable {
     final Scheduler.ScheduleResult scheduled,
     final List<Integer> nextTokenIds
   ) {
-    // Internal: write sampled ids into sequences; collect (seqId, tokenId) for streaming
     List<int[]> appendedTokens = new ArrayList<>();
     this.scheduler.postprocess(
       scheduled.sequences(), nextTokenIds, scheduled.prefill(), appendedTokens);
@@ -430,7 +415,6 @@ public final class LLM implements AutoCloseable {
   }
 
   private List<FinishedOutput> collectFinishedOutputs(final List<Sequence> sequences) {
-    // Internal: only sequences that reached stop / maxTokens on this tick
     return sequences.stream()
       .filter(Sequence::isFinished)
       .map(seq -> new FinishedOutput(
@@ -439,14 +423,10 @@ public final class LLM implements AutoCloseable {
   }
 
   private List<TokenEvent> toTokenEvents(final List<int[]> appendedTokens) {
-    // Internal: raw [seqId, tokenId] pairs → typed stream events
-    return appendedTokens.stream()
-      .map(pair -> new TokenEvent(pair[0], pair[1]))
-      .toList();
+    return appendedTokens.stream().map(pair -> new TokenEvent(pair[0], pair[1])).toList();
   }
 
   private int measureStepWorkload(final Scheduler.ScheduleResult scheduled) {
-    // Internal: +token count for prefill; −batch size for decode (progress convention)
     return scheduled.prefill()
       ? scheduled.sequences().stream().mapToInt(Sequence::numScheduledTokens).sum()
       : -scheduled.sequences().size();
@@ -865,27 +845,20 @@ public final class LLM implements AutoCloseable {
     final Duration timeout,
     final Consumer<TokenEvent> onToken
   ) {
-    // Business: turn prompts into decoded completions under cancel / timeout / optional streaming
     this.assertNotClosed();
     this.requireCausal();
     this.generateLock.lock();
     try {
       this.assertNotClosed();
-      // Reset cancel flag for this exclusive generate session
       this.beginGeneration();
+      this.enqueueAllPromptsUnlocked(prompts, this.resolveSamplingParams(prompts, samplingParams));
 
-      // Normalize sampling (shared or per-prompt) and enqueue every prompt as a Sequence
-      List<SamplingParams> params = this.resolveSamplingParams(prompts, samplingParams);
-      this.enqueueAllPromptsUnlocked(prompts, params);
-
-      // Wall-clock budget and UI progress knobs for the drive loop
       long startedAtNanos = System.nanoTime();
       long deadlineNanos = this.resolveDeadlineNanos(timeout, startedAtNanos);
       boolean showProgress = this.shouldShowProgress(useTqdm);
       Map<Integer, FinishedOutput> outputsBySeqId = new HashMap<>();
 
       try {
-        // Core loop: step until the scheduler has no waiting/running work
         this.driveUntilSchedulerIdle(
           timeout,
           deadlineNanos,
@@ -895,26 +868,22 @@ public final class LLM implements AutoCloseable {
           startedAtNanos,
           outputsBySeqId);
       } finally {
-        // On cancel/timeout/error: abort leftover sequences; always clear cancel flag
         this.finishGeneration();
       }
 
-      // End the progress line (if any) and decode completion token ids → text
       this.finishProgressLine(showProgress);
-      long elapsedNanos = Math.max(0L, System.nanoTime() - startedAtNanos);
-      return this.decodeCompletedOutputs(outputsBySeqId, elapsedNanos);
+      return this.decodeCompletedOutputs(
+        outputsBySeqId, Math.max(0L, System.nanoTime() - startedAtNanos));
     } finally {
       this.generateLock.unlock();
     }
   }
 
   private void beginGeneration() {
-    // Internal: this generate owns the cancel flag until finishGeneration
     this.cancelRequested.set(false);
   }
 
   private void finishGeneration() {
-    // Internal: incomplete work after abort must free KV pages via scheduler.clear()
     if (!this.scheduler.isFinished()) {
       this.scheduler.clear();
     }
@@ -922,13 +891,11 @@ public final class LLM implements AutoCloseable {
   }
 
   private void enqueueAllPromptsUnlocked(final List<?> prompts, final List<SamplingParams> params) {
-    // Internal: one Sequence per prompt, paired with its SamplingParams (caller holds generateLock)
     IntStream.range(0, prompts.size())
       .forEach(i -> this.enqueuePromptUnlocked(prompts.get(i), params.get(i)));
   }
 
   private void enqueuePromptUnlocked(final Object prompt, final SamplingParams samplingParams) {
-    // Internal: accept either raw text (tokenize) or pre-tokenized ids
     if (prompt instanceof String text) {
       this.enqueueTokenIdsUnlocked(this.tokenizer.encode(text), samplingParams);
       return;
@@ -962,10 +929,7 @@ public final class LLM implements AutoCloseable {
   }
 
   private List<Integer> toTokenIdList(final List<?> ids) {
-    // Internal: untyped List<?> from the public generate API → List<Integer>
-    return ids.stream()
-      .map(id -> ((Number) id).intValue())
-      .toList();
+    return ids.stream().map(id -> ((Number) id).intValue()).toList();
   }
 
   private void driveUntilSchedulerIdle(
@@ -977,46 +941,37 @@ public final class LLM implements AutoCloseable {
     final long startedAtNanos,
     final Map<Integer, FinishedOutput> outputsBySeqId
   ) {
-    // Business loop: keep producing tokens until every sequence is finished or aborted
     int completed = 0;
     while (!this.scheduler.isFinished()) {
-      // Guard: cancel flag or wall-clock deadline → throw (finally clears the scheduler)
       this.requireGenerationAllowed(timeout, deadlineNanos);
 
-      // One engine tick (schedule → forward+sample → postprocess); lock already held
       StepResult step = this.stepUnlocked();
 
-      // Optional streaming: notify caller for each newly appended token id
       this.dispatchTokenEvents(step, onToken);
 
-      // Collect finished sequences; update progress counter when a prompt completes
       completed = this.recordFinishedOutputs(
         step, outputsBySeqId, completed, showProgress, totalPrompts, startedAtNanos);
     }
   }
 
   private void requireGenerationAllowed(final Duration timeout, final long deadlineNanos) {
-    // Internal: both guards must pass before the next tick
     this.requireNotCancelled();
     this.requireWithinDeadline(timeout, deadlineNanos);
   }
 
   private void requireNotCancelled() {
-    // Internal: cancel() from another thread sets this flag
     if (this.cancelRequested.get()) {
       throw new GenerationCancelledException();
     }
   }
 
   private void requireWithinDeadline(final Duration timeout, final long deadlineNanos) {
-    // Internal: Long.MAX_VALUE means “no timeout”
     if (System.nanoTime() > deadlineNanos) {
       throw new GenerationTimeoutException(timeout);
     }
   }
 
   private void dispatchTokenEvents(final StepResult step, final Consumer<TokenEvent> onToken) {
-    // Internal: skip when the caller did not request streaming
     if (onToken == null) {
       return;
     }
@@ -1031,7 +986,6 @@ public final class LLM implements AutoCloseable {
     final int totalPrompts,
     final long startedAtNanos
   ) {
-    // Internal: stash finished sequences by seqId; progress counts finished prompts
     int nextCompleted = completed;
     for (FinishedOutput finished : step.outputs()) {
       outputsBySeqId.put(finished.seqId(), finished);
@@ -1047,7 +1001,6 @@ public final class LLM implements AutoCloseable {
     final int totalPrompts,
     final long startedAtNanos
   ) {
-    // Internal: CLI-style progress only when requested and listener is not silent
     if (!showProgress) {
       return;
     }
@@ -1057,14 +1010,12 @@ public final class LLM implements AutoCloseable {
   }
 
   private void finishProgressLine(final boolean showProgress) {
-    // Internal: move past the \r progress line before returning text
     if (showProgress) {
       LlmListeners.progressf(this.listener, this, "%n");
     }
   }
 
   private long resolveDeadlineNanos(final Duration timeout, final long startedAtNanos) {
-    // Internal: null / zero / negative Duration → unbounded generate
     if (timeout == null || timeout.isZero() || timeout.isNegative()) {
       return Long.MAX_VALUE;
     }
@@ -1072,7 +1023,6 @@ public final class LLM implements AutoCloseable {
   }
 
   private boolean shouldShowProgress(final boolean useTqdm) {
-    // Internal: never spam progress into silent (library-default) I/O
     return useTqdm && !LlmListeners.isSilent(this.listener);
   }
 
@@ -1080,7 +1030,6 @@ public final class LLM implements AutoCloseable {
     final Map<Integer, FinishedOutput> outputsBySeqId,
     final long elapsedNanos
   ) {
-    // Internal: stable seqId order → GenerationOutput(text, tokenIds, stats) for each prompt
     return outputsBySeqId.keySet().stream()
       .sorted()
       .map(seqId -> {
@@ -1096,9 +1045,8 @@ public final class LLM implements AutoCloseable {
 
   private List<SamplingParams> resolveSamplingParams(final List<?> prompts,
                                                      final Object samplingParams) {
-    // Internal: one shared SamplingParams, or one per prompt (sizes must match)
     if (samplingParams instanceof SamplingParams shared) {
-      return java.util.Collections.nCopies(prompts.size(), shared);
+      return nCopies(prompts.size(), shared);
     }
     if (samplingParams instanceof List<?> list) {
       if (list.size() != prompts.size()) {
@@ -1261,9 +1209,7 @@ public final class LLM implements AutoCloseable {
    * @throws GenerationCancelledException if {@link #cancel()} fires
    */
   public String chatOnce(final String userMessage, final SamplingParams samplingParams) {
-    // Business: one ChatSession turn; return visible answer only (thinking stripped by session)
-    ChatReply reply = this.chat(samplingParams).send(userMessage);
-    return reply.answer();
+    return this.chat(samplingParams).send(userMessage).answer();
   }
 
   /**

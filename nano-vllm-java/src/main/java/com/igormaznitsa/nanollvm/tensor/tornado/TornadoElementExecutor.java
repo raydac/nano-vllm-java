@@ -265,27 +265,8 @@ final class TornadoElementExecutor {
   private record PlanKey(Kind kind, int n) {
   }
 
-  private static final class ElementPlan implements AutoCloseable {
-
-    private final TornadoExecutionPlan plan;
-    private final float[] left;
-    private final float[] right;
-    private final float[] out;
-    private final float[] scalar;
-    private final float[] sum;
-
-    private ElementPlan(
-      final TornadoExecutionPlan plan,
-      final float[] left, final float[] right, final float[] out, final float[] scalar,
-      final float[] sum
-    ) {
-      this.plan = plan;
-      this.left = left;
-      this.right = right;
-      this.out = out;
-      this.scalar = scalar;
-      this.sum = sum;
-    }
+  private record ElementPlan(TornadoExecutionPlan plan, float[] left, float[] right, float[] out,
+                             float[] scalar, float[] sum) implements AutoCloseable {
 
     static ElementPlan compile(final Kind kind, final int n) throws TornadoExecutionPlanException {
       float[] left = new float[n];

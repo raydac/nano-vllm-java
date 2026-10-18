@@ -592,6 +592,9 @@ final class GgufIqTables {
   static final byte[] kvalues_fp4 = {
     0, 1, 2, 3, 4, 6, 8, 12, 0, -1, -2, -3, -4, -6, -8, -12
   };
+  static final byte[] kvalues_iq4nl = {
+    -127, -104, -83, -65, -49, -35, -22, -10, 1, 13, 25, 38, 53, 69, 89, 113
+  };
   static final long[] iq1s_grid = {
     0xFFFFFFFFFFFFFFFFL, 0xFFFFFFFFFFFFFF01L, 0xFFFFFFFFFFFF0000L, 0xFFFFFFFFFFFF01FFL,
     0xFFFFFFFFFFFF0101L, 0xFFFFFFFFFF00FF00L, 0xFFFFFFFFFF000000L, 0xFFFFFFFFFF01FFFFL,

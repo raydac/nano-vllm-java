@@ -529,9 +529,8 @@ final class EspeakNgG2p {
       case 'ч' -> "tɕ";
       case 'ш' -> "ʃ";
       case 'щ' -> "ɕ";
-      case 'ъ' -> "";
+      case 'ъ', 'ь' -> "";
       case 'ы' -> "y";
-      case 'ь' -> "";
       case 'э' -> "ɛ";
       case 'ю' -> this.iotated("u", index, cps);
       case 'я' -> this.iotated("a", index, cps);

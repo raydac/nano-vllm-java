@@ -1,5 +1,6 @@
 package com.igormaznitsa.nanollvm.models.internal;
 
+import static com.igormaznitsa.nanollvm.models.internal.WeightLayers.ropeTheta;
 import static com.igormaznitsa.nanollvm.models.internal.WeightNames.ARCH_LLAMA;
 import static com.igormaznitsa.nanollvm.models.internal.WeightNames.DOWN_PROJ_WEIGHT;
 import static com.igormaznitsa.nanollvm.models.internal.WeightNames.EMBED_TOKENS;
@@ -16,7 +17,6 @@ import static com.igormaznitsa.nanollvm.models.internal.WeightNames.selfAttn;
 import static java.util.Objects.requireNonNull;
 
 import com.igormaznitsa.nanollvm.internal.Context;
-import com.igormaznitsa.nanollvm.internal.Json;
 import com.igormaznitsa.nanollvm.layers.Attention;
 import com.igormaznitsa.nanollvm.layers.Linear;
 import com.igormaznitsa.nanollvm.layers.Norms.RMSNorm;
@@ -27,8 +27,8 @@ import com.igormaznitsa.nanollvm.layers.VocabParallelEmbedding.ParallelLMHead;
 import com.igormaznitsa.nanollvm.llm.Config;
 import com.igormaznitsa.nanollvm.tensor.Ops;
 import com.igormaznitsa.nanollvm.tensor.Tensor;
-import java.util.ArrayList;
 import java.util.List;
+import java.util.stream.IntStream;
 
 /**
  * Causal LM for the {@code llama} architecture family (RMSNorm, RoPE, GQA, SiLU MLP; no Q/K head norms).
@@ -119,10 +119,6 @@ public record LlamaForCausalLM(LlamaModel model, ParallelLMHead lmHead) implemen
       int qSize = numHeads * headDim;
       int kvSize = numKvHeads * headDim;
       float scaling = (float) Math.pow(headDim, -0.5);
-      float ropeTheta = config.ropeTheta();
-      if (config.ropeScaling() != null && config.ropeScaling().containsKey("rope_theta")) {
-        ropeTheta = Json.asFloat(config.ropeScaling().get("rope_theta"), ropeTheta);
-      }
       String p = selfAttn(layerIndex);
       Tensor qkvWeight = weights.require(p + QKV_PROJ_WEIGHT);
       Linear.Qkv qkvProj = config.attentionBias()
@@ -131,7 +127,7 @@ public record LlamaForCausalLM(LlamaModel model, ParallelLMHead lmHead) implemen
       return new LlamaAttention(
         qkvProj,
         new Linear.Row(weights.require(p + O_PROJ_WEIGHT)),
-        ropes.get(headDim, headDim, config.maxPositionEmbeddings(), ropeTheta),
+        ropes.get(headDim, headDim, config.maxPositionEmbeddings(), ropeTheta(config)),
         new Attention(numHeads, headDim, scaling, numKvHeads, layerIndex),
         numHeads,
         numKvHeads,
@@ -250,13 +246,11 @@ public record LlamaForCausalLM(LlamaModel model, ParallelLMHead lmHead) implemen
 
     private static LlamaModel assemble(final Config.HfConfig config, final WeightBag weights) {
       Tables ropes = new Tables();
-      List<LlamaDecoderLayer> built = new ArrayList<>(config.numHiddenLayers());
-      for (int i = 0; i < config.numHiddenLayers(); i++) {
-        built.add(new LlamaDecoderLayer(config, weights, i, ropes));
-      }
       return new LlamaModel(
         new VocabParallelEmbedding(weights.require(EMBED_TOKENS)),
-        List.copyOf(built),
+        IntStream.range(0, config.numHiddenLayers())
+          .mapToObj(i -> new LlamaDecoderLayer(config, weights, i, ropes))
+          .toList(),
         new RMSNorm(weights.require(MODEL_NORM), config.rmsNormEps()));
     }
 

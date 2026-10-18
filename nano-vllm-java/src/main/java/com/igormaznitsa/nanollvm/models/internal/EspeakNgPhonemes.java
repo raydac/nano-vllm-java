@@ -8,13 +8,14 @@ import java.text.Normalizer;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Stream;
 
 /**
  * Kirschenbaum / espeak mnemonics from {@code *_list} / {@code *_rules} to IPA.
  */
 final class EspeakNgPhonemes {
 
-  private static final List<Map.Entry<String, String>> MNEMONICS = List.of(
+  private static final List<Map.Entry<String, String>> MNEMONICS = Stream.of(
       entry("aI", "aɪ"),
       entry("aU", "aʊ"),
       entry("eI", "eɪ"),
@@ -84,7 +85,7 @@ final class EspeakNgPhonemes {
       entry("Y", "y"),
       entry("W", "w"),
       entry("g", "ɡ")
-    ).stream()
+    )
     .sorted(comparingInt((Map.Entry<String, String> e) -> e.getKey().length()).reversed())
     .toList();
 

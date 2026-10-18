@@ -115,7 +115,7 @@ final class EspeakNgVoiceFiles {
 
     List<String> phonemeTableNames() {
       LinkedHashSet<String> names = new LinkedHashSet<>(this.phonemeTables);
-      this.languageIds.forEach(names::add);
+      names.addAll(this.languageIds);
       names.add("base");
       return List.copyOf(names);
     }

@@ -31,8 +31,8 @@ import com.igormaznitsa.nanollvm.layers.VocabParallelEmbedding.ParallelLMHead;
 import com.igormaznitsa.nanollvm.llm.Config;
 import com.igormaznitsa.nanollvm.tensor.Ops;
 import com.igormaznitsa.nanollvm.tensor.Tensor;
-import java.util.ArrayList;
 import java.util.List;
+import java.util.stream.IntStream;
 
 /**
  * Causal LM for the {@code gemma3} / {@code gemma3_text} architecture family. Weights from {@link WeightBag} at
@@ -146,16 +146,11 @@ public record Gemma3ForCausalLM(Gemma3Model model, ParallelLMHead lmHead) implem
       Tensor q = parts[0].reshape(parts[0].size(0), this.numHeads, this.headDim);
       Tensor k = parts[1].reshape(parts[1].size(0), this.numKvHeads, this.headDim);
       Tensor v = parts[2].reshape(parts[2].size(0), this.numKvHeads, this.headDim);
-      q = this.normHeads(q, this.qNorm);
-      k = this.normHeads(k, this.kNorm);
+      q = this.qNorm.forward(q);
+      k = this.kNorm.forward(k);
       Tensor[] rotated = this.rotaryEmb.forward(positions, q, k, context);
       Tensor o = this.attn.forward(rotated[0], rotated[1], v, context);
       return this.oProj.forward(o.reshape(o.size(0), this.numHeads * this.headDim), context);
-    }
-
-    private Tensor normHeads(final Tensor x, final RMSNorm norm) {
-      return norm.forward(x.reshape(x.size(0) * x.size(1), this.headDim))
-        .reshape(x.size(0), x.size(1), this.headDim);
     }
   }
 
@@ -226,25 +221,11 @@ public record Gemma3ForCausalLM(Gemma3Model model, ParallelLMHead lmHead) implem
       Tensor residual = hiddenStates;
       Tensor hidden = this.selfAttn.forward(
         positions, this.inputLayernorm.forward(hiddenStates), context);
-      hidden = this.add(residual, this.postAttentionLayernorm.forward(hidden));
+      hidden = Ops.add(residual, this.postAttentionLayernorm.forward(hidden));
 
       residual = hidden;
       hidden = this.mlp.forward(this.preFeedforwardLayernorm.forward(hidden), context);
-      return this.add(residual, this.postFeedforwardLayernorm.forward(hidden));
-    }
-
-    private Tensor add(final Tensor a, final Tensor b) {
-      Tensor out = Tensor.zeros(a.shape());
-      float[] ad = a.data();
-      float[] bd = b.data();
-      float[] od = out.data();
-      int n = a.numel();
-      int aOff = a.offset();
-      int bOff = b.offset();
-      for (int i = 0; i < n; i++) {
-        od[i] = ad[aOff + i] + bd[bOff + i];
-      }
-      return out;
+      return Ops.add(residual, this.postFeedforwardLayernorm.forward(hidden));
     }
   }
 
@@ -264,35 +245,21 @@ public record Gemma3ForCausalLM(Gemma3Model model, ParallelLMHead lmHead) implem
 
     private static Gemma3Model assemble(final Config.HfConfig config, final WeightBag weights) {
       Tables ropes = new Tables();
-      List<Gemma3DecoderLayer> built = new ArrayList<>(config.numHiddenLayers());
-      for (int i = 0; i < config.numHiddenLayers(); i++) {
-        built.add(new Gemma3DecoderLayer(config, weights, i, ropes));
-      }
       return new Gemma3Model(
         new VocabParallelEmbedding(weights.require(EMBED_TOKENS)),
-        List.copyOf(built),
+        IntStream.range(0, config.numHiddenLayers())
+          .mapToObj(i -> new Gemma3DecoderLayer(config, weights, i, ropes))
+          .toList(),
         new RMSNorm(weights.require(MODEL_NORM), config.rmsNormEps(), true),
         (float) Math.sqrt(config.hiddenSize()));
     }
 
     Tensor forward(final Tensor inputIds, final Tensor positions, final Context context) {
-      Tensor hiddenStates = this.scaleEmbed(this.embedTokens.forward(inputIds, context));
+      Tensor hiddenStates = Ops.scale(this.embedTokens.forward(inputIds, context), this.embedScale);
       for (Gemma3DecoderLayer layer : this.layers) {
         hiddenStates = layer.forward(positions, hiddenStates, context);
       }
       return this.norm.forward(hiddenStates);
-    }
-
-    private Tensor scaleEmbed(final Tensor emb) {
-      Tensor out = Tensor.zeros(emb.shape());
-      float[] ed = emb.data();
-      float[] od = out.data();
-      int n = emb.numel();
-      int off = emb.offset();
-      for (int i = 0; i < n; i++) {
-        od[i] = ed[off + i] * this.embedScale;
-      }
-      return out;
     }
   }
 }

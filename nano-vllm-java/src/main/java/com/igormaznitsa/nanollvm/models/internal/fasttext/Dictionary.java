@@ -116,7 +116,7 @@ final class Dictionary {
   static int hash(final byte[] str, final int begin, final int end) {
     int h = 0x811C9DC5;
     for (int i = begin; i < end; i++) {
-      h ^= (int) str[i];
+      h ^= str[i];
       h *= 16777619;
     }
     return h;

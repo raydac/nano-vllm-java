@@ -123,21 +123,7 @@ public final class WeightBag {
    * Gemma 4 QAT entries cannot be expanded (PLE tables are multi-GB).
    */
   public WeightBag asDense() {
-    if (this.hasGemmaQat()) {
-      throw new IllegalStateException(
-        "Gemma 4 QAT weights stay packed and cannot be unpacked to float32");
-    }
-    if (!this.hasPacked()) {
-      return this;
-    }
-    Map<String, Object> dense = new LinkedHashMap<>(this.byName.size());
-    for (Map.Entry<String, Object> entry : this.byName.entrySet()) {
-      Object value = entry.getValue();
-      dense.put(
-        entry.getKey(),
-        value instanceof PackedWeight packed ? packed.materialize() : value);
-    }
-    return new WeightBag(dense, this.convLayouts);
+    return this.materializePacked(false);
   }
 
   public int size() {
@@ -162,6 +148,10 @@ public final class WeightBag {
    * that tensor so peak RAM stays near one full copy (not packed + float32 together).
    */
   public WeightBag asDenseReleasingPacked() {
+    return this.materializePacked(true);
+  }
+
+  private WeightBag materializePacked(final boolean releasePackedBytes) {
     if (this.hasGemmaQat()) {
       throw new IllegalStateException(
         "Gemma 4 QAT weights stay packed and cannot be unpacked to float32");
@@ -174,7 +164,9 @@ public final class WeightBag {
       Object value = entry.getValue();
       if (value instanceof PackedWeight packed) {
         Tensor tensor = packed.materialize();
-        packed.releasePackedBytes();
+        if (releasePackedBytes) {
+          packed.releasePackedBytes();
+        }
         dense.put(entry.getKey(), tensor);
       } else {
         dense.put(entry.getKey(), value);

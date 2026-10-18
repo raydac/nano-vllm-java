@@ -1,5 +1,9 @@
 package com.igormaznitsa.nanollvm.models.internal;
 
+import static com.igormaznitsa.nanollvm.models.internal.WeightLayers.embedding;
+import static com.igormaznitsa.nanollvm.models.internal.WeightLayers.linearRow;
+import static com.igormaznitsa.nanollvm.models.internal.WeightLayers.ropeTheta;
+import static com.igormaznitsa.nanollvm.models.internal.WeightLayers.tiedLmHead;
 import static com.igormaznitsa.nanollvm.models.internal.WeightNames.ARCH_QWEN3;
 import static com.igormaznitsa.nanollvm.models.internal.WeightNames.DOWN_PROJ_WEIGHT;
 import static com.igormaznitsa.nanollvm.models.internal.WeightNames.EMBED_TOKENS;
@@ -22,7 +26,6 @@ import static com.igormaznitsa.nanollvm.models.internal.WeightNames.selfAttn;
 import static java.util.Objects.requireNonNull;
 
 import com.igormaznitsa.nanollvm.internal.Context;
-import com.igormaznitsa.nanollvm.internal.Json;
 import com.igormaznitsa.nanollvm.layers.Attention;
 import com.igormaznitsa.nanollvm.layers.Linear;
 import com.igormaznitsa.nanollvm.layers.Norms.RMSNorm;
@@ -33,9 +36,8 @@ import com.igormaznitsa.nanollvm.layers.VocabParallelEmbedding.ParallelLMHead;
 import com.igormaznitsa.nanollvm.llm.Config;
 import com.igormaznitsa.nanollvm.tensor.Ops;
 import com.igormaznitsa.nanollvm.tensor.Tensor;
-
-import java.util.ArrayList;
 import java.util.List;
+import java.util.stream.IntStream;
 
 /**
  * Causal LM for the {@code qwen3} architecture family. Hugging Face folders use fused QKV / gate-up
@@ -67,32 +69,6 @@ public record Qwen3ForCausalLM(Qwen3Model model, ParallelLMHead lmHead) implemen
 
   private static boolean isGgufLayout(final WeightBag weights) {
     return weights.has(GGUF_TOKEN_EMBD);
-  }
-
-  private static Linear.Row linearRow(final WeightBag weights, final String name) {
-    return weights.findPacked(name)
-      .map(Linear.Row::new)
-      .orElseGet(() -> new Linear.Row(weights.require(name)));
-  }
-
-  private static VocabParallelEmbedding embedding(final WeightBag weights, final String name) {
-    return weights.findPacked(name)
-      .map(VocabParallelEmbedding::new)
-      .orElseGet(() -> new VocabParallelEmbedding(weights.require(name)));
-  }
-
-  private static ParallelLMHead tiedLmHead(final VocabParallelEmbedding embed) {
-    return embed.isPacked()
-      ? new ParallelLMHead(embed.packedWeight())
-      : new ParallelLMHead(embed.weight());
-  }
-
-  private static float ropeTheta(final Config.HfConfig config) {
-    float ropeTheta = config.ropeTheta();
-    if (config.ropeScaling() != null && config.ropeScaling().containsKey("rope_theta")) {
-      return Json.asFloat(config.ropeScaling().get("rope_theta"), ropeTheta);
-    }
-    return ropeTheta;
   }
 
   private static void requireSilu(final Config.HfConfig config) {
@@ -213,17 +189,12 @@ public record Qwen3ForCausalLM(Qwen3Model model, ParallelLMHead lmHead) implemen
       Tensor k = parts[1].reshape(parts[1].size(0), this.numKvHeads, this.headDim);
       Tensor v = parts[2].reshape(parts[2].size(0), this.numKvHeads, this.headDim);
       if (!this.qkvBias) {
-        q = this.normHeads(q, this.qNorm);
-        k = this.normHeads(k, this.kNorm);
+        q = this.qNorm.forward(q);
+        k = this.kNorm.forward(k);
       }
       Tensor[] rotated = this.rotaryEmb.forward(positions, q, k, context);
       Tensor o = this.attn.forward(rotated[0], rotated[1], v, context);
       return this.oProj.forward(o.reshape(o.size(0), this.numHeads * this.headDim), context);
-    }
-
-    private Tensor normHeads(final Tensor x, final RMSNorm norm) {
-      return norm.forward(x.reshape(x.size(0) * x.size(1), this.headDim))
-        .reshape(x.size(0), x.size(1), this.headDim);
     }
   }
 
@@ -288,19 +259,14 @@ public record Qwen3ForCausalLM(Qwen3Model model, ParallelLMHead lmHead) implemen
       Tensor k = this.kProj.forward(hiddenStates, context)
         .reshape(hiddenStates.size(0), this.numKvHeads, this.headDim);
       if (this.qNorm != null) {
-        q = this.normHeads(q, this.qNorm);
-        k = this.normHeads(k, this.kNorm);
+        q = this.qNorm.forward(q);
+        k = this.kNorm.forward(k);
       }
       Tensor v = this.vProj.forward(hiddenStates, context)
         .reshape(hiddenStates.size(0), this.numKvHeads, this.headDim);
       Tensor[] rotated = this.rotaryEmb.forward(positions, q, k, context);
       Tensor o = this.attn.forward(rotated[0], rotated[1], v, context);
       return this.oProj.forward(o.reshape(o.size(0), this.numHeads * this.headDim), context);
-    }
-
-    private Tensor normHeads(final Tensor x, final RMSNorm norm) {
-      return norm.forward(x.reshape(x.size(0) * x.size(1), this.headDim))
-        .reshape(x.size(0), x.size(1), this.headDim);
     }
   }
 
@@ -442,19 +408,18 @@ public record Qwen3ForCausalLM(Qwen3Model model, ParallelLMHead lmHead) implemen
 
     private static Qwen3Model assemble(final Config.HfConfig config, final WeightBag weights) {
       Tables ropes = new Tables();
-      List<Qwen3DecoderLayer> built = new ArrayList<>(config.numHiddenLayers());
-      for (int i = 0; i < config.numHiddenLayers(); i++) {
-        built.add(new Qwen3DecoderLayer(config, weights, i, ropes));
-      }
+      List<Qwen3DecoderLayer> built = IntStream.range(0, config.numHiddenLayers())
+        .mapToObj(i -> new Qwen3DecoderLayer(config, weights, i, ropes))
+        .toList();
       if (isGgufLayout(weights)) {
         return new Qwen3Model(
           embedding(weights, GGUF_TOKEN_EMBD),
-          List.copyOf(built),
+          built,
           new RMSNorm(weights.require(GGUF_OUTPUT_NORM), config.rmsNormEps()));
       }
       return new Qwen3Model(
         new VocabParallelEmbedding(weights.require(EMBED_TOKENS)),
-        List.copyOf(built),
+        built,
         new RMSNorm(weights.require(MODEL_NORM), config.rmsNormEps()));
     }
 

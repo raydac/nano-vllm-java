@@ -1,5 +1,8 @@
 package com.igormaznitsa.nanollvm.models.internal;
 
+import static com.igormaznitsa.nanollvm.models.internal.WeightLayers.embedding;
+import static com.igormaznitsa.nanollvm.models.internal.WeightLayers.linearRow;
+import static com.igormaznitsa.nanollvm.models.internal.WeightLayers.tiedLmHead;
 import static com.igormaznitsa.nanollvm.models.internal.WeightNames.ARCH_LFM2;
 import static com.igormaznitsa.nanollvm.models.internal.WeightNames.GGUF_OUTPUT;
 import static com.igormaznitsa.nanollvm.models.internal.WeightNames.GGUF_TOKEN_EMBD;
@@ -45,24 +48,6 @@ public record Lfm2ForCausalLM(Lfm2Model model, ParallelLMHead lmHead) implements
       .or(() -> weights.find(GGUF_OUTPUT).map(ParallelLMHead::new))
       .orElseGet(() -> tiedLmHead(model.embedTokens()));
     return new Lfm2ForCausalLM(model, lmHead);
-  }
-
-  private static ParallelLMHead tiedLmHead(final VocabParallelEmbedding embed) {
-    return embed.isPacked()
-      ? new ParallelLMHead(embed.packedWeight())
-      : new ParallelLMHead(embed.weight());
-  }
-
-  private static Linear.Row linearRow(final WeightBag weights, final String name) {
-    return weights.findPacked(name)
-      .map(Linear.Row::new)
-      .orElseGet(() -> new Linear.Row(weights.require(name)));
-  }
-
-  private static VocabParallelEmbedding embedding(final WeightBag weights, final String name) {
-    return weights.findPacked(name)
-      .map(VocabParallelEmbedding::new)
-      .orElseGet(() -> new VocabParallelEmbedding(weights.require(name)));
   }
 
   private static ShortConv buildShortConv(
@@ -167,24 +152,15 @@ public record Lfm2ForCausalLM(Lfm2Model model, ParallelLMHead lmHead) implements
     }
 
     Tensor forward(final Tensor positions, final Tensor hiddenStates, final Context context) {
-      Tensor q = this.normHeads(
-        this.qProj.forward(hiddenStates, context)
-          .reshape(hiddenStates.size(0), this.numHeads, this.headDim),
-        this.qNorm);
-      Tensor k = this.normHeads(
-        this.kProj.forward(hiddenStates, context)
-          .reshape(hiddenStates.size(0), this.numKvHeads, this.headDim),
-        this.kNorm);
+      Tensor q = this.qNorm.forward(this.qProj.forward(hiddenStates, context)
+        .reshape(hiddenStates.size(0), this.numHeads, this.headDim));
+      Tensor k = this.kNorm.forward(this.kProj.forward(hiddenStates, context)
+        .reshape(hiddenStates.size(0), this.numKvHeads, this.headDim));
       Tensor v = this.vProj.forward(hiddenStates, context)
         .reshape(hiddenStates.size(0), this.numKvHeads, this.headDim);
       Tensor[] rotated = this.rotaryEmb.forward(positions, q, k, context);
       Tensor o = this.attn.forward(rotated[0], rotated[1], v, context);
       return this.oProj.forward(o.reshape(o.size(0), this.numHeads * this.headDim), context);
-    }
-
-    private Tensor normHeads(final Tensor x, final RMSNorm norm) {
-      return norm.forward(x.reshape(x.size(0) * x.size(1), this.headDim))
-        .reshape(x.size(0), x.size(1), this.headDim);
     }
   }
 
@@ -285,12 +261,11 @@ public record Lfm2ForCausalLM(Lfm2Model model, ParallelLMHead lmHead) implements
 
     private static Lfm2Model assemble(final Config.HfConfig config, final WeightBag weights) {
       Tables ropes = new Tables();
-      List<Lfm2DecoderLayer> built = IntStream.range(0, config.numHiddenLayers())
-        .mapToObj(i -> new Lfm2DecoderLayer(config, weights, i, ropes))
-        .toList();
       return new Lfm2Model(
         embedding(weights, GGUF_TOKEN_EMBD),
-        List.copyOf(built),
+        IntStream.range(0, config.numHiddenLayers())
+          .mapToObj(i -> new Lfm2DecoderLayer(config, weights, i, ropes))
+          .toList(),
         new RMSNorm(weights.require(GGUF_TOKEN_EMBD_NORM), config.rmsNormEps()));
     }
 

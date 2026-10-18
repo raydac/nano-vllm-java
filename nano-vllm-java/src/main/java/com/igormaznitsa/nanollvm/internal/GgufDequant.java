@@ -89,10 +89,6 @@ public final class GgufDequant {
   public static final int BLOCK_TQ1_0 = 2 + QK_K / 64 + (QK_K - 4 * QK_K / 64) / 5;
   public static final int BLOCK_TQ2_0 = 2 + QK_K / 4;
 
-  private static final int[] KVALUES_IQ4NL = {
-    -127, -104, -83, -65, -49, -35, -22, -10, 1, 13, 25, 38, 53, 69, 89, 113
-  };
-
   private GgufDequant() {
   }
 
@@ -642,8 +638,8 @@ public final class GgufDequant {
     int qsOff = byteOff + 2;
     for (int j = 0; j < QK4_NL / 2; j++) {
       int qs = packed[qsOff + j] & 0xFF;
-      dst[dstOff + j] = d * KVALUES_IQ4NL[qs & 0x0F];
-      dst[dstOff + j + QK4_NL / 2] = d * KVALUES_IQ4NL[qs >> 4];
+      dst[dstOff + j] = d * GgufIqTables.kvalues_iq4nl[qs & 0x0F];
+      dst[dstOff + j + QK4_NL / 2] = d * GgufIqTables.kvalues_iq4nl[qs >> 4];
     }
   }
 

@@ -164,17 +164,14 @@ final class EspeakNgDictSource {
 
   private static OptionalInt stressFlag(final String token) {
     return switch (token) {
-      case "$1" -> OptionalInt.of(1);
-      case "$2" -> OptionalInt.of(2);
-      case "$3" -> OptionalInt.of(3);
+      case "$1", "$u1", "$u1+" -> OptionalInt.of(1);
+      case "$2", "$u2", "$u2+" -> OptionalInt.of(2);
+      case "$3", "$u3", "$u3+" -> OptionalInt.of(3);
       case "$4" -> OptionalInt.of(4);
       case "$5" -> OptionalInt.of(5);
       case "$6" -> OptionalInt.of(6);
       case "$7" -> OptionalInt.of(7);
       case "$u", "$u+" -> OptionalInt.of(-1);
-      case "$u1", "$u1+" -> OptionalInt.of(1);
-      case "$u2", "$u2+" -> OptionalInt.of(2);
-      case "$u3", "$u3+" -> OptionalInt.of(3);
       default -> OptionalInt.empty();
     };
   }
@@ -1105,16 +1102,18 @@ final class EspeakNgDictSource {
     }
 
     private void readListLine(final String line) {
-      if (line.isEmpty()) {
-        return;
-      }
-      if (line.equals("$textmode")) {
-        this.textMode = true;
-        return;
-      }
-      if (line.equals("$phonememode")) {
-        this.textMode = false;
-        return;
+      switch (line) {
+        case "" -> {
+          return;
+        }
+        case "$textmode" -> {
+          this.textMode = true;
+          return;
+        }
+        case "$phonememode" -> {
+          this.textMode = false;
+          return;
+        }
       }
       Condition condition = Condition.parse(line);
       String rest = condition.rest();

@@ -10,6 +10,7 @@ import static com.igormaznitsa.nanollvm.internal.GgufIqTables.iq3xxs_grid;
 import static com.igormaznitsa.nanollvm.internal.GgufIqTables.kmask_iq2xs;
 import static com.igormaznitsa.nanollvm.internal.GgufIqTables.ksigns_iq2xs;
 import static com.igormaznitsa.nanollvm.internal.GgufIqTables.kvalues_fp4;
+import static com.igormaznitsa.nanollvm.internal.GgufIqTables.kvalues_iq4nl;
 
 /**
  * GGML IQ / ternary / MXFP / NVFP / Q1_0 / Q2_0 row dequant (llama.cpp {@code ggml-quants.c}).
@@ -17,9 +18,6 @@ import static com.igormaznitsa.nanollvm.internal.GgufIqTables.kvalues_fp4;
 final class GgufIqDequant {
 
   private static final float IQ1S_DELTA = 0.125f;
-  private static final int[] KVALUES_IQ4NL = {
-    -127, -104, -83, -65, -49, -35, -22, -10, 1, 13, 25, 38, 53, 69, 89, 113
-  };
   private static final int[] POW3 = {1, 3, 9, 27, 81, 243};
 
   private GgufIqDequant() {
@@ -316,8 +314,8 @@ final class GgufIqDequant {
       float dl = d * (ls - 32);
       for (int j = 0; j < 16; j++) {
         int q = packed[qs + j] & 0xFF;
-        dst[y + j] = dl * KVALUES_IQ4NL[q & 0x0F];
-        dst[y + j + 16] = dl * KVALUES_IQ4NL[q >> 4];
+        dst[y + j] = dl * kvalues_iq4nl[q & 0x0F];
+        dst[y + j + 16] = dl * kvalues_iq4nl[q >> 4];
       }
       y += 32;
       qs += 16;

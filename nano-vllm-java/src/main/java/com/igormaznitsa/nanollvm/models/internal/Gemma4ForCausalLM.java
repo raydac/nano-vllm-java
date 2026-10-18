@@ -30,8 +30,8 @@ import com.igormaznitsa.nanollvm.tensor.Ops;
 import com.igormaznitsa.nanollvm.tensor.Tensor;
 import com.igormaznitsa.nanollvm.tensor.kernels.PackedEmbeddingKernel;
 import com.igormaznitsa.nanollvm.tensor.kernels.PackedLinearKernel;
-import java.util.ArrayList;
 import java.util.List;
+import java.util.stream.IntStream;
 
 /**
  * Causal LM for the {@code gemma4} / {@code gemma4_text} family (text decoder, QAT weights stay packed).
@@ -163,9 +163,8 @@ public record Gemma4ForCausalLM(Gemma4Model model, ParallelLMHead lmHead, float 
     }
 
     Tensor forward(final Tensor positions, final Tensor hiddenStates, final Context context) {
-      Tensor q = this.reshapeHeads(
-        this.qProj.forward(hiddenStates, context), this.numHeads);
-      q = this.normHeads(q, this.qNorm);
+      Tensor q = this.qNorm.forward(this.reshapeHeads(
+        this.qProj.forward(hiddenStates, context), this.numHeads));
       Tensor k;
       Tensor v;
       if (this.kvShared) {
@@ -175,9 +174,8 @@ public record Gemma4ForCausalLM(Gemma4Model model, ParallelLMHead lmHead, float 
         k = Tensor.zeros(q.size(0), this.numKvHeads, this.headDim);
         v = Tensor.zeros(q.size(0), this.numKvHeads, this.headDim);
       } else {
-        k = this.normHeads(
-          this.reshapeHeads(this.kProj.forward(hiddenStates, context), this.numKvHeads),
-          this.kNorm);
+        k = this.kNorm.forward(this.reshapeHeads(
+          this.kProj.forward(hiddenStates, context), this.numKvHeads));
         v = this.vNorm.forward(
           this.reshapeHeads(this.vProj.forward(hiddenStates, context), this.numKvHeads));
         Tensor[] rotated = this.rotaryEmb.forward(positions, q, k, context);
@@ -190,11 +188,6 @@ public record Gemma4ForCausalLM(Gemma4Model model, ParallelLMHead lmHead, float 
 
     private Tensor reshapeHeads(final Tensor projected, final int heads) {
       return projected.reshape(projected.size(0), heads, this.headDim);
-    }
-
-    private Tensor normHeads(final Tensor x, final RMSNorm norm) {
-      return norm.forward(x.reshape(x.size(0) * x.size(1), this.headDim))
-        .reshape(x.size(0), x.size(1), this.headDim);
     }
   }
 
@@ -330,10 +323,9 @@ public record Gemma4ForCausalLM(Gemma4Model model, ParallelLMHead lmHead, float 
       Tables ropes = new Tables();
       int layers = config.numHiddenLayers();
       int ple = config.gemma4().hiddenSizePerLayerInput();
-      List<Gemma4DecoderLayer> built = new ArrayList<>(layers);
-      for (int i = 0; i < layers; i++) {
-        built.add(new Gemma4DecoderLayer(config, weights, i, ropes));
-      }
+      List<Gemma4DecoderLayer> built = IntStream.range(0, layers)
+        .mapToObj(i -> new Gemma4DecoderLayer(config, weights, i, ropes))
+        .toList();
       GemmaQatWeight tokens = weights.requireQat(EMBED_TOKENS);
       GemmaQatWeight perLayer = weights.requireQat("model.embed_tokens_per_layer.weight");
       return new Gemma4Model(
@@ -347,7 +339,7 @@ public record Gemma4ForCausalLM(Gemma4Model model, ParallelLMHead lmHead, float 
         new Linear.Row(weights.require("model.per_layer_model_projection.weight")),
         new RMSNorm(weights.require("model.per_layer_projection_norm.weight"), config.rmsNormEps(),
           false),
-        List.copyOf(built),
+        built,
         new RMSNorm(weights.require(MODEL_NORM), config.rmsNormEps(), false),
         (float) Math.sqrt(config.hiddenSize()),
         (float) Math.sqrt(ple),

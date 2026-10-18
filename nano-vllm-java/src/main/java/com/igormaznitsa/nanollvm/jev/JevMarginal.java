@@ -35,7 +35,7 @@ final class JevMarginal {
   static List<int[]> choiceRotations(final List<String> options) {
     int[] canonical = IntStream.range(0, options.size())
       .boxed()
-      .sorted(Comparator.<Integer, String>comparing(options::get).thenComparingInt(index -> index))
+      .sorted(Comparator.comparing(options::get).thenComparingInt(index -> index))
       .mapToInt(Integer::intValue)
       .toArray();
     List<int[]> shifts = new ArrayList<>(canonical.length);

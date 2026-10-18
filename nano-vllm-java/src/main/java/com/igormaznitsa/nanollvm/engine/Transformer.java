@@ -140,27 +140,24 @@ public final class Transformer implements AutoCloseable {
     final boolean allowUnpackParameters,
     final Random sampleRandom
   ) {
-    // Capture engine config and resolve progress sink (null → silent)
     this.config = config;
     this.sampleRandom = requireNonNull(sampleRandom, "sampleRandom");
-    final LlmListener io1 = io == null ? LlmListeners.silent() : io;
+    final LlmListener progress = io == null ? LlmListeners.silent() : io;
     this.blockSize = config.kvcacheBlockSize();
-    this.network = LlmModelImpl.peer(model).resolveNetwork(allowUnpackParameters, io1);
+    this.network = LlmModelImpl.peer(model).resolveNetwork(allowUnpackParameters, progress);
     this.matmul = requireNonNull(matmul, "matmul");
 
-    // Allocate paged KV arena sized from config (or heap-aware estimate)
-    LlmListeners.info(io1, null, "Allocating KV cache…");
+    LlmListeners.info(progress, null, "Allocating KV cache…");
     long tKv = System.nanoTime();
     this.kvCache = this.allocateKvCache();
-    LlmListeners.infof(io1, null, "KV cache ready: %d blocks (%.1fs)%n",
+    LlmListeners.infof(progress, null, "KV cache ready: %d blocks (%.1fs)%n",
       this.config.numKvcacheBlocks(),
       (System.nanoTime() - tKv) / 1e9);
 
-    // Short-conv hybrid models need a parallel per-layer conv state arena
     Config.HfConfig hf = this.config.hfConfig();
     if (hf.convLCache() > 0) {
       this.convCache = new ConvStateArena(hf.numHiddenLayers(), hf.hiddenSize(), hf.convLCache());
-      LlmListeners.info(io1, null, "Conv state arena ready (" + this.convCache + ")");
+      LlmListeners.info(progress, null, "Conv state arena ready (" + this.convCache + ")");
     } else {
       this.convCache = null;
     }
@@ -178,44 +175,8 @@ public final class Transformer implements AutoCloseable {
     return Tensor.of(data, values.size());
   }
 
-  /**
-   * One forward+sample over a scheduled batch (prefill or decode).
-   *
-   * <p>Binds the KV (and optional conv) arenas on {@link Context}, prepares input tensors,
-   * runs the causal LM, samples one token id per sequence, then clears the Context.
-   *
-   * @param seqs      sequences chosen by {@link Scheduler#schedule()} for this tick
-   * @param isPrefill {@code true} for a prompt-token batch; {@code false} for one-token decode
-   * @return sampled next-token id for each sequence, same order as {@code seqs}
-   * @throws IllegalStateException if this transformer is {@linkplain #close() closed}
-   */
-  public List<Integer> step(final List<Sequence> seqs, final boolean isPrefill) {
-    this.requireOpen();
-    // Bind per-LLM arenas / matmul on the step Context passed through the forward graph
-    this.stepContext.bindKvCache(this.kvCache);
-    this.stepContext.bindMatmul(this.matmul);
-    if (this.convCache != null) {
-      this.stepContext.bindConvCache(this.convCache);
-    }
-
-    try {
-      // 1) Flatten scheduled tokens → tensors + Context metadata (cuSeqlens, slots, …)
-      PreparedInputs prepared = this.prepareInputs(seqs, isPrefill);
-
-      // 2) Snapshot sampling knobs once per sequence for this batch
-      SamplingControls sampling = this.collectSamplingControls(seqs);
-
-      // 3) CausalLM forward → last-layer hidden states
-      Tensor hidden = this.forwardHidden(prepared);
-
-      // 4) Hidden → vocabulary logits
-      Tensor logits = this.computeLogits(hidden);
-
-      // 5) Temperature / top-k / top-p → one token id per sequence
-      return this.sampleTokens(logits, sampling);
-    } finally {
-      this.stepContext.clear();
-    }
+  private static int[] toInts(final List<Integer> values) {
+    return values.stream().mapToInt(Integer::intValue).toArray();
   }
 
   private static List<Sequence> requirePrefill(final List<Sequence> seqs) {
@@ -271,25 +232,15 @@ public final class Transformer implements AutoCloseable {
     }
   }
 
-  /**
-   * Runs {@link CausalLM#forward} on the prepared input-id and position tensors.
-   */
   private Tensor forwardHidden(final PreparedInputs prepared) {
     return this.network.forward(prepared.inputIds(), prepared.positions(), this.stepContext);
   }
 
-  /**
-   * Projects last-layer hidden states to vocabulary logits via {@link CausalLM#computeLogits}.
-   */
   private Tensor computeLogits(final Tensor hidden) {
     return this.network.computeLogits(hidden, this.stepContext);
   }
 
-  /**
-   * Samples one token id per batch row using the sequence-local temperature / top-k / top-p.
-   */
   private List<Integer> sampleTokens(final Tensor logits, final SamplingControls sampling) {
-    // Sampler.forward returns int[]; box to List for the scheduler postprocess API
     return this.toTokenIdList(this.sampler.forward(
       logits,
       sampling.temperatures(),
@@ -298,19 +249,11 @@ public final class Transformer implements AutoCloseable {
       this.sampleRandom));
   }
 
-  /**
-   * Dispatches to {@link #preparePrefill} or {@link #prepareDecode} based on the schedule flag.
-   */
   private PreparedInputs prepareInputs(final List<Sequence> seqs, final boolean isPrefill) {
-    // Prefill packs many tokens per seq; decode packs exactly one
     return isPrefill ? this.preparePrefill(seqs) : this.prepareDecode(seqs);
   }
 
-  /**
-   * Collects per-sequence temperature, top-k, and top-p into parallel arrays for {@link Sampler}.
-   */
   private SamplingControls collectSamplingControls(final List<Sequence> seqs) {
-    // Lockstep fill: three parallel primitive arrays indexed by sequence position
     float[] temperatures = new float[seqs.size()];
     int[] topKs = new int[seqs.size()];
     float[] topPs = new float[seqs.size()];
@@ -323,9 +266,6 @@ public final class Transformer implements AutoCloseable {
     return new SamplingControls(temperatures, topKs, topPs);
   }
 
-  /**
-   * Boxes a primitive token-id array into an immutable {@link List} for callers.
-   */
   private List<Integer> toTokenIdList(final int[] tokenIds) {
     return Arrays.stream(tokenIds).boxed().toList();
   }
@@ -399,7 +339,6 @@ public final class Transformer implements AutoCloseable {
    * so attention can index physical KV pages uniformly across the batch.
    */
   private int[][] prepareBlockTables(final List<Sequence> seqs) {
-    // Width = longest block table in the batch; shorter tables pad with -1
     int maxLen = seqs.stream().mapToInt(seq -> seq.blockTable().size()).max().orElse(0);
     int[][] tables = new int[seqs.size()][maxLen];
     for (int i = 0; i < seqs.size(); i++) {
@@ -412,6 +351,29 @@ public final class Transformer implements AutoCloseable {
   }
 
   /**
+   * One forward+sample over a scheduled batch (prefill or decode).
+   *
+   * <p>Binds the KV (and optional conv) arenas on {@link Context}, prepares input tensors,
+   * runs the causal LM, samples one token id per sequence, then clears the Context.
+   *
+   * @param seqs      sequences chosen by {@link Scheduler#schedule()} for this tick
+   * @param isPrefill {@code true} for a prompt-token batch; {@code false} for one-token decode
+   * @return sampled next-token id for each sequence, same order as {@code seqs}
+   * @throws IllegalStateException if this transformer is {@linkplain #close() closed}
+   */
+  public List<Integer> step(final List<Sequence> seqs, final boolean isPrefill) {
+    this.requireOpen();
+    this.bindStep();
+    try {
+      PreparedInputs prepared = this.prepareInputs(seqs, isPrefill);
+      SamplingControls sampling = this.collectSamplingControls(seqs);
+      return this.sampleTokens(this.computeLogits(this.forwardHidden(prepared)), sampling);
+    } finally {
+      this.stepContext.clear();
+    }
+  }
+
+  /**
    * Builds flat prefill tensors and publishes varlen / slot metadata on {@link Context}.
    *
    * <p>For each sequence, only the uncached window
@@ -421,7 +383,6 @@ public final class Transformer implements AutoCloseable {
    * when some tokens are already cached (prefix reuse) and every sequence has a block table.
    */
   private PreparedInputs preparePrefill(final List<Sequence> seqs) {
-    // Accumulators for the packed batch (token ids, positions, cu-seqlens, slots, seq ids)
     List<Integer> inputIds = new ArrayList<>();
     List<Integer> positions = new ArrayList<>();
     List<Integer> cuSeqlensQ = new ArrayList<>();
@@ -435,73 +396,62 @@ public final class Transformer implements AutoCloseable {
     boolean anyBlockTable = false;
 
     for (Sequence seq : seqs) {
-      // Uncached window: start at already-cached prefix, end after this prefill chunk
       int start = seq.numCachedTokens();
       int seqlenQ = seq.numScheduledTokens();
       int end = start + seqlenQ;
 
-      // Pack token ids + absolute positions + owning seqId (one entry per new token)
       for (int i = start; i < end; i++) {
         inputIds.add(seq.tokenAt(i));
         positions.add(i);
         seqIds.add(seq.seqId());
       }
 
-      // Cumulative lengths: Q = new tokens only; K = full context through end
       cuSeqlensQ.add(cuSeqlensQ.getLast() + seqlenQ);
       cuSeqlensK.add(cuSeqlensK.getLast() + end);
       maxSeqlenQ = Math.max(maxSeqlenQ, seqlenQ);
       maxSeqlenK = Math.max(maxSeqlenK, end);
 
-      // No block table yet → nothing to map into the KV arena for this sequence
       if (seq.blockTable().isEmpty()) {
         continue;
       }
       anyBlockTable = true;
-
-      // Map each new token to its physical slot inside the sequence's allocated blocks
-      int startBlock = start / this.blockSize;
-      int endBlock = (end + this.blockSize - 1) / this.blockSize;
-      for (int i = startBlock; i < endBlock; i++) {
-        int slotStart = seq.blockTable().get(i) * this.blockSize;
-        if (i == startBlock) {
-          // First block may start mid-page when the cached prefix is not block-aligned
-          slotStart += start % this.blockSize;
-        }
-        int slotEnd;
-        if (i != endBlock - 1) {
-          // Full interior block
-          slotEnd = seq.blockTable().get(i) * this.blockSize + this.blockSize;
-        } else {
-          // Last block: only through the final token of this prefill window
-          slotEnd = seq.blockTable().get(i) * this.blockSize + end - i * this.blockSize;
-        }
-        for (int s = slotStart; s < slotEnd; s++) {
-          slotMapping.add(s);
-        }
-      }
+      this.appendPrefillSlots(seq, start, end, slotMapping);
     }
 
-    // Block tables needed when K context exceeds Q (prefix cache hit) and tables exist
-    int[][] blockTables = null;
-    if (cuSeqlensK.getLast() > cuSeqlensQ.getLast() &&
-      anyBlockTable) {
-      blockTables = this.prepareBlockTables(seqs);
-    }
-
-    // Publish varlen attention metadata; layers read this via Context during forward
+    int[][] blockTables = cuSeqlensK.getLast() > cuSeqlensQ.getLast() && anyBlockTable
+      ? this.prepareBlockTables(seqs)
+      : null;
     this.stepContext.set(
       true,
-      cuSeqlensQ.stream().mapToInt(Integer::intValue).toArray(),
-      cuSeqlensK.stream().mapToInt(Integer::intValue).toArray(),
+      toInts(cuSeqlensQ),
+      toInts(cuSeqlensK),
       maxSeqlenQ,
       maxSeqlenK,
-      slotMapping.stream().mapToInt(Integer::intValue).toArray(),
+      toInts(slotMapping),
       null,
       blockTables,
-      seqIds.stream().mapToInt(Integer::intValue).toArray()
-    );
+      toInts(seqIds));
     return new PreparedInputs(toTensor1d(inputIds), toTensor1d(positions));
+  }
+
+  private void appendPrefillSlots(
+    final Sequence seq,
+    final int start,
+    final int end,
+    final List<Integer> slotMapping
+  ) {
+    int startBlock = start / this.blockSize;
+    int endBlock = (end + this.blockSize - 1) / this.blockSize;
+    for (int block = startBlock; block < endBlock; block++) {
+      int pageBase = seq.blockTable().get(block) * this.blockSize;
+      int slotStart = block == startBlock ? pageBase + start % this.blockSize : pageBase;
+      int slotEnd = block == endBlock - 1
+        ? pageBase + end - block * this.blockSize
+        : pageBase + this.blockSize;
+      for (int slot = slotStart; slot < slotEnd; slot++) {
+        slotMapping.add(slot);
+      }
+    }
   }
 
   /**
@@ -519,33 +469,23 @@ public final class Transformer implements AutoCloseable {
     int[] contextLens = new int[n];
     int[] seqIds = new int[n];
 
-    // One row per sequence: last token → next-token prediction
     for (int i = 0; i < n; i++) {
       Sequence seq = seqs.get(i);
       inputIds[i] = seq.lastToken();
       positions[i] = seq.length() - 1;
       contextLens[i] = seq.length();
       seqIds[i] = seq.seqId();
-      // Physical slot for the append write inside the last allocated KV block
-      slotMapping[i] = seq.blockTable().getLast() * this.blockSize
-        + seq.lastBlockNumTokens() - 1;
+      slotMapping[i] = seq.blockTable().getLast() * this.blockSize + seq.lastBlockNumTokens() - 1;
     }
 
-    // Decode Context: no cu-seqlens; contextLens + blockTables drive attention reads
     this.stepContext.set(
       false, null, null, 0, 0, slotMapping, contextLens, this.prepareBlockTables(seqs), seqIds);
     return new PreparedInputs(Tensor.of(inputIds, n), Tensor.of(positions, n));
   }
 
-  /**
-   * Input-id and position tensors ready for {@link CausalLM#forward}.
-   */
   private record PreparedInputs(Tensor inputIds, Tensor positions) {
   }
 
-  /**
-   * Per-sequence sampling knobs aligned with the scheduled batch order.
-   */
   @SuppressWarnings("ArrayRecordComponent")
   private record SamplingControls(float[] temperatures, int[] topKs, float[] topPs) {
   }

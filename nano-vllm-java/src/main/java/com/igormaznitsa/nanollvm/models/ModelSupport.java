@@ -695,16 +695,16 @@ public final class ModelSupport {
     if (isBertEncoder(token)) {
       return Verdict.ok(ARCH_BERT, Kind.EMBEDDING);
     }
-    if (token.equals("whisper")) {
-      return Verdict.ok(ARCH_WHISPER, Kind.SPEECH);
-    }
-    if (token.equals("piper") || token.equals("piper_vits") || token.equals("pipervits")
-      || token.equals("vits")) {
-      return Verdict.ok(ARCH_PIPER, Kind.SYNTHESIS);
-    }
-    if (token.equals("fasttext") || token.equals("fast_text") || token.equals("lid")
-      || token.equals("language_id") || token.equals("languageidentification")) {
-      return Verdict.ok(ARCH_FASTTEXT, Kind.CLASSIFICATION);
+    switch (token) {
+      case "whisper" -> {
+        return Verdict.ok(ARCH_WHISPER, Kind.SPEECH);
+      }
+      case "piper", "piper_vits", "pipervits", "vits" -> {
+        return Verdict.ok(ARCH_PIPER, Kind.SYNTHESIS);
+      }
+      case "fasttext", "fast_text", "lid", "language_id", "languageidentification" -> {
+        return Verdict.ok(ARCH_FASTTEXT, Kind.CLASSIFICATION);
+      }
     }
     String known = knownUnsupportedReason(token);
     if (known != null) {

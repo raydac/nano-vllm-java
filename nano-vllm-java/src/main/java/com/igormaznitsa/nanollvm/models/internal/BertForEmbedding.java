@@ -1,5 +1,6 @@
 package com.igormaznitsa.nanollvm.models.internal;
 
+import static com.igormaznitsa.nanollvm.models.internal.WeightLayers.embedding;
 import static com.igormaznitsa.nanollvm.models.internal.WeightNames.ARCH_BERT;
 import static com.igormaznitsa.nanollvm.models.internal.WeightNames.GGUF_POSITION_EMBD;
 import static com.igormaznitsa.nanollvm.models.internal.WeightNames.GGUF_TOKEN_EMBD;
@@ -50,12 +51,6 @@ public final class BertForEmbedding implements EmbeddingEncoder {
     this.blocks = IntStream.range(0, config.numHiddenLayers())
       .mapToObj(i -> new BertBlock(config, weights, i))
       .toList();
-  }
-
-  private static VocabParallelEmbedding embedding(final WeightBag weights, final String name) {
-    return weights.findPacked(name)
-      .map(VocabParallelEmbedding::new)
-      .orElseGet(() -> new VocabParallelEmbedding(weights.require(name)));
   }
 
   private static Linear.Row linear(final WeightBag weights, final String weight,
