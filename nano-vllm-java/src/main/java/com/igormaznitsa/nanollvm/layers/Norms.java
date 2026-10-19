@@ -379,8 +379,9 @@ public final class Norms {
           out.data()[oBase + i] = x1 * cos - x2 * sin;
           out.data()[oBase + pairs + i] = x2 * cos + x1 * sin;
         }
-        for (int i = this.rotaryDim; i < this.headSize; i++) {
-          out.data()[oBase + i] = in.data()[base + i];
+        if (this.headSize - this.rotaryDim >= 0) {
+          System.arraycopy(in.data(), base + this.rotaryDim, out.data(), oBase + this.rotaryDim,
+            this.headSize - this.rotaryDim);
         }
       }
     }

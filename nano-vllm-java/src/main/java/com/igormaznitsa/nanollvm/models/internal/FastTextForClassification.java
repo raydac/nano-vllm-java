@@ -10,11 +10,9 @@ import java.util.List;
  *
  * @since 1.4.0
  */
-public final class FastTextForClassification implements TextClassifier {
+public record FastTextForClassification(FastTextModel model) implements TextClassifier {
 
   public static final String ARCH_FASTTEXT = "fasttext";
-
-  private final FastTextModel model;
 
   public FastTextForClassification(final FastTextModel model) {
     this.model = requireNonNull(model, "model");
@@ -32,9 +30,5 @@ public final class FastTextForClassification implements TextClassifier {
     return this.model.predict(text, topK, threshold).stream()
       .map(prediction -> new ScoredLabel(prediction.label(), prediction.probability()))
       .toList();
-  }
-
-  public FastTextModel model() {
-    return this.model;
   }
 }

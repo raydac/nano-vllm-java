@@ -193,16 +193,16 @@ final class VitsSynthesizer {
     double inputBinWidth = widths[bin];
     double inputCumHeight = cumHeights[bin];
     double inputHeight = heights[bin];
-    double delta = inputHeight / inputBinWidth;
-    double inputDelta = delta;
     double inputDerivative = derivatives[bin];
     double inputDerivativePlusOne = derivatives[bin + 1];
     double a =
-      (input - inputCumHeight) * (inputDerivative + inputDerivativePlusOne - 2.0 * inputDelta)
-        + inputHeight * (inputDelta - inputDerivative);
+      (input - inputCumHeight) * (inputDerivative + inputDerivativePlusOne - 2.0 *
+        (inputHeight / inputBinWidth))
+        + inputHeight * (inputHeight / inputBinWidth - inputDerivative);
     double b = inputHeight * inputDerivative
-      - (input - inputCumHeight) * (inputDerivative + inputDerivativePlusOne - 2.0 * inputDelta);
-    double c = -inputDelta * (input - inputCumHeight);
+      - (input - inputCumHeight) * (inputDerivative + inputDerivativePlusOne - 2.0 *
+      (inputHeight / inputBinWidth));
+    double c = -(inputHeight / inputBinWidth) * (input - inputCumHeight);
     if (Math.abs(a) < 1e-12) {
       return inputCumWidth + (-c / b) * inputBinWidth;
     }

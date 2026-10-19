@@ -503,7 +503,6 @@ public final class GgufDequant {
   private static void dequantOneQ2_K(
     final byte[] packed, final int byteOff, final float[] dst, final int dstOff
   ) {
-    int scalesOff = byteOff;
     int qsOff = byteOff + QK_K / 16;
     float d = Float.float16ToFloat((short) u16LE(packed, qsOff + QK_K / 4));
     float min = Float.float16ToFloat((short) u16LE(packed, qsOff + QK_K / 4 + 2));
@@ -513,13 +512,13 @@ public final class GgufDequant {
     for (int n = 0; n < QK_K; n += 128) {
       int shift = 0;
       for (int j = 0; j < 4; j++) {
-        int sc = packed[scalesOff + is++] & 0xFF;
+        int sc = packed[byteOff + is++] & 0xFF;
         float dl = d * (sc & 0x0F);
         float ml = min * (sc >> 4);
         for (int l = 0; l < 16; l++) {
           dst[y++] = dl * ((packed[q + l] >> shift) & 3) - ml;
         }
-        sc = packed[scalesOff + is++] & 0xFF;
+        sc = packed[byteOff + is++] & 0xFF;
         dl = d * (sc & 0x0F);
         ml = min * (sc >> 4);
         for (int l = 0; l < 16; l++) {
@@ -581,7 +580,6 @@ public final class GgufDequant {
   private static void dequantOneQ3_K(
     final byte[] packed, final int byteOff, final float[] dst, final int dstOff
   ) {
-    int hmaskOff = byteOff;
     int qsOff = byteOff + QK_K / 8;
     int scalesOff = qsOff + QK_K / 4;
     float dAll = Float.float16ToFloat((short) u16LE(packed, scalesOff + 12));
@@ -615,13 +613,13 @@ public final class GgufDequant {
         float dl = dAll * (scales[is++] - 32);
         for (int l = 0; l < 16; l++) {
           int q = (packed[qBase + l] >> shift) & 3;
-          int hm = (packed[hmaskOff + l] & m) != 0 ? 0 : 4;
+          int hm = (packed[byteOff + l] & m) != 0 ? 0 : 4;
           dst[y++] = dl * (q - hm);
         }
         dl = dAll * (scales[is++] - 32);
         for (int l = 0; l < 16; l++) {
           int q = (packed[qBase + 16 + l] >> shift) & 3;
-          int hm = (packed[hmaskOff + 16 + l] & m) != 0 ? 0 : 4;
+          int hm = (packed[byteOff + 16 + l] & m) != 0 ? 0 : 4;
           dst[y++] = dl * (q - hm);
         }
         shift += 2;
@@ -676,7 +674,6 @@ public final class GgufDequant {
   private static void dequantOneQ6_K(
     final byte[] packed, final int byteOff, final float[] dst, final int dstOff
   ) {
-    int qlOff = byteOff;
     int qhOff = byteOff + QK_K / 2;
     int scOff = byteOff + QK_K / 2 + QK_K / 4;
     float d = Float.float16ToFloat((short) u16LE(packed, scOff + QK_K / 16));
@@ -687,11 +684,12 @@ public final class GgufDequant {
     for (int block = 0; block < QK_K; block += 128) {
       for (int l = 0; l < 32; l++) {
         int is = l / 16;
-        int q1 = (packed[qlOff + ql + l] & 0x0F) | ((packed[qhOff + qh + l] & 3) << 4);
-        int q2 = (packed[qlOff + ql + l + 32] & 0x0F) | (((packed[qhOff + qh + l] >> 2) & 3) << 4);
+        int q1 = (packed[byteOff + ql + l] & 0x0F) | ((packed[qhOff + qh + l] & 3) << 4);
+        int q2 =
+          (packed[byteOff + ql + l + 32] & 0x0F) | (((packed[qhOff + qh + l] >> 2) & 3) << 4);
         int q3 =
-          ((packed[qlOff + ql + l] & 0xFF) >> 4) | (((packed[qhOff + qh + l] >> 4) & 3) << 4);
-        int q4 = ((packed[qlOff + ql + l + 32] & 0xFF) >> 4)
+          ((packed[byteOff + ql + l] & 0xFF) >> 4) | (((packed[qhOff + qh + l] >> 4) & 3) << 4);
+        int q4 = ((packed[byteOff + ql + l + 32] & 0xFF) >> 4)
           | (((packed[qhOff + qh + l] >> 6) & 3) << 4);
         dst[y + l] = d * packed[scOff + sc + is] * (q1 - 32);
         dst[y + l + 32] = d * packed[scOff + sc + is + 2] * (q2 - 32);

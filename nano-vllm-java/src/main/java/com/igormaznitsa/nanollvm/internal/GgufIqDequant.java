@@ -256,8 +256,7 @@ final class GgufIqDequant {
   static void dequantOneIq1M(
     final byte[] packed, final int byteOff, final float[] dst, final int dstOff
   ) {
-    int qsOff = byteOff;
-    int qhOff = qsOff + QK_K / 8;
+    int qhOff = byteOff + QK_K / 8;
     int scOff = qhOff + QK_K / 16;
     int scaleBits = (u16LE(packed, scOff) >>> 12)
       | ((u16LE(packed, scOff + 2) >>> 8) & 0x00F0)
@@ -265,7 +264,7 @@ final class GgufIqDequant {
       | (u16LE(packed, scOff + 6) & 0xF000);
     float d = Float.float16ToFloat((short) scaleBits);
     int y = dstOff;
-    int qs = qsOff;
+    int qs = byteOff;
     int qh = qhOff;
     for (int ib = 0; ib < QK_K / 32; ib++) {
       int sc = u16LE(packed, scOff + (ib / 2) * 2);

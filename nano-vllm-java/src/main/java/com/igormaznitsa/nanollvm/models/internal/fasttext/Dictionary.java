@@ -236,11 +236,11 @@ final class Dictionary {
       return this.computeSubwords(this.bowWordEow(token), line, lineSize, capacity);
     }
     if (this.args.maxn <= 0) {
-      return this.push(line, lineSize, capacity, wordId);
+      return push(line, lineSize, capacity, wordId);
     }
     int size = lineSize;
     for (final int subword : this.words[wordId].subwords) {
-      size = this.push(line, size, capacity, subword);
+      size = push(line, size, capacity, subword);
     }
     return size;
   }
@@ -276,7 +276,7 @@ final class Dictionary {
       }
       mapped = pruned;
     }
-    return this.push(line, lineSize, capacity, this.nwords + mapped);
+    return push(line, lineSize, capacity, this.nwords + mapped);
   }
 
   private void computeSubwordsGrowing(final byte[] word, final IntBuffer out) {
