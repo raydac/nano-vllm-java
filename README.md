@@ -332,18 +332,8 @@ mvn -pl nano-vllm-java-samples -q exec:java \
 <a id="hello-world--russian-checkers"></a>
 ## Hello World — Russian checkers
 
-A terminal game of Russian draughts (**since 1.5.0**). Before the first move you choose your
-colour once. Qwen Jeff plays the other colour. Enter selects White, so you move first.
-
-The board is an 8×8 grid with files `a`–`h` and rows `1`–`8`. Your pieces sit at the bottom, so
-Black turns the board around. Enter a move as
-coordinates, the same shape as a terminal checkers board: `a3 b4`, `a3-b4`, or `A 3 B 4`. A long
-capture lists every landing (`c3 e5 g7`). Men step one square diagonally forward and jump one
-square either way. Kings move and jump any distance. A capture is required. When only one
-move is legal, Enter plays the move shown in the prompt. `q` or `0` quits.
-
-Jeff does not type free text. The sample lists the legal moves and asks for one typed choice
-(`JevLevel.RAW`, a single readout). The line under a computer move is how long that readout took.
+A terminal game of Russian draughts (**since 1.5.0**). You pick a colour and Qwen Jeff plays the
+other. Enter selects White. Moves are coordinates such as `a3 b4` or `A 3 B 4`. `q` quits.
 
 ```bash
 mvn -pl nano-vllm-java-samples -q exec:java \
@@ -1072,7 +1062,7 @@ Prompt wording is module-private (`prompts`); `RagSession.formatUserMessage` bui
 | [`TranscribeHelloWorld.java`](nano-vllm-java-samples/src/main/java/com/igormaznitsa/nanollvm/samples/TranscribeHelloWorld.java) | Whisper sample: `piper-hello.wav` if present, else `ofPcm` tone, or `ofWav` |
 | [`LanguageIdHelloWorld.java`](nano-vllm-java-samples/src/main/java/com/igormaznitsa/nanollvm/samples/LanguageIdHelloWorld.java) | fastText language id |
 | [`JevHelloWorld.java`](nano-vllm-java-samples/src/main/java/com/igormaznitsa/nanollvm/samples/JevHelloWorld.java) | Choice at L0 and RAW, yes/no, score, label prior (**since 1.5.0**) |
-| [`RussianCheckersHelloWorld.java`](nano-vllm-java-samples/src/main/java/com/igormaznitsa/nanollvm/samples/RussianCheckersHelloWorld.java) | Russian draughts; you pick a colour, Qwen Jeff plays the other; move time per computer turn |
+| [`RussianCheckersHelloWorld.java`](nano-vllm-java-samples/src/main/java/com/igormaznitsa/nanollvm/samples/RussianCheckersHelloWorld.java) | Russian draughts against Qwen Jeff |
 | [`SynthesizeHelloWorld.java`](nano-vllm-java-samples/src/main/java/com/igormaznitsa/nanollvm/samples/SynthesizeHelloWorld.java) | Piper sample: `generate` → `LlmOutSoundData.wav()` |
 | [`VoiceReplyHelloWorld.java`](nano-vllm-java-samples/src/main/java/com/igormaznitsa/nanollvm/samples/VoiceReplyHelloWorld.java) | Whisper → chat → Piper |
 | [`rag/`](rag/) | Demo corpus (fairy tales + fact cards) |

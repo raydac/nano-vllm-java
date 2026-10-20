@@ -308,19 +308,23 @@ public final class RussianCheckersHelloWorld {
 
   private void printBoard(final Board board, final Side side, final List<Move> legal) {
     List<Sq> squares = displaySquares(this.seat(Side.BLACK) == Seat.YOU);
+    String files = fileLabels(squares.subList(0, 8));
     String bar = "   +---+---+---+---+---+---+---+---+";
+    System.out.println(files);
     System.out.println(bar);
     for (int rowIndex = 0; rowIndex < 8; rowIndex++) {
       List<Sq> rowSquares = squares.subList(rowIndex * 8, rowIndex * 8 + 8);
+      int rank = rowSquares.getFirst().rank() + 1;
       StringBuilder row = new StringBuilder();
-      row.append(' ').append(rowSquares.getFirst().rank() + 1).append(" |");
+      row.append(' ').append(rank).append(" |");
       for (Sq sq : rowSquares) {
         row.append(this.cell(board, sq)).append('|');
       }
+      row.append(' ').append(rank);
       System.out.println(row);
       System.out.println(bar);
     }
-    System.out.println(fileLabels(squares.subList(56, 64)));
+    System.out.println(files);
     System.out.println();
     System.out.println("White: " + seatName(this.white) + "    Black: " + seatName(this.black));
     System.out.println(side.label() + " to move");

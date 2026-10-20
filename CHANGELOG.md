@@ -20,11 +20,8 @@ Development snapshot after the **1.4.0** public release.
   TileContext is CUDA-only and is not used.
 
 ### Added
-- Sample `RussianCheckersHelloWorld` plays Russian draughts in the terminal. You choose your colour
-  once and Qwen Jeff plays the other. Your pieces sit at the bottom, so playing Black turns the
-  board around. When only one move is legal, Enter plays the move shown in the prompt. Jeff picks
-  one legal move with a typed choice, and the sample prints how long that move took. Moves are
-  coordinates such as `a3 b4` or `A 3 B 4`.
+- Sample `RussianCheckersHelloWorld` plays Russian draughts in the terminal. You pick a colour
+  and Qwen Jeff plays the other.
 - Causal chat models can answer a typed decision. `LLM.builder(model).toJev()` reads a choice, a
   yes/no, or a score from the next-token distribution and returns a probability for every option.
   The default level, L0, rotates the options and removes the label prior without any training
