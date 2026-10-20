@@ -7,10 +7,11 @@
  * {@link com.igormaznitsa.nanollvm.models.LlmModel}. Embeddings, Whisper, Piper, and fastText
  * have no next-token vocabulary and are refused.
  *
- * <p>{@link JevLevel#L0} (the default) reads every cyclic rotation of a choice, averages in log
- * space, and divides out a label prior estimated from the decisions themselves once eight states
- * of the same question have been seen. {@link JevLevel#RAW} is one prefill in the order given.
- * Nothing is parsed and nothing is trained. The readout follows the training-free contract in
+ * <p>{@link JevLevel} chooses the readout. {@link JevLevel#L0} (the default) reads every cyclic
+ * rotation of a choice, averages in log space, and divides out a label prior estimated from the
+ * decisions themselves once eight states of the same question have been seen. {@link JevLevel#RAW}
+ * is one prefill in the order given. Nothing is parsed and nothing is trained. The readout follows
+ * the training-free contract in
  * <a href="https://github.com/nokia-applied-research/AnyJev">AnyJev</a>
  * (Zhang et al., <a href="https://arxiv.org/abs/2610.00831">arXiv:2610.00831</a>).
  *

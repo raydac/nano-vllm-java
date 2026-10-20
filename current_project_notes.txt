@@ -23,6 +23,7 @@
 - `LLM` still has many one-line generate overloads. They exist so callers do not pass unused flags.
 
 ## 4. Current Work In Progress
+- `JevLevel` javadoc now states RAW vs L0 (rotations, eight-state prior, ordered scores stay one prefill) and includes a two-engine usage example. `require` and `Builder.jevLevel` point at it.
 - Russian checkers sample is in (`RussianCheckersHelloWorld`). Rules covered by `RussianCheckersHelloWorldTest` (no model load). A live game still needs `models/Jeff-Qwen3.5-0.8B`.
 - Qwen3.5 text load is in: hybrid Gated DeltaNet + gated attention, leading partial RoPE, delta-state arena, `models/download-jeff-qwen3.5-0.8b.sh`. Vision tower and the Jeff readout head are not loaded. `toJev()` uses the causal logits. Jeff safetensors use a `language_model.*` prefix; that now maps onto `model.*`. Real Jeff-Qwen3.5-0.8B loaded and produced one token.
 

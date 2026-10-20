@@ -2034,9 +2034,13 @@ public final class LLM implements AutoCloseable {
     }
 
     /**
-     * Readout level for {@link #toJev()}. Default {@link JevLevel#L0}.
+     * How {@link #toJev()} reads each decision. Default {@link JevLevel#L0}.
      *
-     * @param level raw or L0; must not be {@code null}
+     * <p>{@link JevLevel#L0} rotates an unordered choice and a yes/no, then removes a label prior
+     * after eight states of that question. {@link JevLevel#RAW} is one prefill in the order given.
+     * Cost, score behavior, and a full example are on {@link JevLevel}.
+     *
+     * @param level readout level; must not be {@code null}
      * @return {@code this}
      * @throws NullPointerException if {@code level} is {@code null}
      * @since 1.5.0

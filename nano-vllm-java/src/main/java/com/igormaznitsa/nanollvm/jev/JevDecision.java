@@ -100,12 +100,15 @@ public record JevDecision(
   }
 
   /**
-   * Returns this decision when {@link #level()} is at least {@code minimum}.
+   * Returns this decision when it was read at {@code minimum} or stronger.
+   *
+   * <p>{@link JevLevel#RAW} is weaker than {@link JevLevel#L0}. A RAW decision passes
+   * {@code require(JevLevel.RAW)} and throws on {@code require(JevLevel.L0)}.
    *
    * @param minimum level the caller is willing to act on
    * @return this decision
    * @throws NullPointerException  if {@code minimum} is {@code null}
-   * @throws IllegalStateException if this decision is below {@code minimum}
+   * @throws IllegalStateException if {@link #level()} is below {@code minimum}
    * @since 1.5.0
    */
   public JevDecision require(final JevLevel minimum) {
