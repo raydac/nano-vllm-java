@@ -2,7 +2,8 @@
  * Runnable demos ({@link HelloWorld}, {@link NextTokenHelloWorld}, {@link LogTriageHelloWorld},
  * {@link AdvisorRagHelloWorld}, {@link RagTunerHelloWorld}, {@link EmbeddingsHelloWorld},
  * {@link TranscribeHelloWorld}, {@link SynthesizeHelloWorld}, {@link VoiceReplyHelloWorld},
- * {@link LanguageIdHelloWorld}, {@link JevHelloWorld}, {@link Example}, {@link Bench},
+ * {@link LanguageIdHelloWorld}, {@link JevHelloWorld}, {@link RussianCheckersHelloWorld},
+ * {@link Example}, {@link Bench},
  * {@link KernelChatBench}).
  * Helpers for local {@code models/} and {@code rag/} live in {@code samples.utils}.
  * Launch from the repo root with

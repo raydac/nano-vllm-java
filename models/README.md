@@ -37,6 +37,9 @@ Windows: `.\models\download-jeff-qwen3.5-0.8b.ps1` or `models\download-jeff-qwen
 
 Creates `models/Jeff-Qwen3.5-0.8B/` (~1.7GB).
 
+Sample: `nano-vllm-java-samples` → `com.igormaznitsa.nanollvm.samples.RussianCheckersHelloWorld`
+(Russian draughts: you pick a colour, this checkpoint plays the other).
+
 ## Gemma3-270M (optional)
 
 Instruction-tuned text Gemma 3 (270M). **License-gated** on Hugging Face — accept terms at

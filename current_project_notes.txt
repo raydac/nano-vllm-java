@@ -1,4 +1,5 @@
 ## 1. Implementation Progress
+- Sample `RussianCheckersHelloWorld`: terminal Russian draughts. User picks one colour; Qwen Jeff plays the other. User's pieces are drawn at the bottom (Black rotates the board 180°). A single legal move is shown in the prompt; Enter plays it. RAW choice among legal moves. Coordinate entry `a3 b4` / `A 3 B 4`. Jeff usage is documented on `playWithJeff`, `positionText`, `choose`, `narrow`, and `ask`.
 - Qwen3.5 text chat (`qwen3_5`): Gated DeltaNet + gated full attention, leading partial RoPE, vision tensors skipped. Jeff-Qwen3.5-0.8B download script. `toJev()` uses the causal logits; no separate Jeff API.
 - Compacted causal-graph construction and the generate tick without changing the public API.
 - Shared packed-or-dense layer loading in `WeightLayers` (Qwen3, LFM2, BERT, Llama RoPE theta).
@@ -22,6 +23,7 @@
 - `LLM` still has many one-line generate overloads. They exist so callers do not pass unused flags.
 
 ## 4. Current Work In Progress
+- Russian checkers sample is in (`RussianCheckersHelloWorld`). Rules covered by `RussianCheckersHelloWorldTest` (no model load). A live game still needs `models/Jeff-Qwen3.5-0.8B`.
 - Qwen3.5 text load is in: hybrid Gated DeltaNet + gated attention, leading partial RoPE, delta-state arena, `models/download-jeff-qwen3.5-0.8b.sh`. Vision tower and the Jeff readout head are not loaded. `toJev()` uses the causal logits. Jeff safetensors use a `language_model.*` prefix; that now maps onto `model.*`. Real Jeff-Qwen3.5-0.8B loaded and produced one token.
 
 ## 5. Known Issues & Limitations
@@ -32,6 +34,8 @@
 - None from this compaction.
 
 ## 7. Useful References
+- Russian checkers: `mvn22 -pl nano-vllm-java-samples -q exec:java -Dexec.mainClass=com.igormaznitsa.nanollvm.samples.RussianCheckersHelloWorld`
+- Rules test: `mvn22 -pl nano-vllm-java-samples -am test -Dtest=RussianCheckersHelloWorldTest -Dsurefire.failIfNoSpecifiedTests=false`
 - Build/test: `mvn22 -pl nano-vllm-java test`
 - Changelog is only for user-facing behavior. This pass did not change it.
 

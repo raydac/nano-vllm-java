@@ -1994,7 +1994,7 @@ the rotations. Closing the `Jev` closes the engine and does not close the model.
 Whisper, Piper, and fastText are refused.
 
 **In the code:** `LLM.Builder.toJev`, `Jev`, `JevQuestion`, `JevDecision`, `JevLevel`; the prefill
-read is `LLM.readNextToken`. Samples `JevHelloWorld` and the interactive Jev session in `Example`. The training-free contract follows
+read is `LLM.readNextToken`. Samples `JevHelloWorld`, `RussianCheckersHelloWorld` (a draughts game: Jeff picks a legal move and the sample prints that readout's time), and the interactive Jev session in `Example`. The training-free contract follows
 [AnyJev](https://github.com/nokia-applied-research/AnyJev) (Zhang et al.,
 [arXiv:2610.00831](https://arxiv.org/abs/2610.00831)). Self-distilled Tacit checkpoints are ordinary
 causal models if their family already loads; this library does not train them.
@@ -4220,7 +4220,7 @@ LLM.builder(model).toJev()          // closes the engine; does not close the mod
     → JevDecision (answer, probability per option, level L0 or RAW)
 ```
 
-Narrative: **chapter 7g**. Demo: `samples.JevHelloWorld` (L0 and RAW on one choice, a yes/no, a score, then eight states until the label prior turns on). `samples.Example` offers the same loop: choose Jev, then `/choice`, `/yesno`, or `/score`, and type a state on each line.
+Narrative: **chapter 7g**. Demo: `samples.JevHelloWorld` (L0 and RAW on one choice, a yes/no, a score, then eight states until the label prior turns on). `samples.RussianCheckersHelloWorld` plays Russian draughts and uses one RAW choice per computer move. `samples.Example` offers the same loop: choose Jev, then `/choice`, `/yesno`, or `/score`, and type a state on each line.
 
 ### Sample G — text RAG (prepare once, ask many times)
 
