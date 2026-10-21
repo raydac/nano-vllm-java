@@ -186,25 +186,25 @@ public final class RussianCheckersHelloWorld {
   static List<Sq> displaySquares(final boolean yoursAtBottom) {
     int rank = yoursAtBottom ? 0 : 7;
     int rankStep = yoursAtBottom ? 1 : -1;
-    int fileStart = yoursAtBottom ? 7 : 0;
-    int fileStep = yoursAtBottom ? -1 : 1;
+    int leftColumn = yoursAtBottom ? 7 : 0;
+    int columnStep = yoursAtBottom ? -1 : 1;
     List<Sq> squares = new ArrayList<>();
     for (int rowIndex = 0; rowIndex < 8; rowIndex++) {
-      for (int column = 0; column < 8; column++) {
-        squares.add(new Sq(fileStart + column * fileStep, rank));
+      for (int across = 0; across < 8; across++) {
+        squares.add(new Sq(leftColumn + across * columnStep, rank));
       }
       rank += rankStep;
     }
     return squares;
   }
 
-  private static String fileLabels(final List<Sq> bottomRow) {
+  private static String columnLabels(final List<Sq> bottomRow) {
     StringBuilder labels = new StringBuilder("     ");
-    for (int column = 0; column < bottomRow.size(); column++) {
-      if (column > 0) {
+    for (int across = 0; across < bottomRow.size(); across++) {
+      if (across > 0) {
         labels.append("   ");
       }
-      labels.append((char) ('a' + bottomRow.get(column).file()));
+      labels.append((char) ('a' + bottomRow.get(across).column()));
     }
     return labels.toString();
   }
@@ -213,17 +213,76 @@ public final class RussianCheckersHelloWorld {
    * Situation text, the first argument of {@link Jev#decide}.
    *
    * <p>Put here the facts the choice depends on: whose turn it is, the rules that bind the
-   * answer, and the board. Leave the candidate moves out. Those strings are the question's
-   * options, and the model answers with a letter that stands for one of them. The question words
-   * can stay the same on every turn. A new option list is a new {@link JevQuestion}.
+   * answer, the board, and where each piece stands. Leave the candidate moves out. Those
+   * strings are the question's options, and the model answers with a letter that stands for
+   * one of them. It does not write a plan: the readout is the next letter, so the plan has to
+   * already be in this text and in {@link #choiceLabel}.
    */
-  private static String positionText(final Board board, final Side side) {
+  static String positionText(final Board board, final Side side) {
     return "Russian checkers. White (o man, O king) moves toward row 8. "
       + "Black (x man, X king) moves toward row 1. "
       + "Men step one diagonal square forward and capture one square either way. "
       + "Kings move and capture any distance on a diagonal. Take a capture when one exists.\n"
+      + "  abcdefgh\n"
       + board.diagram()
-      + "Files a to h from left to right. " + side.label() + " to move.";
+      + "White men: " + squaresOf(board, Piece.WHITE_MAN) + "\n"
+      + "White kings: " + squaresOf(board, Piece.WHITE_KING) + "\n"
+      + "Black men: " + squaresOf(board, Piece.BLACK_MAN) + "\n"
+      + "Black kings: " + squaresOf(board, Piece.BLACK_KING) + "\n"
+      + side.label() + " to move.";
+  }
+
+  /**
+   * Notation plus the facts a player would check before choosing.
+   *
+   * <p>A quiet man is {@code step}; a quiet king is {@code king slide}. A capture says how many
+   * pieces it takes, and {@code king captures} when the mover is already a king.
+   * {@code promotes} means a man becomes a king on the way. {@code wins} means the opponent
+   * has no reply. {@code landing taken at once} means a reply captures the piece on its last
+   * square.
+   */
+  static String choiceLabel(final Board board, final Side side, final Move move) {
+    Piece mover = board.pieceAt(move.path().getFirst()).orElseThrow();
+    Board after = board.play(move);
+    List<Move> replies = after.legalMoves(side.opposite());
+    boolean wins = replies.isEmpty();
+    boolean hanging = !wins && replies.stream()
+      .anyMatch(reply -> reply.captured().contains(move.path().getLast()));
+    List<String> notes = new ArrayList<>();
+    if (move.captured().isEmpty()) {
+      notes.add(mover.king() ? "king slide" : "step");
+    } else if (mover.king()) {
+      notes.add("king captures " + move.captured().size());
+    } else {
+      notes.add("captures " + move.captured().size());
+    }
+    if (move.result().king() && !mover.king()) {
+      notes.add("promotes");
+    }
+    if (wins) {
+      notes.add("wins");
+    } else if (hanging) {
+      notes.add("landing taken at once");
+    }
+    return move.notation() + " (" + String.join(", ", notes) + ")";
+  }
+
+  private static String moveQuestion(final Side side) {
+    return "Which move should " + side.label() + " play? "
+      + "Read the note on each option. "
+      + "Prefer a win, then more captures, then a promotion, "
+      + "then a landing the opponent cannot take at once.";
+  }
+
+  private static String squaresOf(final Board board, final Piece piece) {
+    String listed = IntStream.rangeClosed(0, 7)
+      .map(rank -> 7 - rank)
+      .boxed()
+      .flatMap(rank -> IntStream.range(0, 8).mapToObj(column -> new Sq(column, rank)))
+      .filter(sq -> board.pieceAt(sq).filter(piece::equals).isPresent())
+      .map(Sq::label)
+      .collect(joining(" "));
+    return listed.isEmpty() ? "none" : listed;
   }
 
   private static boolean isQuit(final String line) {
@@ -236,9 +295,9 @@ public final class RussianCheckersHelloWorld {
     Matcher matcher = SQUARE.matcher(line);
     List<Sq> squares = new ArrayList<>();
     while (matcher.find()) {
-      int file = matcher.group(1).toLowerCase(Locale.ROOT).charAt(0) - 'a';
+      int column = matcher.group(1).toLowerCase(Locale.ROOT).charAt(0) - 'a';
       int rank = matcher.group(2).charAt(0) - '1';
-      squares.add(new Sq(file, rank));
+      squares.add(new Sq(column, rank));
     }
     return List.copyOf(squares);
   }
@@ -308,9 +367,9 @@ public final class RussianCheckersHelloWorld {
 
   private void printBoard(final Board board, final Side side, final List<Move> legal) {
     List<Sq> squares = displaySquares(this.seat(Side.BLACK) == Seat.YOU);
-    String files = fileLabels(squares.subList(0, 8));
+    String letters = columnLabels(squares.subList(0, 8));
     String bar = "   +---+---+---+---+---+---+---+---+";
-    System.out.println(files);
+    System.out.println(letters);
     System.out.println(bar);
     for (int rowIndex = 0; rowIndex < 8; rowIndex++) {
       List<Sq> rowSquares = squares.subList(rowIndex * 8, rowIndex * 8 + 8);
@@ -324,7 +383,7 @@ public final class RussianCheckersHelloWorld {
       System.out.println(row);
       System.out.println(bar);
     }
-    System.out.println(files);
+    System.out.println(letters);
     System.out.println();
     System.out.println("White: " + seatName(this.white) + "    Black: " + seatName(this.black));
     System.out.println(side.label() + " to move");
@@ -401,7 +460,7 @@ public final class RussianCheckersHelloWorld {
       return Played.onlyMove(legal.getFirst());
     }
     long started = System.nanoTime();
-    Choice choice = this.narrow(positionText(board, side), side, legal);
+    Choice choice = this.narrow(board, side, legal);
     long millis = (System.nanoTime() - started) / 1_000_000L;
     return new Played(choice.move(), millis, choice.probability(), false);
   }
@@ -415,45 +474,50 @@ public final class RussianCheckersHelloWorld {
    * that last call is the move that is played. Every call sits inside the clock started by
    * {@link #choose}.
    */
-  private Choice narrow(final String state, final Side side, final List<Move> moves) {
+  private Choice narrow(final Board board, final Side side, final List<Move> moves) {
+    String state = positionText(board, side);
     List<Move> pool = moves;
     while (pool.size() > CHOICE_LIMIT) {
       List<Move> winners = new ArrayList<>();
       for (int offset = 0; offset < pool.size(); offset += CHOICE_LIMIT) {
         List<Move> chunk = pool.subList(offset, Math.min(offset + CHOICE_LIMIT, pool.size()));
-        winners.add(chunk.size() == 1 ? chunk.getFirst() : this.ask(state, side, chunk).move());
+        winners.add(chunk.size() == 1
+          ? chunk.getFirst()
+          : this.ask(board, state, side, chunk).move());
       }
       pool = List.copyOf(winners);
     }
     if (pool.size() == 1) {
       return new Choice(pool.getFirst(), OptionalDouble.empty());
     }
-    return this.ask(state, side, pool);
+    return this.ask(board, state, side, pool);
   }
 
   /**
    * One typed choice. This is the call to copy.
    *
    * <p>{@link Jev#decide} does not parse a sentence. The prompt stops where the answer letter
-   * would be, and the decision is how likely each letter is. {@link JevQuestion#choice} takes
-   * the question text and your own option strings, here the move notations such as
-   * {@code c3-d4}. The model is shown {@code A. c3-d4}, {@code B. e3-f4}, and so on.
-   * {@link JevDecision#answer()} returns the option string, not the letter.
-   * {@link JevDecision#probability(String)} is that option's share of the answer.
-   * Map the string back onto the move you put in the list. An answer outside the list means the
-   * question and the list no longer describe the same set.
+   * would be, and the decision is how likely each letter is. Each option is
+   * {@link #choiceLabel}: the notation and a note, shown as {@code A. c3xe5 (captures 1, wins)}.
+   * {@link JevDecision#answer()} returns that whole option string, not the letter. Map it back
+   * onto the move that produced it. An answer outside the list means the question and the list
+   * no longer describe the same set.
    */
-  private Choice ask(final String state, final Side side, final List<Move> moves) {
-    JevDecision decision = this.jeff().decide(
-      state,
-      JevQuestion.choice(
-        "Which move should " + side.label() + " play?",
-        moves.stream().map(Move::notation).toList()));
-    Move move = moves.stream()
-      .filter(item -> item.notation().equals(decision.answer()))
-      .findFirst()
-      .orElseThrow(() -> new IllegalStateException("decision missed the legal moves"));
-    return new Choice(move, OptionalDouble.of(decision.probability(decision.answer())));
+  private Choice ask(
+    final Board board,
+    final String state,
+    final Side side,
+    final List<Move> moves
+  ) {
+    List<String> options = moves.stream().map(move -> choiceLabel(board, side, move)).toList();
+    JevDecision decision =
+      this.jeff().decide(state, JevQuestion.choice(moveQuestion(side), options));
+    int picked = options.indexOf(decision.answer());
+    if (picked < 0) {
+      throw new IllegalStateException("decision missed the legal moves");
+    }
+    return new Choice(moves.get(picked),
+      OptionalDouble.of(decision.probability(decision.answer())));
   }
 
   /**
@@ -553,6 +617,20 @@ public final class RussianCheckersHelloWorld {
     }
   }
 
+  /**
+   * Jeff's turn as printed under the board: the move applied, how long the readout took, and
+   * whether the model was asked.
+   *
+   * <p>{@code forced} is the single legal move. A choice needs two options, so that case never
+   * calls the model: {@code millis} stays 0 and {@code probability} stays empty. Otherwise
+   * {@code millis} is the prefill time from {@link #choose}, including every round inside
+   * {@link #narrow}, and {@code probability} is the winning option's share of the last decision.
+   *
+   * @param move        legal move that was applied
+   * @param millis      readout time in milliseconds; {@code 0} when {@code forced}
+   * @param probability winning option's probability; empty when no decision was read
+   * @param forced      {@code true} when the rules left one legal move
+   */
   private record Played(Move move, long millis, OptionalDouble probability, boolean forced) {
 
     private static Played onlyMove(final Move move) {
@@ -560,13 +638,34 @@ public final class RussianCheckersHelloWorld {
     }
   }
 
+  /**
+   * One move that survived a round of {@link #narrow}, with the probability of the decision
+   * that selected it.
+   *
+   * <p>{@code probability} is empty when a group of one move was kept without a model call.
+   * The choice from the last round is the move {@link #choose} plays.
+   *
+   * @param move        selected legal move
+   * @param probability that move's share of the answer; empty when the model was not asked
+   */
   private record Choice(Move move, OptionalDouble probability) {
   }
 
-  record Sq(int file, int rank) {
+  /**
+   * One square of the 8×8 board. Pieces stand only on dark squares ({@link #dark()}).
+   *
+   * <p>{@code column} {@code 0} is {@code a} and {@code 7} is {@code h}. {@code rank} {@code 0}
+   * is the printed {@code 1} and {@code 7} is the printed {@code 8}. White men advance by
+   * increasing rank and promote on rank 7. Black men advance by decreasing rank and promote
+   * on rank 0.
+   *
+   * @param column {@code a..h} as {@code 0..7}
+   * @param rank   printed {@code 1..8} as {@code 0..7}
+   */
+  record Sq(int column, int rank) {
 
     Sq {
-      if (file < 0 || file > 7 || rank < 0 || rank > 7) {
+      if (column < 0 || column > 7 || rank < 0 || rank > 7) {
         throw new IllegalArgumentException("square off the board");
       }
     }
@@ -580,14 +679,31 @@ public final class RussianCheckersHelloWorld {
     }
 
     String label() {
-      return "" + (char) ('a' + this.file) + (this.rank + 1);
+      return "" + (char) ('a' + this.column) + (this.rank + 1);
     }
 
     boolean dark() {
-      return (this.file + this.rank) % 2 == 0;
+      return (this.column + this.rank) % 2 == 0;
     }
   }
 
+  /**
+   * One legal action: the squares the piece visits, the enemy squares it removes, and the piece
+   * that stands on the last square afterwards.
+   *
+   * <p>{@code path} starts on the mover and ends on the final square. A quiet move is exactly
+   * those two squares, {@code captured} is empty, and the notation joins them with {@code -}
+   * ({@code a3-b4}). A capture has one landing per victim, so {@code captured} is one entry
+   * shorter than {@code path} and the notation joins the path with {@code x} ({@code c3xe5xg7}).
+   * Every intermediate landing belongs in {@code path}. {@code result} is the mover after the
+   * action. A man that reaches the promotion rank on a landing is already a king in
+   * {@code result}, including when that landing was in the middle of a capture and later jumps
+   * continued as a king.
+   *
+   * @param path     squares visited, origin first and final square last; at least two
+   * @param captured enemy squares removed, one per jump; empty for a quiet move
+   * @param result   piece occupying the last square, crowned when a landing promoted it
+   */
   record Move(List<Sq> path, List<Sq> captured, Piece result) {
 
     Move {
@@ -638,15 +754,15 @@ public final class RussianCheckersHelloWorld {
     }
 
     private static void fillDark(final Piece[][] cells, final int rank, final Piece piece) {
-      for (int file = 0; file < 8; file++) {
-        if ((file + rank) % 2 == 0) {
-          cells[rank][file] = piece;
+      for (int column = 0; column < 8; column++) {
+        if ((column + rank) % 2 == 0) {
+          cells[rank][column] = piece;
         }
       }
     }
 
-    private static boolean onBoard(final int file, final int rank) {
-      return file >= 0 && file < 8 && rank >= 0 && rank < 8;
+    private static boolean onBoard(final int column, final int rank) {
+      return column >= 0 && column < 8 && rank >= 0 && rank < 8;
     }
 
     Board place(final Sq sq, final Piece piece) {
@@ -656,13 +772,13 @@ public final class RussianCheckersHelloWorld {
         throw new IllegalArgumentException(sq.label() + " is a light square");
       }
       Piece[][] next = this.copy();
-      next[sq.rank()][sq.file()] = piece;
+      next[sq.rank()][sq.column()] = piece;
       return new Board(next);
     }
 
     Optional<Piece> pieceAt(final Sq sq) {
       requireNonNull(sq, "sq");
-      return Optional.ofNullable(this.cells[sq.rank()][sq.file()]);
+      return Optional.ofNullable(this.cells[sq.rank()][sq.column()]);
     }
 
     List<Move> legalMoves(final Side side) {
@@ -680,12 +796,12 @@ public final class RussianCheckersHelloWorld {
       requireNonNull(move, "move");
       Piece[][] next = this.copy();
       Sq from = move.path().getFirst();
-      next[from.rank()][from.file()] = null;
+      next[from.rank()][from.column()] = null;
       for (Sq captured : move.captured()) {
-        next[captured.rank()][captured.file()] = null;
+        next[captured.rank()][captured.column()] = null;
       }
       Sq to = move.path().getLast();
-      next[to.rank()][to.file()] = move.result();
+      next[to.rank()][to.column()] = move.result();
       return new Board(next);
     }
 
@@ -704,8 +820,8 @@ public final class RussianCheckersHelloWorld {
       StringBuilder text = new StringBuilder();
       for (int rank = 7; rank >= 0; rank--) {
         text.append(rank + 1).append(' ');
-        for (int file = 0; file < 8; file++) {
-          Piece piece = this.cells[rank][file];
+        for (int column = 0; column < 8; column++) {
+          Piece piece = this.cells[rank][column];
           text.append(piece == null ? '.' : piece.glyph());
         }
         text.append('\n');
@@ -727,15 +843,15 @@ public final class RussianCheckersHelloWorld {
 
     private void addManStep(final Piece piece, final Sq from, final List<Move> out) {
       for (Step step : DIRECTIONS) {
-        if (step.rank() != piece.side().forward()) {
+        if (step.rankDelta() != piece.side().forward()) {
           continue;
         }
-        int file = from.file() + step.file();
-        int rank = from.rank() + step.rank();
-        if (!onBoard(file, rank)) {
+        int column = from.column() + step.columnDelta();
+        int rank = from.rank() + step.rankDelta();
+        if (!onBoard(column, rank)) {
           continue;
         }
-        Sq to = new Sq(file, rank);
+        Sq to = new Sq(column, rank);
         if (!this.isEmpty(to)) {
           continue;
         }
@@ -745,16 +861,16 @@ public final class RussianCheckersHelloWorld {
 
     private void addKingSlides(final Piece piece, final Sq from, final List<Move> out) {
       for (Step step : DIRECTIONS) {
-        int file = from.file() + step.file();
-        int rank = from.rank() + step.rank();
-        while (onBoard(file, rank)) {
-          Sq to = new Sq(file, rank);
+        int column = from.column() + step.columnDelta();
+        int rank = from.rank() + step.rankDelta();
+        while (onBoard(column, rank)) {
+          Sq to = new Sq(column, rank);
           if (!this.isEmpty(to)) {
             break;
           }
           out.add(new Move(List.of(from, to), List.of(), piece));
-          file += step.file();
-          rank += step.rank();
+          column += step.columnDelta();
+          rank += step.rankDelta();
         }
       }
     }
@@ -811,16 +927,16 @@ public final class RussianCheckersHelloWorld {
     ) {
       List<Hop> hops = new ArrayList<>();
       for (Step step : DIRECTIONS) {
-        int midFile = at.file() + step.file();
-        int midRank = at.rank() + step.rank();
-        int landFile = midFile + step.file();
-        int landRank = midRank + step.rank();
-        if (!onBoard(midFile, midRank) || !onBoard(landFile, landRank)) {
+        int midColumn = at.column() + step.columnDelta();
+        int midRank = at.rank() + step.rankDelta();
+        int landColumn = midColumn + step.columnDelta();
+        int landRank = midRank + step.rankDelta();
+        if (!onBoard(midColumn, midRank) || !onBoard(landColumn, landRank)) {
           continue;
         }
 
-        Sq victim = new Sq(midFile, midRank);
-        Sq land = new Sq(landFile, landRank);
+        Sq victim = new Sq(midColumn, midRank);
+        Sq land = new Sq(landColumn, landRank);
         if (this.isNotEnemy(victim, side) || captured.contains(victim)) {
           continue;
         }
@@ -840,31 +956,31 @@ public final class RussianCheckersHelloWorld {
     ) {
       List<Hop> hops = new ArrayList<>();
       for (Step step : DIRECTIONS) {
-        int file = at.file() + step.file();
-        int rank = at.rank() + step.rank();
-        while (onBoard(file, rank) && this.isEmpty(new Sq(file, rank))) {
-          file += step.file();
-          rank += step.rank();
+        int column = at.column() + step.columnDelta();
+        int rank = at.rank() + step.rankDelta();
+        while (onBoard(column, rank) && this.isEmpty(new Sq(column, rank))) {
+          column += step.columnDelta();
+          rank += step.rankDelta();
         }
-        if (!onBoard(file, rank)) {
+        if (!onBoard(column, rank)) {
           continue;
         }
 
-        Sq victim = new Sq(file, rank);
+        Sq victim = new Sq(column, rank);
         if (this.isNotEnemy(victim, side) || captured.contains(victim)) {
           continue;
         }
 
-        file += step.file();
-        rank += step.rank();
-        while (onBoard(file, rank)) {
-          Sq land = new Sq(file, rank);
+        column += step.columnDelta();
+        rank += step.rankDelta();
+        while (onBoard(column, rank)) {
+          Sq land = new Sq(column, rank);
           if (!this.isEmpty(land) || path.contains(land)) {
             break;
           }
           hops.add(new Hop(land, victim));
-          file += step.file();
-          rank += step.rank();
+          column += step.columnDelta();
+          rank += step.rankDelta();
         }
       }
       return hops;
@@ -872,10 +988,10 @@ public final class RussianCheckersHelloWorld {
 
     private void eachPiece(final Side side, final PieceVisitor visitor) {
       for (int rank = 0; rank < 8; rank++) {
-        for (int file = 0; file < 8; file++) {
-          Piece piece = this.cells[rank][file];
+        for (int column = 0; column < 8; column++) {
+          Piece piece = this.cells[rank][column];
           if (piece != null && piece.side() == side) {
-            visitor.visit(piece, new Sq(file, rank));
+            visitor.visit(piece, new Sq(column, rank));
           }
         }
       }
@@ -883,17 +999,17 @@ public final class RussianCheckersHelloWorld {
 
     private Board relocate(final Sq from, final Sq to, final Piece piece) {
       Piece[][] next = this.copy();
-      next[from.rank()][from.file()] = null;
-      next[to.rank()][to.file()] = piece;
+      next[from.rank()][from.column()] = null;
+      next[to.rank()][to.column()] = piece;
       return new Board(next);
     }
 
     private boolean isEmpty(final Sq sq) {
-      return this.cells[sq.rank()][sq.file()] == null;
+      return this.cells[sq.rank()][sq.column()] == null;
     }
 
     private boolean isNotEnemy(final Sq sq, final Side side) {
-      Piece piece = this.cells[sq.rank()][sq.file()];
+      Piece piece = this.cells[sq.rank()][sq.column()];
       return piece == null || piece.side() == side;
     }
 
@@ -909,9 +1025,28 @@ public final class RussianCheckersHelloWorld {
       void visit(Piece piece, Sq square);
     }
 
-    private record Step(int file, int rank) {
+    /**
+     * One diagonal unit, not a square. Both components are {@code -1} or {@code +1}.
+     *
+     * <p>A man may take a quiet step only when {@code rankDelta} equals {@link Side#forward()}.
+     * Captures try all four diagonals. A king repeats the same pair to walk further along that
+     * diagonal.
+     *
+     * @param columnDelta step along {@code a..h}, {@code -1} or {@code +1}
+     * @param rankDelta   step along the ranks, {@code -1} or {@code +1}; positive is toward White's promotion rank
+     */
+    private record Step(int columnDelta, int rankDelta) {
     }
 
+    /**
+     * One jump inside a capture search. {@code land} is the empty square the piece stops on.
+     * {@code victim} is the enemy square it jumps. A man lands on the next square past the
+     * victim. A king may stop on any empty square beyond the victim along that diagonal. The
+     * same victim is not taken twice, and {@code land} must not already be on the path.
+     *
+     * @param land   empty square the piece moves to
+     * @param victim enemy square removed by this jump
+     */
     private record Hop(Sq land, Sq victim) {
     }
   }

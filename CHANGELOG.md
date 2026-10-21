@@ -21,7 +21,9 @@ Development snapshot after the **1.4.0** public release.
 
 ### Added
 - Sample `RussianCheckersHelloWorld` plays Russian draughts in the terminal. You pick a colour
-  and Qwen Jeff plays the other.
+  and Qwen Jeff plays the other. Jeff's prompt lists every piece and notes what each legal move
+  does (captures, promotion, an immediate win, or a landing the opponent can take), because the
+  decision is one letter and the model does not write a plan.
 - Causal chat models can answer a typed decision. `LLM.builder(model).toJev()` reads a choice, a
   yes/no, or a score from the next-token distribution and returns a probability for every option.
   The default level, L0, rotates the options and removes the label prior without any training

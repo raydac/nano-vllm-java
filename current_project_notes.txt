@@ -24,6 +24,9 @@
 
 ## 4. Current Work In Progress
 - `JevLevel` javadoc now states RAW vs L0 (rotations, eight-state prior, ordered scores stay one prefill) and includes a two-engine usage example. `require` and `Builder.jevLevel` point at it.
+- Russian checkers records (`Sq`, `Move`, `Played`, `Choice`, `Step`, `Hop`) have javadoc for the short components: file/rank axes, path vs captured vs crowned `result`, forced single-move turns, and a hop's land/victim.
+- Board a–h axis is `Sq.column` (0 = a). `Step` uses `columnDelta` and `rankDelta`. Screen position in the rotated drawing is `across`, not `column`.
+- Jeff's checkers prompt does not ask for a written plan. Jev reads the next letter and the chat template closes an empty think block. `positionText` lists pieces; `choiceLabel` notes captures, promotion, a win, or `landing taken at once`. The question states that preference order.
 - Russian checkers sample is in (`RussianCheckersHelloWorld`). Rules covered by `RussianCheckersHelloWorldTest` (no model load). A live game still needs `models/Jeff-Qwen3.5-0.8B`.
 - Qwen3.5 text load is in: hybrid Gated DeltaNet + gated attention, leading partial RoPE, delta-state arena, `models/download-jeff-qwen3.5-0.8b.sh`. Vision tower and the Jeff readout head are not loaded. `toJev()` uses the causal logits. Jeff safetensors use a `language_model.*` prefix; that now maps onto `model.*`. Real Jeff-Qwen3.5-0.8B loaded and produced one token.
 

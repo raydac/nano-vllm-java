@@ -34,8 +34,8 @@ class RussianCheckersHelloWorldTest {
   private static int count(final Board board, final Piece piece) {
     int found = 0;
     for (int rank = 0; rank < 8; rank++) {
-      for (int file = 0; file < 8; file++) {
-        if (board.pieceAt(new Sq(file, rank)).filter(piece::equals).isPresent()) {
+      for (int column = 0; column < 8; column++) {
+        if (board.pieceAt(new Sq(column, rank)).filter(piece::equals).isPresent()) {
           found++;
         }
       }
@@ -137,6 +137,39 @@ class RussianCheckersHelloWorldTest {
     assertEquals(Sq.parse("h1"), blackView.getFirst());
     assertEquals(List.of("h8", "g8", "f8", "e8", "d8", "c8", "b8", "a8"),
       blackView.subList(56, 64).stream().map(Sq::label).toList());
+  }
+
+  @Test
+  void positionTextNamesColumnsAndListsPieces() {
+    String text = RussianCheckersHelloWorld.positionText(Board.initial(), Side.WHITE);
+    assertTrue(text.contains("  abcdefgh\n"));
+    assertTrue(text.contains("White men: "));
+    assertTrue(text.contains("a1"));
+    assertTrue(text.contains("Black kings: none"));
+    assertTrue(text.contains("White to move."));
+  }
+
+  @Test
+  void choiceNoteStatesWhatTheMoveDoes() {
+    Board quiet = board("a1W h8b");
+    assertEquals("a1-b2 (king slide)",
+      RussianCheckersHelloWorld.choiceLabel(quiet, Side.WHITE, move(quiet, "a1-b2")));
+
+    Board promoting = board("a7w");
+    assertEquals("a7-b8 (step, promotes, wins)",
+      RussianCheckersHelloWorld.choiceLabel(promoting, Side.WHITE, only(promoting, Side.WHITE)));
+
+    Board winning = board("c3w d4b");
+    assertEquals("c3xe5 (captures 1, wins)",
+      RussianCheckersHelloWorld.choiceLabel(winning, Side.WHITE, only(winning, Side.WHITE)));
+
+    Board hanging = board("a3w c5b");
+    assertEquals("a3-b4 (step, landing taken at once)",
+      RussianCheckersHelloWorld.choiceLabel(hanging, Side.WHITE, only(hanging, Side.WHITE)));
+
+    Board chain = board("b6w c7b e7b");
+    assertEquals("b6xd8xf6 (captures 2, promotes, wins)",
+      RussianCheckersHelloWorld.choiceLabel(chain, Side.WHITE, move(chain, "b6xd8xf6")));
   }
 
   @Test
