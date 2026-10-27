@@ -16,6 +16,8 @@
 - `HfConfig` compact constructor freezes a null `ropeScaling` to an empty map, so `WeightLayers.ropeTheta` can call `containsKey` directly.
 - `IntStream.toList()` is already unmodifiable; `List.copyOf` around it was an extra copy.
 - Public `LLM.generate` / `generateTokenIds` overloads stay: they are the caller-facing surface.
+- TornadoVM Maven coordinate is `8.0.0-jdk22plus` (JDK 22+, including 27). Optional `tornado-clblast` is compile-only. Multi-token dense GEMV uses CLBlast SGEMM when `libclblast` runs; one token stays on the Kernel API plan because CLBlast SGEMV returned NaN on POCL. A non-finite CLBlast result or a failed launch drops CLBlast for the rest of the process. `-Dnanollvm.tornado.clblast=false` keeps the kernel. The weight slice is copied once into a Tornado `FloatArray`. Chat attention stays a Loop Parallel kernel. cuDNN packed-QKV attention is CUDA-only and does not match causal grouped-query attention with a sliding window.
+- This machine's OpenCL device is POCL on the CPU (`Tornado device=0:0`). The SDK jar directory still contains the CUDA driver, and TornadoVM 8 service-binds it, so startup needs `-Dtornado.enabled.backends=OpenCL` when `libcuda` is absent. `etc/tornado.backend` is OpenCL only. `libclblast.so.1` is on the SDK `lib` path (`java.library.path`).
 
 ## 3. Technical Debt & Refactoring
 - GGUF IQ tables, Tornado kernels, and espeak dictionaries are data or numeric kernels. Do not “compact” them into shared abstractions.
@@ -32,7 +34,7 @@
 
 ## 5. Known Issues & Limitations
 - Qwen3.5 support is text-only safetensors. Vision inputs, LoRA adapters, Qwen3-Next, and Qwen3.5 MoE stay rejected. GGUF is not a load path for `qwen3_5`.
-- Tornado kernel tests skip when no Tornado device is on the module path.
+- Tornado kernel tests skip when no Tornado device is on the module path. Maven Surefire does not launch the `tornado` CLI, so those tests skip there.
 
 ## 6. Open Questions & Pending Decisions
 - None from this compaction.
@@ -41,7 +43,7 @@
 - Russian checkers: `mvn22 -pl nano-vllm-java-samples -q exec:java -Dexec.mainClass=com.igormaznitsa.nanollvm.samples.RussianCheckersHelloWorld`
 - Rules test: `mvn22 -pl nano-vllm-java-samples -am test -Dtest=RussianCheckersHelloWorldTest -Dsurefire.failIfNoSpecifiedTests=false`
 - Build/test: `mvn22 -pl nano-vllm-java test`
-- Changelog is only for user-facing behavior. This pass did not change it.
+- Tornado device tests need the `tornado` CLI (OpenCL backend only on this machine) plus `libclblast`.
 
 ## 8. User Advice and Recommendations
 - Keep public generate overloads. Compact internals, not the caller API.

@@ -18,11 +18,13 @@
  * (optional at runtime — scalar kernels are used when it is absent).
  *
  * <p>Optional TornadoVM acceleration uses {@code requires static tornado.api}; add {@code tornado-runtime}
- * on the module path and run on a TornadoVM-enabled JDK to activate it.
+ * on the module path and run on a TornadoVM-enabled JDK to activate it. {@code tornado.clblast} is
+ * optional and used for multi-token OpenCL dense GEMV when {@code libclblast} runs on the device.
  */
 module com.igormaznitsa.nanollvm {
   requires static jdk.incubator.vector;
   requires static tornado.api;
+  requires static tornado.clblast;
 
   exports com.igormaznitsa.nanollvm.models;
   exports com.igormaznitsa.nanollvm.llm;

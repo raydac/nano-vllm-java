@@ -1,6 +1,7 @@
 package com.igormaznitsa.nanollvm.tensor.tornado;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 import com.igormaznitsa.nanollvm.tensor.FloatKernels;
@@ -161,10 +162,14 @@ class TornadoFloatKernelsTest {
     float[] expected = new float[rows * rowStride];
     float[] first = new float[rows * rowStride];
     float[] second = new float[rows * rowStride];
+    int launches = TornadoClBlastGemv.launchCount();
     cpu.gemvRows(x, 0, weight, 0, bias, expected, 0, rows, in, rowStride, out0, out0 + out);
     TornadoGemvExecutor.gemvRows(
       x, 0, weight, 0, bias, first, 0, rows, in, rowStride, out0, out0 + out);
     assertClose(expected, first);
+    if (TornadoClBlastGemv.isInstalled()) {
+      assertTrue(TornadoClBlastGemv.launchCount() > launches);
+    }
     x[0] += 0.5f;
     cpu.gemvRows(x, 0, weight, 0, bias, expected, 0, rows, in, rowStride, out0, out0 + out);
     TornadoGemvExecutor.gemvRows(

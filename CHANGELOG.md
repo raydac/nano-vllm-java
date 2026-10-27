@@ -10,13 +10,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Development snapshot after the **1.4.0** public release.
 
 ### Changed
-- Optional TornadoVM dependencies are `7.3.0-jdk22plus`. TornadoVM mode keeps dense GEMV on the
-  device (a weight matrix stays resident, and a multi-token layer is one launch) and runs chat
-  attention as one TornadoVM task per query range. Short vectors stay in scalar loops so generation
-  does not pay a device launch per attention score. Cached plans keep only the latest execution
-  result, so a long chat does not retain one result per token. Closing a model releases that
-  model's resident weight copies. Later layers of the same token reuse keys already copied for
-  that token. The Vector API stays a separate mode.
+- Optional TornadoVM dependencies are `8.0.0-jdk22plus`. On OpenCL, a multi-token dense GEMV
+  uses CLBlast when `libclblast` runs on the device; one token and any failed CLBlast launch
+  stay on the device kernel.
+  `-Dnanollvm.tornado.clblast=false` keeps the device kernel.
+  TornadoVM mode still keeps a weight matrix resident, runs a multi-token layer as one launch,
+  and runs chat attention as one TornadoVM task per query range. Short vectors stay in scalar
+  loops so generation does not pay a device launch per attention score. Cached plans keep only
+  the latest execution result, so a long chat does not retain one result per token. Closing a
+  model releases that model's resident weight copies. Later layers of the same token reuse keys
+  already copied for that token. The Vector API stays a separate mode.
   TileContext is CUDA-only and is not used.
 
 ### Added

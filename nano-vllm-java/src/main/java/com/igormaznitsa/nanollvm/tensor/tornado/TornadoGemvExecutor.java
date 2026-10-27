@@ -17,7 +17,8 @@ import uk.ac.manchester.tornado.api.WorkerGrid1D;
 import uk.ac.manchester.tornado.api.exceptions.TornadoExecutionPlanException;
 
 /**
- * One compiled Tornado plan per weight matrix and token count. Activations are copied into a
+ * One compiled Tornado plan per weight matrix and token count. OpenCL uses CLBlast for more than
+ * one token when {@code libclblast} runs; otherwise a device kernel. Activations are copied into a
  * plan-owned buffer so a new result array does not recompile the kernel or re-upload weights.
  *
  * @since 1.4.0
@@ -28,10 +29,10 @@ final class TornadoGemvExecutor {
   private static final String GRAPH_NAME = "nanollvm-gemv";
   private static final String TASK_NAME = "gemv";
   private static final String SCHEDULER_KEY = GRAPH_NAME + "." + TASK_NAME;
-  private static final Map<WeightKey, GemvPlan> CACHED_PLANS =
+  private static final Map<WeightKey, TornadoGemvLaunch> CACHED_PLANS =
     new LinkedHashMap<>(MAX_CACHED_PLANS, 0.75f, true) {
       @Override
-      protected boolean removeEldestEntry(final Map.Entry<WeightKey, GemvPlan> eldest) {
+      protected boolean removeEldestEntry(final Map.Entry<WeightKey, TornadoGemvLaunch> eldest) {
         if (this.size() <= MAX_CACHED_PLANS) {
           return false;
         }
@@ -68,6 +69,36 @@ final class TornadoGemvExecutor {
     } finally {
       TornadoLaunchLock.unlock();
     }
+  }
+
+  private static TornadoGemvLaunch cached(final WeightKey key)
+    throws TornadoExecutionPlanException {
+    TornadoGemvLaunch plan = CACHED_PLANS.get(key);
+    if (plan != null) {
+      return plan;
+    }
+    TornadoGemvLaunch compiled = GemvPlan.compile(key);
+    CACHED_PLANS.put(key, compiled);
+    return compiled;
+  }
+
+  private static TornadoGemvLaunch replaceUnusableBlas(
+    final WeightKey key, final TornadoGemvLaunch plan, final Exception failed
+  ) throws TornadoExecutionPlanException {
+    if (!plan.isClBlast()) {
+      if (failed instanceof TornadoExecutionPlanException checked) {
+        throw new IllegalStateException("TornadoVM GEMV failed", checked);
+      }
+      if (failed instanceof RuntimeException runtime) {
+        throw runtime;
+      }
+      throw new IllegalStateException("TornadoVM GEMV failed", failed);
+    }
+    plan.closeQuietly();
+    TornadoClBlastGemv.retire(failed);
+    TornadoGemvLaunch kernel = GemvPlan.compileKernel(key);
+    CACHED_PLANS.put(key, kernel);
+    return kernel;
   }
 
   static int cachedPlanCount() {
@@ -107,14 +138,14 @@ final class TornadoGemvExecutor {
     WeightKey key = WeightKey.of(w, wOff, bias, in, out0, outCount, rows);
     TornadoLaunchLock.lock();
     try {
-      GemvPlan plan = CACHED_PLANS.get(key);
-      if (plan == null) {
-        plan = GemvPlan.compile(key);
-        CACHED_PLANS.put(key, plan);
+      TornadoGemvLaunch plan = cached(key);
+      try {
+        plan.execute(x, xOff, y, yOff, rowStride);
+      } catch (RuntimeException | TornadoExecutionPlanException failed) {
+        replaceUnusableBlas(key, plan, failed).execute(x, xOff, y, yOff, rowStride);
       }
-      plan.execute(x, xOff, y, yOff, rowStride);
-    } catch (TornadoExecutionPlanException e) {
-      throw new IllegalStateException("TornadoVM GEMV failed", e);
+    } catch (TornadoExecutionPlanException failed) {
+      throw new IllegalStateException("TornadoVM GEMV failed", failed);
     } finally {
       TornadoLaunchLock.unlock();
     }
@@ -169,9 +200,20 @@ final class TornadoGemvExecutor {
   }
 
   private record GemvPlan(TornadoExecutionPlan plan, float[] xScratch, float[] yScratch, int rows,
-                          int in, int out0, int outCount) implements AutoCloseable {
+                          int in, int out0, int outCount) implements TornadoGemvLaunch {
 
-    static GemvPlan compile(final WeightKey key) throws TornadoExecutionPlanException {
+    static TornadoGemvLaunch compile(final WeightKey key) throws TornadoExecutionPlanException {
+      TornadoGemvLaunch blas = TornadoClBlastGemv.tryCompile(
+        key.weight(), key.weightOffset(), key.bias(),
+        key.in(), key.out0(), key.outCount(), key.rows());
+      if (blas != null) {
+        return blas;
+      }
+      return compileKernel(key);
+    }
+
+    static TornadoGemvLaunch compileKernel(final WeightKey key)
+      throws TornadoExecutionPlanException {
       float[] xScratch = new float[key.rows() * key.in()];
       float[] yScratch = new float[key.work()];
       try {
@@ -282,7 +324,8 @@ final class TornadoGemvExecutor {
       return Math.max(1L, local);
     }
 
-    void execute(
+    @Override
+    public void execute(
       final float[] x, final int xOff,
       final float[] y, final int yOff, final int rowStride
     ) throws TornadoExecutionPlanException {
@@ -307,7 +350,8 @@ final class TornadoGemvExecutor {
       this.plan.close();
     }
 
-    void closeQuietly() {
+    @Override
+    public void closeQuietly() {
       try {
         this.close();
       } catch (TornadoExecutionPlanException failure) {

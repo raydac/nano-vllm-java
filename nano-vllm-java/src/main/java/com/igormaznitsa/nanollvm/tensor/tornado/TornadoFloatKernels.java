@@ -4,9 +4,10 @@ import com.igormaznitsa.nanollvm.tensor.FloatKernels;
 import com.igormaznitsa.nanollvm.tensor.scalar.ScalarFloatKernels;
 
 /**
- * TornadoVM {@link FloatKernels}. Dense GEMV uses the Kernel API. Chat attention is one Loop
- * Parallel task per query range. Elementwise work uses Loop Parallel only when the slice is long
- * enough to hide the launch; shorter slices use scalar loops.
+ * TornadoVM {@link FloatKernels}. Multi-token dense GEMV uses CLBlast when it runs, otherwise the
+ * Kernel API. Chat attention is one Loop Parallel task per query range. Elementwise work uses
+ * Loop Parallel only when the slice is long enough to hide the launch; shorter slices use scalar
+ * loops.
  *
  * @since 1.4.0
  */

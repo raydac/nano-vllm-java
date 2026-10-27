@@ -22,7 +22,9 @@
         <tornado.params></tornado.params>
         <!-- TornadoVM child JVM; override when Maven's JAVA_HOME is not the TornadoVM JDK. -->
         <tornado.java.home>${java.home}</tornado.java.home>
-        <tornado.jvm.args>-Dnanollvm.kernels=tornado --add-modules=jdk.incubator.vector -Xmx16g</tornado.jvm.args>
+        <tornado.jvm.args>-Dnanollvm.kernels=tornado -Dtornado.enabled.backends=OpenCL
+            --add-modules=jdk.incubator.vector -Xmx16g
+        </tornado.jvm.args>
     </properties>
 
     <dependencies>
@@ -68,7 +70,8 @@
         <!--
           Run a sample under the TornadoVM launcher (must be on PATH as `tornado`).
           Uses the SDK runtime/modules — not the Maven Central tornado jars — so the installed
-          TornadoVM 7.3.0 distribution (e.g. OpenCL) drives accelerators.
+          TornadoVM 8.0.0 distribution (e.g. OpenCL) drives accelerators.
+          Install libclblast so a multi-token dense GEMV uses CLBlast.
 
             mvn -pl nano-vllm-java-samples -am -Ptornado compile exec:exec@tornado \
               -Dtornado.java.home=/path/to/jdk-22
