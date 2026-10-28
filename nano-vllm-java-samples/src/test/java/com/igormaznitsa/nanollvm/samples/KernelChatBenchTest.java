@@ -3,8 +3,14 @@ package com.igormaznitsa.nanollvm.samples;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.io.File;
+import java.net.URI;
+import java.net.URL;
+import java.net.URLClassLoader;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Optional;
@@ -22,16 +28,58 @@ class KernelChatBenchTest {
   }
 
   @Test
-  void coordinatorModesAlwaysIncludeVectorEvenIfParentLacksIt() {
+  void coordinatorModesIncludeTornadoWhenLauncherExists() {
     assertEquals(
       List.of("scalar", "vector"),
-      KernelChatBench.coordinatorModes(List.of("scalar")));
+      KernelChatBench.coordinatorModes(List.of("scalar"), false));
     assertEquals(
       List.of("scalar", "vector", "tornado"),
-      KernelChatBench.coordinatorModes(List.of("scalar", "tornado")));
+      KernelChatBench.coordinatorModes(List.of("scalar"), true));
     assertEquals(
       List.of("scalar", "vector", "tornado"),
-      KernelChatBench.coordinatorModes(List.of("scalar", "vector", "tornado")));
+      KernelChatBench.coordinatorModes(List.of("scalar", "tornado"), false));
+  }
+
+  @Test
+  void tornadoChildUsesLauncherRatherThanPlainJava() {
+    List<String> command = KernelChatBench.tornadoChildCommand(
+      Path.of("/opt/tornado"),
+      "classes",
+      "/models/Gemma 3",
+      8,
+      2);
+    assertEquals("/opt/tornado", command.getFirst());
+    assertTrue(command.contains("--classpath"));
+    assertTrue(command.contains("classes"));
+    assertTrue(command.stream().anyMatch(arg -> arg.contains("-Dnanollvm.kernels=tornado")));
+    assertTrue(command.stream().anyMatch(arg ->
+      arg.contains("--worker") && arg.contains("'/models/Gemma 3'")));
+    assertEquals(KernelChatBench.class.getName(), command.getLast());
+  }
+
+  @Test
+  void tornadoExecutablePrefersPathThenHome() throws Exception {
+    Path dir = Files.createTempDirectory("tornado-path");
+    Path home = Files.createTempDirectory("tornado-home");
+    try {
+      Path onPath = dir.resolve("tornado");
+      Files.writeString(onPath, "#!/bin/sh\n");
+      assertTrue(onPath.toFile().setExecutable(true));
+      Path sdkBin = Files.createDirectories(home.resolve("bin"));
+      Path bundled = sdkBin.resolve("tornado");
+      Files.writeString(bundled, "#!/bin/sh\n");
+      assertTrue(bundled.toFile().setExecutable(true));
+
+      assertEquals(onPath, KernelChatBench.tornadoExecutable(home.toString(), dir.toString()));
+      assertEquals(bundled, KernelChatBench.tornadoExecutable(home.toString(), ""));
+      assertNull(KernelChatBench.tornadoExecutable("", dir.resolve("missing").toString()));
+    } finally {
+      Files.deleteIfExists(dir.resolve("tornado"));
+      Files.deleteIfExists(home.resolve("bin").resolve("tornado"));
+      Files.deleteIfExists(home.resolve("bin"));
+      Files.deleteIfExists(home);
+      Files.deleteIfExists(dir);
+    }
   }
 
   @Test
@@ -78,7 +126,7 @@ class KernelChatBenchTest {
       results);
 
     assertTrue(table.contains("Gemma3-270M"));
-    assertTrue(table.contains("skipped: tornado (TornadoVM unavailable (no SDK/device))"));
+    assertTrue(table.contains("skipped: tornado (tornado command not found)"));
     assertTrue(table.contains("Scalar Java"));
     assertTrue(table.contains("Vector API (SIMD)"));
     assertTrue(table.contains("6.40"));
@@ -104,5 +152,28 @@ class KernelChatBenchTest {
     assertTrue(options.worker());
     assertEquals(Path.of("models/Qwen3-0.6B"), options.modelPath());
     assertEquals(8, options.maxTokens());
+  }
+
+  @Test
+  void applicationClasspathPrefersLoaderFiles() throws Exception {
+    URL classes = Path.of("/tmp/nano-bench-classes").toUri().toURL();
+    URL jar = Path.of("/tmp/nano-vllm-java.jar").toUri().toURL();
+    try (URLClassLoader loader = new URLClassLoader(new URL[] {classes, jar}, null)) {
+      assertEquals(
+        "/tmp/nano-bench-classes" + File.pathSeparator + "/tmp/nano-vllm-java.jar",
+        KernelChatBench.applicationClasspath(loader, "maven.jar"));
+    }
+  }
+
+  @Test
+  void applicationClasspathFallsBackWhenLoaderHasNoFiles() throws Exception {
+    URL remote = URI.create("http://example.invalid/app.jar").toURL();
+    try (URLClassLoader loader = new URLClassLoader(new URL[] {remote}, null)) {
+      assertEquals("app.jar", KernelChatBench.applicationClasspath(loader, "app.jar"));
+    }
+    assertEquals("app.jar", KernelChatBench.applicationClasspath(null, "app.jar"));
+    assertThrows(
+      IllegalStateException.class,
+      () -> KernelChatBench.applicationClasspath(null, " "));
   }
 }

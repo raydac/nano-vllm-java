@@ -41,7 +41,10 @@ Development snapshot after the **1.4.0** public release.
   device) on the same greedy chat: one child JVM per kernel, a console tok/s table, and a
   well-formed `kernel-chat-bench.svg` bar chart. Default model is Gemma3-270M. Vector API always
   runs in a child with `--add-modules=jdk.incubator.vector` (the TornadoVM parent launcher often
-  cannot see the incubator module, which previously dropped the vector bar).
+  cannot see the incubator module, which previously dropped the vector bar). The TornadoVM run
+  starts through the `tornado` command when that command is on `PATH`, because a Maven
+  `exec:java` parent cannot see SDK devices. Child JVMs take the sample classpath from the
+  launching class loader, so `mvn exec:java` does not start them on Maven's own classpath.
 - `KernelBackend.availableModes()` lists kernels this JVM can run; `FloatKernelsFactory.isTornadoAvailable()`
   mirrors the existing Vector API probe.
 

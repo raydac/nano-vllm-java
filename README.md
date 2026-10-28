@@ -776,15 +776,14 @@ Second argument is the number of concurrent sequences (default `8`).
 
 ### Kernel comparison (`KernelChatBench`)
 
-Runs the **same greedy chat** once per kernel, each in its **own JVM** (`-Dnanollvm.kernels=scalar`, then `vector`, then `tornado` when TornadoVM reports a device). Vector API is always launched with `--add-modules=jdk.incubator.vector` on that child — the parent TornadoVM process often cannot load the incubator module, so a parent-only probe would skip it. Prints a tok/s table and writes `kernel-chat-bench.svg`. Default checkpoint is Gemma3-270M (then SmolLM2 Instruct ONNX, then Qwen3-0.6B).
+Runs the **same greedy chat** once per kernel, each in its **own JVM** (`-Dnanollvm.kernels=scalar`, then `vector`, then `tornado`). Vector API is always launched with `--add-modules=jdk.incubator.vector` on that child. TornadoVM is launched with the `tornado` command when that command is on `PATH` (a Maven `exec:java` parent cannot see SDK devices, so it used to skip TornadoVM even when `tornado --devices` lists them). Prints a tok/s table and writes `kernel-chat-bench.svg`. Default checkpoint is Gemma3-270M (then SmolLM2 Instruct ONNX, then Qwen3-0.6B).
 
 ```bash
 mvn -pl nano-vllm-java-samples -q exec:java \
   -Dexec.mainClass=com.igormaznitsa.nanollvm.samples.KernelChatBench
 # optional: -Dexec.args="models/Gemma3-270M --svg /tmp/kernels.svg"
-# with TornadoVM SDK (includes the tornado bar when a device is present):
-mvn -pl nano-vllm-java-samples -am -Ptornado compile exec:exec@tornado \
-  -Dexec.mainClass=com.igormaznitsa.nanollvm.samples.KernelChatBench
+# TornadoVM is included when `tornado` is on PATH. The tornado Maven profile is only needed
+# when the parent process itself must be the TornadoVM launcher.
 ```
 
 `--svg -` prints the table only. `--max-tokens` (default `64`) and `--runs` (default `2`, plus one warmup) adjust the token budget.

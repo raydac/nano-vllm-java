@@ -14,25 +14,32 @@ import com.igormaznitsa.nanollvm.samples.utils.BundledModels;
 import com.igormaznitsa.nanollvm.samples.utils.KernelChatBenchSvg;
 import com.igormaznitsa.nanollvm.utils.KernelBackend;
 import java.io.BufferedReader;
+import java.io.File;
 import java.io.IOException;
 import java.lang.management.ManagementFactory;
+import java.net.URISyntaxException;
+import java.net.URL;
+import java.net.URLClassLoader;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
 import java.util.stream.Stream;
 
 /**
- * Compares scalar Java, Vector API, and TornadoVM (when a device is present) on the same greedy
- * chat. Kernels are process-wide, so this sample starts one child JVM per backend. Scalar and
- * Vector API always run ({@code --add-modules=jdk.incubator.vector} on the child, even when the
- * parent is the TornadoVM launcher and cannot see the incubator module). TornadoVM runs when the
- * parent reports a device. Prints a tok/s table and writes {@code kernel-chat-bench.svg}.
+ * Compares scalar Java, Vector API, and TornadoVM on the same greedy chat. Kernels are
+ * process-wide, so this sample starts one child JVM per backend. Scalar and Vector API always run
+ * ({@code --add-modules=jdk.incubator.vector} on the child, even when the parent cannot see the
+ * incubator module). TornadoVM runs when the {@code tornado} command is on {@code PATH} or
+ * {@code TORNADOVM_HOME} is set, and that child is started with the TornadoVM launcher. A Maven
+ * {@code exec:java} parent cannot see SDK devices, so a parent-only probe would skip TornadoVM.
+ * Prints a tok/s table and writes {@code kernel-chat-bench.svg}.
  *
  * <p>From the repository root:
  * {@code mvn -pl nano-vllm-java-samples -q exec:java
@@ -67,12 +74,15 @@ public final class KernelChatBench {
     runCoordinator(options);
   }
 
-  static List<String> coordinatorModes(final List<String> parentAvailable) {
+  static List<String> coordinatorModes(
+    final List<String> parentAvailable,
+    final boolean tornadoLauncher
+  ) {
     requireNonNull(parentAvailable, "parentAvailable");
     Stream.Builder<String> modes = Stream.builder();
     modes.add("scalar");
     modes.add("vector");
-    if (parentAvailable.contains("tornado")) {
+    if (tornadoLauncher || parentAvailable.contains("tornado")) {
       modes.add("tornado");
     }
     return modes.build().toList();
@@ -175,7 +185,9 @@ public final class KernelChatBench {
 
   private static void runCoordinator(final Options options) throws Exception {
     Path modelPath = resolveModel(options.modelPath());
-    List<String> available = coordinatorModes(KernelBackend.availableModes());
+    boolean tornadoLauncher = tornadoExecutable(
+      System.getenv("TORNADOVM_HOME"), System.getenv("PATH")) != null;
+    List<String> available = coordinatorModes(KernelBackend.availableModes(), tornadoLauncher);
     List<String> skipped = skippedModes(available);
 
     System.out.println("Kernel chat benchmark");
@@ -252,6 +264,9 @@ public final class KernelChatBench {
       + " -D" + PROP_KERNELS + "=" + mode + ")");
 
     ProcessBuilder builder = new ProcessBuilder(command);
+    if ("tornado".equals(mode)) {
+      publishTornadoHome(builder, command);
+    }
     builder.redirectError(ProcessBuilder.Redirect.INHERIT);
     Process process = builder.start();
 
@@ -282,9 +297,15 @@ public final class KernelChatBench {
     final Path modelPath,
     final Options options
   ) {
-    String classpath = System.getProperty("java.class.path");
-    if (classpath == null || classpath.isBlank()) {
-      throw new IllegalStateException("java.class.path is empty");
+    String classpath = applicationClasspath(
+      Thread.currentThread().getContextClassLoader(),
+      System.getProperty("java.class.path"));
+    if ("tornado".equals(mode)) {
+      Path tornado = tornadoExecutable(System.getenv("TORNADOVM_HOME"), System.getenv("PATH"));
+      if (tornado != null) {
+        return tornadoChildCommand(
+          tornado, classpath, modelPath.toString(), options.maxTokens(), options.runs());
+      }
     }
 
     List<String> command = new ArrayList<>();
@@ -300,6 +321,113 @@ public final class KernelChatBench {
     command.add(Integer.toString(options.runs()));
     command.add(modelPath.toString());
     return List.copyOf(command);
+  }
+
+  static List<String> tornadoChildCommand(
+    final Path tornado,
+    final String classpath,
+    final String modelPath,
+    final int maxTokens,
+    final int runs
+  ) {
+    requireNonNull(tornado, "tornado");
+    requireNonNull(classpath, "classpath");
+    requireNonNull(modelPath, "modelPath");
+    return List.of(
+      tornado.toString(),
+      "--classpath",
+      classpath,
+      "--jvm=-D" + PROP_KERNELS + "=tornado -Dtornado.enabled.backends=OpenCL"
+        + " --add-modules=jdk.incubator.vector",
+      "--params=" + workerArguments(modelPath, maxTokens, runs),
+      KernelChatBench.class.getName());
+  }
+
+  static String workerArguments(final String modelPath, final int maxTokens, final int runs) {
+    requireNonNull(modelPath, "modelPath");
+    return "--worker --max-tokens %d --runs %d %s".formatted(maxTokens, runs,
+      shellQuote(modelPath));
+  }
+
+  static String shellQuote(final String value) {
+    requireNonNull(value, "value");
+    return "'" + value.replace("'", "'\\''") + "'";
+  }
+
+  static Path tornadoExecutable(final String tornadoHome, final String pathEnv) {
+    Path onPath = firstExecutable(pathEnv, "tornado");
+    if (onPath != null) {
+      return onPath;
+    }
+    if (tornadoHome == null || tornadoHome.isBlank()) {
+      return null;
+    }
+    Path bundled = Path.of(tornadoHome, "bin", "tornado");
+    return Files.isExecutable(bundled) ? bundled : null;
+  }
+
+  static Path sdkHome(final Path executable) {
+    requireNonNull(executable, "executable");
+    Path bin = executable.toAbsolutePath().normalize().getParent();
+    if (bin == null || !"bin".equals(String.valueOf(bin.getFileName()))) {
+      return null;
+    }
+    Path sdk = bin.getParent();
+    if (sdk != null && Files.isDirectory(sdk.resolve("share").resolve("java").resolve("tornado"))) {
+      return sdk;
+    }
+    return null;
+  }
+
+  private static Path firstExecutable(final String pathEnv, final String name) {
+    if (pathEnv == null || pathEnv.isBlank()) {
+      return null;
+    }
+    return Arrays.stream(pathEnv.split(File.pathSeparator))
+      .filter(dir -> !dir.isBlank())
+      .map(dir -> Path.of(dir, name))
+      .filter(Files::isExecutable)
+      .findFirst()
+      .orElse(null);
+  }
+
+  private static void publishTornadoHome(final ProcessBuilder builder, final List<String> command) {
+    if (!builder.environment().getOrDefault("TORNADOVM_HOME", "").isBlank() || command.isEmpty()) {
+      return;
+    }
+    Path sdk = sdkHome(Path.of(command.getFirst()));
+    if (sdk != null) {
+      builder.environment().put("TORNADOVM_HOME", sdk.toString());
+    }
+  }
+
+  static String applicationClasspath(final ClassLoader loader, final String javaClassPath) {
+    String fromLoader = classpathOf(loader);
+    if (!fromLoader.isBlank()) {
+      return fromLoader;
+    }
+    if (javaClassPath == null || javaClassPath.isBlank()) {
+      throw new IllegalStateException("java.class.path is empty");
+    }
+    return javaClassPath;
+  }
+
+  private static String classpathOf(final ClassLoader loader) {
+    if (!(loader instanceof URLClassLoader urls) || urls.getURLs().length == 0) {
+      return "";
+    }
+    return Arrays.stream(urls.getURLs())
+      .filter(url -> "file".equals(url.getProtocol()))
+      .map(KernelChatBench::filePath)
+      .collect(joining(File.pathSeparator));
+  }
+
+  private static String filePath(final URL url) {
+    try {
+      return Path.of(url.toURI()).toString();
+    } catch (URISyntaxException failed) {
+      throw new IllegalStateException("classpath URL is not a file: " + url, failed);
+    }
   }
 
   private static List<String> inheritedJvmArgs(final String mode) {
@@ -354,7 +482,7 @@ public final class KernelChatBench {
   private static String skipReason(final String mode) {
     return switch (mode) {
       case "vector" -> "Vector API unavailable";
-      case "tornado" -> "TornadoVM unavailable (no SDK/device)";
+      case "tornado" -> "tornado command not found";
       default -> "unavailable";
     };
   }
