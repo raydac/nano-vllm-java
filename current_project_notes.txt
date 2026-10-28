@@ -18,7 +18,7 @@
 - Public `LLM.generate` / `generateTokenIds` overloads stay: they are the caller-facing surface.
 - TornadoVM Maven coordinate is `8.0.0-jdk22plus` (JDK 22+, including 27). Optional `tornado-clblast` is compile-only. Multi-token dense GEMV uses CLBlast SGEMM when `libclblast` runs; one token stays on the Kernel API plan because CLBlast SGEMV returned NaN on POCL. A non-finite CLBlast result or a failed launch drops CLBlast for the rest of the process. `-Dnanollvm.tornado.clblast=false` keeps the kernel. The weight slice is copied once into a Tornado `FloatArray`. Chat attention stays a Loop Parallel kernel. cuDNN packed-QKV attention is CUDA-only and does not match causal grouped-query attention with a sliding window.
 - OpenCL devices outside the sandbox: `0:0` Intel UHD Graphics 620 (Tornado default), `0:1` POCL CPU. A sandboxed `tornado --devices` sees only POCL. `etc/tornado.backend` is OpenCL only. The CUDA driver jar can still abort startup when `libcuda` is missing, so the TornadoVM bench child passes `-Dtornado.enabled.backends=OpenCL`. `libclblast.so.1` is on the SDK `lib` path.
-- `KernelChatBench` child JVMs must use the context class loader URLs. Under `mvn exec:java`, `java.class.path` is Maven's classpath. The TornadoVM child must be started with the `tornado` command: the Maven parent never loads the SDK, so a parent device probe skips TornadoVM even when `tornado --devices` lists both OpenCL devices.
+- `KernelChatBench` child JVMs must use the context class loader URLs. Under `mvn exec:java`, `java.class.path` is Maven's classpath. The TornadoVM child must be started with the `tornado` command (`tornado.exe` on Windows): the Maven parent never loads the SDK, so a parent device probe skips TornadoVM even when `tornado --devices` lists both OpenCL devices. The extensionless `bin/tornado` in the Windows SDK is a shell script; CreateProcess error 193 is that file. The `windows` Maven profile sets `tornado.executable` to `tornado.exe`.
 
 ## 3. Technical Debt & Refactoring
 - GGUF IQ tables, Tornado kernels, and espeak dictionaries are data or numeric kernels. Do not “compact” them into shared abstractions.
@@ -26,6 +26,7 @@
 - `LLM` still has many one-line generate overloads. They exist so callers do not pass unused flags.
 
 ## 4. Current Work In Progress
+- `KernelChatBench` on Windows resolves `tornado.exe` from `PATH` or `TORNADOVM_HOME/bin`, and the `windows` Maven profile sets `tornado.executable` to `tornado.exe`. Path assertions follow `Path.toString()` / file-URL round-trip.
 - `JevLevel` javadoc now states RAW vs L0 (rotations, eight-state prior, ordered scores stay one prefill) and includes a two-engine usage example. `require` and `Builder.jevLevel` point at it.
 - Russian checkers records (`Sq`, `Move`, `Played`, `Choice`, `Step`, `Hop`) have javadoc for the short components: file/rank axes, path vs captured vs crowned `result`, forced single-move turns, and a hop's land/victim.
 - Board a–h axis is `Sq.column` (0 = a). `Step` uses `columnDelta` and `rankDelta`. Screen position in the rotated drawing is `across`, not `column`.

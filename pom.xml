@@ -235,5 +235,16 @@
                 </plugins>
             </build>
         </profile>
+        <profile>
+            <id>windows</id>
+            <activation>
+                <os>
+                    <family>windows</family>
+                </os>
+            </activation>
+            <properties>
+                <tornado.executable>tornado.exe</tornado.executable>
+            </properties>
+        </profile>
     </profiles>
 </project>

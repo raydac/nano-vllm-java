@@ -36,8 +36,8 @@ import java.util.stream.Stream;
  * Compares scalar Java, Vector API, and TornadoVM on the same greedy chat. Kernels are
  * process-wide, so this sample starts one child JVM per backend. Scalar and Vector API always run
  * ({@code --add-modules=jdk.incubator.vector} on the child, even when the parent cannot see the
- * incubator module). TornadoVM runs when the {@code tornado} command is on {@code PATH} or
- * {@code TORNADOVM_HOME} is set, and that child is started with the TornadoVM launcher. A Maven
+ * incubator module). TornadoVM runs when {@code tornado} ({@code tornado.exe} on Windows) is on
+ * {@code PATH} or {@code TORNADOVM_HOME} is set, and that child is started with that launcher. A Maven
  * {@code exec:java} parent cannot see SDK devices, so a parent-only probe would skip TornadoVM.
  * Prints a tok/s table and writes {@code kernel-chat-bench.svg}.
  *
@@ -355,15 +355,35 @@ public final class KernelChatBench {
   }
 
   static Path tornadoExecutable(final String tornadoHome, final String pathEnv) {
-    Path onPath = firstExecutable(pathEnv, "tornado");
+    return tornadoExecutable(tornadoHome, pathEnv, System.getProperty("os.name", ""));
+  }
+
+  static Path tornadoExecutable(
+    final String tornadoHome,
+    final String pathEnv,
+    final String osName
+  ) {
+    requireNonNull(osName, "osName");
+    List<String> names = tornadoLauncherNames(osName);
+    Path onPath = firstExecutable(pathEnv, names);
     if (onPath != null) {
       return onPath;
     }
     if (tornadoHome == null || tornadoHome.isBlank()) {
       return null;
     }
-    Path bundled = Path.of(tornadoHome, "bin", "tornado");
-    return Files.isExecutable(bundled) ? bundled : null;
+    return names.stream()
+      .map(name -> Path.of(tornadoHome, "bin", name))
+      .filter(Files::isExecutable)
+      .findFirst()
+      .orElse(null);
+  }
+
+  static List<String> tornadoLauncherNames(final String osName) {
+    requireNonNull(osName, "osName");
+    return osName.toLowerCase(Locale.ROOT).contains("win")
+      ? List.of("tornado.exe")
+      : List.of("tornado");
   }
 
   static Path sdkHome(final Path executable) {
@@ -379,13 +399,13 @@ public final class KernelChatBench {
     return null;
   }
 
-  private static Path firstExecutable(final String pathEnv, final String name) {
+  private static Path firstExecutable(final String pathEnv, final List<String> names) {
     if (pathEnv == null || pathEnv.isBlank()) {
       return null;
     }
     return Arrays.stream(pathEnv.split(File.pathSeparator))
       .filter(dir -> !dir.isBlank())
-      .map(dir -> Path.of(dir, name))
+      .flatMap(dir -> names.stream().map(name -> Path.of(dir, name)))
       .filter(Files::isExecutable)
       .findFirst()
       .orElse(null);

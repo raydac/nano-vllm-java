@@ -42,13 +42,14 @@ class KernelChatBenchTest {
 
   @Test
   void tornadoChildUsesLauncherRatherThanPlainJava() {
+    Path tornado = Path.of("/opt/tornado");
     List<String> command = KernelChatBench.tornadoChildCommand(
-      Path.of("/opt/tornado"),
+      tornado,
       "classes",
       "/models/Gemma 3",
       8,
       2);
-    assertEquals("/opt/tornado", command.getFirst());
+    assertEquals(tornado.toString(), command.getFirst());
     assertTrue(command.contains("--classpath"));
     assertTrue(command.contains("classes"));
     assertTrue(command.stream().anyMatch(arg -> arg.contains("-Dnanollvm.kernels=tornado")));
@@ -76,6 +77,41 @@ class KernelChatBenchTest {
     } finally {
       Files.deleteIfExists(dir.resolve("tornado"));
       Files.deleteIfExists(home.resolve("bin").resolve("tornado"));
+      Files.deleteIfExists(home.resolve("bin"));
+      Files.deleteIfExists(home);
+      Files.deleteIfExists(dir);
+    }
+  }
+
+  @Test
+  void windowsLauncherUsesExeNotExtensionlessScript() throws Exception {
+    Path dir = Files.createTempDirectory("tornado-win");
+    Path home = Files.createTempDirectory("tornado-win-home");
+    try {
+      Path script = dir.resolve("tornado");
+      Files.writeString(script, "#!/bin/sh\n");
+      assertTrue(script.toFile().setExecutable(true));
+      Path exe = dir.resolve("tornado.exe");
+      Files.writeString(exe, "MZ");
+      assertTrue(exe.toFile().setExecutable(true));
+
+      assertEquals(
+        exe,
+        KernelChatBench.tornadoExecutable(home.toString(), dir.toString(), "Windows 11"));
+      assertEquals(List.of("tornado.exe"), KernelChatBench.tornadoLauncherNames("Windows 11"));
+      assertEquals(List.of("tornado"), KernelChatBench.tornadoLauncherNames("Linux"));
+
+      Files.delete(exe);
+      assertNull(KernelChatBench.tornadoExecutable("", dir.toString(), "Windows 11"));
+
+      Path bundled = Files.createDirectories(home.resolve("bin")).resolve("tornado.exe");
+      Files.writeString(bundled, "MZ");
+      assertTrue(bundled.toFile().setExecutable(true));
+      assertEquals(bundled, KernelChatBench.tornadoExecutable(home.toString(), "", "Windows 11"));
+    } finally {
+      Files.deleteIfExists(dir.resolve("tornado"));
+      Files.deleteIfExists(dir.resolve("tornado.exe"));
+      Files.deleteIfExists(home.resolve("bin").resolve("tornado.exe"));
       Files.deleteIfExists(home.resolve("bin"));
       Files.deleteIfExists(home);
       Files.deleteIfExists(dir);
@@ -160,7 +196,7 @@ class KernelChatBenchTest {
     URL jar = Path.of("/tmp/nano-vllm-java.jar").toUri().toURL();
     try (URLClassLoader loader = new URLClassLoader(new URL[] {classes, jar}, null)) {
       assertEquals(
-        "/tmp/nano-bench-classes" + File.pathSeparator + "/tmp/nano-vllm-java.jar",
+        Path.of(classes.toURI()) + File.pathSeparator + Path.of(jar.toURI()),
         KernelChatBench.applicationClasspath(loader, "maven.jar"));
     }
   }

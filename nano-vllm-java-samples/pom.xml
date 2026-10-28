@@ -68,7 +68,7 @@
 
     <profiles>
         <!--
-          Run a sample under the TornadoVM launcher (must be on PATH as `tornado`).
+          Run a sample under the TornadoVM launcher (`tornado` on PATH, `tornado.exe` on Windows).
           Uses the SDK runtime/modules — not the Maven Central tornado jars — so the installed
           TornadoVM 8.0.0 distribution (e.g. OpenCL) drives accelerators.
           Install libclblast so a multi-token dense GEMV uses CLBlast.
@@ -119,6 +119,17 @@
                     </plugin>
                 </plugins>
             </build>
+        </profile>
+        <profile>
+            <id>windows</id>
+            <activation>
+                <os>
+                    <family>windows</family>
+                </os>
+            </activation>
+            <properties>
+                <tornado.executable>tornado.exe</tornado.executable>
+            </properties>
         </profile>
     </profiles>
 </project>

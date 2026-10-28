@@ -22,6 +22,9 @@ Development snapshot after the **1.4.0** public release.
   already copied for that token. The Vector API stays a separate mode.
   TileContext is CUDA-only and is not used.
 
+### Fixed
+- On Windows, TornadoVM samples start `tornado.exe`. The extensionless `tornado` file in the SDK is a shell script, and Windows cannot run it.
+
 ### Added
 - Sample `RussianCheckersHelloWorld` plays Russian draughts in the terminal. You pick a colour
   and Qwen Jeff plays the other. Jeff's prompt lists every piece and notes what each legal move

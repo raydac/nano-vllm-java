@@ -724,13 +724,13 @@ Maven note: `exec:java` runs in the **same JVM as Maven**. Vector API flags and 
 
 ### Run with TornadoVM (`-Ptornado`)
 
-Requires the TornadoVM **8.0.0** SDK (`jdk22plus` build) on `PATH` (`tornado` command) and a matching
+Requires the TornadoVM **8.0.0** SDK (`jdk22plus` build) on `PATH` (`tornado`, or `tornado.exe` on Windows) and a matching
 **JDK 22+**. The project targets Java 21 bytecode, but building with the `8.0.0-jdk22plus` Maven
 artifacts requires JDK 22+. Install `libclblast` (`libclblast1`) so a multi-token OpenCL GEMV uses CLBlast.
 A SDK that also ships the CUDA driver jar service-binds that backend and aborts when `libcuda` is
 missing; `-Dtornado.enabled.backends=OpenCL` keeps the OpenCL device (the sample profile sets this).
 Drop that flag when an NVIDIA driver is installed.
-Profile `tornado` in `nano-vllm-java-samples` launches via `tornado`
+Profile `tornado` in `nano-vllm-java-samples` launches via `tornado` (`tornado.exe` on Windows)
 (not Maven’s JVM), forces `-Dnanollvm.kernels=tornado`, and puts only the sample + library classes on
 the classpath (SDK supplies TornadoVM modules):
 
@@ -776,7 +776,7 @@ Second argument is the number of concurrent sequences (default `8`).
 
 ### Kernel comparison (`KernelChatBench`)
 
-Runs the **same greedy chat** once per kernel, each in its **own JVM** (`-Dnanollvm.kernels=scalar`, then `vector`, then `tornado`). Vector API is always launched with `--add-modules=jdk.incubator.vector` on that child. TornadoVM is launched with the `tornado` command when that command is on `PATH` (a Maven `exec:java` parent cannot see SDK devices, so it used to skip TornadoVM even when `tornado --devices` lists them). Prints a tok/s table and writes `kernel-chat-bench.svg`. Default checkpoint is Gemma3-270M (then SmolLM2 Instruct ONNX, then Qwen3-0.6B).
+Runs the **same greedy chat** once per kernel, each in its **own JVM** (`-Dnanollvm.kernels=scalar`, then `vector`, then `tornado`). Vector API is always launched with `--add-modules=jdk.incubator.vector` on that child. TornadoVM is launched with the `tornado` command (`tornado.exe` on Windows) when that command is on `PATH` (a Maven `exec:java` parent cannot see SDK devices, so it used to skip TornadoVM even when `tornado --devices` lists them). Prints a tok/s table and writes `kernel-chat-bench.svg`. Default checkpoint is Gemma3-270M (then SmolLM2 Instruct ONNX, then Qwen3-0.6B).
 
 ```bash
 mvn -pl nano-vllm-java-samples -q exec:java \
