@@ -47,15 +47,18 @@ import java.util.stream.Stream;
  *
  * <p>Args: optional model path; {@code --svg <path>} (default {@code kernel-chat-bench.svg};
  * {@code --svg -} skips the file); {@code --max-tokens N}; {@code --runs N}. Internal
- * {@code --worker} is used by child JVMs.
+ * {@code --worker} is used by child JVMs. Default checkpoint prefers Qwen3-0.6B / Gemma3-270M over
+ * compact ONNX demos so TornadoVM is not judged only on launch overhead.
  */
 public final class KernelChatBench {
 
   static final String RESULT_PREFIX = "KERNEL_RESULT";
   static final String DEFAULT_SVG_NAME = "kernel-chat-bench.svg";
   static final String SVG_PROPERTY = "nanollvm.bench.svg";
-  static final String CHAT_PROMPT = "Explain why the sky is blue in three short sentences.";
-  static final int DEFAULT_MAX_TOKENS = 64;
+  static final String CHAT_PROMPT =
+      "Explain why the sky is blue in three short sentences. Mention Rayleigh scattering, "
+          + "why shorter wavelengths scatter more, and why sunsets look red near the horizon.";
+  static final int DEFAULT_MAX_TOKENS = 128;
   static final int DEFAULT_RUNS = 2;
 
   private static final List<String> ALL_MODES = List.of("scalar", "vector", "tornado");
@@ -195,6 +198,11 @@ public final class KernelChatBench {
     System.out.println("  modes: " + String.join(", ", available));
     if (!skipped.isEmpty()) {
       System.out.println("  skipped: " + describeSkipped(skipped));
+    }
+    if (BundledModels.isCompactKernelBenchModel(modelPath)) {
+      System.out.println(
+          "  note: compact checkpoint — TornadoVM tok/s is often launch-bound;"
+              + " prefer models/Qwen3-0.6B or models/Gemma3-270M");
     }
     System.out.println();
 
@@ -491,7 +499,7 @@ public final class KernelChatBench {
     if (cliPath != null) {
       return cliPath.toAbsolutePath().normalize();
     }
-    return BundledModels.requireChatDemo();
+    return BundledModels.requireKernelChatBench();
   }
 
   private static String normalizedMode() {

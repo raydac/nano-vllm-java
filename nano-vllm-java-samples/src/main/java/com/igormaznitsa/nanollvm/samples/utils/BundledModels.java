@@ -215,6 +215,34 @@ public final class BundledModels {
   }
 
   /**
+   * Chat checkpoint for kernel throughput comparison. Prefers denser safetensors (Qwen3 / Gemma /
+   * Jeff) before compact ONNX demos, because TornadoVM tok/s on ~100M models is usually
+   * launch-bound rather than compute-bound.
+   */
+  public static Path requireKernelChatBench() {
+    return find(QWEN3_0_6B)
+      .or(() -> find(GEMMA3_270M))
+      .or(() -> find(JEFF_QWEN35_0_8B))
+      .or(() -> find(GEMMA4_E2B_IT_QAT_MOBILE))
+      .or(() -> find(SMOLLM2_135M_INSTRUCT_ONNX))
+      .or(() -> find(TINY_LLM_ONNX))
+      .orElseThrow(() -> new IllegalStateException(
+        "no kernel-bench chat checkpoint under " + modelsRoot()
+          + ". Prefer models/download-qwen3-0.6b.sh or models/download-gemma3-270m.sh"
+          + " (HF license + HF_TOKEN); compact ONNX demos understate TornadoVM."));
+  }
+
+  /**
+   * {@code true} for compact ONNX chat demos where device-launch overhead dominates GEMV work.
+   */
+  public static boolean isCompactKernelBenchModel(final Path modelPath) {
+    requireNonNull(modelPath, "modelPath");
+    Path fileName = modelPath.getFileName();
+    String name = (fileName == null ? modelPath : fileName).toString().toLowerCase(Locale.ROOT);
+    return name.contains("smollm") || name.contains("tiny-llm");
+  }
+
+  /**
    * {@code true} for US-English Lessac-style Piper folder names.
    */
   public static boolean isEnglishPiperVoice(final Path modelDir) {

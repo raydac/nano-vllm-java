@@ -777,17 +777,17 @@ Second argument is the number of concurrent sequences (default `8`).
 
 ### Kernel comparison (`KernelChatBench`)
 
-Runs the **same greedy chat** once per kernel, each in its **own JVM** (`-Dnanollvm.kernels=scalar`, then `vector`, then `tornado`). Vector API is always launched with `--add-modules=jdk.incubator.vector` on that child. TornadoVM is launched with the `tornado` command (`tornado.exe` on Windows) when that command is on `PATH` (a Maven `exec:java` parent cannot see SDK devices, so it used to skip TornadoVM even when `tornado --devices` lists them). Prints a tok/s table and writes `kernel-chat-bench.svg`. Default checkpoint is Gemma3-270M (then SmolLM2 Instruct ONNX, then Qwen3-0.6B).
+Runs the **same greedy chat** once per kernel, each in its **own JVM** (`-Dnanollvm.kernels=scalar`, then `vector`, then `tornado`). Vector API is always launched with `--add-modules=jdk.incubator.vector` on that child. TornadoVM is launched with the `tornado` command (`tornado.exe` on Windows) when that command is on `PATH` (a Maven `exec:java` parent cannot see SDK devices, so it used to skip TornadoVM even when `tornado --devices` lists them). Prints a tok/s table and writes `kernel-chat-bench.svg`. Default checkpoint prefers denser chat models (`Qwen3-0.6B`, then `Gemma3-270M`, Jeff, Gemma 4) before compact ONNX demos — SmolLM2-class sizes are usually launch-bound on TornadoVM.
 
 ```bash
 mvn -pl nano-vllm-java-samples -q exec:java \
   -Dexec.mainClass=com.igormaznitsa.nanollvm.samples.KernelChatBench
-# optional: -Dexec.args="models/Gemma3-270M --svg /tmp/kernels.svg"
+# recommended: -Dexec.args="models/Qwen3-0.6B --svg /tmp/kernels.svg"
 # TornadoVM is included when `tornado` is on PATH or TORNADOVM_HOME is set.
 # The tornado Maven profile is only needed when the parent process itself must be the TornadoVM launcher.
 ```
 
-`--svg -` prints the table only. `--max-tokens` (default `64`) and `--runs` (default `2`, plus one warmup) adjust the token budget.
+`--svg -` prints the table only. `--max-tokens` (default `128`) and `--runs` (default `2`, plus one warmup) adjust the token budget.
 
 ## Library quick start
 

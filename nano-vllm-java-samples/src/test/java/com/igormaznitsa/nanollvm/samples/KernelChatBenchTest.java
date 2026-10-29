@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.igormaznitsa.nanollvm.samples.utils.BundledModels;
 import java.io.File;
 import java.net.URI;
 import java.net.URL;
@@ -204,6 +205,15 @@ class KernelChatBenchTest {
     assertNull(options.svgPath());
     assertEquals(32, options.maxTokens());
     assertEquals(3, options.runs());
+  }
+
+  @Test
+  void defaultPromptAndBudgetFavorHeavierPrefill() {
+    assertTrue(KernelChatBench.CHAT_PROMPT.length() > 80);
+    assertEquals(128, KernelChatBench.DEFAULT_MAX_TOKENS);
+    assertTrue(BundledModels.isCompactKernelBenchModel(
+        Path.of("models/SmolLM2-135M-Instruct-ONNX")));
+    assertFalse(BundledModels.isCompactKernelBenchModel(Path.of("models/Qwen3-0.6B")));
   }
 
   @Test
