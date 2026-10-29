@@ -211,7 +211,8 @@
         <profile>
             <id>tornado</id>
             <properties>
-                <tornado.executable>tornado</tornado.executable>
+                <tornado.launcher>tornado</tornado.launcher>
+                <tornado.executable>${tornado.launcher}</tornado.executable>
                 <tornado.exec.skip>true</tornado.exec.skip>
             </properties>
             <build>
@@ -243,7 +244,19 @@
                 </os>
             </activation>
             <properties>
-                <tornado.executable>tornado.exe</tornado.executable>
+                <tornado.launcher>tornado.exe</tornado.launcher>
+                <tornado.executable>${tornado.launcher}</tornado.executable>
+            </properties>
+        </profile>
+        <profile>
+            <id>tornadovm-home</id>
+            <activation>
+                <property>
+                    <name>env.TORNADOVM_HOME</name>
+                </property>
+            </activation>
+            <properties>
+                <tornado.executable>${env.TORNADOVM_HOME}/bin/${tornado.launcher}</tornado.executable>
             </properties>
         </profile>
     </profiles>

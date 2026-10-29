@@ -17,7 +17,8 @@
     <properties>
         <maven.deploy.skip>true</maven.deploy.skip>
         <exec.mainClass>com.igormaznitsa.nanollvm.samples.Example</exec.mainClass>
-        <tornado.executable>tornado</tornado.executable>
+        <tornado.launcher>tornado</tornado.launcher>
+        <tornado.executable>${tornado.launcher}</tornado.executable>
         <tornado.exec.skip>true</tornado.exec.skip>
         <tornado.params></tornado.params>
         <!-- TornadoVM child JVM; override when Maven's JAVA_HOME is not the TornadoVM JDK. -->
@@ -69,6 +70,7 @@
     <profiles>
         <!--
           Run a sample under the TornadoVM launcher (`tornado` on PATH, `tornado.exe` on Windows).
+          When `TORNADOVM_HOME` is set, the executable is `$TORNADOVM_HOME/bin/<launcher>`.
           Uses the SDK runtime/modules — not the Maven Central tornado jars — so the installed
           TornadoVM 8.0.0 distribution (e.g. OpenCL) drives accelerators.
           Install libclblast so a multi-token dense GEMV uses CLBlast.
@@ -128,7 +130,19 @@
                 </os>
             </activation>
             <properties>
-                <tornado.executable>tornado.exe</tornado.executable>
+                <tornado.launcher>tornado.exe</tornado.launcher>
+                <tornado.executable>${tornado.launcher}</tornado.executable>
+            </properties>
+        </profile>
+        <profile>
+            <id>tornadovm-home</id>
+            <activation>
+                <property>
+                    <name>env.TORNADOVM_HOME</name>
+                </property>
+            </activation>
+            <properties>
+                <tornado.executable>${env.TORNADOVM_HOME}/bin/${tornado.launcher}</tornado.executable>
             </properties>
         </profile>
     </profiles>

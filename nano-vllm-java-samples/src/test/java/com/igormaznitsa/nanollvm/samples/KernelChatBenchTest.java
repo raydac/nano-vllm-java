@@ -60,14 +60,16 @@ class KernelChatBenchTest {
 
   @Test
   void tornadoExecutablePrefersPathThenHome() throws Exception {
+    String launcher = KernelChatBench.tornadoLauncherNames(System.getProperty("os.name", ""))
+        .getFirst();
     Path dir = Files.createTempDirectory("tornado-path");
     Path home = Files.createTempDirectory("tornado-home");
     try {
-      Path onPath = dir.resolve("tornado");
+      Path onPath = dir.resolve(launcher);
       Files.writeString(onPath, "#!/bin/sh\n");
       assertTrue(onPath.toFile().setExecutable(true));
       Path sdkBin = Files.createDirectories(home.resolve("bin"));
-      Path bundled = sdkBin.resolve("tornado");
+      Path bundled = sdkBin.resolve(launcher);
       Files.writeString(bundled, "#!/bin/sh\n");
       assertTrue(bundled.toFile().setExecutable(true));
 
@@ -75,8 +77,8 @@ class KernelChatBenchTest {
       assertEquals(bundled, KernelChatBench.tornadoExecutable(home.toString(), ""));
       assertNull(KernelChatBench.tornadoExecutable("", dir.resolve("missing").toString()));
     } finally {
-      Files.deleteIfExists(dir.resolve("tornado"));
-      Files.deleteIfExists(home.resolve("bin").resolve("tornado"));
+      Files.deleteIfExists(dir.resolve(launcher));
+      Files.deleteIfExists(home.resolve("bin").resolve(launcher));
       Files.deleteIfExists(home.resolve("bin"));
       Files.deleteIfExists(home);
       Files.deleteIfExists(dir);

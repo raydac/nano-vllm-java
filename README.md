@@ -724,13 +724,14 @@ Maven note: `exec:java` runs in the **same JVM as Maven**. Vector API flags and 
 
 ### Run with TornadoVM (`-Ptornado`)
 
-Requires the TornadoVM **8.0.0** SDK (`jdk22plus` build) on `PATH` (`tornado`, or `tornado.exe` on Windows) and a matching
-**JDK 22+**. The project targets Java 21 bytecode, but building with the `8.0.0-jdk22plus` Maven
-artifacts requires JDK 22+. Install `libclblast` (`libclblast1`) so a multi-token OpenCL GEMV uses CLBlast.
-A SDK that also ships the CUDA driver jar service-binds that backend and aborts when `libcuda` is
-missing; `-Dtornado.enabled.backends=OpenCL` keeps the OpenCL device (the sample profile sets this).
-Drop that flag when an NVIDIA driver is installed.
-Profile `tornado` in `nano-vllm-java-samples` launches via `tornado` (`tornado.exe` on Windows)
+Requires the TornadoVM **8.0.0** SDK (`jdk22plus` build) and a matching **JDK 22+**. Put the SDK
+`bin` on `PATH` (`tornado`, or `tornado.exe` on Windows), and/or set `TORNADOVM_HOME` to the SDK
+root — Maven then launches `$TORNADOVM_HOME/bin/<launcher>`. The project targets Java 21 bytecode,
+but building with the `8.0.0-jdk22plus` Maven artifacts requires JDK 22+. Install `libclblast`
+(`libclblast1`) so a multi-token OpenCL GEMV uses CLBlast. A SDK that also ships the CUDA driver jar
+service-binds that backend and aborts when `libcuda` is missing; `-Dtornado.enabled.backends=OpenCL`
+keeps the OpenCL device (the sample profile sets this). Drop that flag when an NVIDIA driver is
+installed. Profile `tornado` in `nano-vllm-java-samples` launches via that TornadoVM launcher
 (not Maven’s JVM), forces `-Dnanollvm.kernels=tornado`, and puts only the sample + library classes on
 the classpath (SDK supplies TornadoVM modules):
 
@@ -782,8 +783,8 @@ Runs the **same greedy chat** once per kernel, each in its **own JVM** (`-Dnanol
 mvn -pl nano-vllm-java-samples -q exec:java \
   -Dexec.mainClass=com.igormaznitsa.nanollvm.samples.KernelChatBench
 # optional: -Dexec.args="models/Gemma3-270M --svg /tmp/kernels.svg"
-# TornadoVM is included when `tornado` is on PATH. The tornado Maven profile is only needed
-# when the parent process itself must be the TornadoVM launcher.
+# TornadoVM is included when `tornado` is on PATH or TORNADOVM_HOME is set.
+# The tornado Maven profile is only needed when the parent process itself must be the TornadoVM launcher.
 ```
 
 `--svg -` prints the table only. `--max-tokens` (default `64`) and `--runs` (default `2`, plus one warmup) adjust the token budget.
