@@ -54,8 +54,17 @@ class KernelChatBenchTest {
     assertTrue(command.contains("classes"));
     assertTrue(command.stream().anyMatch(arg -> arg.contains("-Dnanollvm.kernels=tornado")));
     assertTrue(command.stream().anyMatch(arg ->
-      arg.contains("--worker") && arg.contains("'/models/Gemma 3'")));
+        arg.contains("--worker") && arg.contains(KernelChatBench.shellQuote("/models/Gemma 3"))));
     assertEquals(KernelChatBench.class.getName(), command.getLast());
+  }
+
+  @Test
+  void shellQuoteUsesCmdRulesOnWindows() {
+    assertEquals("\"C:\\models\\Gemma 3\"",
+        KernelChatBench.shellQuote("C:\\models\\Gemma 3", "Windows 11"));
+    assertEquals("\"C:\\models\\say \"\"hi\"\"\"",
+        KernelChatBench.shellQuote("C:\\models\\say \"hi\"", "Windows 11"));
+    assertEquals("'/models/Gemma 3'", KernelChatBench.shellQuote("/models/Gemma 3", "Linux"));
   }
 
   @Test

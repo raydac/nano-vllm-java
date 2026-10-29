@@ -26,7 +26,7 @@
 - `LLM` still has many one-line generate overloads. They exist so callers do not pass unused flags.
 
 ## 4. Current Work In Progress
-- `KernelChatBench` on Windows resolves `tornado.exe` from `PATH` or `TORNADOVM_HOME/bin`, and the `windows` Maven profile sets `tornado.executable` to `tornado.exe`. Path assertions follow `Path.toString()` / file-URL round-trip.
+- `KernelChatBench` on Windows resolves `tornado.exe` from `PATH` or `TORNADOVM_HOME/bin`, and the `windows` Maven profile sets `tornado.executable` to `tornado.exe`. Worker `--params` paths use `cmd.exe` double quotes on Windows; Unix single quotes stay literal and break `Path.of` (`Illegal char <:>`). Path assertions follow `Path.toString()` / file-URL round-trip.
 - `JevLevel` javadoc now states RAW vs L0 (rotations, eight-state prior, ordered scores stay one prefill) and includes a two-engine usage example. `require` and `Builder.jevLevel` point at it.
 - Russian checkers records (`Sq`, `Move`, `Played`, `Choice`, `Step`, `Hop`) have javadoc for the short components: file/rank axes, path vs captured vs crowned `result`, forced single-move turns, and a hop's land/victim.
 - Board a–h axis is `Sq.column` (0 = a). `Step` uses `columnDelta` and `rankDelta`. Screen position in the rotated drawing is `across`, not `column`.

@@ -350,7 +350,15 @@ public final class KernelChatBench {
   }
 
   static String shellQuote(final String value) {
+    return shellQuote(value, System.getProperty("os.name", ""));
+  }
+
+  static String shellQuote(final String value, final String osName) {
     requireNonNull(value, "value");
+    requireNonNull(osName, "osName");
+    if (osName.toLowerCase(Locale.ROOT).contains("win")) {
+      return "\"" + value.replace("\"", "\"\"") + "\"";
+    }
     return "'" + value.replace("'", "'\\''") + "'";
   }
 
