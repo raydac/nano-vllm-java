@@ -266,6 +266,8 @@ public final class KernelChatBench {
     ProcessBuilder builder = new ProcessBuilder(command);
     if ("tornado".equals(mode)) {
       publishTornadoHome(builder, command);
+      // TornadoVM's launcher appends $CLASSPATH with a Unix ':' even on Windows.
+      builder.environment().remove("CLASSPATH");
     }
     builder.redirectError(ProcessBuilder.Redirect.INHERIT);
     Process process = builder.start();
@@ -336,7 +338,8 @@ public final class KernelChatBench {
     return List.of(
       tornado.toString(),
       "--classpath",
-      classpath,
+        // TornadoVM pastes --classpath into os.system(); cmd.exe splits on unquoted ';'.
+        shellQuote(classpath),
       "--jvm=-D" + PROP_KERNELS + "=tornado -Dtornado.enabled.backends=OpenCL"
         + " --add-modules=jdk.incubator.vector",
       "--params=" + workerArguments(modelPath, maxTokens, runs),

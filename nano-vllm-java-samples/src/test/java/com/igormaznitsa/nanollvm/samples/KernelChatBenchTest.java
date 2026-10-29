@@ -51,11 +51,25 @@ class KernelChatBenchTest {
       2);
     assertEquals(tornado.toString(), command.getFirst());
     assertTrue(command.contains("--classpath"));
-    assertTrue(command.contains("classes"));
+    assertTrue(command.contains(KernelChatBench.shellQuote("classes")));
     assertTrue(command.stream().anyMatch(arg -> arg.contains("-Dnanollvm.kernels=tornado")));
     assertTrue(command.stream().anyMatch(arg ->
         arg.contains("--worker") && arg.contains(KernelChatBench.shellQuote("/models/Gemma 3"))));
     assertEquals(KernelChatBench.class.getName(), command.getLast());
+  }
+
+  @Test
+  void tornadoClasspathIsQuotedForCmdSeparator() {
+    String windowsCp = "C:\\samples\\classes;C:\\nano-vllm-java\\classes";
+    List<String> command = KernelChatBench.tornadoChildCommand(
+        Path.of("C:\\tvm\\bin\\tornado.exe"),
+        windowsCp,
+        "C:\\models\\Gemma",
+        8,
+        2);
+    assertEquals(
+        KernelChatBench.shellQuote(windowsCp, System.getProperty("os.name", "")),
+        command.get(command.indexOf("--classpath") + 1));
   }
 
   @Test

@@ -23,7 +23,7 @@ Development snapshot after the **1.4.0** public release.
   TileContext is CUDA-only and is not used.
 
 ### Fixed
-- On Windows, TornadoVM samples start `tornado.exe`. The extensionless `tornado` file in the SDK is a shell script, and Windows cannot run it. When `TORNADOVM_HOME` is set, Maven `-Ptornado` launches `$TORNADOVM_HOME/bin` rather than relying on `PATH` alone. Kernel chat bench quotes worker model paths for `cmd.exe` on Windows so a drive letter is not wrapped in Unix single quotes.
+- On Windows, TornadoVM samples start `tornado.exe`. The extensionless `tornado` file in the SDK is a shell script, and Windows cannot run it. When `TORNADOVM_HOME` is set, Maven `-Ptornado` launches `$TORNADOVM_HOME/bin` rather than relying on `PATH` alone. Kernel chat bench quotes TornadoVM worker classpath and model paths for `cmd.exe` so `;` and drive letters survive the launcher's `os.system` command line.
 
 ### Added
 - Sample `RussianCheckersHelloWorld` plays Russian draughts in the terminal. You pick a colour
