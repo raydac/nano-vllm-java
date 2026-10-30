@@ -2,6 +2,8 @@
 
 ### An introductory guide to this Java inference engine (Nano-vLLM)
 
+Day-to-day use — dependency, samples, and limits — is in [`README.md`](README.md). This file is the longer technical tour.
+
 This guide is written for a reader with general academic habits — careful definitions, structured argument, and a
 willingness to learn technical vocabulary — but **without** assuming prior machine-learning or systems coursework.
 
