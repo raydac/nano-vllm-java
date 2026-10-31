@@ -4222,7 +4222,7 @@ LLM.builder(model).toJev()          // closes the engine; does not close the mod
     → JevDecision (answer, probability per option, level L0 or RAW)
 ```
 
-Narrative: **chapter 7g**. Demo: `samples.JevHelloWorld` (L0 and RAW on one choice, a yes/no, a score, then eight states until the label prior turns on). `samples.RussianCheckersHelloWorld` plays Russian draughts and uses one RAW choice per computer move. `samples.Example` offers the same loop: choose Jev, then `/choice`, `/yesno`, or `/score`, and type a state on each line.
+Narrative: **chapter 7g**. Demo: `samples.JevHelloWorld` (L0 and RAW on one choice, a yes/no, a score, then eight states until the label prior turns on, then two of those states again so the probability change is visible). `samples.RussianCheckersHelloWorld` plays Russian draughts and uses one RAW choice per computer move. `samples.Example` offers the same loop: choose Jev, then `/choice`, `/yesno`, or `/score`, and type a state on each line.
 
 ### Sample G — text RAG (prepare once, ask many times)
 

@@ -111,7 +111,8 @@ final class JevTest {
       JevQuestion.yesNo("Is this a technical failure?"),
       new int[] {1, 0},
       List.of("Yes", "No"));
-    assertTrue(yesNo.contains("Answer No or Yes."));
+    assertTrue(yesNo.startsWith("Message: The page returns 500."));
+    assertTrue(yesNo.contains("No or Yes:"));
   }
 
   @Test

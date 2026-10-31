@@ -1,4 +1,5 @@
 ## 1. Implementation Progress
+- A yes/no prompt ends on `Yes or No:` / `No or Yes:` after `Message:`. The old line `Answer Yes or No.` made Gemma3-270M continue with Yes for every refund state. `JevHelloWorld` asks whether the message asks for a refund, then repeats two states once the prior is on.
 - `README.md` is the user guide (what it is, samples, limits). The design tour stays in `description.md`.
 - Sample `RussianCheckersHelloWorld`: terminal Russian draughts. User picks one colour; Qwen Jeff plays the other. User's pieces are drawn at the bottom (Black rotates the board 180°). Rank numbers and file letters are on both edges. A single legal move is shown in the prompt; Enter plays it. RAW choice among legal moves. Coordinate entry `a3 b4` / `A 3 B 4`. Jeff usage is documented on `playWithJeff`, `positionText`, `choose`, `narrow`, and `ask`.
 - Qwen3.5 text chat (`qwen3_5`): Gated DeltaNet + gated full attention, leading partial RoPE, vision tensors skipped. Jeff-Qwen3.5-0.8B download script. `toJev()` uses the causal logits; no separate Jeff API.

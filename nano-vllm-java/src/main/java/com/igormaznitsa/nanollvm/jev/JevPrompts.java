@@ -26,17 +26,16 @@ final class JevPrompts {
     final List<String> labels
   ) {
     String shown = state == null || state.isBlank() ? "(empty)" : state.strip();
+    if (question.kind() == JevQuestion.Kind.YES_NO) {
+      return "Message: %s%n%s%n%s or %s:".formatted(
+        shown,
+        question.text(),
+        labels.get(permutation[0]),
+        labels.get(permutation[1]));
+    }
     StringBuilder body = new StringBuilder();
     body.append("State:\n").append(shown).append("\n\n");
     body.append("Question: ").append(question.text()).append('\n');
-    if (question.kind() == JevQuestion.Kind.YES_NO) {
-      body.append("Answer ")
-        .append(labels.get(permutation[0]))
-        .append(" or ")
-        .append(labels.get(permutation[1]))
-        .append('.');
-      return body.toString();
-    }
     if (question.kind() == JevQuestion.Kind.SCORE) {
       if (question.hasExplicitLevels()) {
         body.append("Pick the level that applies (the levels are ordered):\n");

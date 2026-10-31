@@ -18,8 +18,9 @@ import java.util.Locale;
  *
  * <p>A choice is read at L0 (every rotation of the options) and again at RAW (one prefill, options
  * in the order given). A yes/no and an ordered score follow. The last section decides the same
- * yes/no eight times so the label prior turns on. Each rotation is one prefill, so a four-way L0
- * choice costs four prefills.
+ * yes/no eight times so the label prior turns on, then repeats two of those states so the change
+ * in probability is on the page. Each rotation is one prefill, so a four-way L0 choice costs four
+ * prefills.
  *
  * <p>Args: optional chat checkpoint (default the smallest local chat demo via
  * {@link BundledModels#requireChatDemo()}). From the repository root:
@@ -44,18 +45,25 @@ public final class JevHelloWorld {
     "How urgent is the customer's request?",
     List.of("low", "medium", "high")).named("urgency");
 
-  private static final JevQuestion REFUND = JevQuestion.yesNo("Does the customer want a refund?");
+  private static final JevQuestion REFUND =
+    JevQuestion.yesNo("Does this message ask for a refund?");
+
+  private static final String MONEY_BACK = "I want my money back for order 441.";
+
+  private static final String PACKAGE_DUE = "Where is my package? It was due Monday.";
 
   private static final List<String> REFUND_STATES = List.of(
-    "I want my money back for order 441.",
+    MONEY_BACK,
     "Please refund the duplicate charge.",
-    "Where is my package? It was due Monday.",
+    PACKAGE_DUE,
     "Can you change the delivery address?",
     "The item arrived broken. I need a refund.",
     "I only wanted to track the shipment.",
     "Cancel the order and return the payment.",
     "What are your store hours?"
   );
+
+  private static final List<String> PRIOR_REPEATS = List.of(PACKAGE_DUE, MONEY_BACK);
 
   private JevHelloWorld() {
   }
@@ -130,21 +138,51 @@ public final class JevHelloWorld {
       System.out.println("  expected level " + format(value) + "  (0=low, 1=medium, 2=high)"));
   }
 
-  private static void showPrior(final Jev l0) {
+  private static void showPrior(final Jev jev) {
     heading("Label prior — same yes/no, eight states, prior turns on at the eighth");
     System.out.println("question: " + REFUND.text());
     System.out.println("Each state is 2 prefills. The prior is estimated from these answers");
     System.out.println("and applied from the eighth state of this question on this Jev.");
+    System.out.println("The last two lines repeat earlier states. Compare p(Yes).");
+    System.out.println("The printed answer is the label with the higher probability.");
+    double[] yesProbability = new double[REFUND_STATES.size()];
     for (int index = 0; index < REFUND_STATES.size(); index++) {
-      String state = REFUND_STATES.get(index);
-      System.out.println("reading state " + (index + 1) + "/" + REFUND_STATES.size() + "…");
-      JevDecision decision = l0.decide(state, REFUND);
-      System.out.println("  " + (index + 1) + "/" + REFUND_STATES.size()
-        + "  prior=" + (decision.priorApplied() ? "on" : "off")
-        + "  answer=" + decision.answer()
-        + "  p(Yes)=" + format(decision.probability("Yes"))
-        + "  " + state);
+      yesProbability[index] = printRefundState(jev, index, REFUND_STATES.get(index));
     }
+    for (String state : PRIOR_REPEATS) {
+      printRefundRepeat(jev, state, yesProbability[REFUND_STATES.indexOf(state)]);
+    }
+  }
+
+  private static double printRefundState(final Jev jev, final int index, final String state) {
+    int total = REFUND_STATES.size();
+    System.out.println("reading state " + (index + 1) + "/" + total + "…");
+
+    JevDecision decision = jev.decide(state, REFUND);
+    System.out.println("  " + (index + 1) + "/" + total
+      + "  prior=" + priorMark(decision)
+      + "  answer=" + decision.answer()
+      + "  p(Yes)=" + format(decision.probability("Yes"))
+      + "  " + state);
+    return decision.probability("Yes");
+  }
+
+  private static void printRefundRepeat(final Jev jev, final String state,
+                                        final double earlierYes) {
+    int earlier = REFUND_STATES.indexOf(state) + 1;
+    int total = REFUND_STATES.size();
+    System.out.println("reading the same words as " + earlier + "/" + total + "…");
+
+    JevDecision decision = jev.decide(state, REFUND);
+    System.out.println("  prior=" + priorMark(decision)
+      + "  answer=" + decision.answer()
+      + "  p(Yes)=" + format(decision.probability("Yes"))
+      + "  was " + format(earlierYes) + " prior=off at " + earlier + "/" + total
+      + "  " + state);
+  }
+
+  private static String priorMark(final JevDecision decision) {
+    return decision.priorApplied() ? "on" : "off";
   }
 
   private static void printDecision(final JevDecision decision) {
@@ -152,7 +190,7 @@ public final class JevHelloWorld {
     System.out.println(name + " → " + decision.answer()
       + "  level=" + decision.level()
       + "  rotations=" + decision.rotations()
-      + "  prior=" + (decision.priorApplied() ? "on" : "off")
+      + "  prior=" + priorMark(decision)
       + "  orderFlip=" + format(decision.orderFlipRate())
       + "  labelMass=" + format(decision.labelMass()));
     for (JevOption option : decision.distribution()) {

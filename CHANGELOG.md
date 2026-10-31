@@ -43,8 +43,11 @@ Development snapshot after the **1.4.0** public release.
 - Causal chat models can answer a typed decision. `LLM.builder(model).toJev()` reads a choice, a
   yes/no, or a score from the next-token distribution and returns a probability for every option.
   The default level, L0, rotates the options and removes the label prior without any training
-  labels. `jevLevel(JevLevel.RAW)` is one prefill in the order given. `JevHelloWorld` prints a choice
-  at L0 and RAW, a yes/no, a score, and the label prior turning on after eight states. `Example`
+  labels. A yes/no ends on the two labels (`Yes or No:` and `No or Yes:`) so the model is not
+  asked to continue the word Answer. `jevLevel(JevLevel.RAW)` is one prefill in the order given.
+  `JevHelloWorld` prints a choice
+  at L0 and RAW, a yes/no, a score, and the label prior turning on after eight states. It then
+  repeats two of those states so the change in probability is visible. `Example`
   can open the same API as a prompt: pick Jev after the model, set `/choice`, `/yesno`, or
   `/score`, then type a state on each line.
 - Qwen3.5 text chat loads from Hugging Face safetensors (`model_type` `qwen3_5`), including
