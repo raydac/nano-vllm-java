@@ -17,6 +17,9 @@ import static com.igormaznitsa.nanollvm.models.internal.WeightNames.Q_NORM_WEIGH
 import static com.igormaznitsa.nanollvm.models.internal.WeightNames.layer;
 import static com.igormaznitsa.nanollvm.models.internal.WeightNames.mlp;
 import static com.igormaznitsa.nanollvm.models.internal.WeightNames.selfAttn;
+import static com.igormaznitsa.nanollvm.tensor.ActivationWorkspace.beginLayer;
+import static com.igormaznitsa.nanollvm.tensor.ActivationWorkspace.endLayer;
+import static com.igormaznitsa.nanollvm.tensor.ActivationWorkspace.releaseUnless;
 import static java.util.Locale.ROOT;
 import static java.util.Objects.requireNonNull;
 
@@ -255,11 +258,19 @@ public record Gemma3ForCausalLM(Gemma3Model model, ParallelLMHead lmHead) implem
     }
 
     Tensor forward(final Tensor inputIds, final Tensor positions, final Context context) {
+      beginLayer();
       Tensor hiddenStates = Ops.scale(this.embedTokens.forward(inputIds, context), this.embedScale);
       for (Gemma3DecoderLayer layer : this.layers) {
-        hiddenStates = layer.forward(positions, hiddenStates, context);
+        Tensor next = layer.forward(positions, hiddenStates, context);
+        endLayer(next);
+        releaseUnless(hiddenStates, next);
+        hiddenStates = next;
+        beginLayer();
       }
-      return this.norm.forward(hiddenStates);
+      Tensor normed = this.norm.forward(hiddenStates);
+      endLayer(normed);
+      releaseUnless(hiddenStates, normed);
+      return normed;
     }
   }
 }

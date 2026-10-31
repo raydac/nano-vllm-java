@@ -15,6 +15,9 @@ import static com.igormaznitsa.nanollvm.models.internal.WeightNames.layer;
 import static com.igormaznitsa.nanollvm.models.internal.WeightNames.linearAttn;
 import static com.igormaznitsa.nanollvm.models.internal.WeightNames.mlp;
 import static com.igormaznitsa.nanollvm.models.internal.WeightNames.selfAttn;
+import static com.igormaznitsa.nanollvm.tensor.ActivationWorkspace.beginLayer;
+import static com.igormaznitsa.nanollvm.tensor.ActivationWorkspace.endLayer;
+import static com.igormaznitsa.nanollvm.tensor.ActivationWorkspace.releaseUnless;
 import static java.util.Objects.requireNonNull;
 
 import com.igormaznitsa.nanollvm.internal.Context;
@@ -316,14 +319,26 @@ public record Qwen35ForCausalLM(Qwen35Model model, ParallelLMHead lmHead) implem
     }
 
     Tensor forward(final Tensor inputIds, final Tensor positions, final Context context) {
+      beginLayer();
       Tensor hiddenStates = this.embedTokens.forward(inputIds, context);
       Tensor residual = null;
       for (Qwen35DecoderLayer layer : this.layers) {
         Tensor[] out = layer.forward(positions, hiddenStates, residual, context);
+        Tensor previousHidden = hiddenStates;
+        Tensor previousResidual = residual;
         hiddenStates = out[0];
         residual = out[1];
+        endLayer(hiddenStates, residual);
+        releaseUnless(previousHidden, hiddenStates, residual);
+        releaseUnless(previousResidual, hiddenStates, residual);
+        beginLayer();
       }
-      return this.norm.forward(hiddenStates, residual)[0];
+      Tensor[] normed = this.norm.forward(hiddenStates, residual);
+      endLayer(normed[0]);
+      releaseUnless(hiddenStates, normed[0]);
+      releaseUnless(residual, normed[0]);
+      releaseUnless(normed[1], normed[0]);
+      return normed[0];
     }
   }
 }

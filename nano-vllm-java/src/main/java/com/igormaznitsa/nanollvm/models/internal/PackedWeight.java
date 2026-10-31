@@ -3,6 +3,7 @@ package com.igormaznitsa.nanollvm.models.internal;
 import static com.igormaznitsa.nanollvm.internal.GgufDequant.TYPE_F32;
 import static java.util.Objects.requireNonNull;
 
+import com.igormaznitsa.nanollvm.internal.EmptyArrays;
 import com.igormaznitsa.nanollvm.internal.GgufDequant;
 import com.igormaznitsa.nanollvm.tensor.Tensor;
 import java.nio.ByteBuffer;
@@ -18,7 +19,7 @@ import java.util.Arrays;
  */
 public final class PackedWeight {
 
-  private static final byte[] RELEASED = new byte[0];
+  private static final byte[] RELEASED = EmptyArrays.BYTES;
   private final int ggmlType;
   private final int[] shape;
   private final int numel;

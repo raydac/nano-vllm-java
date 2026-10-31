@@ -2,6 +2,7 @@ package com.igormaznitsa.nanollvm.models.internal.fasttext;
 
 import static java.nio.charset.StandardCharsets.UTF_8;
 
+import com.igormaznitsa.nanollvm.internal.EmptyArrays;
 import java.io.IOException;
 import java.util.Arrays;
 import java.util.HashMap;
@@ -69,7 +70,7 @@ final class Dictionary {
     final Dictionary dictionary = new Dictionary(
       args,
       words,
-      new int[0],
+      EmptyArrays.INTS,
       size,
       nwords,
       nlabels,
@@ -197,7 +198,7 @@ final class Dictionary {
 
   private Dictionary withWord2Int() {
     final int word2intSize = (int) Math.ceil(this.size / 0.7);
-    final int[] table = new int[word2intSize];
+    final int[] table = EmptyArrays.ints(word2intSize);
     Arrays.fill(table, -1);
     for (int i = 0; i < this.size; i++) {
       table[this.findSlot(this.words[i].word, hash(this.words[i].word), table)] = i;
@@ -368,7 +369,7 @@ final class Dictionary {
     final byte[] word;
     final long count;
     final byte type;
-    int[] subwords = new int[0];
+    int[] subwords = EmptyArrays.INTS;
 
     Entry(final byte[] word, final long count, final byte type) {
       this.word = word;
@@ -393,7 +394,7 @@ final class Dictionary {
     }
 
     int[] toArray() {
-      return Arrays.copyOf(this.data, this.size);
+      return this.size == 0 ? EmptyArrays.INTS : Arrays.copyOf(this.data, this.size);
     }
   }
 }

@@ -10,6 +10,7 @@ import com.igormaznitsa.nanollvm.llm.Config;
 import com.igormaznitsa.nanollvm.models.LlmModel;
 import com.igormaznitsa.nanollvm.models.internal.CausalLM;
 import com.igormaznitsa.nanollvm.models.internal.LlmModelImpl;
+import com.igormaznitsa.nanollvm.tensor.ActivationWorkspace;
 import com.igormaznitsa.nanollvm.tensor.MatmulRuntime;
 import com.igormaznitsa.nanollvm.tensor.Tensor;
 import java.util.ArrayList;
@@ -68,6 +69,7 @@ public final class Transformer implements AutoCloseable {
   private final Sampler sampler = new Sampler();
   private final Random sampleRandom;
   private final AtomicBoolean closed = new AtomicBoolean();
+  private final ActivationWorkspace activations = new ActivationWorkspace();
   private CausalLM network;
   private KvCacheArena kvCache;
   private ConvStateArena convCache;
@@ -213,9 +215,12 @@ public final class Transformer implements AutoCloseable {
     this.requireOpen();
     this.bindStep();
     try {
-      return this.computeLogits(this.forwardHidden(this.preparePrefill(requirePrefill(seqs))));
+      Tensor logits = this.computeLogits(
+        this.forwardHidden(this.preparePrefill(requirePrefill(seqs))));
+      ActivationWorkspace.detach(logits);
+      return logits;
     } finally {
-      this.stepContext.clear();
+      this.finishStep();
     }
   }
 
@@ -233,11 +238,12 @@ public final class Transformer implements AutoCloseable {
     try {
       this.forwardHidden(this.preparePrefill(requirePrefill(seqs)));
     } finally {
-      this.stepContext.clear();
+      this.finishStep();
     }
   }
 
   private void bindStep() {
+    ActivationWorkspace.bind(this.activations);
     this.stepContext.bindKvCache(this.kvCache);
     this.stepContext.bindMatmul(this.matmul);
     if (this.convCache != null) {
@@ -245,6 +251,15 @@ public final class Transformer implements AutoCloseable {
     }
     if (this.deltaCache != null) {
       this.stepContext.bindDeltaCache(this.deltaCache);
+    }
+  }
+
+  private void finishStep() {
+    try {
+      this.activations.recycleAll();
+    } finally {
+      ActivationWorkspace.unbind();
+      this.stepContext.clear();
     }
   }
 
@@ -294,6 +309,7 @@ public final class Transformer implements AutoCloseable {
   @Override
   public void close() {
     if (this.closed.compareAndSet(false, true)) {
+      this.activations.recycleAll();
       this.stepContext.clear();
       if (this.kvCache != null) {
         this.kvCache.close();
@@ -393,7 +409,7 @@ public final class Transformer implements AutoCloseable {
       SamplingControls sampling = this.collectSamplingControls(seqs);
       return this.sampleTokens(this.computeLogits(this.forwardHidden(prepared)), sampling);
     } finally {
-      this.stepContext.clear();
+      this.finishStep();
     }
   }
 
@@ -455,6 +471,9 @@ public final class Transformer implements AutoCloseable {
       null,
       blockTables,
       toInts(seqIds));
+    if (blockTables != null) {
+      this.stepContext.bindPagedSlots(this.pagedSlots(seqs, true));
+    }
     return new PreparedInputs(toTensor1d(inputIds), toTensor1d(positions));
   }
 
@@ -504,7 +523,23 @@ public final class Transformer implements AutoCloseable {
 
     this.stepContext.set(
       false, null, null, 0, 0, slotMapping, contextLens, this.prepareBlockTables(seqs), seqIds);
+    this.stepContext.bindPagedSlots(this.pagedSlots(seqs, false));
     return new PreparedInputs(Tensor.of(inputIds, n), Tensor.of(positions, n));
+  }
+
+  private int[][] pagedSlots(final List<Sequence> seqs, final boolean prefill) {
+    int[][] slots = new int[seqs.size()][];
+    for (int i = 0; i < seqs.size(); i++) {
+      Sequence seq = seqs.get(i);
+      if (seq.blockTable().isEmpty()) {
+        continue;
+      }
+      int covered = prefill
+        ? seq.numCachedTokens() + seq.numScheduledTokens()
+        : seq.length();
+      slots[i] = seq.pagedSlots(covered);
+    }
+    return slots;
   }
 
   private record PreparedInputs(Tensor inputIds, Tensor positions) {

@@ -89,64 +89,16 @@ public final class Sampler {
       return this.argmax(logits, row, vocab);
     }
 
-    float[] scores = new float[vocab];
-    int base = logits.offset() + row * vocab;
-    float max = Float.NEGATIVE_INFINITY;
-    for (int i = 0; i < vocab; i++) {
-      float v = logits.data()[base + i] / temperature;
-      scores[i] = v;
-      if (v > max) {
-        max = v;
-      }
-    }
-    float sum = 0f;
-    for (int i = 0; i < vocab; i++) {
-      float e = (float) Math.exp(scores[i] - max);
-      scores[i] = e;
-      sum += e;
-    }
-    float inv = 1f / sum;
-    for (int i = 0; i < vocab; i++) {
-      scores[i] *= inv;
-    }
-
-    int[] order = this.sortedIndicesDesc(scores);
+    float[] scores = this.softmaxRow(logits, row, vocab, temperature);
     if (topK > 0 && topK < vocab) {
-      for (int i = topK; i < vocab; i++) {
-        scores[order[i]] = 0f;
-      }
+      this.keepHighest(scores, topK);
       this.renormalize(scores);
-      order = this.sortedIndicesDesc(scores);
     }
     if (topP < 1f) {
-      float cum = 0f;
-      for (int i = 0; i < vocab; i++) {
-        int idx = order[i];
-        if (cum >= topP && i > 0) {
-          scores[idx] = 0f;
-        } else {
-          cum += scores[idx];
-        }
-      }
+      this.keepNucleus(scores, topP);
       this.renormalize(scores);
     }
-
-    int best = 0;
-    float bestScore = Float.NEGATIVE_INFINITY;
-    for (int i = 0; i < vocab; i++) {
-      float p = scores[i];
-      if (p <= 0f) {
-        continue;
-      }
-      float u = random.nextFloat();
-      float g = (float) -Math.log(Math.max(1e-10, u));
-      float s = p / Math.max(1e-10f, g);
-      if (s > bestScore) {
-        bestScore = s;
-        best = i;
-      }
-    }
-    return best;
+    return this.drawGumbel(scores, random);
   }
 
   private int argmax(final Tensor logits, final int row, final int vocab) {
@@ -180,20 +132,197 @@ public final class Sampler {
     }
   }
 
-  /**
-   * Indices of {@code scores} sorted by descending probability (for top-k / top-p prefixes).
-   */
-  private int[] sortedIndicesDesc(final float[] scores) {
-    int n = scores.length;
-    Integer[] idx = new Integer[n];
-    for (int i = 0; i < n; i++) {
-      idx[i] = i;
+  private float[] softmaxRow(
+    final Tensor logits, final int row, final int vocab, final float temperature
+  ) {
+    float[] scores = new float[vocab];
+    int base = logits.offset() + row * vocab;
+    float[] data = logits.data();
+    float max = Float.NEGATIVE_INFINITY;
+    for (int i = 0; i < vocab; i++) {
+      float value = data[base + i] / temperature;
+      scores[i] = value;
+      if (value > max) {
+        max = value;
+      }
     }
-    Arrays.sort(idx, (a, b) -> Float.compare(scores[b], scores[a]));
-    int[] out = new int[n];
-    for (int i = 0; i < n; i++) {
-      out[i] = idx[i];
+    float sum = 0f;
+    for (int i = 0; i < vocab; i++) {
+      float exponent = (float) Math.exp(scores[i] - max);
+      scores[i] = exponent;
+      sum += exponent;
     }
-    return out;
+    float inverse = 1f / sum;
+    for (int i = 0; i < vocab; i++) {
+      scores[i] *= inverse;
+    }
+    return scores;
+  }
+
+  private void keepHighest(final float[] scores, final int topK) {
+    int[] best = this.topIndices(scores, topK);
+    float[] kept = new float[topK];
+    for (int i = 0; i < topK; i++) {
+      kept[i] = scores[best[i]];
+    }
+    Arrays.fill(scores, 0f);
+    for (int i = 0; i < topK; i++) {
+      scores[best[i]] = kept[i];
+    }
+  }
+
+  private void keepNucleus(final float[] scores, final float topP) {
+    int[] heap = new int[scores.length];
+    int size = 0;
+    for (int index = 0; index < scores.length; index++) {
+      if (scores[index] > 0f) {
+        heap[size++] = index;
+      }
+    }
+    if (size == 0) {
+      return;
+    }
+    this.heapifyBestFirst(scores, heap, size);
+    float cumulative = 0f;
+    while (size > 0) {
+      int index = this.pollBest(scores, heap, size);
+      size--;
+      cumulative += scores[index];
+      if (cumulative >= topP) {
+        this.zeroHeap(scores, heap, size);
+        return;
+      }
+    }
+  }
+
+  private void heapifyBestFirst(final float[] scores, final int[] heap, final int size) {
+    for (int index = size / 2 - 1; index >= 0; index--) {
+      this.siftBestDown(scores, heap, size, index);
+    }
+  }
+
+  private int pollBest(final float[] scores, final int[] heap, final int size) {
+    int best = heap[0];
+    int last = size - 1;
+    heap[0] = heap[last];
+    if (last > 0) {
+      this.siftBestDown(scores, heap, last, 0);
+    }
+    return best;
+  }
+
+  private void siftBestDown(
+    final float[] scores, final int[] heap, final int size, final int index
+  ) {
+    int node = index;
+    while (true) {
+      int left = node * 2 + 1;
+      if (left >= size) {
+        return;
+      }
+      int right = left + 1;
+      int bestChild = left;
+      if (right < size && this.better(scores, heap[right], heap[left])) {
+        bestChild = right;
+      }
+      if (!this.better(scores, heap[bestChild], heap[node])) {
+        return;
+      }
+      this.swap(heap, node, bestChild);
+      node = bestChild;
+    }
+  }
+
+  private void zeroHeap(final float[] scores, final int[] heap, final int size) {
+    for (int i = 0; i < size; i++) {
+      scores[heap[i]] = 0f;
+    }
+  }
+
+  private int drawGumbel(final float[] scores, final Random random) {
+    int best = 0;
+    float bestScore = Float.NEGATIVE_INFINITY;
+    for (int i = 0; i < scores.length; i++) {
+      float probability = scores[i];
+      if (probability <= 0f) {
+        continue;
+      }
+      float gumbel = (float) -Math.log(Math.max(1e-10, random.nextFloat()));
+      float score = probability / Math.max(1e-10f, gumbel);
+      if (score > bestScore) {
+        bestScore = score;
+        best = i;
+      }
+    }
+    return best;
+  }
+
+  private int[] topIndices(final float[] scores, final int k) {
+    int[] heap = new int[k];
+    int size = 0;
+    for (int index = 0; index < scores.length; index++) {
+      if (size < k) {
+        heap[size] = index;
+        this.siftUp(scores, heap, size);
+        size++;
+        continue;
+      }
+      if (this.better(scores, index, heap[0])) {
+        heap[0] = index;
+        this.siftDown(scores, heap, size, 0);
+      }
+    }
+    return heap;
+  }
+
+  private void siftUp(final float[] scores, final int[] heap, final int index) {
+    int node = index;
+    while (node > 0) {
+      int parent = (node - 1) / 2;
+      if (!this.worse(scores, heap[node], heap[parent])) {
+        break;
+      }
+      this.swap(heap, node, parent);
+      node = parent;
+    }
+  }
+
+  private void siftDown(final float[] scores, final int[] heap, final int size, final int index) {
+    int node = index;
+    while (true) {
+      int left = node * 2 + 1;
+      if (left >= size) {
+        return;
+      }
+      int right = left + 1;
+      int worst = left;
+      if (right < size && this.worse(scores, heap[right], heap[left])) {
+        worst = right;
+      }
+      if (!this.worse(scores, heap[worst], heap[node])) {
+        return;
+      }
+      this.swap(heap, node, worst);
+      node = worst;
+    }
+  }
+
+  private boolean better(final float[] scores, final int left, final int right) {
+    return this.worse(scores, right, left);
+  }
+
+  private boolean worse(final float[] scores, final int left, final int right) {
+    float leftScore = scores[left];
+    float rightScore = scores[right];
+    if (leftScore != rightScore) {
+      return leftScore < rightScore;
+    }
+    return left > right;
+  }
+
+  private void swap(final int[] values, final int left, final int right) {
+    int held = values[left];
+    values[left] = values[right];
+    values[right] = held;
   }
 }

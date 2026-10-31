@@ -10,13 +10,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Development snapshot after the **1.4.0** public release.
 
 ### Changed
+- Nucleus sampling keeps the smallest high-probability prefix without sorting the whole vocabulary.
+- `Bench` can record an async-profiler sample of the timed generate
+  (`mvn22 -pl nano-vllm-java-samples -am -Pbench package exec:exec@bench`).
+  `-Dbench.kernels=scalar|vector` selects the math backend. Flat and collapsed reports are written
+  under `nano-vllm-java-samples/target/bench-profile/`.
+- Prompt prefill keeps each 8-row block of a layer weight in cache and applies it to every
+  token before the next block, instead of reading the matrix again for every token.
+- Chat steps reuse activation buffers across a forward, keep one paged KV slot index per
+  sequence, and draw top-k without boxing the vocabulary.
 - Optional TornadoVM dependencies are `8.0.0-jdk22plus`. On OpenCL, a multi-token dense GEMV
-  uses CLBlast when `libclblast` runs on the device; one token and any failed CLBlast launch
-  stay on the device kernel.
-  `-Dnanollvm.tornado.clblast=false` keeps the device kernel.
-  TornadoVM mode still keeps a weight matrix resident, runs a multi-token layer as one launch,
-  and runs chat attention as one TornadoVM task per query range. Short vectors stay in scalar
-  loops so generation does not pay a device launch per attention score. Cached plans keep only
+  uses CLBlast when `libclblast` runs on the device. A one-token matmul and a one-query attention
+  step run on the CPU, using the Vector API when it is available. A failed multi-token CLBlast
+  launch stays on the device kernel.
+  `-Dnanollvm.tornado.clblast=false` keeps the device kernel for multi-token matmul.
+  TornadoVM mode still keeps a weight matrix resident and runs a multi-token layer as one launch.
+  A multi-token attention range is one TornadoVM task. Short vectors stay on the CPU so generation
+  does not pay a device launch per score. Cached plans keep only
   the latest execution result, so a long chat does not retain one result per token. Closing a
   model releases that model's resident weight copies. Later layers of the same token reuse keys
   already copied for that token. The Vector API stays a separate mode.

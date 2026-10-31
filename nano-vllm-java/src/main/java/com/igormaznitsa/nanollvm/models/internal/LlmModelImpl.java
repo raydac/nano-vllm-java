@@ -7,6 +7,7 @@ import com.igormaznitsa.nanollvm.chat.ChatSpecials;
 import com.igormaznitsa.nanollvm.chat.LlmListener;
 import com.igormaznitsa.nanollvm.chat.LlmListeners;
 import com.igormaznitsa.nanollvm.chat.ThinkTags;
+import com.igormaznitsa.nanollvm.internal.EmptyArrays;
 import com.igormaznitsa.nanollvm.llm.Config;
 import com.igormaznitsa.nanollvm.models.LlmInSound;
 import com.igormaznitsa.nanollvm.models.LlmInText;
@@ -554,7 +555,7 @@ public final class LlmModelImpl extends LlmModel {
     requireNonNull(runtime, "runtime");
     EmbeddingEncoder active = this.requireEncoder();
     if (texts.isEmpty()) {
-      return new float[0][];
+      return EmptyArrays.FLOAT_ROWS;
     }
     float[][] out = new float[texts.size()][];
     for (int i = 0; i < texts.size(); i++) {

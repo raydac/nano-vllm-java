@@ -173,6 +173,42 @@ public final class VectorFloatKernels extends FloatKernels {
     }
   }
 
+  @Override
+  public void gemvRows(
+    final float[] x, final int xOff,
+    final float[] w, final int wOff,
+    final float[] bias,
+    final float[] y, final int yOff,
+    final int rows, final int in, final int rowStride,
+    final int out0, final int out1
+  ) {
+    if (rows <= 1) {
+      if (rows == 1) {
+        this.gemv(x, xOff, w, wOff, bias, y, yOff, in, out0, out1);
+      }
+      return;
+    }
+    int o = out0;
+    for (; o + GEMV_PANEL <= out1; o += GEMV_PANEL) {
+      int rowX = xOff;
+      int rowY = yOff;
+      for (int r = 0; r < rows; r++) {
+        this.gemvPanel8(x, rowX, w, wOff, bias, y, rowY, in, o);
+        rowX += in;
+        rowY += rowStride;
+      }
+    }
+    if (o < out1) {
+      int rowX = xOff;
+      int rowY = yOff;
+      for (int r = 0; r < rows; r++) {
+        this.gemv(x, rowX, w, wOff, bias, y, rowY, in, o, out1);
+        rowX += in;
+        rowY += rowStride;
+      }
+    }
+  }
+
   private void gemvPanel8(
     final float[] x, final int xOff,
     final float[] w, final int wOff,

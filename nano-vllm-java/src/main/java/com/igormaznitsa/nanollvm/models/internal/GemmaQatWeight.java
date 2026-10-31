@@ -2,6 +2,7 @@ package com.igormaznitsa.nanollvm.models.internal;
 
 import static java.util.Objects.requireNonNull;
 
+import com.igormaznitsa.nanollvm.internal.EmptyArrays;
 import com.igormaznitsa.nanollvm.tensor.Tensor;
 import java.util.Arrays;
 
@@ -10,7 +11,7 @@ import java.util.Arrays;
  */
 public final class GemmaQatWeight {
 
-  private static final byte[] RELEASED = new byte[0];
+  private static final byte[] RELEASED = EmptyArrays.BYTES;
 
   private final int rows;
   private final int cols;

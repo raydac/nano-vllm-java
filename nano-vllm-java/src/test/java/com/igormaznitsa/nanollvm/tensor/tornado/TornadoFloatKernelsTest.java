@@ -1,6 +1,7 @@
 package com.igormaznitsa.nanollvm.tensor.tornado;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
@@ -80,6 +81,37 @@ class TornadoFloatKernelsTest {
     for (int i = 0; i < values.length; i++) {
       values[i] = (i % 19) * scale;
     }
+  }
+
+  @Test
+  void oneTokenMatmulAndOneQueryAttentionStayOnTheCpu() {
+    FloatKernels cpu = FloatKernelsFactory.create("scalar");
+    TornadoFloatKernels tornado = new TornadoFloatKernels(cpu);
+    int in = 32;
+    int out = 16;
+    float[] x = new float[in];
+    float[] weight = new float[out * in];
+    float[] expected = new float[out];
+    float[] actual = new float[out];
+    float[] oneRow = new float[out];
+    for (int i = 0; i < in; i++) {
+      x[i] = i * 0.1f;
+    }
+    for (int i = 0; i < weight.length; i++) {
+      weight[i] = 0.01f * i;
+    }
+
+    int launches = TornadoClBlastGemv.launchCount();
+    cpu.gemv(x, 0, weight, 0, null, expected, 0, in, 0, out);
+    tornado.gemv(x, 0, weight, 0, null, actual, 0, in, 0, out);
+    tornado.gemvRows(x, 0, weight, 0, null, oneRow, 0, 1, in, out, 0, out);
+    assertClose(expected, actual);
+    assertClose(expected, oneRow);
+    assertEquals(launches, TornadoClBlastGemv.launchCount());
+    assertFalse(tornado.attend(
+      new float[4], 0, new float[4], 0, new float[4], 0, new float[4], 0,
+      0, 1, 0, 1, 1, 1, 4, 1f, 0, true, null
+    ));
   }
 
   @Test

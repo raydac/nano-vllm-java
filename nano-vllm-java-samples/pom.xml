@@ -44,6 +44,10 @@
             <artifactId>nano-vllm-java</artifactId>
         </dependency>
         <dependency>
+            <groupId>tools.profiler</groupId>
+            <artifactId>async-profiler</artifactId>
+        </dependency>
+        <dependency>
             <groupId>org.junit.jupiter</groupId>
             <artifactId>junit-jupiter</artifactId>
             <scope>test</scope>
@@ -114,6 +118,72 @@
                                         <argument>--jvm=${tornado.jvm.args}</argument>
                                         <argument>--params=${tornado.params}</argument>
                                         <argument>${exec.mainClass}</argument>
+                                    </arguments>
+                                </configuration>
+                            </execution>
+                        </executions>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+        <!--
+          Fork Bench and sample the timed generate with async-profiler.
+          Invoke package in the same Maven command so the classpath is this build's jar,
+          not an older snapshot from the local repository.
+          Reports land in nano-vllm-java-samples/target/bench-profile/.
+
+            mvn22 -pl nano-vllm-java-samples -am -Pbench package exec:exec@bench
+            mvn22 -pl nano-vllm-java-samples -am -Pbench package exec:exec@bench -Dbench.kernels=vector
+            mvn22 -pl nano-vllm-java-samples -am -Pbench package exec:exec@bench -Dbench.kernels=scalar -Dbench.seqs=1 -Dbench.maxInput=32 -Dbench.maxOutput=8
+
+          bench.kernels: scalar (default), vector, auto, tornado.
+          bench.event: cpu (default), wall, alloc, lock, itimer.
+        -->
+        <profile>
+            <id>bench</id>
+            <properties>
+                <bench.exec.skip>false</bench.exec.skip>
+                <bench.kernels>scalar</bench.kernels>
+                <bench.event>cpu</bench.event>
+                <bench.interval>10000000</bench.interval>
+                <bench.model>models/Qwen3-0.6B</bench.model>
+                <bench.seqs>8</bench.seqs>
+                <bench.maxInput></bench.maxInput>
+                <bench.maxOutput></bench.maxOutput>
+                <bench.profile.file>${project.build.directory}/bench-profile/bench-${bench.kernels}</bench.profile.file>
+                <bench.executable>java</bench.executable>
+            </properties>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.codehaus.mojo</groupId>
+                        <artifactId>exec-maven-plugin</artifactId>
+                        <executions>
+                            <execution>
+                                <id>bench</id>
+                                <goals>
+                                    <goal>exec</goal>
+                                </goals>
+                                <configuration>
+                                    <skip>${bench.exec.skip}</skip>
+                                    <executable>${bench.executable}</executable>
+                                    <workingDirectory>${maven.multiModuleProjectDirectory}</workingDirectory>
+                                    <longClasspath>true</longClasspath>
+                                    <arguments>
+                                        <argument>-Xmx16g</argument>
+                                        <argument>--add-modules=jdk.incubator.vector</argument>
+                                        <argument>--enable-native-access=ALL-UNNAMED</argument>
+                                        <argument>-Dnanollvm.kernels=${bench.kernels}</argument>
+                                        <argument>-Dnanollvm.profile=${bench.event}</argument>
+                                        <argument>-Dnanollvm.profile.interval=${bench.interval}</argument>
+                                        <argument>-Dnanollvm.profile.file=${bench.profile.file}</argument>
+                                        <argument>-Dnanollvm.bench.maxInput=${bench.maxInput}</argument>
+                                        <argument>-Dnanollvm.bench.maxOutput=${bench.maxOutput}</argument>
+                                        <argument>-classpath</argument>
+                                        <classpath/>
+                                        <argument>com.igormaznitsa.nanollvm.samples.Bench</argument>
+                                        <argument>${bench.model}</argument>
+                                        <argument>${bench.seqs}</argument>
                                     </arguments>
                                 </configuration>
                             </execution>

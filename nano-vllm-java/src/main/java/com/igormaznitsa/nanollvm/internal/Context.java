@@ -20,6 +20,7 @@ public final class Context {
   private int[] slotMapping;
   private int[] contextLens;
   private int[][] blockTables;
+  private int[][] pagedSlots;
   private int[] seqIds;
   private KvCacheArena kvCache;
   private ConvStateArena convCache;
@@ -89,7 +90,16 @@ public final class Context {
     this.slotMapping = slotMapping;
     this.contextLens = contextLens;
     this.blockTables = blockTables;
+    this.pagedSlots = null;
     this.seqIds = seqIds;
+  }
+
+  /**
+   * Slot index per sequence for this step, or {@code null} to compute from the block table.
+   * Each row may be longer than the sequence; the live prefix length is the context length.
+   */
+  public void bindPagedSlots(final int[][] slots) {
+    this.pagedSlots = slots;
   }
 
   /**
@@ -104,6 +114,7 @@ public final class Context {
     this.slotMapping = null;
     this.contextLens = null;
     this.blockTables = null;
+    this.pagedSlots = null;
     this.seqIds = null;
     this.kvCache = null;
     this.convCache = null;
@@ -165,6 +176,13 @@ public final class Context {
    */
   public int[][] blockTables() {
     return this.blockTables;
+  }
+
+  /**
+   * Per-sequence KV slot indexes for this step, or {@code null} when unset.
+   */
+  public int[][] pagedSlots() {
+    return this.pagedSlots;
   }
 
   /**

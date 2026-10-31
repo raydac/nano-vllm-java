@@ -4,6 +4,7 @@ import static java.nio.ByteOrder.LITTLE_ENDIAN;
 import static java.nio.charset.StandardCharsets.UTF_8;
 import static java.util.Objects.requireNonNull;
 
+import com.igormaznitsa.nanollvm.internal.EmptyArrays;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.file.Files;
@@ -50,7 +51,7 @@ final class EspeakNgCompiledDict {
     0x0f12, 0x100f, 0x1011, 0x1101, 0x1106, 0x1109, 0x110f, 0x1213, 0x1220, 0x7fff
   };
   private static final EspeakNgCompiledDict EMPTY = new EspeakNgCompiledDict(
-    new byte[0], new int[0], Map.of(), Set.of());
+    EmptyArrays.BYTES, EmptyArrays.INTS, Map.of(), Set.of());
 
   private final byte[] data;
   private final int[] buckets;

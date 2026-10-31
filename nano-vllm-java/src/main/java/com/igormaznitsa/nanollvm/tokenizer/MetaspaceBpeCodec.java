@@ -2,6 +2,7 @@ package com.igormaznitsa.nanollvm.tokenizer;
 
 import static java.util.Objects.requireNonNull;
 
+import com.igormaznitsa.nanollvm.internal.EmptyArrays;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -25,7 +26,7 @@ final class MetaspaceBpeCodec implements TokenCodec {
     final boolean prependMetaSpace,
     final boolean byteFallback
   ) {
-    this(vocab, merges, new float[0], prependMetaSpace, byteFallback);
+    this(vocab, merges, EmptyArrays.FLOATS, prependMetaSpace, byteFallback);
   }
 
   MetaspaceBpeCodec(

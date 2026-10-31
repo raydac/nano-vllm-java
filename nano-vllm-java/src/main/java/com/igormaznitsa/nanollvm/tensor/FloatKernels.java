@@ -88,8 +88,9 @@ public abstract class FloatKernels {
   public abstract String name();
 
   /**
-   * When {@code true}, dense GEMV should run as one full-range call instead of CPU-sharded tiles.
-   * Device offload paths that hold a global execute lock benefit from a single transfer/launch.
+   * When {@code true}, a multi-token dense GEMV should run as one full-range call instead of
+   * CPU-sharded tiles. One-token decode stays sharded across CPU threads: a device launch costs
+   * more than reading the matrix once.
    *
    * @return {@code false} for CPU backends
    * @since 1.4.0
@@ -205,8 +206,30 @@ public abstract class FloatKernels {
     final int rows, final int in, final int rowStride,
     final int out0, final int out1
   ) {
-    for (int r = 0; r < rows; r++) {
-      this.gemv(x, xOff + r * in, w, wOff, bias, y, yOff + r * rowStride, in, out0, out1);
+    if (rows <= 1) {
+      if (rows == 1) {
+        this.gemv(x, xOff, w, wOff, bias, y, yOff, in, out0, out1);
+      }
+      return;
+    }
+    int o = out0;
+    for (; o + 8 <= out1; o += 8) {
+      int rowX = xOff;
+      int rowY = yOff;
+      for (int r = 0; r < rows; r++) {
+        this.gemv(x, rowX, w, wOff, bias, y, rowY, in, o, o + 8);
+        rowX += in;
+        rowY += rowStride;
+      }
+    }
+    if (o < out1) {
+      int rowX = xOff;
+      int rowY = yOff;
+      for (int r = 0; r < rows; r++) {
+        this.gemv(x, rowX, w, wOff, bias, y, rowY, in, o, out1);
+        rowX += in;
+        rowY += rowStride;
+      }
     }
   }
 

@@ -24,8 +24,8 @@ public final class TornadoFloatKernelsProvider {
   }
 
   /**
-   * Builds TornadoVM kernels. {@code cpuFallback} is accepted so callers keep a CPU backend ready;
-   * the TornadoVM instance does not run that backend.
+   * Builds TornadoVM kernels. One-token matmul, one-query attention, and short elementwise slices
+   * run on {@code cpuFallback}. Multi-token GEMV runs on the device.
    *
    * @param cpuFallback Vector or scalar kernels used for non-GEMV work and small GEMV
    * @return hybrid kernels, or {@code null} when {@link #isAvailable()} is {@code false}
@@ -35,6 +35,6 @@ public final class TornadoFloatKernelsProvider {
     if (cpuFallback == null || !TornadoAvailability.isReady()) {
       return null;
     }
-    return new TornadoFloatKernels();
+    return new TornadoFloatKernels(cpuFallback);
   }
 }

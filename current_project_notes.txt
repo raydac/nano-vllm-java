@@ -12,12 +12,16 @@
 - IQ4NL codebook lives once as `GgufIqTables.kvalues_iq4nl` (signed bytes). `GgufDequant` and `GgufIqDequant` no longer each keep an `int[]` copy.
 
 ## 2. Architecture & Technical Discoveries
+- Activation buffers: `ActivationWorkspace` is bound for a transformer step. Each causal forward keeps the tensors the next layer still needs and parks the rest (length ≥ 256) for reuse. `prefillLogits` detaches the returned logits so the freelist cannot overwrite them. `Sequence.pagedSlots` grows one slot index per sequence; `Context` publishes it once per step. `Sampler` selects top-k with an `int` heap. Nucleus sampling pops that same order until the cumulative mass reaches top-p, instead of mergesorting the vocabulary.
+- Zero-length `byte[]`, `int[]`, `float[]`, and `float[][]` are the shared `EmptyArrays` constants. `Tensor.zeros` with `numel == 0` returns that `float[]`. Tornado's no-bias sentinel stays its own empty array so a real buffer is not equal to "no bias".
+- Speed review (inference hot path): multi-token `gemvRows` walks an 8-row weight panel across every token before the next panel (scalar and Vector). Decode (`rows == 1`) stays one GEMV. A JevHelloWorld hotspot export (`jevhotspot.csv`) was 86% CPU in `ScalarFloatKernels.gemvPanel8` — that JVM had no Vector API (`--add-modules jdk.incubator.vector`); IntelliJ does not load `.mvn/jvm.config`. On this i7-8550U (AVX2, 8 lanes), vector panel-across-tokens was ~12× the profiled scalar per-token GEMV on a 96×640×4096 prefill. Tornado one-token GEMV and one-query attention stay on the CPU fallback (Vector when the incubator module is present). Multi-token GEMV stays one device launch. Short elementwise slices use that same CPU fallback. Gated DeltaNet stays on the CPU. UHD 620 does not beat AVX2 on single-token F32 GEMV.
+
 - Qwen3.5 text is architecture `qwen3_5`, not an alias of `qwen3`. Full-attention layers use leading partial RoPE (text-only; MRoPE collapses when positions match). Linear layers keep conv + recurrent state in `DeltaNetStateArena`, cleared with the existing conv-state hook. HF names `model.language_model.*` and root `language_model.*` (Jeff checkpoint) both canonicalize to `model.*`. `q_proj` stays unfused (query | gate).
 - `RMSNorm.forward` walks `numel / lastDim` rows, so a `[tokens, heads, headDim]` tensor matches the old reshape-to-2d-then-back path.
 - `HfConfig` compact constructor freezes a null `ropeScaling` to an empty map, so `WeightLayers.ropeTheta` can call `containsKey` directly.
 - `IntStream.toList()` is already unmodifiable; `List.copyOf` around it was an extra copy.
 - Public `LLM.generate` / `generateTokenIds` overloads stay: they are the caller-facing surface.
-- TornadoVM Maven coordinate is `8.0.0-jdk22plus` (JDK 22+, including 27). Optional `tornado-clblast` is compile-only. Multi-token dense GEMV uses CLBlast SGEMM when `libclblast` runs; one token stays on the Kernel API plan because CLBlast SGEMV returned NaN on POCL. A non-finite CLBlast result or a failed launch drops CLBlast for the rest of the process. `-Dnanollvm.tornado.clblast=false` keeps the kernel. The weight slice is copied once into a Tornado `FloatArray`. Chat attention stays a Loop Parallel kernel. cuDNN packed-QKV attention is CUDA-only and does not match causal grouped-query attention with a sliding window.
+- TornadoVM Maven coordinate is `8.0.0-jdk22plus` (JDK 22+, including 27). Optional `tornado-clblast` is compile-only. Multi-token dense GEMV uses CLBlast SGEMM when `libclblast` runs. One-token GEMV never reaches CLBlast (SGEMV returned NaN on POCL) and runs on the CPU backend instead. A non-finite CLBlast result or a failed launch drops CLBlast for the rest of the process. `-Dnanollvm.tornado.clblast=false` keeps the multi-token kernel. The weight slice is copied once into a Tornado `FloatArray`. Multi-token chat attention is one Loop Parallel task; a single decode query stays on the CPU. cuDNN packed-QKV attention is CUDA-only and does not match causal grouped-query attention with a sliding window.
 - OpenCL devices outside the sandbox: `0:0` Intel UHD Graphics 620 (Tornado default), `0:1` POCL CPU. A sandboxed `tornado --devices` sees only POCL. `etc/tornado.backend` is OpenCL only. The CUDA driver jar can still abort startup when `libcuda` is missing, so the TornadoVM bench child passes `-Dtornado.enabled.backends=OpenCL`. `libclblast.so.1` is on the SDK `lib` path.
 - `KernelChatBench` child JVMs must use the context class loader URLs. Under `mvn exec:java`, `java.class.path` is Maven's classpath. The TornadoVM child must be started with the `tornado` command (`tornado.exe` on Windows): the Maven parent never loads the SDK, so a parent device probe skips TornadoVM even when `tornado --devices` lists both OpenCL devices. The extensionless `bin/tornado` in the Windows SDK is a shell script; CreateProcess error 193 is that file. The `windows` Maven profile sets `tornado.launcher` to `tornado.exe`. When `TORNADOVM_HOME` is set, profile `tornadovm-home` points `tornado.executable` at `$TORNADOVM_HOME/bin/<launcher>`. `KernelChatBench` already resolves PATH then `TORNADOVM_HOME/bin`.
 
@@ -27,6 +31,11 @@
 - `LLM` still has many one-line generate overloads. They exist so callers do not pass unused flags.
 
 ## 4. Current Work In Progress
+- Speed work stays algorithmic. Nucleus sampling keeps a heap prefix instead of sorting the vocabulary. Vector GEMV stays one 8-row panel on `SPECIES_PREFERRED`. Splitting that panel onto `SPECIES_256` / a 2-row kernel was a JDK 27 inliner trick: the 2-row form measured slower (about 8 tok/s vs 11 tok/s on the same 4×16×8 Qwen3-0.6B smoke) and still spent most samples in the lane fallback.
+- KernelChatBench Qwen3-0.6B, 46 prompt + 256 completion: scalar 5.10 tok/s, Vector 9.12 (1.79×), TornadoVM 1.49 (0.29×) before decode left the device. Decode reads the fp32 matrix once per token, so Vector is near memory bandwidth. Tornado decode now uses that CPU backend (and the CPU thread split); the device is only the multi-token prefill. The 0.29× figure is the old launch-per-token path and has not been remeasured.
+- `Bench` Maven profile `bench` forks the timed generate under async-profiler 4.6. `package` and `exec:exec@bench` must be the same invocation, or the classpath is an older installed snapshot. Reports: `nano-vllm-java-samples/target/bench-profile/`.
+- Activation reuse, paged slot cache, and primitive top-k select are in. `CoreUnitTest` covers zeroed buffer reuse, detached logits, and append-only slot growth. Prefill GEMV reuses an 8-row weight panel across tokens (`batchedGemvMatchesPerTokenGemv`). Tornado one-token matmul uses the CPU fallback (`oneTokenMatmulAndOneQueryAttentionStayOnTheCpu`). Re-profile `JevHelloWorld` with `--add-modules jdk.incubator.vector` so the hotspot is `VectorFloatKernels`, not scalar.
+
 - `KernelChatBench` on Windows resolves `tornado.exe` from `PATH` or `TORNADOVM_HOME/bin`, and the `windows` Maven profile sets `tornado.executable` to `tornado.exe`. Worker `--classpath` / `--params` are shell-quoted because TornadoVM pastes them into `os.system`/`cmd.exe`: unquoted `;` truncates the classpath (NoClassDefFoundError for library classes), and Unix single quotes break `Path.of`. The tornado child also drops `CLASSPATH` so the launcher cannot append it with a Unix `:`. Default model is `requireKernelChatBench()` (Qwen3-0.6B → Gemma3 → Jeff → Gemma4 → SmolLM2); compact ONNX prints a note that Tornado ratios are launch-bound.
 - `JevLevel` javadoc now states RAW vs L0 (rotations, eight-state prior, ordered scores stay one prefill) and includes a two-engine usage example. `require` and `Builder.jevLevel` point at it.
 - Russian checkers records (`Sq`, `Move`, `Played`, `Choice`, `Step`, `Hop`) have javadoc for the short components: file/rank axes, path vs captured vs crowned `result`, forced single-move turns, and a hop's land/victim.
@@ -43,10 +52,16 @@
 - None from this compaction.
 
 ## 7. Useful References
+- Profiled bench (scalar): `mvn22 -pl nano-vllm-java-samples -am -Pbench package exec:exec@bench`
+- Profiled bench (vector): `mvn22 -pl nano-vllm-java-samples -am -Pbench package exec:exec@bench -Dbench.kernels=vector`
+- Short profile: `mvn22 -pl nano-vllm-java-samples -am -Pbench package exec:exec@bench -Dbench.seqs=1 -Dbench.maxInput=32 -Dbench.maxOutput=8`
+- `package` must be in the same invocation. `exec:exec` alone puts the installed snapshot on the classpath.
 - Russian checkers: `mvn22 -pl nano-vllm-java-samples -q exec:java -Dexec.mainClass=com.igormaznitsa.nanollvm.samples.RussianCheckersHelloWorld`
 - Rules test: `mvn22 -pl nano-vllm-java-samples -am test -Dtest=RussianCheckersHelloWorldTest -Dsurefire.failIfNoSpecifiedTests=false`
 - Build/test: `mvn22 -pl nano-vllm-java test`
 - Tornado device tests need the `tornado` CLI (OpenCL backend only on this machine) plus `libclblast`.
 
 ## 8. User Advice and Recommendations
+- README commands use `mvn`. Do not put local launcher names (`mvn22`), machine paths, or bench-profile property recipes in `README.md`.
 - Keep public generate overloads. Compact internals, not the caller API.
+- Optimize algorithms in Java. Do not shape kernels around the current JVM's inliner or Vector API intrinsification; that changes between JDKs.

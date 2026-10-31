@@ -2,6 +2,7 @@ package com.igormaznitsa.nanollvm.models.internal.audio;
 
 import static java.util.Objects.requireNonNull;
 
+import com.igormaznitsa.nanollvm.internal.EmptyArrays;
 import com.igormaznitsa.nanollvm.tensor.MatmulRuntime;
 import com.igormaznitsa.nanollvm.tensor.Tensor;
 
@@ -272,7 +273,7 @@ public final class WhisperLogMel {
         last--;
       }
       if (last < first) {
-        filters[m] = new SparseMel(0, new float[0]);
+        filters[m] = new SparseMel(0, EmptyArrays.FLOATS);
       } else {
         float[] trimmed = new float[last - first + 1];
         System.arraycopy(dense, first, trimmed, 0, trimmed.length);

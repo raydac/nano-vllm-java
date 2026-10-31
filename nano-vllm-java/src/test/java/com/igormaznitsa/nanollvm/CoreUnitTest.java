@@ -50,6 +50,7 @@ import com.igormaznitsa.nanollvm.models.LlmModel;
 import com.igormaznitsa.nanollvm.models.LlmModelFactory;
 import com.igormaznitsa.nanollvm.models.LlmOptionalData;
 import com.igormaznitsa.nanollvm.prompts.ChatPrompts;
+import com.igormaznitsa.nanollvm.tensor.ActivationWorkspace;
 import com.igormaznitsa.nanollvm.tensor.FloatKernels;
 import com.igormaznitsa.nanollvm.tensor.FloatKernelsFactory;
 import com.igormaznitsa.nanollvm.tensor.MatmulRuntime;
@@ -770,6 +771,52 @@ class CoreUnitTest {
     }
   }
 
+  private static void assertBatchedGemvMatchesPerToken(final FloatKernels kernels) {
+    int rows = 5;
+    int in = 100;
+    int out0 = 3;
+    int out1 = 21;
+    int rowStride = 30;
+    int xOff = 4;
+    int wOff = 2;
+    int yOff = 1;
+    float[] x = new float[xOff + rows * in];
+    float[] weight = new float[wOff + out1 * in];
+    float[] bias = new float[out1];
+    float[] batched = new float[yOff + rows * rowStride];
+    float[] perToken = new float[batched.length];
+    for (int i = 0; i < x.length; i++) {
+      x[i] = (i % 13) * 0.02f;
+    }
+    for (int i = 0; i < weight.length; i++) {
+      weight[i] = ((i * 5) % 17) * 0.01f;
+    }
+    for (int i = 0; i < bias.length; i++) {
+      bias[i] = i * 0.001f;
+    }
+
+    kernels.gemvRows(x, xOff, weight, wOff, bias, batched, yOff, rows, in, rowStride, out0, out1);
+    for (int r = 0; r < rows; r++) {
+      kernels.gemv(
+        x, xOff + r * in, weight, wOff, bias, perToken, yOff + r * rowStride, in, out0, out1);
+    }
+    for (int i = 0; i < batched.length; i++) {
+      assertEquals(perToken[i], batched[i], 0f, kernels.name() + " index " + i);
+    }
+
+    kernels.gemvRows(x, xOff, weight, wOff, null, batched, yOff, 1, in, rowStride, out0, out1);
+    kernels.gemv(x, xOff, weight, wOff, null, perToken, yOff, in, out0, out1);
+    for (int i = 0; i < yOff + rowStride; i++) {
+      assertEquals(perToken[i], batched[i], 0f, kernels.name() + " decode " + i);
+    }
+  }
+
+  @Test
+  void batchedGemvMatchesPerTokenGemv() {
+    assertBatchedGemvMatchesPerToken(FloatKernelsFactory.create("scalar"));
+    assertBatchedGemvMatchesPerToken(FloatKernelsFactory.create("vector"));
+  }
+
   @Test
   void kernelBackendSummaryIncludesActiveLabel() {
     String summary = KernelBackend.summaryLine();
@@ -999,6 +1046,101 @@ class CoreUnitTest {
     int[] second = sampler.forward(logits, temperatures, topKs, topPs, random);
     assertEquals(1, first[0]);
     assertEquals(first[0], second[0]);
+  }
+
+  @Test
+  void samplerTopKKeepsOnlyTheLargestLogits() {
+    Sampler sampler = new Sampler();
+    Tensor logits = Tensor.of(new float[] {0f, 8f, 7f, -4f, 1f}, 1, 5);
+    int[] drawn = sampler.forward(logits, new float[] {1f}, new int[] {2}, new float[] {0.5f},
+      new Random(1L));
+    assertEquals(1, drawn[0]);
+  }
+
+  @Test
+  void samplerNucleusPrefersTheLowerIndexWhenScoresTie() {
+    Sampler sampler = new Sampler();
+    Tensor logits = Tensor.of(new float[] {5f, 5f, 0f}, 1, 3);
+    for (int seed = 0; seed < 16; seed++) {
+      int drawn = sampler.forward(
+        logits, new float[] {1f}, new int[] {0}, new float[] {0.4f}, new Random(seed))[0];
+      assertEquals(0, drawn);
+    }
+  }
+
+  @Test
+  void samplerNucleusDropsMassBelowTheCutoff() {
+    Sampler sampler = new Sampler();
+    Tensor logits = Tensor.of(new float[] {5f, 5f, 0f}, 1, 3);
+    for (int seed = 0; seed < 32; seed++) {
+      int drawn = sampler.forward(
+        logits, new float[] {1f}, new int[] {0}, new float[] {0.5f}, new Random(seed))[0];
+      assertTrue(drawn == 0 || drawn == 1);
+    }
+  }
+
+  @Test
+  void activationWorkspaceReusesZeroedBuffersAndKeepsDetachedStorage() {
+    ActivationWorkspace workspace = new ActivationWorkspace();
+    ActivationWorkspace.bind(workspace);
+    try {
+      ActivationWorkspace.beginLayer();
+      Tensor kept = Tensor.zeros(16, 16);
+      Tensor dropped = Tensor.zeros(16, 16);
+      Tensor view = kept.reshape(256);
+      kept.set(0, 3f);
+      dropped.set(0, 9f);
+      ActivationWorkspace.endLayer(view);
+      ActivationWorkspace.releaseUnless(dropped, view);
+      assertEquals(3f, kept.get(0), 0f);
+
+      Tensor reused = Tensor.zeros(256);
+      assertEquals(0f, reused.get(0), 0f);
+      reused.set(0, 4f);
+      assertEquals(3f, kept.get(0), 0f);
+
+      ActivationWorkspace.detach(reused);
+      workspace.recycleAll();
+      assertEquals(4f, reused.get(0), 0f);
+      Tensor afterRecycle = Tensor.zeros(256);
+      assertEquals(0f, afterRecycle.get(0), 0f);
+      assertEquals(0f, kept.get(0), 0f);
+    } finally {
+      workspace.recycleAll();
+      ActivationWorkspace.unbind();
+    }
+  }
+
+  @Test
+  void pagedSlotsGrowWithTheBlockTable() {
+    Sequence seq = new Sequence(List.of(1, 2, 3), SamplingDefaults.neutral(8), 4);
+    seq.blockTable().add(2);
+    int[] first = seq.pagedSlots(3);
+    assertEquals(8, first[0]);
+    assertEquals(10, first[2]);
+
+    seq.blockTable().add(5);
+    int[] grown = seq.pagedSlots(5);
+    assertEquals(20, grown[4]);
+    assertSame(grown, seq.pagedSlots(5));
+
+    int[] rebuilt = seq.pagedSlots(2);
+    assertEquals(8, rebuilt[0]);
+    assertEquals(9, rebuilt[1]);
+    assertThrows(IllegalArgumentException.class, () -> seq.pagedSlots(-1));
+  }
+
+  @Test
+  void zeroLengthArraysAreShared() {
+    Tensor left = Tensor.zeros(0, 4);
+    Tensor right = Tensor.zeros(3, 0);
+    assertSame(left.data(), right.data());
+    assertEquals(0, left.numel());
+    assertEquals(0, right.numel());
+
+    Sequence first = new Sequence(List.of(1), SamplingDefaults.neutral(8), 4);
+    Sequence second = new Sequence(List.of(2), SamplingDefaults.neutral(8), 4);
+    assertSame(first.pagedSlots(0), second.pagedSlots(0));
   }
 
   @Test

@@ -4,6 +4,7 @@ import static java.util.Objects.requireNonNull;
 
 import com.igormaznitsa.nanollvm.engine.KvCacheArena;
 import com.igormaznitsa.nanollvm.internal.Context;
+import com.igormaznitsa.nanollvm.internal.EmptyArrays;
 import com.igormaznitsa.nanollvm.tensor.MatmulRuntime;
 import com.igormaznitsa.nanollvm.tensor.Tensor;
 import com.igormaznitsa.nanollvm.tensor.VectorMath;
@@ -129,11 +130,28 @@ public final class Attention {
    * ({@code blockId * blockSize + offset}).
    */
   private static int[] pagedSlots(final int[] table, final int kLen, final int blockSize) {
-    int[] slots = new int[kLen];
+    int[] slots = EmptyArrays.ints(kLen);
     for (int t = 0; t < kLen; t++) {
       slots[t] = table[t / blockSize] * blockSize + (t % blockSize);
     }
     return slots;
+  }
+
+  private int[] slotsFor(
+    final Context ctx,
+    final int batchIndex,
+    final int[] table,
+    final int kLen,
+    final int blockSize
+  ) {
+    int[][] cached = ctx.pagedSlots();
+    if (cached != null && batchIndex < cached.length) {
+      int[] slots = cached[batchIndex];
+      if (slots != null && slots.length >= kLen) {
+        return slots;
+      }
+    }
+    return pagedSlots(table, kLen, blockSize);
   }
 
   /**
@@ -273,7 +291,7 @@ public final class Attention {
       int qStart = cuQ[b];
       int qEnd = cuQ[b + 1];
       int kLen = cuK[b + 1] - cuK[b];
-      int[] slots = pagedSlots(blockTables[b], kLen, blockSize);
+      int[] slots = this.slotsFor(ctx, b, blockTables[b], kLen, blockSize);
       this.attendRange(q, kCache, vCache, out, qStart, qEnd, 0, kLen, true, slots, ctx);
     }
     return out;
@@ -292,7 +310,7 @@ public final class Attention {
 
     for (int b = 0; b < bs; b++) {
       int kLen = contextLens[b];
-      int[] slots = pagedSlots(blockTables[b], kLen, blockSize);
+      int[] slots = this.slotsFor(ctx, b, blockTables[b], kLen, blockSize);
       this.attendRange(q, kCache, vCache, out, b, b + 1, 0, kLen, false, slots, ctx);
     }
     return out;

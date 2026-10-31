@@ -32,7 +32,7 @@ One `LLM` serves one caller at a time. Share the loaded `LlmModel` across engine
 
 ## Add it to an application
 
-JDK **21+**. A small chat model (Gemma3-270M, Qwen3-0.6B) wants a few gigabytes of heap. Larger checkpoints want more; the in-repo demos use **16 GB** via [`.mvn/jvm.config`](.mvn/jvm.config).
+JDK **21+**. A small chat model (Gemma3-270M, Qwen3-0.6B) wants a few gigabytes of heap. Larger checkpoints want more. The in-repo demos expect about 16 GB.
 
 **Maven**
 

@@ -1,8 +1,10 @@
 package com.igormaznitsa.nanollvm.engine;
 
+import com.igormaznitsa.nanollvm.internal.EmptyArrays;
 import com.igormaznitsa.nanollvm.llm.SamplingDefaults;
 import com.igormaznitsa.nanollvm.llm.SamplingParams;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -34,6 +36,9 @@ public final class Sequence {
   private final List<Integer> tokenIds;
   private final int numPromptTokens;
   private final List<Integer> blockTable;
+  private int[] slotIndex = EmptyArrays.INTS;
+  private int slotIndexFilled;
+  private int slotBlocks;
   private final float temperature;
   private final int maxTokens;
   private final boolean ignoreEos;
@@ -241,6 +246,36 @@ public final class Sequence {
    */
   public List<Integer> blockTable() {
     return this.blockTable;
+  }
+
+  /**
+   * Arena slot of each cached token, {@code blockId * blockSize + offset}. Grown as the block
+   * table gains pages. The returned array may be longer than {@code tokenCount}; indexes
+   * {@code [0, tokenCount)} are the live prefix.
+   *
+   * @param tokenCount tokens covered by {@link #blockTable()}
+   * @return slot index, shared until the next growth
+   */
+  public int[] pagedSlots(final int tokenCount) {
+    if (tokenCount < 0) {
+      throw new IllegalArgumentException("tokenCount must be >= 0, got " + tokenCount);
+    }
+    int blocks = this.blockTable.size();
+    if (tokenCount < this.slotIndexFilled || blocks < this.slotBlocks) {
+      this.slotIndexFilled = 0;
+    }
+    this.slotBlocks = blocks;
+    if (this.slotIndex.length < tokenCount) {
+      this.slotIndex = Arrays.copyOf(
+        this.slotIndex, Math.max(tokenCount, this.slotIndex.length * 2));
+    }
+    int blockSize = this.blockSize;
+    for (int token = this.slotIndexFilled; token < tokenCount; token++) {
+      this.slotIndex[token] =
+        this.blockTable.get(token / blockSize) * blockSize + (token % blockSize);
+    }
+    this.slotIndexFilled = tokenCount;
+    return this.slotIndex;
   }
 
   /**

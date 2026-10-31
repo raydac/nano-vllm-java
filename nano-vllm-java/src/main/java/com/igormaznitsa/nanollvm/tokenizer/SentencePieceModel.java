@@ -4,6 +4,7 @@ import static java.nio.charset.StandardCharsets.UTF_8;
 import static java.util.Objects.requireNonNull;
 
 import com.igormaznitsa.nanollvm.exceptions.ModelLoadException;
+import com.igormaznitsa.nanollvm.internal.EmptyArrays;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
@@ -141,7 +142,7 @@ final class SentencePieceModel {
   }
 
   private static NormalizerSpec readNormalizer(final ByteBuffer buf) throws IOException {
-    byte[] charsmap = new byte[0];
+    byte[] charsmap = EmptyArrays.BYTES;
     boolean addDummyPrefix = true;
     boolean escapeWhitespaces = true;
     while (buf.hasRemaining()) {
@@ -294,7 +295,7 @@ final class SentencePieceModel {
   private record NormalizerSpec(byte[] charsmap, boolean addDummyPrefix,
                                 boolean escapeWhitespaces) {
     NormalizerSpec() {
-      this(new byte[0], true, true);
+      this(EmptyArrays.BYTES, true, true);
     }
   }
 }

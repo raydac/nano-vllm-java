@@ -14,6 +14,9 @@ import static com.igormaznitsa.nanollvm.models.internal.WeightNames.Q_NORM_WEIGH
 import static com.igormaznitsa.nanollvm.models.internal.WeightNames.layer;
 import static com.igormaznitsa.nanollvm.models.internal.WeightNames.mlp;
 import static com.igormaznitsa.nanollvm.models.internal.WeightNames.selfAttn;
+import static com.igormaznitsa.nanollvm.tensor.ActivationWorkspace.beginLayer;
+import static com.igormaznitsa.nanollvm.tensor.ActivationWorkspace.endLayer;
+import static com.igormaznitsa.nanollvm.tensor.ActivationWorkspace.releaseUnless;
 import static java.util.Locale.ROOT;
 import static java.util.Objects.requireNonNull;
 
@@ -350,13 +353,22 @@ public record Gemma4ForCausalLM(Gemma4Model model, ParallelLMHead lmHead, float 
     }
 
     Tensor forward(final Tensor inputIds, final Tensor positions, final Context context) {
+      beginLayer();
       Tensor hidden = Ops.scale(this.embedTokens.forward(inputIds, context), this.embedScale);
       Tensor perLayer = this.combinePerLayerInputs(inputIds, hidden, context);
       for (int i = 0; i < this.layers.size(); i++) {
-        hidden = this.layers.get(i).forward(
+        Tensor next = this.layers.get(i).forward(
           positions, hidden, this.sliceLayer(perLayer, i), context);
+        endLayer(next, perLayer);
+        releaseUnless(hidden, next, perLayer);
+        hidden = next;
+        beginLayer();
       }
-      return this.norm.forward(hidden);
+      Tensor normed = this.norm.forward(hidden);
+      endLayer(normed);
+      releaseUnless(hidden, normed);
+      releaseUnless(perLayer, normed);
+      return normed;
     }
 
     private Tensor combinePerLayerInputs(

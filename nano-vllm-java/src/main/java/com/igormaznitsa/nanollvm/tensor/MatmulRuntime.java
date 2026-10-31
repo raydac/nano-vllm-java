@@ -283,7 +283,7 @@ public final class MatmulRuntime implements AutoCloseable {
     final int in, final int out
   ) {
     this.requireOpen();
-    if (KERNELS.prefersSingleShotGemv() || !this.parallelEnabled() || out < MIN_PARALLEL_OUT) {
+    if (!this.parallelEnabled() || out < MIN_PARALLEL_OUT) {
       this.decode1Range(x, xOffset, w, wOffset, bias, y, yOffset, in, 0, out);
       return;
     }

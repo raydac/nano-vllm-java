@@ -8,6 +8,9 @@ import static com.igormaznitsa.nanollvm.models.internal.WeightNames.GGUF_OUTPUT;
 import static com.igormaznitsa.nanollvm.models.internal.WeightNames.GGUF_TOKEN_EMBD;
 import static com.igormaznitsa.nanollvm.models.internal.WeightNames.GGUF_TOKEN_EMBD_NORM;
 import static com.igormaznitsa.nanollvm.models.internal.WeightNames.ggufBlk;
+import static com.igormaznitsa.nanollvm.tensor.ActivationWorkspace.beginLayer;
+import static com.igormaznitsa.nanollvm.tensor.ActivationWorkspace.endLayer;
+import static com.igormaznitsa.nanollvm.tensor.ActivationWorkspace.releaseUnless;
 import static java.util.Objects.requireNonNull;
 
 import com.igormaznitsa.nanollvm.internal.Context;
@@ -22,7 +25,6 @@ import com.igormaznitsa.nanollvm.layers.VocabParallelEmbedding.ParallelLMHead;
 import com.igormaznitsa.nanollvm.llm.Config;
 import com.igormaznitsa.nanollvm.tensor.Ops;
 import com.igormaznitsa.nanollvm.tensor.Tensor;
-
 import java.util.List;
 import java.util.stream.IntStream;
 
@@ -270,11 +272,19 @@ public record Lfm2ForCausalLM(Lfm2Model model, ParallelLMHead lmHead) implements
     }
 
     Tensor forward(final Tensor inputIds, final Tensor positions, final Context context) {
+      beginLayer();
       Tensor hidden = this.embedTokens.forward(inputIds, context);
       for (Lfm2DecoderLayer layer : this.layers) {
-        hidden = layer.forward(positions, hidden, context);
+        Tensor next = layer.forward(positions, hidden, context);
+        endLayer(next);
+        releaseUnless(hidden, next);
+        hidden = next;
+        beginLayer();
       }
-      return this.embeddingNorm.forward(hidden);
+      Tensor normed = this.embeddingNorm.forward(hidden);
+      endLayer(normed);
+      releaseUnless(hidden, normed);
+      return normed;
     }
   }
 }

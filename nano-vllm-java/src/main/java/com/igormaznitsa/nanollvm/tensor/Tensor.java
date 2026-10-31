@@ -2,6 +2,7 @@ package com.igormaznitsa.nanollvm.tensor;
 
 import static java.util.Objects.requireNonNull;
 
+import com.igormaznitsa.nanollvm.internal.EmptyArrays;
 import java.util.Arrays;
 
 /**
@@ -51,25 +52,47 @@ public final class Tensor {
   private final int[] shape;
   private final int offset;
   private final int size;
+  private final ActivationWorkspace.Lease lease;
 
-  private Tensor(final float[] data, final int[] shape, final int offset, final int size) {
+  private Tensor(
+    final float[] data,
+    final int[] shape,
+    final int offset,
+    final int size,
+    final ActivationWorkspace.Lease lease
+  ) {
     this.data = data;
     this.shape = shape;
     this.offset = offset;
     this.size = size;
+    this.lease = lease;
   }
 
   /**
    * Allocates a new tensor filled with zeros.
    *
    * @param shape axis lengths; must be non-empty and non-negative; {@code numel} is their product
-   * @return a tensor owning a fresh {@code float[numel]} buffer at offset {@code 0}
+   * @return a tensor owning a zero-filled {@code float[numel]} buffer at offset {@code 0}.
+   *         A zero-length tensor shares one empty array.
    * @throws IllegalArgumentException if {@code shape} is empty or contains a negative dimension
    * @throws ArithmeticException      if the product of dimensions overflows {@code int}
    */
   public static Tensor zeros(int... shape) {
     int[] s = requireShape(shape);
-    return new Tensor(new float[numel(s)], s, 0, numel(s));
+    int n = numel(s);
+    ActivationWorkspace workspace = ActivationWorkspace.current();
+    if (workspace != null && n >= ActivationWorkspace.MIN_LENGTH) {
+      return workspace.allocate(s, n);
+    }
+    return new Tensor(EmptyArrays.floats(n), s, 0, n, null);
+  }
+
+  static Tensor pooled(
+    final float[] data,
+    final int[] shape,
+    final ActivationWorkspace.Lease lease
+  ) {
+    return new Tensor(data, shape, 0, data.length, lease);
   }
 
   /**
@@ -105,7 +128,7 @@ public final class Tensor {
       throw new IllegalArgumentException(
         "data length %d != shape numel %d".formatted(data.length, n));
     }
-    return new Tensor(data, s, 0, n);
+    return new Tensor(data, s, 0, n, null);
   }
 
   /**
@@ -131,7 +154,7 @@ public final class Tensor {
       throw new IllegalArgumentException(
         "view [%d, %d) outside data length %d".formatted(offset, offset + n, data.length));
     }
-    return new Tensor(data, s, offset, n);
+    return new Tensor(data, s, offset, n, null);
   }
 
   /**
@@ -273,7 +296,11 @@ public final class Tensor {
       throw new IllegalArgumentException(
         "cannot reshape %s to %s".formatted(Arrays.toString(this.shape), Arrays.toString(s)));
     }
-    return new Tensor(this.data, s, this.offset, this.size);
+    return new Tensor(this.data, s, this.offset, this.size, this.lease);
+  }
+
+  ActivationWorkspace.Lease lease() {
+    return this.lease;
   }
 
   /**
