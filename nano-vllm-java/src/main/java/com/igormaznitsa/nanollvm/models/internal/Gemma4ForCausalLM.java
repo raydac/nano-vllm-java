@@ -412,13 +412,18 @@ public record Gemma4ForCausalLM(Gemma4Model model, ParallelLMHead lmHead, float 
       beginLayer();
       Tensor hidden = Ops.scale(this.embedTokens.forward(inputIds, context), this.embedScale);
       Tensor perLayer = this.combinePerLayerInputs(inputIds, hidden, context);
-      for (int i = 0; i < this.layers.size(); i++) {
-        Tensor next = this.layers.get(i).forward(
-          positions, hidden, this.sliceLayer(perLayer, i), context);
-        endLayer(next, perLayer);
-        releaseUnless(hidden, next, perLayer);
-        hidden = next;
-        beginLayer();
+      DeviceDecoders.openFrame();
+      try {
+        for (int i = 0; i < this.layers.size(); i++) {
+          Tensor next = this.layers.get(i).forward(
+            positions, hidden, this.sliceLayer(perLayer, i), context);
+          endLayer(next, perLayer);
+          releaseUnless(hidden, next, perLayer);
+          hidden = next;
+          beginLayer();
+        }
+      } finally {
+        DeviceDecoders.closeFrame();
       }
       Tensor normed = this.norm.forward(hidden);
       endLayer(normed);

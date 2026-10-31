@@ -236,12 +236,22 @@ public final class KernelChatBench {
 
     try (LlmModel model = LlmModelFactory.make(modelPath);
          LLM llm = LLM.builder(model).noSystemPrompt().deterministic().build()) {
+      if ("tornado".equals(normalizedMode())) {
+        System.out.println(
+          "TornadoVM compiles each decoder layer on first use. The warmup stays quiet for a few minutes, then generation continues.");
+      }
+      System.out.println("Warmup generate");
+      System.out.flush();
       llm.chat(sampling).send(CHAT_PROMPT);
+      System.out.println("Warmup finished");
+      System.out.flush();
 
       long elapsedNanos = 0L;
       int promptTokens = 0;
       int completionTokens = 0;
       for (int run = 0; run < options.runs(); run++) {
+        System.out.println("Run " + (run + 1) + " of " + options.runs());
+        System.out.flush();
         GenerationStats stats = llm.chat(sampling).send(CHAT_PROMPT).stats();
         elapsedNanos += stats.elapsedNanos();
         promptTokens = stats.promptTokens();

@@ -27,7 +27,8 @@ Development snapshot after the **1.4.0** public release.
   kernel. `-Dnanollvm.tornado.clblast=false` keeps the device kernel for multi-token matmul.
   A weight matrix stays resident for the current token count. A prefill plan is released when
   decode starts, so the same matrix is not stored on the device twice. A matrix larger than 32 MiB,
-  including the vocabulary projection, is uploaded in pieces through one reusable device buffer.
+  including the vocabulary projection, is streamed through one reused device tile so it is not
+  kept beside the decoder-layer graphs.
   Each dense decoder layer
   (Llama, Qwen3, Qwen3.5 full attention, Gemma 3, Gemma 4, and LFM2 attention), including its
   prefill tokens, is one TornadoVM task graph: matmul, norm, RoPE, and attention stay on the

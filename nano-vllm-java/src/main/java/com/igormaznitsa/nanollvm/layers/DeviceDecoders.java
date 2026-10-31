@@ -41,9 +41,34 @@ public final class DeviceDecoders {
     GELU
   }
 
+  public static void openFrame() {
+    Step step = decoder();
+    if (step != null) {
+      step.openFrame();
+    }
+  }
+
+  public static void closeFrame() {
+    Step step = decoder();
+    if (step != null) {
+      step.closeFrame();
+    }
+  }
+
+  public static void flushFrame() {
+    closeFrame();
+    openFrame();
+  }
+
   @FunctionalInterface
   public interface Step {
     Tensor[] forward(Layer layer);
+
+    default void openFrame() {
+    }
+
+    default void closeFrame() {
+    }
   }
 
   public record Gain(float[] data, int offset, int width, boolean onePlus) {

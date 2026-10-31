@@ -13,7 +13,22 @@ import com.igormaznitsa.nanollvm.tensor.FloatKernels;
 public final class TornadoFloatKernels extends FloatKernels {
 
   TornadoFloatKernels() {
-    DeviceDecoders.register(TornadoDecoder::forward);
+    DeviceDecoders.register(new DeviceDecoders.Step() {
+      @Override
+      public com.igormaznitsa.nanollvm.tensor.Tensor[] forward(final DeviceDecoders.Layer layer) {
+        return TornadoDecoder.forward(layer);
+      }
+
+      @Override
+      public void openFrame() {
+        TornadoDecoder.openFrame();
+      }
+
+      @Override
+      public void closeFrame() {
+        TornadoDecoder.closeFrame();
+      }
+    });
   }
 
   @Override

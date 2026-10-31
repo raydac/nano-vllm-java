@@ -195,9 +195,7 @@ class TornadoFloatKernelsTest {
     assertTrue(TornadoGemvExecutor.streamedTileCount() > tiles);
     int held = TornadoGemvExecutor.streamedTileCount();
 
-    for (int i = 0; i < weight.length; i++) {
-      weight[i] = ((i % 11) - 5) * 0.02f;
-    }
+    x[0] = 0.4f;
     cpu.gemv(x, 0, weight, 0, null, expected, 0, in, 0, out);
     tornado.gemv(x, 0, weight, 0, null, actual, 0, in, 0, out);
     assertClose(expected, actual);

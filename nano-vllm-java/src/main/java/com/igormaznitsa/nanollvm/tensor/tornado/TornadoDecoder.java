@@ -51,6 +51,16 @@ public final class TornadoDecoder {
     if (!accepted(layer)) {
       return null;
     }
+    return runImmediate(layer);
+  }
+
+  public static void openFrame() {
+  }
+
+  public static void closeFrame() {
+  }
+
+  private static Tensor[] runImmediate(final Layer layer) {
     int rows = layer.hidden().size(0);
     int hidden = layer.hidden().size(1);
     Tensor hiddenOut = Tensor.zeros(rows, hidden);
@@ -237,6 +247,18 @@ public final class TornadoDecoder {
       float[] residual = new float[hidden];
       draft.every(x);
       draft.every(residual);
+      List<float[]> host = new ArrayList<>();
+      Stage stage = append(draft, layer, x, residual, true, host);
+      draft.host(host);
+      return stage.plan(draft.open(), sources(layer));
+    }
+
+    private static Stage append(
+      final Draft draft, final Layer layer,
+      final float[] x, final float[] residual,
+      final boolean publishActivation, final List<float[]> host
+    ) {
+      int hidden = x.length;
       float[] epsilon = {layer.epsilon()};
       draft.resident(epsilon);
 
@@ -275,18 +297,18 @@ public final class TornadoDecoder {
 
       float[] result = projectMlp(draft, layer, mlpInput, carried, epsilon, hidden);
       result = projectPerLayer(draft, layer, result, epsilon, hidden);
-      List<float[]> host = new ArrayList<>();
-      host.add(result);
-      if (layer.shape() == HIGHWAY) {
-        host.add(carried);
+      if (publishActivation) {
+        host.add(result);
+        if (layer.shape() == HIGHWAY) {
+          host.add(carried);
+        }
       }
       if (layer.writeKv()) {
         host.add(rotatedKey);
         host.add(storedValue);
       }
-      draft.host(host);
-      return new LayerPlan(
-        draft.open(), sources(layer), x, residual, angles, draft.perLayerRow, result, carried,
+      return new Stage(
+        x, residual, angles, draft.perLayerRow, result, carried,
         rotatedKey, storedValue, keyCache, valueCache, params, slots,
         hidden, keySize, cacheOffset, valueOffset, layer.window(),
         layer.attention(), layer.writeKv(), layer.rope());
@@ -306,7 +328,7 @@ public final class TornadoDecoder {
         float[] gain = requireGain(layer.postAttentionNorm(), hidden, "post-attention");
         draft.resident(carried);
         draft.resident(gain);
-        draft.graph = draft.graph.task("post", TornadoNormKernels::addRmsNormRows,
+        draft.graph = draft.graph.task(draft.id("post"), TornadoNormKernels::addRmsNormRows,
           x, residual, carried, gain, post, epsilon, 1, hidden);
         draft.carried = carried;
         return post;
@@ -314,7 +336,8 @@ public final class TornadoDecoder {
       float[] gain = requireGain(layer.preMlpNorm(), hidden, "pre-mlp");
       draft.resident(gain);
       draft.graph =
-        draft.graph.task("pre", TornadoNormKernels::rmsNormRows, x, gain, post, epsilon, 1, hidden);
+        draft.graph.task(draft.id("pre"), TornadoNormKernels::rmsNormRows, x, gain, post, epsilon,
+          1, hidden);
       return post;
     }
 
@@ -343,7 +366,7 @@ public final class TornadoDecoder {
       draft.resident(normed);
       draft.resident(gainIn);
       draft.every(params);
-      draft.graph = draft.graph.task("norm", TornadoQwen3LayerKernels::residualRms,
+      draft.graph = draft.graph.task(draft.id("norm"), TornadoQwen3LayerKernels::residualRms,
         x, residual, stream, normed, gainIn, epsilon, params);
 
       float[] query = new float[querySize];
@@ -362,7 +385,7 @@ public final class TornadoDecoder {
         float[] gain = bake(layer.queryNorm(), layer.headDim());
         draft.resident(queryForRope);
         draft.resident(gain);
-        draft.graph = draft.graph.task("qnorm", TornadoNormKernels::rmsNormRows,
+        draft.graph = draft.graph.task(draft.id("qnorm"), TornadoNormKernels::rmsNormRows,
           query, gain, queryForRope, epsilon, layer.numHeads(), layer.headDim());
       }
       boolean projectsKeys = layer.qkv() != null || layer.key() != null;
@@ -371,7 +394,7 @@ public final class TornadoDecoder {
         float[] gain = bake(layer.keyNorm(), layer.headDim());
         draft.resident(keyForRope);
         draft.resident(gain);
-        draft.graph = draft.graph.task("knorm", TornadoNormKernels::rmsNormRows,
+        draft.graph = draft.graph.task(draft.id("knorm"), TornadoNormKernels::rmsNormRows,
           key, gain, keyForRope, epsilon, layer.numKvHeads(), layer.headDim());
       }
       float[] storedValue = value;
@@ -380,7 +403,7 @@ public final class TornadoDecoder {
         float[] gain = bake(layer.valueNorm(), layer.headDim());
         draft.resident(storedValue);
         draft.resident(gain);
-        draft.graph = draft.graph.task("vnorm", TornadoNormKernels::rmsNormRows,
+        draft.graph = draft.graph.task(draft.id("vnorm"), TornadoNormKernels::rmsNormRows,
           value, gain, storedValue, epsilon, layer.numKvHeads(), layer.headDim());
       }
 
@@ -388,13 +411,13 @@ public final class TornadoDecoder {
       float[] rotatedQuery = new float[querySize];
       draft.every(angles);
       draft.resident(rotatedQuery);
-      draft.graph = draft.graph.task("ropeq", TornadoQwen3LayerKernels::ropeHeads,
+      draft.graph = draft.graph.task(draft.id("ropeq"), TornadoQwen3LayerKernels::ropeHeads,
         queryForRope, rotatedQuery, angles, layer.numHeads(), layer.headDim());
       float[] rotatedKey = null;
       if (projectsKeys) {
         rotatedKey = new float[keySize];
         draft.resident(rotatedKey);
-        draft.graph = draft.graph.task("ropek", TornadoQwen3LayerKernels::ropeHeads,
+        draft.graph = draft.graph.task(draft.id("ropek"), TornadoQwen3LayerKernels::ropeHeads,
           keyForRope, rotatedKey, angles, layer.numKvHeads(), layer.headDim());
       }
 
@@ -403,7 +426,7 @@ public final class TornadoDecoder {
       if (layer.writeKv()) {
         draft.resident(cacheKey);
         draft.resident(cacheValue);
-        draft.graph = draft.graph.task("store", TornadoQwen3LayerKernels::storeKv,
+        draft.graph = draft.graph.task(draft.id("store"), TornadoQwen3LayerKernels::storeKv,
           rotatedKey, storedValue, cacheKey, cacheValue, params);
       } else {
         draft.every(cacheKey);
@@ -415,7 +438,7 @@ public final class TornadoDecoder {
       draft.every(slots);
       draft.resident(coeff);
       draft.resident(attended);
-      draft.graph = draft.graph.task("attend", TornadoQwen3LayerKernels::attendOne,
+      draft.graph = draft.graph.task(draft.id("attend"), TornadoQwen3LayerKernels::attendOne,
         rotatedQuery, cacheKey, cacheValue, slots, attended, coeff, params,
         layer.numHeads(), layer.numKvHeads(), layer.headDim());
 
@@ -424,7 +447,8 @@ public final class TornadoDecoder {
         mixed = new float[querySize];
         draft.resident(mixed);
         draft.graph =
-          draft.graph.task("qgate", TornadoQwen3LayerKernels::sigmoidMul, attended, queryGate,
+          draft.graph.task(draft.id("qgate"), TornadoQwen3LayerKernels::sigmoidMul, attended,
+            queryGate,
             mixed);
       }
       float[] projected = new float[hidden];
@@ -461,7 +485,8 @@ public final class TornadoDecoder {
         draft.resident(qkvOut);
         draft.gemv("qkv", normed, layer.qkv(), qkvOut);
         draft.graph =
-          draft.graph.task("split", TornadoQwen3LayerKernels::splitQkv, qkvOut, query, key, value);
+          draft.graph.task(draft.id("split"), TornadoQwen3LayerKernels::splitQkv, qkvOut, query,
+            key, value);
         return null;
       }
       if (layer.query() == null) {
@@ -476,7 +501,7 @@ public final class TornadoDecoder {
         draft.resident(queryGate);
         draft.gemv("q", normed, layer.query(), packed);
         draft.graph =
-          draft.graph.task("qsplit", TornadoQwen3LayerKernels::splitHalves, packed, query,
+          draft.graph.task(draft.id("qsplit"), TornadoQwen3LayerKernels::splitHalves, packed, query,
             queryGate);
       } else {
         requireMatrix(layer.query(), querySize, hidden, "query");
@@ -502,7 +527,7 @@ public final class TornadoDecoder {
         draft.resident(carried);
         draft.resident(post);
         draft.resident(gain);
-        draft.graph = draft.graph.task("post", TornadoNormKernels::addRmsNormRows,
+        draft.graph = draft.graph.task(draft.id("post"), TornadoNormKernels::addRmsNormRows,
           projected, stream, carried, gain, post, epsilon, 1, hidden);
         draft.carried = carried;
         return post;
@@ -514,13 +539,15 @@ public final class TornadoDecoder {
         float[] gain = requireGain(layer.postAttentionNorm(), hidden, "post-attention");
         draft.resident(branch);
         draft.resident(gain);
-        draft.graph = draft.graph.task("post", TornadoNormKernels::rmsNormRows,
+        draft.graph = draft.graph.task(draft.id("post"), TornadoNormKernels::rmsNormRows,
           projected, gain, branch, epsilon, 1, hidden);
         draft.graph =
-          draft.graph.task("addAttn", TornadoElementKernels::add, stream, branch, carried, hidden);
+          draft.graph.task(draft.id("addAttn"), TornadoElementKernels::add, stream, branch, carried,
+            hidden);
       } else if (layer.shape() == PLAIN_BRANCH) {
         draft.graph =
-          draft.graph.task("addAttn", TornadoElementKernels::add, stream, projected, carried,
+          draft.graph.task(draft.id("addAttn"), TornadoElementKernels::add, stream, projected,
+            carried,
             hidden);
       }
       float[] post = new float[hidden];
@@ -528,7 +555,8 @@ public final class TornadoDecoder {
       draft.resident(post);
       draft.resident(gain);
       draft.graph =
-        draft.graph.task("pre", TornadoNormKernels::rmsNormRows, carried, gain, post, epsilon, 1,
+        draft.graph.task(draft.id("pre"), TornadoNormKernels::rmsNormRows, carried, gain, post,
+          epsilon, 1,
           hidden);
       draft.carried = carried;
       return post;
@@ -548,10 +576,12 @@ public final class TornadoDecoder {
         draft.gemv("gate", mlpInput, layer.gateUp(), gateOut);
         if (layer.activation() == GELU) {
           draft.graph =
-            draft.graph.task("act", TornadoQwen3LayerKernels::geluHalves, gateOut, activated);
+            draft.graph.task(draft.id("act"), TornadoQwen3LayerKernels::geluHalves, gateOut,
+              activated);
         } else {
           draft.graph =
-            draft.graph.task("act", TornadoQwen3LayerKernels::siluHalves, gateOut, activated);
+            draft.graph.task(draft.id("act"), TornadoQwen3LayerKernels::siluHalves, gateOut,
+              activated);
         }
       } else {
         requireMatrix(layer.gate(), intermediate, hidden, "gate");
@@ -564,11 +594,13 @@ public final class TornadoDecoder {
         draft.gemv("up", mlpInput, layer.up(), upOut);
         if (layer.activation() == GELU) {
           draft.graph =
-            draft.graph.task("act", TornadoElementKernels::geluTanhMul, gateOut, upOut, activated,
+            draft.graph.task(draft.id("act"), TornadoElementKernels::geluTanhMul, gateOut, upOut,
+              activated,
               intermediate);
         } else {
           draft.graph =
-            draft.graph.task("act", TornadoQwen3LayerKernels::siluMul, gateOut, upOut, activated);
+            draft.graph.task(draft.id("act"), TornadoQwen3LayerKernels::siluMul, gateOut, upOut,
+              activated);
         }
       }
       boolean direct = layer.shape() == HIGHWAY && layer.perLayerGate() == null;
@@ -586,14 +618,16 @@ public final class TornadoDecoder {
         float[] gain = requireGain(layer.postMlpNorm(), hidden, "post-mlp");
         draft.resident(normed);
         draft.resident(gain);
-        draft.graph = draft.graph.task("postMlp", TornadoNormKernels::rmsNormRows,
+        draft.graph = draft.graph.task(draft.id("postMlp"), TornadoNormKernels::rmsNormRows,
           mlpOut, gain, normed, epsilon, 1, hidden);
         draft.graph =
-          draft.graph.task("addMlp", TornadoElementKernels::add, carried, normed, hiddenOut,
+          draft.graph.task(draft.id("addMlp"), TornadoElementKernels::add, carried, normed,
+            hiddenOut,
             hidden);
       } else {
         draft.graph =
-          draft.graph.task("addMlp", TornadoElementKernels::add, carried, mlpOut, hiddenOut,
+          draft.graph.task(draft.id("addMlp"), TornadoElementKernels::add, carried, mlpOut,
+            hiddenOut,
             hidden);
       }
       return hiddenOut;
@@ -633,15 +667,82 @@ public final class TornadoDecoder {
       draft.resident(gate);
       draft.gemv("ple", hiddenState, layer.perLayerGate(), gate);
       draft.graph =
-        draft.graph.task("pleAct", TornadoElementKernels::geluTanhMul, gate, row, gated, width);
+        draft.graph.task(draft.id("pleAct"), TornadoElementKernels::geluTanhMul, gate, row, gated,
+          width);
       draft.gemv("pleProj", gated, layer.perLayerProjection(), projected);
-      draft.graph = draft.graph.task("pleNorm", TornadoNormKernels::rmsNormRows,
+      draft.graph = draft.graph.task(draft.id("pleNorm"), TornadoNormKernels::rmsNormRows,
         projected, gain, normed, epsilon, 1, hidden);
       draft.graph =
-        draft.graph.task("pleAdd", TornadoElementKernels::add, hiddenState, normed, summed, hidden);
+        draft.graph.task(draft.id("pleAdd"), TornadoElementKernels::add, hiddenState, normed,
+          summed, hidden);
       draft.graph =
-        draft.graph.task("pleScale", TornadoElementKernels::scale, summed, factor, scaled, hidden);
+        draft.graph.task(draft.id("pleScale"), TornadoElementKernels::scale, summed, factor, scaled,
+          hidden);
       return scaled;
+    }
+
+    private static final class Stage {
+      private final float[] x;
+      private final float[] residual;
+      private final float[] angles;
+      private final float[] perLayer;
+      private final float[] hiddenOut;
+      private final float[] residualOut;
+      private final float[] rotatedKey;
+      private final float[] storedValue;
+      private final float[] keyCache;
+      private final float[] valueCache;
+      private final int[] params;
+      private final int[] slots;
+      private final int hidden;
+      private final int keySize;
+      private final int cacheOffset;
+      private final int valueOffset;
+      private final int window;
+      private final boolean attention;
+      private final boolean writeKv;
+      private final RotaryEmbedding rope;
+
+      private Stage(
+        final float[] x, final float[] residual, final float[] angles, final float[] perLayer,
+        final float[] hiddenOut, final float[] residualOut,
+        final float[] rotatedKey, final float[] storedValue,
+        final float[] keyCache, final float[] valueCache,
+        final int[] params, final int[] slots,
+        final int hidden, final int keySize, final int cacheOffset, final int valueOffset,
+        final int window, final boolean attention, final boolean writeKv,
+        final RotaryEmbedding rope
+      ) {
+        this.x = x;
+        this.residual = residual;
+        this.angles = angles;
+        this.perLayer = perLayer;
+        this.hiddenOut = hiddenOut;
+        this.residualOut = residualOut;
+        this.rotatedKey = rotatedKey;
+        this.storedValue = storedValue;
+        this.keyCache = keyCache;
+        this.valueCache = valueCache;
+        this.params = params;
+        this.slots = slots;
+        this.hidden = hidden;
+        this.keySize = keySize;
+        this.cacheOffset = cacheOffset;
+        this.valueOffset = valueOffset;
+        this.window = window;
+        this.attention = attention;
+        this.writeKv = writeKv;
+        this.rope = rope;
+      }
+
+      private LayerPlan plan(final TornadoExecutionPlan execution, final float[][] sources) {
+        return new LayerPlan(
+          execution, sources, this.x, this.residual, this.angles, this.perLayer,
+          this.hiddenOut, this.residualOut, this.rotatedKey, this.storedValue,
+          this.keyCache, this.valueCache, this.params, this.slots,
+          this.hidden, this.keySize, this.cacheOffset, this.valueOffset, this.window,
+          this.attention, this.writeKv, this.rope);
+      }
     }
 
     private static int intermediate(final Layer layer, final int hidden) {
@@ -851,8 +952,13 @@ public final class TornadoDecoder {
     private final String name;
     private final Set<float[]> seen = Collections.newSetFromMap(new IdentityHashMap<>());
     private TaskGraph graph;
+    private String prefix = "";
     private float[] carried;
     private float[] perLayerRow;
+
+    private String id(final String task) {
+      return this.prefix + task;
+    }
 
     private Draft(final String name) {
       this.name = name;
@@ -896,7 +1002,8 @@ public final class TornadoDecoder {
         this.resident(source);
         this.resident(factor);
         this.graph =
-          this.graph.task(task + "In", TornadoQwen3LayerKernels::srq, input, factor, source);
+          this.graph.task(this.id(task + "In"), TornadoQwen3LayerKernels::srq, input, factor,
+            source);
       }
       float[] bias = weight.bias() == null ? TornadoGemvKernels.NO_BIAS : weight.bias();
       this.resident(bias);
@@ -905,19 +1012,20 @@ public final class TornadoDecoder {
         dest = new float[output.length];
         this.resident(dest);
       }
+      String name = this.id(task);
       WorkerGrid1D worker = new WorkerGrid1D(
         Math.multiplyExact(weight.rows(), TornadoGemvKernels.ROW_LANES));
       worker.setLocalWork(TornadoGemvKernels.ROW_LANES, 1, 1);
-      this.scheduler.addWorkerGrid(this.name + "." + task, worker);
+      this.scheduler.addWorkerGrid(this.name + "." + name, worker);
       this.graph = this.graph.task(
-        task, TornadoGemvKernels::gemvTiled, new KernelContext(), source,
+        name, TornadoGemvKernels::gemvTiled, new KernelContext(), source,
         weight.data(), weight.offset(), bias, weight.bias() == null ? 0 : 1, dest,
         weight.columns(), 0, weight.rows(), TornadoGemvKernels.ROW_LANES);
       if (dest != output) {
         float[] factor = {weight.outputScale()};
         this.resident(factor);
         this.graph = this.graph.task(
-          task + "Out", TornadoQwen3LayerKernels::srq, dest, factor, output);
+          this.id(task + "Out"), TornadoQwen3LayerKernels::srq, dest, factor, output);
       }
     }
 
@@ -927,4 +1035,5 @@ public final class TornadoDecoder {
         .withoutPlanResultsHistory();
     }
   }
+
 }

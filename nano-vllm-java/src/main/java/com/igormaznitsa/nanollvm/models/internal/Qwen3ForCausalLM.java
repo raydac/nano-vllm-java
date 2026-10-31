@@ -495,16 +495,21 @@ public record Qwen3ForCausalLM(Qwen3Model model, ParallelLMHead lmHead) implemen
       beginLayer();
       Tensor hiddenStates = this.embedTokens.forward(inputIds, context);
       Tensor residual = null;
-      for (Qwen3DecoderLayer layer : this.layers) {
-        Tensor[] out = layer.forward(positions, hiddenStates, residual, context);
-        Tensor previousHidden = hiddenStates;
-        Tensor previousResidual = residual;
-        hiddenStates = out[0];
-        residual = out[1];
-        endLayer(hiddenStates, residual);
-        releaseUnless(previousHidden, hiddenStates, residual);
-        releaseUnless(previousResidual, hiddenStates, residual);
-        beginLayer();
+      DeviceDecoders.openFrame();
+      try {
+        for (Qwen3DecoderLayer layer : this.layers) {
+          Tensor[] out = layer.forward(positions, hiddenStates, residual, context);
+          Tensor previousHidden = hiddenStates;
+          Tensor previousResidual = residual;
+          hiddenStates = out[0];
+          residual = out[1];
+          endLayer(hiddenStates, residual);
+          releaseUnless(previousHidden, hiddenStates, residual);
+          releaseUnless(previousResidual, hiddenStates, residual);
+          beginLayer();
+        }
+      } finally {
+        DeviceDecoders.closeFrame();
       }
       Tensor[] normed = this.norm.forward(hiddenStates, residual);
       endLayer(normed[0]);

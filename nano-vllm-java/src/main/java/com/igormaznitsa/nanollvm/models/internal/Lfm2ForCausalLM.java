@@ -240,6 +240,9 @@ public record Lfm2ForCausalLM(Lfm2Model model, ParallelLMHead lmHead) implements
     }
 
     Tensor forward(final Tensor positions, final Tensor hiddenStates, final Context context) {
+      if (this.attention == null) {
+        DeviceDecoders.flushFrame();
+      }
       if (this.attention != null) {
         Tensor device = this.deviceAttention(positions, hiddenStates, context);
         if (device != null) {
@@ -344,12 +347,17 @@ public record Lfm2ForCausalLM(Lfm2Model model, ParallelLMHead lmHead) implements
     Tensor forward(final Tensor inputIds, final Tensor positions, final Context context) {
       beginLayer();
       Tensor hidden = this.embedTokens.forward(inputIds, context);
-      for (Lfm2DecoderLayer layer : this.layers) {
-        Tensor next = layer.forward(positions, hidden, context);
-        endLayer(next);
-        releaseUnless(hidden, next);
-        hidden = next;
-        beginLayer();
+      DeviceDecoders.openFrame();
+      try {
+        for (Lfm2DecoderLayer layer : this.layers) {
+          Tensor next = layer.forward(positions, hidden, context);
+          endLayer(next);
+          releaseUnless(hidden, next);
+          hidden = next;
+          beginLayer();
+        }
+      } finally {
+        DeviceDecoders.closeFrame();
       }
       Tensor normed = this.embeddingNorm.forward(hidden);
       endLayer(normed);

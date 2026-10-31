@@ -31,6 +31,7 @@ final class TornadoGemvExecutor {
 
   private static final int TILE_WEIGHT_BYTES = 32 * 1024 * 1024;
   private static final Map<TileKey, StreamedTile> STREAMED_TILES = new LinkedHashMap<>();
+
   private static int residentRows = -1;
   private static final String GRAPH_NAME = "nanollvm-gemv";
   private static final String TASK_NAME = "gemv";
@@ -393,8 +394,9 @@ final class TornadoGemvExecutor {
       final TaskGraph taskGraph, final GridScheduler scheduler,
       final float[] xScratch, final float[] yScratch, final WeightKey key
     ) throws TornadoExecutionPlanException {
-      TornadoExecutionPlan plan = TornadoPlans.open(taskGraph.snapshot())
-        .withGridScheduler(scheduler);
+      TornadoExecutionPlan plan = new TornadoExecutionPlan(taskGraph.snapshot())
+        .withGridScheduler(scheduler)
+        .withoutPlanResultsHistory();
       return new GemvPlan(plan, xScratch, yScratch, key.rows(), key.in(), key.out0(),
         key.outCount());
     }
@@ -502,8 +504,9 @@ final class TornadoGemvExecutor {
           key.in(), 0, key.outCount(), laneWidth
         )
         .transferToHost(EVERY_EXECUTION, (Object) yScratch);
-      TornadoExecutionPlan plan = TornadoPlans.open(taskGraph.snapshot())
-        .withGridScheduler(scheduler);
+      TornadoExecutionPlan plan = new TornadoExecutionPlan(taskGraph.snapshot())
+        .withGridScheduler(scheduler)
+        .withoutPlanResultsHistory();
       return new GemvPlan(plan, xScratch, yScratch, key.rows(), key.in(), 0, key.outCount());
     }
 
@@ -537,4 +540,5 @@ final class TornadoGemvExecutor {
       this.plan.closeQuietly();
     }
   }
+
 }

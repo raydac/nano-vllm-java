@@ -305,6 +305,38 @@ class TornadoQwen3DecodeTest {
     return values;
   }
 
+  private static DeviceDecoders.Layer layer(
+    final Tensor positions, final Tensor hidden, final Tensor residual, final Context context,
+    final Tensor qkv, final Tensor output, final Tensor gate, final Tensor down,
+    final Tensor inputNorm, final Tensor postNorm, final Tensor queryNorm, final Tensor keyNorm,
+    final float epsilon, final RotaryEmbedding rope,
+    final int heads, final int kvHeads, final int headDim, final float scale,
+    final Tensor keyCache, final Tensor valueCache
+  ) {
+    return DeviceDecoders.layer()
+      .highway()
+      .silu()
+      .positions(positions)
+      .hidden(hidden)
+      .residual(residual)
+      .context(context)
+      .qkv(qkv)
+      .output(output)
+      .gateUp(gate)
+      .down(down)
+      .inputNorm(inputNorm, false)
+      .postAttentionNorm(postNorm, false)
+      .queryNorm(queryNorm, false)
+      .keyNorm(keyNorm, false)
+      .epsilon(epsilon)
+      .rope(rope)
+      .heads(heads, kvHeads, headDim)
+      .scoreScale(scale)
+      .window(0)
+      .caches(keyCache, valueCache)
+      .build();
+  }
+
   private static Tensor matrix(final int rows, final int columns, final float scale) {
     return Tensor.of(pattern(rows * columns, scale), rows, columns);
   }
@@ -398,6 +430,75 @@ class TornadoQwen3DecodeTest {
 
     assertClose(expectedHidden, actual[0].data());
     assertClose(expectedResidual, actual[1].data());
+  }
+
+  @Test
+  void twoLayersMatchScalar() {
+    assumeTrue(TornadoFloatKernelsProvider.isAvailable(), "TornadoVM device required");
+
+    int hidden = 8;
+    int heads = 4;
+    int kvHeads = 2;
+    int headDim = 4;
+    int querySize = heads * headDim;
+    int intermediate = 8;
+    int tokens = 2;
+    float epsilon = 1.0e-5f;
+    float scale = (float) Math.pow(headDim, -0.5f);
+    RotaryEmbedding rope = RotaryEmbedding.of(headDim, headDim, 16, 10_000f);
+    FloatKernels scalar = FloatKernelsFactory.create("scalar");
+    Tensor hiddenIn = matrix(tokens, hidden, 0.15f);
+    Tensor residualIn = matrix(tokens, hidden, 0.05f);
+    Tensor positions = Tensor.of(new float[] {0f, 1f}, tokens);
+    Tensor qkv1 = matrix(querySize + kvHeads * headDim * 2, hidden, 0.02f);
+    Tensor out1 = matrix(hidden, querySize, 0.03f);
+    Tensor gate1 = matrix(intermediate * 2, hidden, 0.04f);
+    Tensor down1 = matrix(hidden, intermediate, 0.05f);
+    Tensor qkv2 = matrix(querySize + kvHeads * headDim * 2, hidden, 0.025f);
+    Tensor out2 = matrix(hidden, querySize, 0.035f);
+    Tensor gate2 = matrix(intermediate * 2, hidden, 0.045f);
+    Tensor down2 = matrix(hidden, intermediate, 0.055f);
+    Tensor inputNorm = vector(hidden, 0.1f);
+    Tensor postNorm = vector(hidden, 0.2f);
+    Tensor queryNorm = vector(headDim, 0.3f);
+    Tensor keyNorm = vector(headDim, 0.4f);
+    float[] firstHidden = new float[tokens * hidden];
+    float[] firstResidual = new float[tokens * hidden];
+    float[] secondHidden = new float[tokens * hidden];
+    float[] secondResidual = new float[tokens * hidden];
+    oracle(
+      scalar, rope, hiddenIn.data(), residualIn.data(), qkv1.data(), out1.data(), gate1.data(),
+      down1.data(), inputNorm.data(), postNorm.data(), queryNorm.data(), keyNorm.data(),
+      new float[4 * kvHeads * headDim], new float[4 * kvHeads * headDim],
+      firstHidden, firstResidual, tokens, hidden, heads, kvHeads, headDim, intermediate, epsilon,
+      scale);
+    oracle(
+      scalar, rope, firstHidden, firstResidual, qkv2.data(), out2.data(), gate2.data(),
+      down2.data(), inputNorm.data(), postNorm.data(), queryNorm.data(), keyNorm.data(),
+      new float[4 * kvHeads * headDim], new float[4 * kvHeads * headDim],
+      secondHidden, secondResidual, tokens, hidden, heads, kvHeads, headDim, intermediate, epsilon,
+      scale);
+
+    Context context = new Context();
+    context.set(
+      true, new int[] {0, tokens}, new int[] {0, tokens}, tokens, tokens,
+      new int[] {0, 1}, null, null, new int[] {1, 1});
+    TornadoDecoder.openFrame();
+    Tensor[] actual;
+    try {
+      Tensor[] mid = TornadoDecoder.forward(layer(
+        positions, hiddenIn, residualIn, context, qkv1, out1, gate1, down1,
+        inputNorm, postNorm, queryNorm, keyNorm, epsilon, rope, heads, kvHeads, headDim, scale,
+        Tensor.zeros(1, 4, kvHeads, headDim), Tensor.zeros(1, 4, kvHeads, headDim)));
+      actual = TornadoDecoder.forward(layer(
+        positions, mid[0], mid[1], context, qkv2, out2, gate2, down2,
+        inputNorm, postNorm, queryNorm, keyNorm, epsilon, rope, heads, kvHeads, headDim, scale,
+        Tensor.zeros(1, 4, kvHeads, headDim), Tensor.zeros(1, 4, kvHeads, headDim)));
+    } finally {
+      TornadoDecoder.closeFrame();
+    }
+    assertClose(secondHidden, actual[0].data());
+    assertClose(secondResidual, actual[1].data());
   }
 
   @Test
