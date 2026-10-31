@@ -123,12 +123,14 @@ final class TornadoNormExecutor {
     @Override
     @SuppressWarnings("ReferenceEquality")
     public boolean equals(final Object other) {
-      if (!(other instanceof PlanKey that)) {
+      if (!(other instanceof PlanKey(
+        Kind kind1, float[] weight1, int offset, int rows1, int last1, int mode1, int bits
+      ))) {
         return false;
       }
-      return this.kind == that.kind && this.weight == that.weight
-        && this.weightOffset == that.weightOffset && this.rows == that.rows
-        && this.last == that.last && this.mode == that.mode && this.epsBits == that.epsBits;
+      return this.kind == kind1 && this.weight == weight1
+        && this.weightOffset == offset && this.rows == rows1
+        && this.last == last1 && this.mode == mode1 && this.epsBits == bits;
     }
 
     @Override

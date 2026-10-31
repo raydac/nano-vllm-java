@@ -30,9 +30,10 @@ Development snapshot after the **1.4.0** public release.
   including the vocabulary projection, is streamed through one reused device tile so it is not
   kept beside the decoder-layer graphs.
   Each dense decoder layer
-  (Llama, Qwen3, Qwen3.5 full attention, Gemma 3, Gemma 4, and LFM2 attention), including its
-  prefill tokens, is one TornadoVM task graph: matmul, norm, RoPE, and attention stay on the
-  device, and only the layer output is copied back. Packed and Gemma 4 QAT projections are expanded
+  (Llama, Qwen3, Qwen3.5 full attention, Gemma 3, Gemma 4, and LFM2 attention) runs in a
+  TornadoVM task graph of four layers, including its prefill tokens: matmul, norm, RoPE, and
+  attention stay on the device, and the activation is copied back when the group ends. A whole
+  stack does not fit TornadoVM's task-graph buffer. Packed and Gemma 4 QAT projections are expanded
   once into that graph. Qwen3.5 linear-attention recurrence and the LFM2 short convolution stay on
   the CPU; the MLP of those layers still runs in one device graph. RMSNorm runs as one device task for every row of the tensor.
   An attention range, including a single decode query, is one TornadoVM task, and the key cache

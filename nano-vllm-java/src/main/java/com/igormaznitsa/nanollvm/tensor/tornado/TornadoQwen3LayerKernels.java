@@ -71,8 +71,9 @@ final class TornadoQwen3LayerKernels {
         out[base + i] = left * cos - right * sin;
         out[base + pairs + i] = right * cos + left * sin;
       }
-      for (int i = rotary; i < headDim; i++) {
-        out[base + i] = in[base + i];
+      // must be manual copy because TornadoVM requires it!
+      for (int lane = rotary; lane < headDim; lane++) {
+        out[base + lane] = in[base + lane];
       }
     }
   }

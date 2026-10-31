@@ -501,6 +501,82 @@ class TornadoQwen3DecodeTest {
     assertClose(secondResidual, actual[1].data());
   }
 
+  private static Tensor[] runChain(
+    final boolean grouped,
+    final Tensor positions, final Tensor hiddenIn, final Tensor residualIn,
+    final Tensor[] qkv, final Tensor[] output, final Tensor[] gate, final Tensor[] down,
+    final Tensor inputNorm, final Tensor postNorm, final Tensor queryNorm, final Tensor keyNorm,
+    final float epsilon, final RotaryEmbedding rope,
+    final int heads, final int kvHeads, final int headDim, final float scale
+  ) {
+    int tokens = hiddenIn.size(0);
+    Context context = prefill(tokens);
+    Tensor hidden = hiddenIn;
+    Tensor residual = residualIn;
+    if (grouped) {
+      TornadoDecoder.openFrame();
+    }
+    try {
+      for (int layer = 0; layer < qkv.length; layer++) {
+        Tensor[] step = TornadoDecoder.forward(layer(
+          positions, hidden, residual, context, qkv[layer], output[layer], gate[layer], down[layer],
+          inputNorm, postNorm, queryNorm, keyNorm, epsilon, rope, heads, kvHeads, headDim, scale,
+          Tensor.zeros(1, 4, kvHeads, headDim), Tensor.zeros(1, 4, kvHeads, headDim)));
+        hidden = step[0];
+        residual = step[1];
+      }
+      return new Tensor[] {hidden, residual};
+    } finally {
+      if (grouped) {
+        TornadoDecoder.closeFrame();
+      }
+    }
+  }
+
+  @Test
+  void groupedLayersMatchOneAtATime() {
+    assumeTrue(TornadoFloatKernelsProvider.isAvailable(), "TornadoVM device required");
+
+    int hidden = 8;
+    int heads = 4;
+    int kvHeads = 2;
+    int headDim = 4;
+    int querySize = heads * headDim;
+    int intermediate = 8;
+    int tokens = 2;
+    int depth = 5;
+    float epsilon = 1.0e-5f;
+    float scale = (float) Math.pow(headDim, -0.5f);
+    RotaryEmbedding rope = RotaryEmbedding.of(headDim, headDim, 16, 10_000f);
+    Tensor positions = Tensor.of(new float[] {0f, 1f}, tokens);
+    Tensor inputNorm = vector(hidden, 0.1f);
+    Tensor postNorm = vector(hidden, 0.2f);
+    Tensor queryNorm = vector(headDim, 0.3f);
+    Tensor keyNorm = vector(headDim, 0.4f);
+    Tensor[] qkv = new Tensor[depth];
+    Tensor[] output = new Tensor[depth];
+    Tensor[] gate = new Tensor[depth];
+    Tensor[] down = new Tensor[depth];
+    for (int layer = 0; layer < depth; layer++) {
+      float weight = 0.02f + layer * 0.004f;
+      qkv[layer] = matrix(querySize + kvHeads * headDim * 2, hidden, weight);
+      output[layer] = matrix(hidden, querySize, weight + 0.01f);
+      gate[layer] = matrix(intermediate * 2, hidden, weight + 0.02f);
+      down[layer] = matrix(hidden, intermediate, weight + 0.03f);
+    }
+    Tensor hiddenIn = matrix(tokens, hidden, 0.15f);
+    Tensor residualIn = matrix(tokens, hidden, 0.05f);
+
+    Tensor[] sequential = runChain(
+      false, positions, hiddenIn, residualIn, qkv, output, gate, down,
+      inputNorm, postNorm, queryNorm, keyNorm, epsilon, rope, heads, kvHeads, headDim, scale);
+    Tensor[] grouped = runChain(
+      true, positions, hiddenIn, residualIn, qkv, output, gate, down,
+      inputNorm, postNorm, queryNorm, keyNorm, epsilon, rope, heads, kvHeads, headDim, scale);
+    assertClose(sequential[0].data(), grouped[0].data());
+    assertClose(sequential[1].data(), grouped[1].data());
+  }
+
   @Test
   void llamaLayerOmitsHeadNorms() {
     assumeTrue(TornadoFloatKernelsProvider.isAvailable(), "TornadoVM device required");

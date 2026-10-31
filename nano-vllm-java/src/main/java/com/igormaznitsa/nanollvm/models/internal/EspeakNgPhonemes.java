@@ -15,7 +15,8 @@ import java.util.stream.Stream;
  */
 final class EspeakNgPhonemes {
 
-  private static final List<Map.Entry<String, String>> MNEMONICS = Stream.of(
+  private static final List<Map.Entry<String, String>> MNEMONICS =
+    Stream.<Map.Entry<String, String>>of(
       entry("aI", "aɪ"),
       entry("aU", "aʊ"),
       entry("eI", "eɪ"),

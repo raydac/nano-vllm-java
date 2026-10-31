@@ -72,14 +72,12 @@ final class TornadoAttentionExecutor {
       );
       return true;
     } catch (Throwable failure) {
-      if (failure instanceof OutOfMemoryError outOfMemory) {
-        throw outOfMemory;
-      }
-      if (failure instanceof Error error) {
-        throw error;
-      }
-      if (failure instanceof RuntimeException runtime) {
-        throw runtime;
+      switch (failure) {
+        case OutOfMemoryError outOfMemory -> throw outOfMemory;
+        case Error error -> throw error;
+        case RuntimeException runtime -> throw runtime;
+        default -> {
+        }
       }
       throw new IllegalStateException("TornadoVM attention failed", failure);
     } finally {

@@ -432,26 +432,32 @@ public record Qwen3ForCausalLM(Qwen3Model model, ParallelLMHead lmHead) implemen
         if (attention.qNorm() != null) {
           builder.queryNorm(attention.qNorm()).keyNorm(attention.kNorm());
         }
-      } else if (this.selfAttn instanceof Qwen3GgufAttention attention) {
-        kvLayer = attention.attn().getKvLayerIndex();
-        builder.query(attention.qProj())
-          .key(attention.kProj())
-          .value(attention.vProj())
-          .output(attention.oProj())
-          .rope(attention.rotaryEmb())
-          .heads(attention.numHeads(), attention.numKvHeads(), attention.headDim())
-          .scoreScale(attention.attn().getScoreScale())
-          .window(attention.attn().getSlidingWindow());
-        if (attention.qNorm() != null) {
-          builder.queryNorm(attention.qNorm()).keyNorm(attention.kNorm());
+      } else if (this.selfAttn instanceof Qwen3GgufAttention(
+        Linear.Row qProj, Linear.Row kProj, Linear.Row vProj, Linear.Row oProj,
+        RotaryEmbedding rotaryEmb, Attention attn, RMSNorm qNorm, RMSNorm kNorm, int numHeads,
+        int numKvHeads, int headDim
+      )) {
+        kvLayer = attn.getKvLayerIndex();
+        builder.query(qProj)
+          .key(kProj)
+          .value(vProj)
+          .output(oProj)
+          .rope(rotaryEmb)
+          .heads(numHeads, numKvHeads, headDim)
+          .scoreScale(attn.getScoreScale())
+          .window(attn.getSlidingWindow());
+        if (qNorm != null) {
+          builder.queryNorm(qNorm).keyNorm(kNorm);
         }
       } else {
         return null;
       }
-      if (this.mlp instanceof Qwen3MLP feed) {
-        builder.gateUp(feed.gateUpProj()).down(feed.downProj());
-      } else if (this.mlp instanceof Qwen3GgufMLP feed) {
-        builder.gate(feed.gateProj()).up(feed.upProj()).down(feed.downProj());
+      if (this.mlp instanceof Qwen3MLP(Linear.Merged gateUpProj, Linear.Row proj)) {
+        builder.gateUp(gateUpProj).down(proj);
+      } else if (this.mlp instanceof Qwen3GgufMLP(
+        Linear.Row gateProj, Linear.Row upProj, Linear.Row downProj
+      )) {
+        builder.gate(gateProj).up(upProj).down(downProj);
       } else {
         return null;
       }

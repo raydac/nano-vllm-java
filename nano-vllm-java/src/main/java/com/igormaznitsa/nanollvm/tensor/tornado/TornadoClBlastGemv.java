@@ -119,14 +119,14 @@ final class TornadoClBlastGemv {
         0.0f,
         result,
         outCount)
-      .transferToHost(EVERY_EXECUTION, (Object) result);
+      .transferToHost(EVERY_EXECUTION, result);
     return TornadoPlans.open(graph.snapshot());
   }
 
   private static TaskGraph residentGraph(final FloatArray matrix, final FloatArray activation) {
     return new TaskGraph(GRAPH_NAME)
-      .transferToDevice(FIRST_EXECUTION, (Object) matrix)
-      .transferToDevice(EVERY_EXECUTION, (Object) activation);
+      .transferToDevice(FIRST_EXECUTION, matrix)
+      .transferToDevice(EVERY_EXECUTION, activation);
   }
 
   private static void copyFromHeap(

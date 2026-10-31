@@ -36,28 +36,52 @@ import uk.ac.manchester.tornado.api.WorkerGrid1D;
 import uk.ac.manchester.tornado.api.exceptions.TornadoExecutionPlanException;
 
 /**
- * One TornadoVM task graph per decoder layer. Prefill walks that graph once per token so the
- * weight buffers allocated for decode are the same buffers, not a second copy.
+ * Decoder layers on TornadoVM. A frame runs four layers in one task graph so a token waits for
+ * the device once per group. Tornado encodes a graph into a fixed 8192-byte buffer, which is why
+ * the group stays at four and not the whole stack. Prefill walks that graph once per token.
  */
 public final class TornadoDecoder {
 
+  private static final int LAYERS_PER_GRAPH = 4;
+
   private static final Map<Key, LayerPlan> PLANS = new HashMap<>();
+
+  private static final Map<GroupKey, LayerPlan.GroupPlan> GROUPS = new HashMap<>();
+
+  private static final ThreadLocal<Frame> FRAME = new ThreadLocal<>();
 
   private TornadoDecoder() {
   }
 
   public static Tensor[] forward(final Layer layer) {
     requireNonNull(layer, "layer");
+    Frame frame = FRAME.get();
     if (!accepted(layer)) {
+      if (frame != null) {
+        frame.flush();
+      }
       return null;
     }
-    return runImmediate(layer);
+    if (frame == null) {
+      return runImmediate(layer);
+    }
+    return frame.record(layer);
   }
 
   public static void openFrame() {
+    Frame current = FRAME.get();
+    if (current != null) {
+      current.flush();
+    }
+    FRAME.set(new Frame());
   }
 
   public static void closeFrame() {
+    Frame current = FRAME.get();
+    FRAME.remove();
+    if (current != null) {
+      current.flush();
+    }
   }
 
   private static Tensor[] runImmediate(final Layer layer) {
@@ -88,6 +112,13 @@ public final class TornadoDecoder {
     TornadoLaunchLock.lock();
     try {
       PLANS.entrySet().removeIf(entry -> {
+        if (!entry.getValue().uses(drop)) {
+          return false;
+        }
+        entry.getValue().closeQuietly();
+        return true;
+      });
+      GROUPS.entrySet().removeIf(entry -> {
         if (!entry.getValue().uses(drop)) {
           return false;
         }
@@ -169,13 +200,114 @@ public final class TornadoDecoder {
   private record Key(float[] weight, float[] keyCache) {
     @Override
     public boolean equals(final Object other) {
-      return other instanceof Key that
-        && this.weight == that.weight && this.keyCache == that.keyCache;
+      return other instanceof Key(float[] weight1, float[] cache)
+        && this.weight == weight1 && this.keyCache == cache;
     }
 
     @Override
     public int hashCode() {
       return System.identityHashCode(this.weight) * 31 + System.identityHashCode(this.keyCache);
+    }
+  }
+
+  private static Tensor[] layerOutputs(final Layer layer) {
+    int rows = layer.hidden().size(0);
+    int hidden = layer.hidden().size(1);
+    if (layer.shape() == HIGHWAY) {
+      return new Tensor[] {Tensor.zeros(rows, hidden), Tensor.zeros(rows, hidden)};
+    }
+    return new Tensor[] {Tensor.zeros(rows, hidden)};
+  }
+
+  private static LayerPlan.GroupPlan group(final List<Pending> batch) {
+    GroupKey key = GroupKey.of(batch);
+    TornadoLaunchLock.lock();
+    try {
+      LayerPlan.GroupPlan cached = GROUPS.get(key);
+      if (cached != null) {
+        return cached;
+      }
+      LayerPlan.GroupPlan compiled = LayerPlan.compileGroup(key, batch);
+      GROUPS.put(key, compiled);
+      return compiled;
+    } finally {
+      TornadoLaunchLock.unlock();
+    }
+  }
+
+  private record Pending(Layer layer, Tensor[] outputs) {
+  }
+
+  private static final class Frame {
+    private final List<Pending> pending = new ArrayList<>();
+
+    private Tensor[] record(final Layer layer) {
+      if (!this.pending.isEmpty()
+        && this.pending.getFirst().layer.hidden().size(0) != layer.hidden().size(0)) {
+        this.flush();
+      }
+      Tensor[] outputs = layerOutputs(layer);
+      this.pending.add(new Pending(layer, outputs));
+      if (this.pending.size() == LAYERS_PER_GRAPH) {
+        this.flush();
+      }
+      return outputs;
+    }
+
+    private void flush() {
+      if (this.pending.isEmpty()) {
+        return;
+      }
+      List<Pending> batch = List.copyOf(this.pending);
+      this.pending.clear();
+      group(batch).run(batch);
+    }
+  }
+
+  private static final class GroupKey {
+    private final float[][] weights;
+    private final float[][] caches;
+    private final int hash;
+
+    private GroupKey(final float[][] weights, final float[][] caches) {
+      this.weights = weights;
+      this.caches = caches;
+      int mixed = weights.length;
+      for (int index = 0; index < weights.length; index++) {
+        mixed = mixed * 31 + System.identityHashCode(weights[index]);
+        mixed = mixed * 31 + System.identityHashCode(caches[index]);
+      }
+      this.hash = mixed;
+    }
+
+    private static GroupKey of(final List<Pending> batch) {
+      float[][] weights = new float[batch.size()][];
+      float[][] caches = new float[batch.size()][];
+      for (int index = 0; index < batch.size(); index++) {
+        Layer layer = batch.get(index).layer;
+        weights[index] = primary(layer);
+        caches[index] = layer.keyCache() == null ? null : layer.keyCache().data();
+      }
+      return new GroupKey(weights, caches);
+    }
+
+    @Override
+    public boolean equals(final Object other) {
+      if (!(other instanceof GroupKey that) || this.weights.length != that.weights.length) {
+        return false;
+      }
+      for (int index = 0; index < this.weights.length; index++) {
+        if (this.weights[index] != that.weights[index] ||
+          this.caches[index] != that.caches[index]) {
+          return false;
+        }
+      }
+      return true;
+    }
+
+    @Override
+    public int hashCode() {
+      return this.hash;
     }
   }
 
@@ -253,6 +385,32 @@ public final class TornadoDecoder {
       return stage.plan(draft.open(), sources(layer));
     }
 
+    static GroupPlan compileGroup(final GroupKey key, final List<Pending> batch) {
+      Layer first = batch.getFirst().layer;
+      int hidden = first.hidden().size(1);
+      Draft draft = new Draft("nanollvm-group-" + Integer.toUnsignedString(key.hashCode()));
+      float[] input = new float[hidden];
+      float[] residual = new float[hidden];
+      draft.every(input);
+      draft.every(residual);
+      List<float[]> host = new ArrayList<>();
+      List<Stage> stages = new ArrayList<>();
+      List<float[]> weightSources = new ArrayList<>();
+      float[] layerInput = input;
+      float[] layerResidual = residual;
+      for (int index = 0; index < batch.size(); index++) {
+        Layer layer = batch.get(index).layer;
+        draft.setPrefix("l" + index + "_");
+        Stage stage = append(draft, layer, layerInput, layerResidual, true, host);
+        stages.add(stage);
+        Collections.addAll(weightSources, sources(layer));
+        layerInput = stage.hiddenOut;
+        layerResidual = stage.residualOut == null ? layerResidual : stage.residualOut;
+      }
+      draft.host(host);
+      return new GroupPlan(draft.open(), stages, weightSources.toArray(float[][]::new), hidden);
+    }
+
     private static Stage append(
       final Draft draft, final Layer layer,
       final float[] x, final float[] residual,
@@ -273,7 +431,7 @@ public final class TornadoDecoder {
       int cacheOffset = 0;
       int valueOffset = 0;
       float[] mlpInput;
-      float[] carried = null;
+      float[] carried;
 
       if (!layer.attention()) {
         mlpInput = mixTail(draft, layer, x, residual, epsilon, hidden);
@@ -681,68 +839,22 @@ public final class TornadoDecoder {
       return scaled;
     }
 
-    private static final class Stage {
-      private final float[] x;
-      private final float[] residual;
-      private final float[] angles;
-      private final float[] perLayer;
-      private final float[] hiddenOut;
-      private final float[] residualOut;
-      private final float[] rotatedKey;
-      private final float[] storedValue;
-      private final float[] keyCache;
-      private final float[] valueCache;
-      private final int[] params;
-      private final int[] slots;
-      private final int hidden;
-      private final int keySize;
-      private final int cacheOffset;
-      private final int valueOffset;
-      private final int window;
-      private final boolean attention;
-      private final boolean writeKv;
-      private final RotaryEmbedding rope;
-
-      private Stage(
-        final float[] x, final float[] residual, final float[] angles, final float[] perLayer,
-        final float[] hiddenOut, final float[] residualOut,
-        final float[] rotatedKey, final float[] storedValue,
-        final float[] keyCache, final float[] valueCache,
-        final int[] params, final int[] slots,
-        final int hidden, final int keySize, final int cacheOffset, final int valueOffset,
-        final int window, final boolean attention, final boolean writeKv,
-        final RotaryEmbedding rope
-      ) {
-        this.x = x;
-        this.residual = residual;
-        this.angles = angles;
-        this.perLayer = perLayer;
-        this.hiddenOut = hiddenOut;
-        this.residualOut = residualOut;
-        this.rotatedKey = rotatedKey;
-        this.storedValue = storedValue;
-        this.keyCache = keyCache;
-        this.valueCache = valueCache;
-        this.params = params;
-        this.slots = slots;
-        this.hidden = hidden;
-        this.keySize = keySize;
-        this.cacheOffset = cacheOffset;
-        this.valueOffset = valueOffset;
-        this.window = window;
-        this.attention = attention;
-        this.writeKv = writeKv;
-        this.rope = rope;
+    void token(
+      final Layer layer, final int token, final float[] hiddenDest, final float[] residualDest
+    ) {
+      this.loadInput(layer, token);
+      int keyLength = this.prepare(layer, token);
+      TornadoLaunchLock.lock();
+      try {
+        if (this.needsCacheRefresh(keyLength)) {
+          this.plan.transferToDevice(this.keyCache, this.valueCache);
+        }
+        this.plan.execute();
+        this.rememberKeyLength(keyLength);
+      } finally {
+        TornadoLaunchLock.unlock();
       }
-
-      private LayerPlan plan(final TornadoExecutionPlan execution, final float[][] sources) {
-        return new LayerPlan(
-          execution, sources, this.x, this.residual, this.angles, this.perLayer,
-          this.hiddenOut, this.residualOut, this.rotatedKey, this.storedValue,
-          this.keyCache, this.valueCache, this.params, this.slots,
-          this.hidden, this.keySize, this.cacheOffset, this.valueOffset, this.window,
-          this.attention, this.writeKv, this.rope);
-      }
+      this.publish(hiddenDest, residualDest, token * this.hidden);
     }
 
     private static int intermediate(final Layer layer, final int hidden) {
@@ -855,57 +967,191 @@ public final class TornadoDecoder {
       }
     }
 
-    void token(
-      final Layer layer, final int token, final float[] hiddenDest, final float[] residualDest
-    ) {
+    private void loadInput(final Layer layer, final int token) {
       int row = token * this.hidden;
-      System.arraycopy(layer.hidden().data(), layer.hidden().offset() + row, this.x, 0,
-        this.hidden);
+      System.arraycopy(
+        layer.hidden().data(), layer.hidden().offset() + row, this.x, 0, this.hidden);
       if (layer.residual() != null) {
         System.arraycopy(
           layer.residual().data(), layer.residual().offset() + row, this.residual, 0, this.hidden);
       }
+    }
+
+    private int prepare(final Layer layer, final int token) {
       if (this.perLayer != null) {
         System.arraycopy(
           layer.perLayerInput().data(),
           layer.perLayerInput().offset() + token * this.perLayer.length,
           this.perLayer, 0, this.perLayer.length);
       }
-      int keyLength = 0;
-      if (this.attention) {
-        int position = Math.round(layer.positions().get(token));
-        this.rope.copyAngles(position, this.angles);
-        keyLength = keyLength(layer.context(), token);
-        int[] source = sourceSlots(layer.context(), keyLength);
-        int slot = layer.context().slotMapping()[token];
-        if (keyLength > this.slots.length || slot < 0) {
-          throw new IllegalArgumentException("device cache cannot hold this token");
-        }
-        System.arraycopy(source, 0, this.slots, 0, keyLength);
-        this.params[POSITION] = position;
-        this.params[SLOT] = slot;
-        this.params[KEY_LENGTH] = keyLength;
-        this.params[HAS_RESIDUAL] = layer.shape() == HIGHWAY && layer.residual() != null ? 1 : 0;
-        this.params[WINDOW] = this.window;
-        this.params[CACHE_OFFSET] = this.cacheOffset;
+      if (!this.attention) {
+        return 0;
       }
-      TornadoLaunchLock.lock();
-      try {
-        if (this.writeKv && this.lastKeyLength >= 0 && keyLength <= this.lastKeyLength) {
-          this.plan.transferToDevice(this.keyCache, this.valueCache);
-        }
-        this.plan.execute();
-        if (this.writeKv) {
-          this.lastKeyLength = keyLength;
-        }
-      } finally {
-        TornadoLaunchLock.unlock();
+      int position = Math.round(layer.positions().get(token));
+      this.rope.copyAngles(position, this.angles);
+      int keyLength = keyLength(layer.context(), token);
+      int[] source = sourceSlots(layer.context(), keyLength);
+      int slot = layer.context().slotMapping()[token];
+      if (keyLength > this.slots.length || slot < 0) {
+        throw new IllegalArgumentException("device cache cannot hold this token");
       }
+      System.arraycopy(source, 0, this.slots, 0, keyLength);
+      this.params[POSITION] = position;
+      this.params[SLOT] = slot;
+      this.params[KEY_LENGTH] = keyLength;
+      this.params[HAS_RESIDUAL] = layer.shape() == HIGHWAY && layer.residual() != null ? 1 : 0;
+      this.params[WINDOW] = this.window;
+      this.params[CACHE_OFFSET] = this.cacheOffset;
+      return keyLength;
+    }
+
+    private boolean needsCacheRefresh(final int keyLength) {
+      return this.writeKv && this.lastKeyLength >= 0 && keyLength <= this.lastKeyLength;
+    }
+
+    private void rememberKeyLength(final int keyLength) {
+      if (this.writeKv) {
+        this.lastKeyLength = keyLength;
+      }
+    }
+
+    private void publish(final float[] hiddenDest, final float[] residualDest, final int row) {
       System.arraycopy(this.hiddenOut, 0, hiddenDest, row, this.hidden);
       if (residualDest != null) {
         System.arraycopy(this.residualOut, 0, residualDest, row, this.hidden);
       }
-      if (this.writeKv) {
+      if (!this.writeKv) {
+        return;
+      }
+      int slot = this.params[SLOT];
+      int keyBase = this.cacheOffset + slot * this.keySize;
+      int valueBase = this.valueOffset + slot * this.keySize;
+      System.arraycopy(this.rotatedKey, 0, this.keyCache, keyBase, this.keySize);
+      System.arraycopy(this.storedValue, 0, this.valueCache, valueBase, this.keySize);
+    }
+
+    private static final class Stage {
+      private final float[] x;
+      private final float[] residual;
+      private final float[] angles;
+      private final float[] perLayer;
+      private final float[] hiddenOut;
+      private final float[] residualOut;
+      private final float[] rotatedKey;
+      private final float[] storedValue;
+      private final float[] keyCache;
+      private final float[] valueCache;
+      private final int[] params;
+      private final int[] slots;
+      private final int hidden;
+      private final int keySize;
+      private final int cacheOffset;
+      private final int valueOffset;
+      private final int window;
+      private final boolean attention;
+      private final boolean writeKv;
+      private final RotaryEmbedding rope;
+
+      private Stage(
+        final float[] x, final float[] residual, final float[] angles, final float[] perLayer,
+        final float[] hiddenOut, final float[] residualOut,
+        final float[] rotatedKey, final float[] storedValue,
+        final float[] keyCache, final float[] valueCache,
+        final int[] params, final int[] slots,
+        final int hidden, final int keySize, final int cacheOffset, final int valueOffset,
+        final int window, final boolean attention, final boolean writeKv,
+        final RotaryEmbedding rope
+      ) {
+        this.x = x;
+        this.residual = residual;
+        this.angles = angles;
+        this.perLayer = perLayer;
+        this.hiddenOut = hiddenOut;
+        this.residualOut = residualOut;
+        this.rotatedKey = rotatedKey;
+        this.storedValue = storedValue;
+        this.keyCache = keyCache;
+        this.valueCache = valueCache;
+        this.params = params;
+        this.slots = slots;
+        this.hidden = hidden;
+        this.keySize = keySize;
+        this.cacheOffset = cacheOffset;
+        this.valueOffset = valueOffset;
+        this.window = window;
+        this.attention = attention;
+        this.writeKv = writeKv;
+        this.rope = rope;
+      }
+
+      private int lastKeyLength = -1;
+
+      private LayerPlan plan(final TornadoExecutionPlan execution, final float[][] sources) {
+        return new LayerPlan(
+          execution, sources, this.x, this.residual, this.angles, this.perLayer,
+          this.hiddenOut, this.residualOut, this.rotatedKey, this.storedValue,
+          this.keyCache, this.valueCache, this.params, this.slots,
+          this.hidden, this.keySize, this.cacheOffset, this.valueOffset, this.window,
+          this.attention, this.writeKv, this.rope);
+      }
+
+      private void loadInput(final Layer layer, final int token) {
+        int row = token * this.hidden;
+        System.arraycopy(
+          layer.hidden().data(), layer.hidden().offset() + row, this.x, 0, this.hidden);
+        if (layer.residual() != null) {
+          System.arraycopy(
+            layer.residual().data(), layer.residual().offset() + row, this.residual, 0,
+            this.hidden);
+        }
+      }
+
+      private int prepare(final Layer layer, final int token) {
+        if (this.perLayer != null) {
+          System.arraycopy(
+            layer.perLayerInput().data(),
+            layer.perLayerInput().offset() + token * this.perLayer.length,
+            this.perLayer, 0, this.perLayer.length);
+        }
+        if (!this.attention) {
+          return 0;
+        }
+        int position = Math.round(layer.positions().get(token));
+        this.rope.copyAngles(position, this.angles);
+        int length = keyLength(layer.context(), token);
+        int[] source = sourceSlots(layer.context(), length);
+        int slot = layer.context().slotMapping()[token];
+        if (length > this.slots.length || slot < 0) {
+          throw new IllegalArgumentException("device cache cannot hold this token");
+        }
+        System.arraycopy(source, 0, this.slots, 0, length);
+        this.params[POSITION] = position;
+        this.params[SLOT] = slot;
+        this.params[KEY_LENGTH] = length;
+        this.params[HAS_RESIDUAL] = layer.shape() == HIGHWAY && layer.residual() != null ? 1 : 0;
+        this.params[WINDOW] = this.window;
+        this.params[CACHE_OFFSET] = this.cacheOffset;
+        return length;
+      }
+
+      private boolean needsCacheRefresh(final int keyLength) {
+        return this.writeKv && this.lastKeyLength >= 0 && keyLength <= this.lastKeyLength;
+      }
+
+      private void rememberKeyLength(final int keyLength) {
+        if (this.writeKv) {
+          this.lastKeyLength = keyLength;
+        }
+      }
+
+      private void publish(final float[] hiddenDest, final float[] residualDest, final int row) {
+        System.arraycopy(this.hiddenOut, 0, hiddenDest, row, this.hidden);
+        if (residualDest != null) {
+          System.arraycopy(this.residualOut, 0, residualDest, row, this.hidden);
+        }
+        if (!this.writeKv) {
+          return;
+        }
         int slot = this.params[SLOT];
         int keyBase = this.cacheOffset + slot * this.keySize;
         int valueBase = this.valueOffset + slot * this.keySize;
@@ -928,6 +1174,76 @@ public final class TornadoDecoder {
         this.plan.close();
       } catch (TornadoExecutionPlanException failure) {
         requireNonNull(failure);
+      }
+    }
+
+    static final class GroupPlan {
+      private final TornadoExecutionPlan plan;
+      private final List<Stage> stages;
+      private final float[][] sources;
+      private final int hidden;
+
+      private GroupPlan(
+        final TornadoExecutionPlan plan,
+        final List<Stage> stages,
+        final float[][] sources,
+        final int hidden
+      ) {
+        this.plan = plan;
+        this.stages = stages;
+        this.sources = sources;
+        this.hidden = hidden;
+      }
+
+      private void run(final List<Pending> batch) {
+        int rows = batch.getFirst().layer.hidden().size(0);
+        for (int token = 0; token < rows; token++) {
+          this.stages.getFirst().loadInput(batch.getFirst().layer, token);
+          int keyLength = 0;
+          for (int index = 0; index < this.stages.size(); index++) {
+            int length = this.stages.get(index).prepare(batch.get(index).layer, token);
+            if (length > 0) {
+              keyLength = length;
+            }
+          }
+          TornadoLaunchLock.lock();
+          try {
+            for (Stage stage : this.stages) {
+              if (stage.needsCacheRefresh(keyLength)) {
+                this.plan.transferToDevice(stage.keyCache, stage.valueCache);
+              }
+            }
+            this.plan.execute();
+            for (Stage stage : this.stages) {
+              stage.rememberKeyLength(keyLength);
+            }
+          } finally {
+            TornadoLaunchLock.unlock();
+          }
+          int row = token * this.hidden;
+          for (int index = 0; index < this.stages.size(); index++) {
+            Tensor[] outputs = batch.get(index).outputs;
+            this.stages.get(index).publish(
+              outputs[0].data(), outputs.length > 1 ? outputs[1].data() : null, row);
+          }
+        }
+      }
+
+      private boolean uses(final Set<float[]> weights) {
+        for (float[] source : this.sources) {
+          if (weights.contains(source)) {
+            return true;
+          }
+        }
+        return false;
+      }
+
+      private void closeQuietly() {
+        try {
+          this.plan.close();
+        } catch (TornadoExecutionPlanException failure) {
+          requireNonNull(failure);
+        }
       }
     }
 
@@ -955,6 +1271,10 @@ public final class TornadoDecoder {
     private String prefix = "";
     private float[] carried;
     private float[] perLayerRow;
+
+    private void setPrefix(final String prefix) {
+      this.prefix = prefix;
+    }
 
     private String id(final String task) {
       return this.prefix + task;
@@ -984,7 +1304,8 @@ public final class TornadoDecoder {
     }
 
     private void host(final List<float[]> outputs) {
-      this.graph = this.graph.transferToHost(EVERY_EXECUTION, outputs.toArray(float[][]::new));
+      this.graph =
+        this.graph.transferToHost(EVERY_EXECUTION, (Object) outputs.toArray(float[][]::new));
     }
 
     private void gemv(

@@ -267,13 +267,15 @@ final class TornadoGemvExecutor {
     @Override
     @SuppressWarnings("ReferenceEquality")
     public boolean equals(final Object other) {
-      if (!(other instanceof WeightKey that)) {
+      if (!(other instanceof WeightKey(
+        float[] weight1, int offset, float[] bias1, int in1, int out1, int count, int rows1
+      ))) {
         return false;
       }
-      return this.weight == that.weight && this.weightOffset == that.weightOffset
-        && this.bias == that.bias
-        && this.in == that.in && this.out0 == that.out0
-        && this.outCount == that.outCount && this.rows == that.rows;
+      return this.weight == weight1 && this.weightOffset == offset
+        && this.bias == bias1
+        && this.in == in1 && this.out0 == out1
+        && this.outCount == count && this.rows == rows1;
     }
 
     @Override
@@ -386,7 +388,7 @@ final class TornadoGemvExecutor {
       final WeightKey key, final float[] xScratch, final float[] yScratch
     ) {
       return new TaskGraph(GRAPH_NAME)
-        .transferToDevice(FIRST_EXECUTION, (Object) key.weight(), (Object) key.biasArg())
+        .transferToDevice(FIRST_EXECUTION, key.weight(), key.biasArg())
         .transferToDevice(EVERY_EXECUTION, (Object) xScratch);
     }
 
@@ -448,24 +450,8 @@ final class TornadoGemvExecutor {
   private record TileKey(int rows, int in, int outCount, boolean withBias) {
   }
 
-  private static final class StreamedTile implements TornadoGemvLaunch {
-
-    private final GemvPlan plan;
-
-    private final float[] weight;
-
-    private final float[] bias;
-
-    private final int in;
-
-    private StreamedTile(
-      final GemvPlan plan, final float[] weight, final float[] bias, final int in
-    ) {
-      this.plan = plan;
-      this.weight = weight;
-      this.bias = bias;
-      this.in = in;
-    }
+  private record StreamedTile(GemvPlan plan, float[] weight, float[] bias, int in)
+    implements TornadoGemvLaunch {
 
     static StreamedTile compile(
       final int rows, final int in, final int outCount, final boolean withBias
@@ -492,7 +478,7 @@ final class TornadoGemvExecutor {
       worker.setLocalWork(laneWidth, 1, 1);
       GridScheduler scheduler = new GridScheduler(name + "." + TASK_NAME, worker);
       TaskGraph taskGraph = new TaskGraph(name)
-        .transferToDevice(EVERY_EXECUTION, (Object) weight, (Object) bias, (Object) xScratch)
+        .transferToDevice(EVERY_EXECUTION, weight, bias, xScratch)
         .task(
           TASK_NAME,
           TornadoGemvKernels::gemvTiled,
