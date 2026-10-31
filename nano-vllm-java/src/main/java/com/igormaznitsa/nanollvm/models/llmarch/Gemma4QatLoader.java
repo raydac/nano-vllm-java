@@ -25,8 +25,6 @@ import java.util.Map;
  */
 public final class Gemma4QatLoader {
 
-  private static final String LANGUAGE_PREFIX = "model.language_model.";
-
   private Gemma4QatLoader() {
   }
 
@@ -72,7 +70,9 @@ public final class Gemma4QatLoader {
     for (Located item : located) {
       String role = tensorRole(item);
       if (role == null) {
-        dense.put(item.canonical(), item);
+        if (dense.putIfAbsent(item.canonical(), item) != null) {
+          throw new IllegalStateException("duplicate weight: " + item.canonical());
+        }
         continue;
       }
       String param = paramName(item.canonical(), role);
@@ -104,11 +104,11 @@ public final class Gemma4QatLoader {
           reader = transport.openShard(currentShard);
         }
         if (item.qatParam() == null) {
-          bag.put(locatedItem.canonical(), reader.getTensor(locatedItem.rawName()));
+          putWeight(bag, locatedItem.canonical(), reader.getTensor(locatedItem.rawName()));
           loadedBytes += locatedItem.byteSize();
         } else {
           ModuleParts parts = modules.get(item.qatParam());
-          bag.put(item.qatParam(), loadQat(reader, parts, bound.config(), item.qatParam()));
+          putWeight(bag, item.qatParam(), loadQat(reader, parts, bound.config(), item.qatParam()));
           loadedBytes += parts.payload().byteSize();
         }
         progress.step("%s | %s (%.0f MiB)".formatted(
@@ -222,10 +222,17 @@ public final class Gemma4QatLoader {
   }
 
   private static String canonicalize(final String rawName) {
-    if (rawName.startsWith(LANGUAGE_PREFIX)) {
-      return "model." + rawName.substring(LANGUAGE_PREFIX.length());
+    return ModelLoader.canonicalWeightName(rawName);
+  }
+
+  private static void putWeight(
+    final Map<String, Object> bag,
+    final String name,
+    final Object weight
+  ) {
+    if (bag.putIfAbsent(name, weight) != null) {
+      throw new IllegalStateException("duplicate weight: " + name);
     }
-    return rawName;
   }
 
   private static String tensorRole(final Located item) {
@@ -305,12 +312,19 @@ public final class Gemma4QatLoader {
 
     void accept(final String role, final Located located) {
       switch (role) {
-        case "quant" -> this.quant = located;
-        case "scale" -> this.scale = located;
-        case "in_scale" -> this.inputScale = located;
-        case "out_scale" -> this.outputScale = located;
+        case "quant" -> this.quant = this.only(role, this.quant, located);
+        case "scale" -> this.scale = this.only(role, this.scale, located);
+        case "in_scale" -> this.inputScale = this.only(role, this.inputScale, located);
+        case "out_scale" -> this.outputScale = this.only(role, this.outputScale, located);
         default -> throw new IllegalArgumentException(role);
       }
+    }
+
+    private Located only(final String role, final Located current, final Located located) {
+      if (current != null) {
+        throw new IllegalStateException("duplicate " + role + " tensor: " + located.canonical());
+      }
+      return located;
     }
 
     Located payload() {

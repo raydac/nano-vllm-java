@@ -33,6 +33,7 @@ Development snapshot after the **1.4.0** public release.
   TileContext is CUDA-only and is not used.
 
 ### Fixed
+- Weight load fails on a duplicate or wrong-shaped tensor, and still accepts the same modules under common wrapper prefixes (`language_model`, `text_model`, `base_model`, repeated `model.`). A swapped `[in, out]` matrix is stored as `[out, in]`.
 - On Windows, TornadoVM samples start `tornado.exe`. The extensionless `tornado` file in the SDK is a shell script, and Windows cannot run it. When `TORNADOVM_HOME` is set, Maven `-Ptornado` launches `$TORNADOVM_HOME/bin` rather than relying on `PATH` alone. Kernel chat bench quotes TornadoVM worker classpath and model paths for `cmd.exe` so `;` and drive letters survive the launcher's `os.system` command line.
 
 ### Added
