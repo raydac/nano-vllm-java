@@ -449,6 +449,9 @@ public final class Ops {
     float[] xd = x.data();
     int xOff = x.offset();
     float[] od = out.data();
+    if (VectorMath.rmsNormRows(xd, xOff, null, 0, eps, false, od, 0, rows, last)) {
+      return out;
+    }
     for (int r = 0; r < rows; r++) {
       int xBase = xOff + r * last;
       int oBase = r * last;
@@ -485,6 +488,9 @@ public final class Ops {
     int xOff = x.offset();
     int wOff = weight.offset();
     float[] od = out.data();
+    if (VectorMath.rmsNormRows(xd, xOff, wd, wOff, eps, onePlusWeight, od, 0, rows, last)) {
+      return out;
+    }
     for (int r = 0; r < rows; r++) {
       int xBase = xOff + r * last;
       int oBase = r * last;
@@ -558,6 +564,11 @@ public final class Ops {
     int xOff = x.offset();
     int rOff = residual.offset();
     int wOff = weight == null ? 0 : weight.offset();
+    if (VectorMath.addRmsNormRows(
+      xd, xOff, rd, rOff, wd, wOff, eps, onePlusWeight, sd, 0, od, 0, rows, last
+    )) {
+      return new Tensor[] {out, summed};
+    }
     for (int r = 0; r < rows; r++) {
       int xBase = xOff + r * last;
       int rBase = rOff + r * last;

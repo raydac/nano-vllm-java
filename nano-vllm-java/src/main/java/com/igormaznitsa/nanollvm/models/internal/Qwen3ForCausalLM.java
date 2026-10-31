@@ -30,6 +30,7 @@ import static java.util.Objects.requireNonNull;
 
 import com.igormaznitsa.nanollvm.internal.Context;
 import com.igormaznitsa.nanollvm.layers.Attention;
+import com.igormaznitsa.nanollvm.layers.DeviceDecoders;
 import com.igormaznitsa.nanollvm.layers.Linear;
 import com.igormaznitsa.nanollvm.layers.Norms.RMSNorm;
 import com.igormaznitsa.nanollvm.layers.Norms.RotaryEmbedding;
@@ -379,6 +380,10 @@ public record Qwen3ForCausalLM(Qwen3Model model, ParallelLMHead lmHead) implemen
       final Tensor residual,
       final Context context
     ) {
+      Tensor[] device = this.deviceLayer(positions, hiddenStates, residual, context);
+      if (device != null) {
+        return device;
+      }
       Tensor hidden;
       Tensor resid;
       if (residual == null) {
@@ -393,6 +398,66 @@ public record Qwen3ForCausalLM(Qwen3Model model, ParallelLMHead lmHead) implemen
       Tensor[] n = this.postAttentionLayernorm.forward(hidden, resid);
       hidden = this.mlp.forward(n[0], context);
       return new Tensor[] {hidden, n[1]};
+    }
+
+    private Tensor[] deviceLayer(
+      final Tensor positions,
+      final Tensor hiddenStates,
+      final Tensor residual,
+      final Context context
+    ) {
+      DeviceDecoders.Step step = DeviceDecoders.decoder();
+      if (step == null || context == null || context.kvCache() == null) {
+        return null;
+      }
+      DeviceDecoders.LayerBuilder builder = DeviceDecoders.layer()
+        .highway()
+        .silu()
+        .positions(positions)
+        .hidden(hiddenStates)
+        .residual(residual)
+        .context(context)
+        .inputNorm(this.inputLayernorm)
+        .postAttentionNorm(this.postAttentionLayernorm)
+        .epsilon(this.inputLayernorm.getEpsilon());
+      int kvLayer;
+      if (this.selfAttn instanceof Qwen3Attention attention) {
+        kvLayer = attention.attn().getKvLayerIndex();
+        builder.qkv(attention.qkvProj())
+          .output(attention.oProj())
+          .rope(attention.rotaryEmb())
+          .heads(attention.numHeads(), attention.numKvHeads(), attention.headDim())
+          .scoreScale(attention.attn().getScoreScale())
+          .window(attention.attn().getSlidingWindow());
+        if (attention.qNorm() != null) {
+          builder.queryNorm(attention.qNorm()).keyNorm(attention.kNorm());
+        }
+      } else if (this.selfAttn instanceof Qwen3GgufAttention attention) {
+        kvLayer = attention.attn().getKvLayerIndex();
+        builder.query(attention.qProj())
+          .key(attention.kProj())
+          .value(attention.vProj())
+          .output(attention.oProj())
+          .rope(attention.rotaryEmb())
+          .heads(attention.numHeads(), attention.numKvHeads(), attention.headDim())
+          .scoreScale(attention.attn().getScoreScale())
+          .window(attention.attn().getSlidingWindow());
+        if (attention.qNorm() != null) {
+          builder.queryNorm(attention.qNorm()).keyNorm(attention.kNorm());
+        }
+      } else {
+        return null;
+      }
+      if (this.mlp instanceof Qwen3MLP feed) {
+        builder.gateUp(feed.gateUpProj()).down(feed.downProj());
+      } else if (this.mlp instanceof Qwen3GgufMLP feed) {
+        builder.gate(feed.gateProj()).up(feed.upProj()).down(feed.downProj());
+      } else {
+        return null;
+      }
+      return step.forward(builder.caches(
+        context.kvCache().getKeyCache(kvLayer),
+        context.kvCache().getValueCache(kvLayer)).build());
     }
   }
 

@@ -19,18 +19,26 @@ Development snapshot after the **1.4.0** public release.
   token before the next block, instead of reading the matrix again for every token.
 - Chat steps reuse activation buffers across a forward, keep one paged KV slot index per
   sequence, and draw top-k without boxing the vocabulary.
-- Optional TornadoVM dependencies are `8.0.0-jdk22plus`. On OpenCL, a multi-token dense GEMV
-  uses CLBlast when `libclblast` runs on the device. A one-token matmul and a one-query attention
-  step run on the CPU, using the Vector API when it is available. A failed multi-token CLBlast
-  launch stays on the device kernel.
-  `-Dnanollvm.tornado.clblast=false` keeps the device kernel for multi-token matmul.
-  TornadoVM mode still keeps a weight matrix resident and runs a multi-token layer as one launch.
-  A multi-token attention range is one TornadoVM task. Short vectors stay on the CPU so generation
-  does not pay a device launch per score. Cached plans keep only
-  the latest execution result, so a long chat does not retain one result per token. Closing a
-  model releases that model's resident weight copies. Later layers of the same token reuse keys
-  already copied for that token. The Vector API stays a separate mode.
-  TileContext is CUDA-only and is not used.
+- Optional TornadoVM dependencies are `8.0.0-jdk22plus`. TornadoVM mode runs dense GEMV,
+  attention, and the elementwise kernels on the device, including one-token decode. One decode
+  matmul is one device launch. On OpenCL, a multi-token dense GEMV uses CLBlast when `libclblast`
+  runs. One-token GEMV uses a workgroup-per-row device kernel (one workgroup reads each weight
+  row, then reduces in local memory). A failed multi-token CLBlast launch stays on that
+  kernel. `-Dnanollvm.tornado.clblast=false` keeps the device kernel for multi-token matmul.
+  A weight matrix stays resident for the current token count. A prefill plan is released when
+  decode starts, so the same matrix is not stored on the device twice. A matrix larger than 32 MiB,
+  including the vocabulary projection, is uploaded in pieces through one reusable device buffer.
+  Each dense decoder layer
+  (Llama, Qwen3, Qwen3.5 full attention, Gemma 3, Gemma 4, and LFM2 attention), including its
+  prefill tokens, is one TornadoVM task graph: matmul, norm, RoPE, and attention stay on the
+  device, and only the layer output is copied back. Packed and Gemma 4 QAT projections are expanded
+  once into that graph. Qwen3.5 linear-attention recurrence and the LFM2 short convolution stay on
+  the CPU; the MLP of those layers still runs in one device graph. RMSNorm runs as one device task for every row of the tensor.
+  An attention range, including a single decode query, is one TornadoVM task, and the key cache
+  stays on the device: only a new token is copied on the next step. Cached plans keep only the latest execution result, so a long chat does not
+  retain one result per token. Closing a model releases that model's resident weight copies.
+  Later layers of the same token reuse keys already copied for that token. The Vector API stays
+  a separate mode. TileContext is CUDA-only and is not used.
 
 ### Fixed
 - Weight load fails on a duplicate or wrong-shaped tensor, and still accepts the same modules under common wrapper prefixes (`language_model`, `text_model`, `base_model`, repeated `model.`). A swapped `[in, out]` matrix is stored as `[out, in]`.

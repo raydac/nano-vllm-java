@@ -12,6 +12,22 @@ final class TornadoAttentionKernels {
   private TornadoAttentionKernels() {
   }
 
+  static void appendLatest(
+    final float[] key, final float[] value,
+    final float[] keyDelta, final float[] valueDelta, final float[] params
+  ) {
+    int count = (int) params[10];
+    int at = (int) params[9];
+    int width = keyDelta.length;
+    int base = at * width;
+    for (@Parallel int lane = 0; lane < width; lane++) {
+      if (count != 0) {
+        key[base + lane] = keyDelta[lane];
+        value[base + lane] = valueDelta[lane];
+      }
+    }
+  }
+
   static void scoreHeads(
     final float[] query,
     final float[] key,

@@ -6,6 +6,7 @@ import com.igormaznitsa.nanollvm.models.internal.PackedWeight;
 import com.igormaznitsa.nanollvm.tensor.LinearKernel;
 import com.igormaznitsa.nanollvm.tensor.MatmulRuntime;
 import com.igormaznitsa.nanollvm.tensor.MatmulRuntime.PackedRowDequant;
+import com.igormaznitsa.nanollvm.tensor.Tensor;
 
 /**
  * Packed GEMM configured with a row-dequant bound at construction (GGML type fixed in the lambda).
@@ -70,6 +71,16 @@ public final class PackedLinearKernel implements LinearKernel {
   @Override
   public String name() {
     return this.name;
+  }
+
+  public Tensor materialize() {
+    float[] data = new float[Math.multiplyExact(this.outFeatures, this.inFeatures)];
+    float[] row = new float[this.inFeatures];
+    for (int r = 0; r < this.outFeatures; r++) {
+      this.dequant.dequantizeRow(r, row);
+      System.arraycopy(row, 0, data, r * this.inFeatures, this.inFeatures);
+    }
+    return Tensor.of(data, this.outFeatures, this.inFeatures);
   }
 
   @Override

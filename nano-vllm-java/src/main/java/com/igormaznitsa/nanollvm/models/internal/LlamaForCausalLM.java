@@ -21,6 +21,7 @@ import static java.util.Objects.requireNonNull;
 
 import com.igormaznitsa.nanollvm.internal.Context;
 import com.igormaznitsa.nanollvm.layers.Attention;
+import com.igormaznitsa.nanollvm.layers.DeviceDecoders;
 import com.igormaznitsa.nanollvm.layers.Linear;
 import com.igormaznitsa.nanollvm.layers.Norms.RMSNorm;
 import com.igormaznitsa.nanollvm.layers.Norms.RotaryEmbedding;
@@ -217,6 +218,10 @@ public record LlamaForCausalLM(LlamaModel model, ParallelLMHead lmHead) implemen
       final Tensor residual,
       final Context context
     ) {
+      Tensor[] device = this.deviceLayer(positions, hiddenStates, residual, context);
+      if (device != null) {
+        return device;
+      }
       Tensor hidden;
       Tensor resid;
       if (residual == null) {
@@ -231,6 +236,41 @@ public record LlamaForCausalLM(LlamaModel model, ParallelLMHead lmHead) implemen
       Tensor[] n = this.postAttentionLayernorm.forward(hidden, resid);
       hidden = this.mlp.forward(n[0], context);
       return new Tensor[] {hidden, n[1]};
+    }
+
+    private Tensor[] deviceLayer(
+      final Tensor positions,
+      final Tensor hiddenStates,
+      final Tensor residual,
+      final Context context
+    ) {
+      DeviceDecoders.Step step = DeviceDecoders.decoder();
+      if (step == null || context == null || context.kvCache() == null) {
+        return null;
+      }
+      int kvLayer = this.selfAttn.attn().getKvLayerIndex();
+      return step.forward(DeviceDecoders.layer()
+        .highway()
+        .silu()
+        .positions(positions)
+        .hidden(hiddenStates)
+        .residual(residual)
+        .context(context)
+        .qkv(this.selfAttn.qkvProj())
+        .output(this.selfAttn.oProj())
+        .gateUp(this.mlp.gateUpProj())
+        .down(this.mlp.downProj())
+        .inputNorm(this.inputLayernorm)
+        .postAttentionNorm(this.postAttentionLayernorm)
+        .epsilon(this.inputLayernorm.getEpsilon())
+        .rope(this.selfAttn.rotaryEmb())
+        .heads(this.selfAttn.numHeads(), this.selfAttn.numKvHeads(), this.selfAttn.headDim())
+        .scoreScale(this.selfAttn.attn().getScoreScale())
+        .window(this.selfAttn.attn().getSlidingWindow())
+        .caches(
+          context.kvCache().getKeyCache(kvLayer),
+          context.kvCache().getValueCache(kvLayer))
+        .build());
     }
   }
 

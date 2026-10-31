@@ -1,24 +1,19 @@
 package com.igormaznitsa.nanollvm.tensor.tornado;
 
+import com.igormaznitsa.nanollvm.layers.DeviceDecoders;
 import com.igormaznitsa.nanollvm.tensor.FloatKernels;
-import java.util.Objects;
 
 /**
- * TornadoVM {@link FloatKernels}. A multi-token dense GEMV uses CLBlast when it runs, otherwise the
- * Kernel API. One token reads each weight matrix once, so that matmul and a one-query attention
- * step stay on the CPU backend. Elementwise work uses the device only when the slice is long
- * enough to hide the launch.
+ * TornadoVM {@link FloatKernels}. Dense GEMV, attention, and elementwise work run as device tasks.
+ * One-token GEMV uses the device kernel. Multi-token GEMV uses CLBlast when it runs, and the same
+ * device kernel when CLBlast does not.
  *
  * @since 1.4.0
  */
 public final class TornadoFloatKernels extends FloatKernels {
 
-  private static final int MIN_DEVICE_SPAN = 65536;
-
-  private final FloatKernels cpu;
-
-  TornadoFloatKernels(final FloatKernels cpu) {
-    this.cpu = Objects.requireNonNull(cpu, "cpu");
+  TornadoFloatKernels() {
+    DeviceDecoders.register(TornadoDecoder::forward);
   }
 
   @Override
@@ -29,6 +24,7 @@ public final class TornadoFloatKernels extends FloatKernels {
   @Override
   public void releaseWeights(final float[]... weights) {
     TornadoGemvExecutor.releaseWeights(weights);
+    TornadoDecoder.releaseWeights(weights);
   }
 
   @Override
@@ -43,11 +39,7 @@ public final class TornadoFloatKernels extends FloatKernels {
     if (n <= 0) {
       return 0f;
     }
-    return this.value(
-      n,
-      () -> TornadoElementExecutor.dot(a, aOffset, b, bOffset, n),
-      () -> this.cpu.dot(a, aOffset, b, bOffset, n)
-    );
+    return TornadoElementExecutor.dot(a, aOffset, b, bOffset, n);
   }
 
   @Override
@@ -55,11 +47,7 @@ public final class TornadoFloatKernels extends FloatKernels {
     if (n <= 0) {
       return 0f;
     }
-    return this.value(
-      n,
-      () -> TornadoElementExecutor.sumSquares(a, offset, n),
-      () -> this.cpu.sumSquares(a, offset, n)
-    );
+    return TornadoElementExecutor.sumSquares(a, offset, n);
   }
 
   @Override
@@ -67,11 +55,10 @@ public final class TornadoFloatKernels extends FloatKernels {
     final float[] src, final int srcOff, final float[] weight, final int wOff, final float scale,
     final float[] dst, final int dstOff, final int n
   ) {
-    this.run(
-      () -> TornadoElementExecutor.scaleAdd(src, srcOff, weight, wOff, scale, dst, dstOff, n),
-      () -> this.cpu.scaleAdd(src, srcOff, weight, wOff, scale, dst, dstOff, n),
-      n
-    );
+    if (n <= 0) {
+      return;
+    }
+    TornadoElementExecutor.scaleAdd(src, srcOff, weight, wOff, scale, dst, dstOff, n);
   }
 
   @Override
@@ -79,12 +66,10 @@ public final class TornadoFloatKernels extends FloatKernels {
     final float[] src, final int srcOff, final float[] weight, final int wOff, final float scale,
     final float[] dst, final int dstOff, final int n
   ) {
-    this.run(
-      () -> TornadoElementExecutor.scaleAddOnePlus(src, srcOff, weight, wOff, scale, dst, dstOff,
-        n),
-      () -> this.cpu.scaleAddOnePlus(src, srcOff, weight, wOff, scale, dst, dstOff, n),
-      n
-    );
+    if (n <= 0) {
+      return;
+    }
+    TornadoElementExecutor.scaleAddOnePlus(src, srcOff, weight, wOff, scale, dst, dstOff, n);
   }
 
   @Override
@@ -98,7 +83,7 @@ public final class TornadoFloatKernels extends FloatKernels {
     if (out1 <= out0 || in < 0) {
       return;
     }
-    this.cpu.gemv(x, xOff, w, wOff, bias, y, yOff, in, out0, out1);
+    TornadoGemvExecutor.gemv(x, xOff, w, wOff, bias, y, yOff, in, out0, out1);
   }
 
   @Override
@@ -113,16 +98,8 @@ public final class TornadoFloatKernels extends FloatKernels {
     if (rows <= 0 || out1 <= out0 || in < 0) {
       return;
     }
-    if (rows == 1) {
-      this.cpu.gemvRows(x, xOff, w, wOff, bias, y, yOff, rows, in, rowStride, out0, out1);
-      return;
-    }
-    try {
-      TornadoGemvExecutor.gemvRows(
-        x, xOff, w, wOff, bias, y, yOff, rows, in, rowStride, out0, out1);
-    } catch (RuntimeException failed) {
-      this.cpu.gemvRows(x, xOff, w, wOff, bias, y, yOff, rows, in, rowStride, out0, out1);
-    }
+    TornadoGemvExecutor.gemvRows(
+      x, xOff, w, wOff, bias, y, yOff, rows, in, rowStride, out0, out1);
   }
 
   @Override
@@ -130,11 +107,10 @@ public final class TornadoFloatKernels extends FloatKernels {
     final float[] a, final int aOff, final float[] b, final int bOff,
     final float[] dst, final int dstOff, final int n
   ) {
-    this.run(
-      () -> TornadoElementExecutor.add(a, aOff, b, bOff, dst, dstOff, n),
-      () -> this.cpu.add(a, aOff, b, bOff, dst, dstOff, n),
-      n
-    );
+    if (n <= 0) {
+      return;
+    }
+    TornadoElementExecutor.add(a, aOff, b, bOff, dst, dstOff, n);
   }
 
   @Override
@@ -142,11 +118,10 @@ public final class TornadoFloatKernels extends FloatKernels {
     final float[] a, final int aOff, final float[] b, final int bOff,
     final float[] dst, final int dstOff, final int n
   ) {
-    this.run(
-      () -> TornadoElementExecutor.mul(a, aOff, b, bOff, dst, dstOff, n),
-      () -> this.cpu.mul(a, aOff, b, bOff, dst, dstOff, n),
-      n
-    );
+    if (n <= 0) {
+      return;
+    }
+    TornadoElementExecutor.mul(a, aOff, b, bOff, dst, dstOff, n);
   }
 
   @Override
@@ -154,11 +129,10 @@ public final class TornadoFloatKernels extends FloatKernels {
     final float[] src, final int srcOff, final float factor,
     final float[] dst, final int dstOff, final int n
   ) {
-    this.run(
-      () -> TornadoElementExecutor.scale(src, srcOff, factor, dst, dstOff, n),
-      () -> this.cpu.scale(src, srcOff, factor, dst, dstOff, n),
-      n
-    );
+    if (n <= 0) {
+      return;
+    }
+    TornadoElementExecutor.scale(src, srcOff, factor, dst, dstOff, n);
   }
 
   @Override
@@ -166,11 +140,10 @@ public final class TornadoFloatKernels extends FloatKernels {
     final float[] dst, final int dstOff, final float alpha,
     final float[] src, final int srcOff, final int n
   ) {
-    this.run(
-      () -> TornadoElementExecutor.axpy(dst, dstOff, alpha, src, srcOff, n),
-      () -> this.cpu.axpy(dst, dstOff, alpha, src, srcOff, n),
-      n
-    );
+    if (n <= 0) {
+      return;
+    }
+    TornadoElementExecutor.axpy(dst, dstOff, alpha, src, srcOff, n);
   }
 
   @Override
@@ -181,11 +154,7 @@ public final class TornadoFloatKernels extends FloatKernels {
     if (n <= 0) {
       return 0f;
     }
-    return this.value(
-      n,
-      () -> TornadoElementExecutor.addSumSquares(a, aOff, b, bOff, dst, dstOff, n),
-      () -> this.cpu.addSumSquares(a, aOff, b, bOff, dst, dstOff, n)
-    );
+    return TornadoElementExecutor.addSumSquares(a, aOff, b, bOff, dst, dstOff, n);
   }
 
   @Override
@@ -193,22 +162,20 @@ public final class TornadoFloatKernels extends FloatKernels {
     final float[] gate, final int gateOff, final float[] up, final int upOff,
     final float[] dst, final int dstOff, final int n
   ) {
-    this.run(
-      () -> TornadoElementExecutor.siluMul(gate, gateOff, up, upOff, dst, dstOff, n),
-      () -> this.cpu.siluMul(gate, gateOff, up, upOff, dst, dstOff, n),
-      n
-    );
+    if (n <= 0) {
+      return;
+    }
+    TornadoElementExecutor.siluMul(gate, gateOff, up, upOff, dst, dstOff, n);
   }
 
   @Override
   public void geluTanh(
     final float[] src, final int srcOff, final float[] dst, final int dstOff, final int n
   ) {
-    this.run(
-      () -> TornadoElementExecutor.geluTanh(src, srcOff, dst, dstOff, n),
-      () -> this.cpu.geluTanh(src, srcOff, dst, dstOff, n),
-      n
-    );
+    if (n <= 0) {
+      return;
+    }
+    TornadoElementExecutor.geluTanh(src, srcOff, dst, dstOff, n);
   }
 
   @Override
@@ -216,11 +183,39 @@ public final class TornadoFloatKernels extends FloatKernels {
     final float[] gate, final int gateOff, final float[] up, final int upOff,
     final float[] dst, final int dstOff, final int n
   ) {
-    this.run(
-      () -> TornadoElementExecutor.geluTanhMul(gate, gateOff, up, upOff, dst, dstOff, n),
-      () -> this.cpu.geluTanhMul(gate, gateOff, up, upOff, dst, dstOff, n),
-      n
-    );
+    if (n <= 0) {
+      return;
+    }
+    TornadoElementExecutor.geluTanhMul(gate, gateOff, up, upOff, dst, dstOff, n);
+  }
+
+  @Override
+  public boolean rmsNormRows(
+    final float[] src, final int srcOff,
+    final float[] weight, final int weightOff,
+    final float eps, final boolean onePlusWeight,
+    final float[] dst, final int dstOff,
+    final int rows, final int last
+  ) {
+    TornadoNormExecutor.rmsNorm(
+      src, srcOff, weight, weightOff, eps, onePlusWeight, dst, dstOff, rows, last);
+    return true;
+  }
+
+  @Override
+  public boolean addRmsNormRows(
+    final float[] left, final int leftOff,
+    final float[] right, final int rightOff,
+    final float[] weight, final int weightOff,
+    final float eps, final boolean onePlusWeight,
+    final float[] summed, final int summedOff,
+    final float[] normed, final int normedOff,
+    final int rows, final int last
+  ) {
+    TornadoNormExecutor.addRmsNorm(
+      left, leftOff, right, rightOff, weight, weightOff, eps, onePlusWeight,
+      summed, summedOff, normed, normedOff, rows, last);
+    return true;
   }
 
   @Override
@@ -234,14 +229,17 @@ public final class TornadoFloatKernels extends FloatKernels {
     final float scale, final int slidingWindow,
     final boolean causal, final int[] keySlots
   ) {
-    if (queryLength <= 1) {
-      return false;
+    if (queryLength <= 0) {
+      return true;
     }
-    return TornadoAttentionExecutor.attend(
+    if (!TornadoAttentionExecutor.attend(
       query, queryOffset, key, keyOffset, value, valueOffset, result, resultOffset,
       queryStart, queryLength, keyIndexBase, keyLength,
       numHeads, numKvHeads, headDim, scale, slidingWindow, causal, keySlots
-    );
+    )) {
+      throw new IllegalStateException("TornadoVM attention rejected the query range");
+    }
+    return true;
   }
 
   @Override
@@ -249,41 +247,9 @@ public final class TornadoFloatKernels extends FloatKernels {
     final float[] src, final int srcOff, final float cap,
     final float[] dst, final int dstOff, final int n
   ) {
-    this.run(
-      () -> TornadoElementExecutor.tanhSoftcap(src, srcOff, cap, dst, dstOff, n),
-      () -> this.cpu.tanhSoftcap(src, srcOff, cap, dst, dstOff, n),
-      n
-    );
-  }
-
-  private void run(final Runnable tornado, final Runnable scalar, final int n) {
     if (n <= 0) {
       return;
     }
-    if (n < MIN_DEVICE_SPAN) {
-      scalar.run();
-      return;
-    }
-    try {
-      tornado.run();
-    } catch (RuntimeException failed) {
-      scalar.run();
-    }
-  }
-
-  private float value(final int n, final FloatSupplier tornado, final FloatSupplier scalar) {
-    if (n < MIN_DEVICE_SPAN) {
-      return scalar.get();
-    }
-    try {
-      return tornado.get();
-    } catch (RuntimeException failed) {
-      return scalar.get();
-    }
-  }
-
-  @FunctionalInterface
-  private interface FloatSupplier {
-    float get();
+    TornadoElementExecutor.tanhSoftcap(src, srcOff, cap, dst, dstOff, n);
   }
 }

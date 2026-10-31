@@ -20,12 +20,18 @@ import uk.ac.manchester.tornado.api.exceptions.TornadoExecutionPlanException;
  * One compiled Tornado plan per weight matrix and token count. OpenCL uses CLBlast for more than
  * one token when {@code libclblast} runs; otherwise a device kernel. Activations are copied into a
  * plan-owned buffer so a new result array does not recompile the kernel or re-upload weights.
+ * A matrix larger than 32 MiB is copied through one reusable device tile, so the vocabulary
+ * projection is not allocated as a single buffer beside the resident layer graphs.
  *
  * @since 1.4.0
  */
 final class TornadoGemvExecutor {
 
   private static final int MAX_CACHED_PLANS = 256;
+
+  private static final int TILE_WEIGHT_BYTES = 32 * 1024 * 1024;
+  private static final Map<TileKey, StreamedTile> STREAMED_TILES = new LinkedHashMap<>();
+  private static int residentRows = -1;
   private static final String GRAPH_NAME = "nanollvm-gemv";
   private static final String TASK_NAME = "gemv";
   private static final String SCHEDULER_KEY = GRAPH_NAME + "." + TASK_NAME;
@@ -66,9 +72,73 @@ final class TornadoGemvExecutor {
         entry.getValue().closeQuietly();
         return true;
       });
+      closeStreamedTiles();
     } finally {
       TornadoLaunchLock.unlock();
     }
+  }
+
+  private static void keepRowCount(final int rows) {
+    if (residentRows == rows) {
+      return;
+    }
+    for (TornadoGemvLaunch plan : CACHED_PLANS.values()) {
+      plan.closeQuietly();
+    }
+    CACHED_PLANS.clear();
+    closeStreamedTiles();
+    residentRows = rows;
+  }
+
+  private static void closeStreamedTiles() {
+    for (StreamedTile plan : STREAMED_TILES.values()) {
+      plan.closeQuietly();
+    }
+    STREAMED_TILES.clear();
+  }
+
+  private static long weightSpanBytes(final int outCount, final int in) {
+    return (long) outCount * (long) in * Float.BYTES;
+  }
+
+  private static int tileOutputRows(final int in) {
+    long rows = TILE_WEIGHT_BYTES / ((long) in * Float.BYTES);
+    if (rows < 1L) {
+      return 1;
+    }
+    return rows > Integer.MAX_VALUE ? Integer.MAX_VALUE : (int) rows;
+  }
+
+  private static void projectInWeightTiles(
+    final float[] x, final int xOff,
+    final float[] w, final int wOff,
+    final float[] bias,
+    final float[] y, final int yOff,
+    final int rows, final int in, final int rowStride,
+    final int out0, final int out1
+  ) throws TornadoExecutionPlanException {
+    int tile = tileOutputRows(in);
+    boolean withBias = bias != null;
+    for (int out = out0; out < out1; ) {
+      int count = Math.min(tile, out1 - out);
+      StreamedTile plan = streamedTile(rows, in, count, withBias);
+      plan.copySlice(w, wOff, bias, out, count);
+      plan.execute(x, xOff, y, Math.addExact(yOff, out), rowStride);
+      out += count;
+    }
+  }
+
+  private static StreamedTile streamedTile(
+    final int rows, final int in, final int outCount, final boolean withBias
+  ) throws TornadoExecutionPlanException {
+    TileKey key = new TileKey(rows, in, outCount, withBias);
+    StreamedTile cached = STREAMED_TILES.get(key);
+    if (cached != null) {
+      return cached;
+    }
+    StreamedTile compiled = StreamedTile.compile(rows, in, outCount, withBias);
+    STREAMED_TILES.put(key, compiled);
+    return compiled;
   }
 
   private static TornadoGemvLaunch cached(final WeightKey key)
@@ -110,6 +180,15 @@ final class TornadoGemvExecutor {
     }
   }
 
+  static int streamedTileCount() {
+    TornadoLaunchLock.lock();
+    try {
+      return STREAMED_TILES.size();
+    } finally {
+      TornadoLaunchLock.unlock();
+    }
+  }
+
   static void gemv(
     final float[] x, final int xOff,
     final float[] w, final int wOff,
@@ -135,9 +214,15 @@ final class TornadoGemvExecutor {
     if (outCount > Integer.MAX_VALUE / rows) {
       throw new IllegalArgumentException("TornadoVM GEMV launch exceeds Integer range");
     }
-    WeightKey key = WeightKey.of(w, wOff, bias, in, out0, outCount, rows);
     TornadoLaunchLock.lock();
     try {
+      keepRowCount(rows);
+      if (weightSpanBytes(outCount, in) > TILE_WEIGHT_BYTES) {
+        projectInWeightTiles(
+          x, xOff, w, wOff, bias, y, yOff, rows, in, rowStride, out0, out1);
+        return;
+      }
+      WeightKey key = WeightKey.of(w, wOff, bias, in, out0, outCount, rows);
       TornadoGemvLaunch plan = cached(key);
       try {
         plan.execute(x, xOff, y, yOff, rowStride);
@@ -236,8 +321,9 @@ final class TornadoGemvExecutor {
     private static GemvPlan compileTiled(
       final WeightKey key, final float[] xScratch, final float[] yScratch
     ) throws TornadoExecutionPlanException {
-      int laneWidth = (int) localWorkSize(key.outCount());
-      WorkerGrid1D worker = new WorkerGrid1D(key.work());
+      int laneWidth = TornadoGemvKernels.ROW_LANES;
+      int threads = Math.multiplyExact(key.work(), laneWidth);
+      WorkerGrid1D worker = new WorkerGrid1D(threads);
       worker.setLocalWork(laneWidth, 1, 1);
       GridScheduler scheduler = new GridScheduler(SCHEDULER_KEY, worker);
       TaskGraph taskGraph = taskGraph(key, xScratch, yScratch)
@@ -298,12 +384,9 @@ final class TornadoGemvExecutor {
     private static TaskGraph taskGraph(
       final WeightKey key, final float[] xScratch, final float[] yScratch
     ) {
-      TaskGraph taskGraph = new TaskGraph(GRAPH_NAME)
-        .transferToDevice(FIRST_EXECUTION, (Object) key.weight());
-      if (key.hasBias()) {
-        taskGraph = taskGraph.transferToDevice(FIRST_EXECUTION, (Object) key.biasArg());
-      }
-      return taskGraph.transferToDevice(EVERY_EXECUTION, (Object) xScratch);
+      return new TaskGraph(GRAPH_NAME)
+        .transferToDevice(FIRST_EXECUTION, (Object) key.weight(), (Object) key.biasArg())
+        .transferToDevice(EVERY_EXECUTION, (Object) xScratch);
     }
 
     private static GemvPlan open(
@@ -357,6 +440,101 @@ final class TornadoGemvExecutor {
       } catch (TornadoExecutionPlanException failure) {
         Objects.requireNonNull(failure);
       }
+    }
+  }
+
+  private record TileKey(int rows, int in, int outCount, boolean withBias) {
+  }
+
+  private static final class StreamedTile implements TornadoGemvLaunch {
+
+    private final GemvPlan plan;
+
+    private final float[] weight;
+
+    private final float[] bias;
+
+    private final int in;
+
+    private StreamedTile(
+      final GemvPlan plan, final float[] weight, final float[] bias, final int in
+    ) {
+      this.plan = plan;
+      this.weight = weight;
+      this.bias = bias;
+      this.in = in;
+    }
+
+    static StreamedTile compile(
+      final int rows, final int in, final int outCount, final boolean withBias
+    ) throws TornadoExecutionPlanException {
+      float[] weight = new float[Math.multiplyExact(outCount, in)];
+      float[] bias = withBias ? new float[outCount] : new float[1];
+      float[] xScratch = new float[Math.multiplyExact(rows, in)];
+      float[] yScratch = new float[Math.multiplyExact(rows, outCount)];
+      WeightKey key = WeightKey.of(weight, 0, withBias ? bias : null, in, 0, outCount, rows);
+      String name =
+        "nanollvm-gemv-tile-%d-%d-%d-%d".formatted(rows, in, outCount, withBias ? 1 : 0);
+      GemvPlan plan = openTiled(name, key, weight, bias, xScratch, yScratch);
+      return new StreamedTile(plan, weight, bias, in);
+    }
+
+    private static GemvPlan openTiled(
+      final String name, final WeightKey key,
+      final float[] weight, final float[] bias,
+      final float[] xScratch, final float[] yScratch
+    ) throws TornadoExecutionPlanException {
+      int laneWidth = TornadoGemvKernels.ROW_LANES;
+      int threads = Math.multiplyExact(key.work(), laneWidth);
+      WorkerGrid1D worker = new WorkerGrid1D(threads);
+      worker.setLocalWork(laneWidth, 1, 1);
+      GridScheduler scheduler = new GridScheduler(name + "." + TASK_NAME, worker);
+      TaskGraph taskGraph = new TaskGraph(name)
+        .transferToDevice(EVERY_EXECUTION, (Object) weight, (Object) bias, (Object) xScratch)
+        .task(
+          TASK_NAME,
+          TornadoGemvKernels::gemvTiled,
+          new KernelContext(),
+          xScratch,
+          weight, 0,
+          bias, key.hasBiasFlag(),
+          yScratch,
+          key.in(), 0, key.outCount(), laneWidth
+        )
+        .transferToHost(EVERY_EXECUTION, (Object) yScratch);
+      TornadoExecutionPlan plan = TornadoPlans.open(taskGraph.snapshot())
+        .withGridScheduler(scheduler);
+      return new GemvPlan(plan, xScratch, yScratch, key.rows(), key.in(), 0, key.outCount());
+    }
+
+    void copySlice(
+      final float[] source, final int sourceOffset,
+      final float[] biasSource, final int out, final int count
+    ) {
+      for (int row = 0; row < count; row++) {
+        int from = Math.toIntExact(sourceOffset + (long) (out + row) * this.in);
+        System.arraycopy(source, from, this.weight, Math.toIntExact((long) row * this.in), this.in);
+      }
+      if (biasSource != null) {
+        System.arraycopy(biasSource, out, this.bias, 0, count);
+      }
+    }
+
+    @Override
+    public void execute(
+      final float[] x, final int xOff, final float[] y, final int yOff, final int rowStride
+    ) throws TornadoExecutionPlanException {
+      this.plan.execute(x, xOff, y, yOff, rowStride);
+    }
+
+    @Override
+    public void close() throws TornadoExecutionPlanException {
+      this.plan.close();
+    }
+
+    @Override
+    public void closeQuietly() {
+      this.plan.closeQuietly();
     }
   }
 }

@@ -14,9 +14,9 @@ package com.igormaznitsa.nanollvm.tensor;
  *   <li><strong>Scalar</strong> — plain Java loops ({@code ScalarFloatKernels})</li>
  *   <li><strong>Vector</strong> — JDK incubator Vector API / SIMD ({@code VectorFloatKernels})</li>
  *   <li><strong>TornadoVM</strong> — optional heterogeneous backend when {@code tornado.api} and
- *       {@code tornado.runtime} are on the module path. Dense GEMV and chat attention run as
- *       TornadoVM tasks. A single short vector stays on a scalar loop, because one device launch
- *       per vector stalls generation. The Vector API is a separate mode</li>
+ *       {@code tornado.runtime} are on the module path. Dense GEMV, chat attention, and the
+ *       elementwise kernels run as TornadoVM tasks, including one-token decode. The Vector API
+ *       is a separate mode</li>
  * </ul>
  * Selection is done once by {@link FloatKernelsFactory} (see {@code -Dnanollvm.kernels}).
  * The process-wide default instance is {@link #get()}; {@link VectorMath} delegates to it.
@@ -60,6 +60,13 @@ public abstract class FloatKernels {
   }
 
   /**
+   * Initializes the process-wide backend. Device layer graphs register during that initialization.
+   */
+  public static void loadBackend() {
+    get();
+  }
+
+  /**
    * Drops device-resident plans that captured these weight arrays. CPU backends do nothing.
    * Closing a model calls this so TornadoVM can free that model's copies.
    *
@@ -88,9 +95,8 @@ public abstract class FloatKernels {
   public abstract String name();
 
   /**
-   * When {@code true}, a multi-token dense GEMV should run as one full-range call instead of
-   * CPU-sharded tiles. One-token decode stays sharded across CPU threads: a device launch costs
-   * more than reading the matrix once.
+   * When {@code true}, dense GEMV — prefill and one-token decode — runs as one full-range call
+   * instead of CPU-sharded tiles.
    *
    * @return {@code false} for CPU backends
    * @since 1.4.0
@@ -115,6 +121,42 @@ public abstract class FloatKernels {
     final int numHeads, final int numKvHeads, final int headDim,
     final float scale, final int slidingWindow,
     final boolean causal, final int[] keySlots
+  ) {
+    return false;
+  }
+
+  /**
+   * RMSNorm over {@code rows} of width {@code last}, as one task. The default returns {@code false}
+   * and the caller keeps a per-row loop.
+   *
+   * @return {@code true} when {@code dst} holds the normalized rows
+   * @since 1.5.0
+   */
+  public boolean rmsNormRows(
+    final float[] src, final int srcOff,
+    final float[] weight, final int weightOff,
+    final float eps, final boolean onePlusWeight,
+    final float[] dst, final int dstOff,
+    final int rows, final int last
+  ) {
+    return false;
+  }
+
+  /**
+   * Residual add and RMSNorm over {@code rows} of width {@code last}, as one task. The default
+   * returns {@code false}.
+   *
+   * @return {@code true} when {@code summed} and {@code normed} are written
+   * @since 1.5.0
+   */
+  public boolean addRmsNormRows(
+    final float[] left, final int leftOff,
+    final float[] right, final int rightOff,
+    final float[] weight, final int weightOff,
+    final float eps, final boolean onePlusWeight,
+    final float[] summed, final int summedOff,
+    final float[] normed, final int normedOff,
+    final int rows, final int last
   ) {
     return false;
   }

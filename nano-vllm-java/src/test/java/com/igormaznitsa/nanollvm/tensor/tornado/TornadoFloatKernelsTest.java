@@ -1,7 +1,6 @@
 package com.igormaznitsa.nanollvm.tensor.tornado;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
@@ -84,9 +83,12 @@ class TornadoFloatKernelsTest {
   }
 
   @Test
-  void oneTokenMatmulAndOneQueryAttentionStayOnTheCpu() {
+  void oneTokenMatmulAndOneQueryAttentionRunOnTheDevice() {
+    assumeTrue(TornadoFloatKernelsProvider.isAvailable(), "TornadoVM device required");
+
     FloatKernels cpu = FloatKernelsFactory.create("scalar");
-    TornadoFloatKernels tornado = new TornadoFloatKernels(cpu);
+    FloatKernels tornado = TornadoFloatKernelsProvider.create();
+    assumeTrue(tornado != null);
     int in = 32;
     int out = 16;
     float[] x = new float[in];
@@ -107,11 +109,29 @@ class TornadoFloatKernelsTest {
     tornado.gemvRows(x, 0, weight, 0, null, oneRow, 0, 1, in, out, 0, out);
     assertClose(expected, actual);
     assertClose(expected, oneRow);
+    int held = TornadoGemvExecutor.cachedPlanCount();
+    assertTrue(held >= 1);
+    tornado.gemv(x, 0, weight, 0, null, actual, 0, in, 0, out);
+    assertEquals(held, TornadoGemvExecutor.cachedPlanCount());
     assertEquals(launches, TornadoClBlastGemv.launchCount());
-    assertFalse(tornado.attend(
-      new float[4], 0, new float[4], 0, new float[4], 0, new float[4], 0,
-      0, 1, 0, 1, 1, 1, 4, 1f, 0, true, null
+
+    int queryLength = 1;
+    int keyLength = 2;
+    int headDim = 4;
+    int numHeads = 1;
+    int numKvHeads = 1;
+    float[] query = fill(queryLength * numHeads * headDim, 0.05f);
+    float[] key = fill(keyLength * numKvHeads * headDim, 0.03f);
+    float[] value = fill(key.length, 0.04f);
+    float[] attended = new float[query.length];
+    float[] deviceAttended = new float[query.length];
+    scalarAttend(query, key, value, attended, queryLength, keyLength, numHeads, numKvHeads, headDim,
+      0.5f, 0, true, null);
+    assertTrue(tornado.attend(
+      query, 0, key, 0, value, 0, deviceAttended, 0,
+      0, queryLength, 0, keyLength, numHeads, numKvHeads, headDim, 0.5f, 0, true, null
     ));
+    assertClose(attended, deviceAttended);
   }
 
   @Test
@@ -119,7 +139,7 @@ class TornadoFloatKernelsTest {
     assumeTrue(TornadoFloatKernelsProvider.isAvailable(), "TornadoVM device required");
 
     FloatKernels cpu = FloatKernelsFactory.create("scalar");
-    FloatKernels tornado = TornadoFloatKernelsProvider.create(cpu);
+    FloatKernels tornado = TornadoFloatKernelsProvider.create();
     assumeTrue(tornado != null);
 
     int in = 256;
@@ -147,11 +167,50 @@ class TornadoFloatKernelsTest {
   }
 
   @Test
+  void vocabularySizedGemvStreamsWeightTiles() {
+    assumeTrue(TornadoFloatKernelsProvider.isAvailable(), "TornadoVM device required");
+
+    FloatKernels cpu = FloatKernelsFactory.create("scalar");
+    FloatKernels tornado = TornadoFloatKernelsProvider.create();
+    assumeTrue(tornado != null);
+
+    int in = 4096;
+    int out = 2053;
+    float[] x = new float[in];
+    float[] weight = new float[out * in];
+    float[] expected = new float[out];
+    float[] actual = new float[out];
+    for (int i = 0; i < in; i++) {
+      x[i] = ((i % 7) - 3) * 0.01f;
+    }
+    for (int i = 0; i < weight.length; i++) {
+      weight[i] = ((i % 5) - 2) * 0.01f;
+    }
+
+    int tiles = TornadoGemvExecutor.streamedTileCount();
+    int launches = TornadoClBlastGemv.launchCount();
+    cpu.gemv(x, 0, weight, 0, null, expected, 0, in, 0, out);
+    tornado.gemv(x, 0, weight, 0, null, actual, 0, in, 0, out);
+    assertClose(expected, actual);
+    assertTrue(TornadoGemvExecutor.streamedTileCount() > tiles);
+    int held = TornadoGemvExecutor.streamedTileCount();
+
+    for (int i = 0; i < weight.length; i++) {
+      weight[i] = ((i % 11) - 5) * 0.02f;
+    }
+    cpu.gemv(x, 0, weight, 0, null, expected, 0, in, 0, out);
+    tornado.gemv(x, 0, weight, 0, null, actual, 0, in, 0, out);
+    assertClose(expected, actual);
+    assertEquals(held, TornadoGemvExecutor.streamedTileCount());
+    assertEquals(launches, TornadoClBlastGemv.launchCount());
+  }
+
+  @Test
   void smallGemvMatchesScalar() {
     assumeTrue(TornadoFloatKernelsProvider.isAvailable(), "TornadoVM device required");
 
     FloatKernels cpu = FloatKernelsFactory.create("scalar");
-    FloatKernels tornado = TornadoFloatKernelsProvider.create(cpu);
+    FloatKernels tornado = TornadoFloatKernelsProvider.create();
     assumeTrue(tornado != null);
 
     int in = 32;
@@ -214,7 +273,7 @@ class TornadoFloatKernelsTest {
     assumeTrue(TornadoFloatKernelsProvider.isAvailable(), "TornadoVM device required");
 
     FloatKernels cpu = FloatKernelsFactory.create("scalar");
-    FloatKernels tornado = TornadoFloatKernelsProvider.create(cpu);
+    FloatKernels tornado = TornadoFloatKernelsProvider.create();
     assumeTrue(tornado != null);
     assertEquals("TornadoVM", tornado.name());
 
@@ -284,7 +343,7 @@ class TornadoFloatKernelsTest {
     assumeTrue(TornadoFloatKernelsProvider.isAvailable(), "TornadoVM device required");
 
     FloatKernels cpu = FloatKernelsFactory.create("scalar");
-    FloatKernels tornado = TornadoFloatKernelsProvider.create(cpu);
+    FloatKernels tornado = TornadoFloatKernelsProvider.create();
     assumeTrue(tornado != null);
 
     int n = 65536;
@@ -292,6 +351,29 @@ class TornadoFloatKernelsTest {
     float[] right = fill(n, 0.02f);
     assertEquals(cpu.dot(left, 0, right, 0, n), tornado.dot(left, 0, right, 0, n), 0.1f);
     assertEquals(cpu.sumSquares(left, 0, n), tornado.sumSquares(left, 0, n), 0.1f);
+  }
+
+  @Test
+  void rmsNormRowsMatchScalar() {
+    assumeTrue(TornadoFloatKernelsProvider.isAvailable(), "TornadoVM device required");
+
+    FloatKernels cpu = FloatKernelsFactory.create("scalar");
+    FloatKernels tornado = TornadoFloatKernelsProvider.create();
+    assumeTrue(tornado != null);
+    int rows = 4;
+    int last = 8;
+    float[] src = fill(rows * last + 2, 0.05f);
+    float[] weight = fill(last + 1, 0.02f);
+    float[] expected = new float[rows * last];
+    float[] actual = new float[rows * last];
+    float eps = 1.0e-6f;
+    for (int row = 0; row < rows; row++) {
+      float energy = cpu.sumSquares(src, 2 + row * last, last);
+      float inv = (float) (1.0 / Math.sqrt(energy / last + eps));
+      cpu.scaleAdd(src, 2 + row * last, weight, 1, inv, expected, row * last, last);
+    }
+    assertTrue(tornado.rmsNormRows(src, 2, weight, 1, eps, false, actual, 0, rows, last));
+    assertClose(expected, actual);
   }
 
   @Test
@@ -331,7 +413,7 @@ class TornadoFloatKernelsTest {
     assumeTrue(TornadoFloatKernelsProvider.isAvailable(), "TornadoVM device required");
 
     FloatKernels cpu = FloatKernelsFactory.create("scalar");
-    FloatKernels tornado = TornadoFloatKernelsProvider.create(cpu);
+    FloatKernels tornado = TornadoFloatKernelsProvider.create();
     assumeTrue(tornado != null);
 
     int in = 32;
@@ -340,20 +422,38 @@ class TornadoFloatKernelsTest {
     float[] weight = fill(out * in, 0.01f);
     float[] expected = new float[out];
     float[] actual = new float[out];
-    int before = TornadoGemvExecutor.cachedPlanCount();
     cpu.gemv(x, 0, weight, 0, null, expected, 0, in, 0, out);
     tornado.gemv(x, 0, weight, 0, null, actual, 0, in, 0, out);
     assertClose(expected, actual);
-    assertEquals(before + 1, TornadoGemvExecutor.cachedPlanCount());
+    int held = TornadoGemvExecutor.cachedPlanCount();
+    assertTrue(held >= 1);
 
     tornado.releaseWeights(weight);
-    assertEquals(before, TornadoGemvExecutor.cachedPlanCount());
+    assertEquals(held - 1, TornadoGemvExecutor.cachedPlanCount());
 
     x[0] += 0.25f;
     cpu.gemv(x, 0, weight, 0, null, expected, 0, in, 0, out);
     tornado.gemv(x, 0, weight, 0, null, actual, 0, in, 0, out);
     assertClose(expected, actual);
-    assertEquals(before + 1, TornadoGemvExecutor.cachedPlanCount());
+    assertEquals(held, TornadoGemvExecutor.cachedPlanCount());
+  }
+
+  @Test
+  void tokenCountChangeDropsResidentGemvPlans() {
+    assumeTrue(TornadoFloatKernelsProvider.isAvailable(), "TornadoVM device required");
+
+    FloatKernels tornado = TornadoFloatKernelsProvider.create();
+    assumeTrue(tornado != null);
+    int in = 16;
+    int out = 16;
+    float[] x = fill(in * 2, 0.1f);
+    float[] weight = fill(out * in, 0.01f);
+    float[] y = new float[out * 2];
+    tornado.gemvRows(x, 0, weight, 0, null, y, 0, 2, in, out, 0, out);
+    assertTrue(TornadoGemvExecutor.cachedPlanCount() >= 1);
+
+    tornado.gemv(x, 0, weight, 0, null, y, 0, in, 0, out);
+    assertEquals(1, TornadoGemvExecutor.cachedPlanCount());
   }
 
   @Test

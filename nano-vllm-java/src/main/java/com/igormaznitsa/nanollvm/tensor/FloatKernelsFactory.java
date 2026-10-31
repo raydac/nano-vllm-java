@@ -74,7 +74,7 @@ public final class FloatKernelsFactory {
         }
         yield new VectorFloatKernels();
       }
-      case "tornado" -> requireTornado(createCpuFallback());
+      case "tornado" -> requireTornado();
       case "auto" -> createBestAvailable();
       default -> throw new IllegalArgumentException(
         "Unknown -D" + PROP_KERNELS + "=" + mode + " (use auto|tornado|vector|scalar)"
@@ -86,9 +86,8 @@ public final class FloatKernelsFactory {
    * Prefer TornadoVM when the optional add-on is ready, else Vector API, else scalar.
    */
   public static FloatKernels createBestAvailable() {
-    FloatKernels cpu = createCpuFallback();
-    FloatKernels tornado = createTornadoIfAvailable(cpu);
-    return tornado != null ? tornado : cpu;
+    FloatKernels tornado = createTornadoIfAvailable();
+    return tornado != null ? tornado : createCpuFallback();
   }
 
   /**
@@ -113,8 +112,8 @@ public final class FloatKernelsFactory {
     return VECTOR_API_AVAILABLE ? new VectorFloatKernels() : new ScalarFloatKernels();
   }
 
-  private static FloatKernels requireTornado(final FloatKernels cpuFallback) {
-    FloatKernels tornado = createTornadoIfAvailable(cpuFallback);
+  private static FloatKernels requireTornado() {
+    FloatKernels tornado = createTornadoIfAvailable();
     if (tornado == null) {
       throw new IllegalStateException(
         "TornadoVM kernels requested (-D" + PROP_KERNELS
@@ -126,14 +125,14 @@ public final class FloatKernelsFactory {
     return tornado;
   }
 
-  private static FloatKernels createTornadoIfAvailable(final FloatKernels cpuFallback) {
+  private static FloatKernels createTornadoIfAvailable() {
     if (!TORNADO_AVAILABLE) {
       return null;
     }
     try {
       Class<?> provider = Class.forName(TORNADO_PROVIDER);
-      Method create = provider.getMethod("create", FloatKernels.class);
-      Object result = create.invoke(null, cpuFallback);
+      Method create = provider.getMethod("create");
+      Object result = create.invoke(null);
       if (result instanceof FloatKernels kernels) {
         return kernels;
       }

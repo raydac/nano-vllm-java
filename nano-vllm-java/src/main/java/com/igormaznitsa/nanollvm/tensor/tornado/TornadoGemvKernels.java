@@ -4,15 +4,17 @@ import uk.ac.manchester.tornado.api.KernelContext;
 import uk.ac.manchester.tornado.api.annotations.Parallel;
 
 /**
- * TornadoVM dense GEMV: tiled Kernel API, plain Kernel API, then Loop Parallel.
+ * TornadoVM dense GEMV. The fast kernel follows TornadoVM's row-major example: one workgroup per
+ * output row, consecutive lanes reading consecutive weights, then a local reduction. Plain Kernel
+ * API and Loop Parallel remain fallbacks.
  *
  * @since 1.4.0
  */
 final class TornadoGemvKernels {
 
-  static final int ACTIVATION_TILE = 128;
+  static final int ROW_LANES = 128;
 
-  static final float[] NO_BIAS = new float[0];
+  static final float[] NO_BIAS = new float[1];
 
   private TornadoGemvKernels() {
   }
@@ -25,31 +27,45 @@ final class TornadoGemvKernels {
     final float[] y,
     final int in, final int out0, final int outCount, final int laneWidth
   ) {
-    int t = ctx.globalIdx;
-    int token = t / outCount;
-    int col = t - token * outCount;
+    int group = ctx.groupIdx;
     int lane = ctx.localIdx;
-    int o = out0 + col;
-    float sum = 0f;
-    if (hasBias != 0) {
-      sum = bias[o];
-    }
+    int token = group / outCount;
+    int col = group - token * outCount;
+    int row = out0 + col;
     int xBase = token * in;
-    int wBase = wOff + o * in;
-    float[] tile = ctx.allocateFloatLocalArray(ACTIVATION_TILE);
-    for (int base = 0; base < in; base += ACTIVATION_TILE) {
-      for (int i = lane; i < ACTIVATION_TILE; i += laneWidth) {
-        int k = base + i;
-        tile[i] = k < in ? x[xBase + k] : 0f;
-      }
-      ctx.localBarrier();
-      int limit = Math.min(ACTIVATION_TILE, in - base);
-      for (int i = 0; i < limit; i++) {
-        sum += tile[i] * w[wBase + base + i];
+    int wBase = wOff + row * in;
+    float[] partials = ctx.allocateFloatLocalArray(laneWidth);
+    float lane0 = 0f;
+    float lane1 = 0f;
+    float lane2 = 0f;
+    float lane3 = 0f;
+    int stride = laneWidth * 4;
+    int aligned = in & ~3;
+    for (int k = lane * 4; k < aligned; k += stride) {
+      lane0 += x[xBase + k] * w[wBase + k];
+      lane1 += x[xBase + k + 1] * w[wBase + k + 1];
+      lane2 += x[xBase + k + 2] * w[wBase + k + 2];
+      lane3 += x[xBase + k + 3] * w[wBase + k + 3];
+    }
+    float partial = lane0 + lane1 + lane2 + lane3;
+    for (int k = aligned + lane; k < in; k += laneWidth) {
+      partial += x[xBase + k] * w[wBase + k];
+    }
+    partials[lane] = partial;
+    ctx.localBarrier();
+    for (int step = laneWidth >> 1; step > 0; step >>= 1) {
+      if (lane < step) {
+        partials[lane] += partials[lane + step];
       }
       ctx.localBarrier();
     }
-    y[token * outCount + col] = sum;
+    if (lane == 0) {
+      float sum = partials[0];
+      if (hasBias != 0) {
+        sum += bias[row];
+      }
+      y[token * outCount + col] = sum;
+    }
   }
 
   static void gemvPlain(

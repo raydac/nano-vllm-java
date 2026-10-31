@@ -126,6 +126,28 @@ public final class Attention {
   }
 
   /**
+   * Arena layer this attention reads, and writes when it stores new keys.
+   */
+  public int getKvLayerIndex() {
+    return this.kvLayerIndex;
+  }
+
+  /**
+   * Maximum number of recent keys this attention reads. {@code 0} is the full context.
+   */
+  public int getSlidingWindow() {
+    return this.slidingWindow;
+  }
+
+  public float getScoreScale() {
+    return this.scale;
+  }
+
+  public boolean isWriteKv() {
+    return this.writeKv;
+  }
+
+  /**
    * Flattens a paged block table of length {@code kLen} into arena slot indices
    * ({@code blockId * blockSize + offset}).
    */

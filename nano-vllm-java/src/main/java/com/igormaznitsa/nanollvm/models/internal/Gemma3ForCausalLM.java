@@ -25,6 +25,7 @@ import static java.util.Objects.requireNonNull;
 
 import com.igormaznitsa.nanollvm.internal.Context;
 import com.igormaznitsa.nanollvm.layers.Attention;
+import com.igormaznitsa.nanollvm.layers.DeviceDecoders;
 import com.igormaznitsa.nanollvm.layers.Linear;
 import com.igormaznitsa.nanollvm.layers.Norms.RMSNorm;
 import com.igormaznitsa.nanollvm.layers.Norms.RotaryEmbedding;
@@ -221,6 +222,10 @@ public record Gemma3ForCausalLM(Gemma3Model model, ParallelLMHead lmHead) implem
     }
 
     Tensor forward(final Tensor positions, final Tensor hiddenStates, final Context context) {
+      Tensor device = this.deviceLayer(positions, hiddenStates, context);
+      if (device != null) {
+        return device;
+      }
       Tensor residual = hiddenStates;
       Tensor hidden = this.selfAttn.forward(
         positions, this.inputLayernorm.forward(hiddenStates), context);
@@ -229,6 +234,42 @@ public record Gemma3ForCausalLM(Gemma3Model model, ParallelLMHead lmHead) implem
       residual = hidden;
       hidden = this.mlp.forward(this.preFeedforwardLayernorm.forward(hidden), context);
       return Ops.add(residual, this.postFeedforwardLayernorm.forward(hidden));
+    }
+
+    private Tensor deviceLayer(
+      final Tensor positions, final Tensor hiddenStates, final Context context
+    ) {
+      DeviceDecoders.Step step = DeviceDecoders.decoder();
+      if (step == null || context == null || context.kvCache() == null) {
+        return null;
+      }
+      int kvLayer = this.selfAttn.attn().getKvLayerIndex();
+      Tensor[] out = step.forward(DeviceDecoders.layer()
+        .normBranch()
+        .gelu()
+        .positions(positions)
+        .hidden(hiddenStates)
+        .context(context)
+        .qkv(this.selfAttn.qkvProj())
+        .output(this.selfAttn.oProj())
+        .gateUp(this.mlp.gateUpProj())
+        .down(this.mlp.downProj())
+        .inputNorm(this.inputLayernorm)
+        .postAttentionNorm(this.postAttentionLayernorm)
+        .preMlpNorm(this.preFeedforwardLayernorm)
+        .postMlpNorm(this.postFeedforwardLayernorm)
+        .queryNorm(this.selfAttn.qNorm())
+        .keyNorm(this.selfAttn.kNorm())
+        .epsilon(this.inputLayernorm.getEpsilon())
+        .rope(this.selfAttn.rotaryEmb())
+        .heads(this.selfAttn.numHeads(), this.selfAttn.numKvHeads(), this.selfAttn.headDim())
+        .scoreScale(this.selfAttn.attn().getScoreScale())
+        .window(this.selfAttn.attn().getSlidingWindow())
+        .caches(
+          context.kvCache().getKeyCache(kvLayer),
+          context.kvCache().getValueCache(kvLayer))
+        .build());
+      return out == null ? null : out[0];
     }
   }
 

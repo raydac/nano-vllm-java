@@ -15,6 +15,7 @@ import static java.util.Objects.requireNonNull;
 
 import com.igormaznitsa.nanollvm.internal.Context;
 import com.igormaznitsa.nanollvm.layers.Attention;
+import com.igormaznitsa.nanollvm.layers.DeviceDecoders;
 import com.igormaznitsa.nanollvm.layers.Linear;
 import com.igormaznitsa.nanollvm.layers.Norms.RMSNorm;
 import com.igormaznitsa.nanollvm.layers.Norms.RotaryEmbedding;
@@ -239,12 +240,81 @@ public record Lfm2ForCausalLM(Lfm2Model model, ParallelLMHead lmHead) implements
     }
 
     Tensor forward(final Tensor positions, final Tensor hiddenStates, final Context context) {
+      if (this.attention != null) {
+        Tensor device = this.deviceAttention(positions, hiddenStates, context);
+        if (device != null) {
+          return device;
+        }
+      }
       Tensor normed = this.operatorNorm.forward(hiddenStates);
       Tensor mixed = this.attention != null
         ? this.attention.forward(positions, normed, context)
         : this.shortConv.forward(normed, context);
       Tensor afterOp = Ops.add(hiddenStates, mixed);
+      if (this.attention == null) {
+        Tensor tail = this.deviceTail(afterOp, context);
+        if (tail != null) {
+          return tail;
+        }
+      }
       return Ops.add(afterOp, this.mlp.forward(this.ffnNorm.forward(afterOp), context));
+    }
+
+    private Tensor deviceAttention(
+      final Tensor positions, final Tensor hiddenStates, final Context context
+    ) {
+      DeviceDecoders.Step step = DeviceDecoders.decoder();
+      if (step == null || context == null || context.kvCache() == null || this.attention == null) {
+        return null;
+      }
+      int kvLayer = this.attention.attn().getKvLayerIndex();
+      Tensor[] out = step.forward(DeviceDecoders.layer()
+        .plainBranch()
+        .silu()
+        .positions(positions)
+        .hidden(hiddenStates)
+        .context(context)
+        .query(this.attention.qProj())
+        .key(this.attention.kProj())
+        .value(this.attention.vProj())
+        .output(this.attention.oProj())
+        .queryNorm(this.attention.qNorm())
+        .keyNorm(this.attention.kNorm())
+        .gate(this.mlp.gateProj())
+        .up(this.mlp.upProj())
+        .down(this.mlp.downProj())
+        .inputNorm(this.operatorNorm)
+        .preMlpNorm(this.ffnNorm)
+        .epsilon(this.operatorNorm.getEpsilon())
+        .rope(this.attention.rotaryEmb())
+        .heads(this.attention.numHeads(), this.attention.numKvHeads(), this.attention.headDim())
+        .scoreScale(this.attention.attn().getScoreScale())
+        .window(this.attention.attn().getSlidingWindow())
+        .caches(
+          context.kvCache().getKeyCache(kvLayer),
+          context.kvCache().getValueCache(kvLayer))
+        .build());
+      return out == null ? null : out[0];
+    }
+
+    private Tensor deviceTail(final Tensor hiddenStates, final Context context) {
+      DeviceDecoders.Step step = DeviceDecoders.decoder();
+      if (step == null) {
+        return null;
+      }
+      Tensor[] out = step.forward(DeviceDecoders.layer()
+        .plainBranch()
+        .silu()
+        .mlpOnly()
+        .hidden(hiddenStates)
+        .context(context)
+        .gate(this.mlp.gateProj())
+        .up(this.mlp.upProj())
+        .down(this.mlp.downProj())
+        .preMlpNorm(this.ffnNorm)
+        .epsilon(this.ffnNorm.getEpsilon())
+        .build());
+      return out == null ? null : out[0];
     }
   }
 

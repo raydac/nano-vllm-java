@@ -22,6 +22,7 @@ import static java.util.Objects.requireNonNull;
 
 import com.igormaznitsa.nanollvm.internal.Context;
 import com.igormaznitsa.nanollvm.layers.Attention;
+import com.igormaznitsa.nanollvm.layers.DeviceDecoders;
 import com.igormaznitsa.nanollvm.layers.Linear;
 import com.igormaznitsa.nanollvm.layers.Norms.RMSNorm;
 import com.igormaznitsa.nanollvm.layers.Norms.RotaryEmbedding;
@@ -280,6 +281,10 @@ public record Gemma4ForCausalLM(Gemma4Model model, ParallelLMHead lmHead, float 
       final Tensor perLayerInput,
       final Context context
     ) {
+      Tensor device = this.deviceLayer(positions, hiddenStates, perLayerInput, context);
+      if (device != null) {
+        return device;
+      }
       Tensor hidden = Ops.add(
         hiddenStates,
         this.postAttentionLayernorm.forward(
@@ -293,6 +298,57 @@ public record Gemma4ForCausalLM(Gemma4Model model, ParallelLMHead lmHead, float 
       hidden = Ops.add(hidden, this.postPerLayerInputNorm.forward(
         this.perLayerProjection.forward(gated, context)));
       return Ops.scale(hidden, this.layerScalar);
+    }
+
+    private Tensor deviceLayer(
+      final Tensor positions,
+      final Tensor hiddenStates,
+      final Tensor perLayerInput,
+      final Context context
+    ) {
+      DeviceDecoders.Step step = DeviceDecoders.decoder();
+      if (step == null || context == null || context.kvCache() == null || perLayerInput == null) {
+        return null;
+      }
+      int kvLayer = this.selfAttn.attn().getKvLayerIndex();
+      DeviceDecoders.LayerBuilder builder = DeviceDecoders.layer()
+        .normBranch()
+        .gelu()
+        .positions(positions)
+        .hidden(hiddenStates)
+        .perLayerInput(perLayerInput)
+        .context(context)
+        .query(this.selfAttn.qProj())
+        .output(this.selfAttn.oProj())
+        .queryNorm(this.selfAttn.qNorm())
+        .gate(this.mlp.gateProj())
+        .up(this.mlp.upProj())
+        .down(this.mlp.downProj())
+        .inputNorm(this.inputLayernorm)
+        .postAttentionNorm(this.postAttentionLayernorm)
+        .preMlpNorm(this.preFeedforwardLayernorm)
+        .postMlpNorm(this.postFeedforwardLayernorm)
+        .perLayerGate(this.perLayerInputGate)
+        .perLayerProjection(this.perLayerProjection)
+        .postPerLayerNorm(this.postPerLayerInputNorm)
+        .layerScale(this.layerScalar)
+        .epsilon(this.inputLayernorm.getEpsilon())
+        .rope(this.selfAttn.rotaryEmb())
+        .heads(this.selfAttn.numHeads(), this.selfAttn.numKvHeads(), this.selfAttn.headDim())
+        .scoreScale(this.selfAttn.attn().getScoreScale())
+        .window(this.selfAttn.attn().getSlidingWindow())
+        .writeKv(this.selfAttn.attn().isWriteKv())
+        .caches(
+          context.kvCache().getKeyCache(kvLayer),
+          context.kvCache().getValueCache(kvLayer));
+      if (!this.selfAttn.kvShared()) {
+        builder.key(this.selfAttn.kProj())
+          .value(this.selfAttn.vProj())
+          .keyNorm(this.selfAttn.kNorm())
+          .valueNorm(this.selfAttn.vNorm());
+      }
+      Tensor[] out = step.forward(builder.build());
+      return out == null ? null : out[0];
     }
   }
 

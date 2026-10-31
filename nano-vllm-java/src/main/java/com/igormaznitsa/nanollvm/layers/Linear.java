@@ -31,6 +31,7 @@ public class Linear {
   private final LinearKernel kernel;
   private final float inputActivationScale;
   private final float outputActivationScale;
+  private volatile Tensor resident;
 
   /**
    * Dense float32 weight {@code [out, in]} with optional bias of length {@code out}.
@@ -137,6 +138,37 @@ public class Linear {
       return this.packedWeight.materialize();
     }
     throw new IllegalStateException("linear has no dense weight table");
+  }
+
+  public Tensor residentMatrix() {
+    if (this.weight != null) {
+      return this.weight;
+    }
+    Tensor cached = this.resident;
+    if (cached != null) {
+      return cached;
+    }
+    synchronized (this) {
+      if (this.resident != null) {
+        return this.resident;
+      }
+      if (this.packedWeight != null) {
+        this.resident = this.packedWeight.materialize();
+      } else if (this.kernel instanceof PackedLinearKernel packed) {
+        this.resident = packed.materialize();
+      } else {
+        throw new IllegalStateException("linear has no dense weight table");
+      }
+      return this.resident;
+    }
+  }
+
+  public float getInputActivationScale() {
+    return this.inputActivationScale;
+  }
+
+  public float getOutputActivationScale() {
+    return this.outputActivationScale;
   }
 
   /**

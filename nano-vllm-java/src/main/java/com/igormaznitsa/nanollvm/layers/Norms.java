@@ -84,6 +84,14 @@ public final class Norms {
       return this.weight;
     }
 
+    public float getEpsilon() {
+      return this.eps;
+    }
+
+    public boolean isOnePlusWeight() {
+      return this.onePlusWeight;
+    }
+
     /**
      * RMS-normalizes {@code x} along the last axis.
      *
@@ -284,6 +292,24 @@ public final class Norms {
         invFreq[i] = (float) (1.0 / Math.pow(base, (2.0 * i) / rotaryDim));
       }
       return new RotaryEmbedding(headSize, rotaryDim, maxPosition, invFreq);
+    }
+
+    public int getRotaryDim() {
+      return this.rotaryDim;
+    }
+
+    public void copyAngles(final int position, final float[] dest) {
+      int maxPos = this.cosSinCache.size(0);
+      if (position < 0 || position >= maxPos) {
+        throw new IllegalArgumentException(
+          "RoPE position %d out of range [0, %d)".formatted(position, maxPos));
+      }
+      if (dest.length < this.rotaryDim) {
+        throw new IllegalArgumentException("angle buffer shorter than rotaryDim");
+      }
+      System.arraycopy(
+        this.cosSinCache.data(), this.cosSinCache.offset() + position * this.rotaryDim,
+        dest, 0, this.rotaryDim);
     }
 
     /**

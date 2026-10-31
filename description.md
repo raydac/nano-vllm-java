@@ -2347,7 +2347,7 @@ embedding**: also chapter 10.
 | Global layers                             | Yes (Qwen; some Gemma layers)                     |
 | Cross-attention to a second text          | No                                                |
 | Bidirectional BERT-style                  | Yes, for embedding GGUFs only (**since 1.1.0**; ch. 7b) |
-| Fancy GPU kernels (flash-attention, etc.) | No flash-attention. CPU SIMD / panel GEMV by default; optional TornadoVM large dense GEMV (**since 1.4.0**) when that add-on is present |
+| Fancy GPU kernels (flash-attention, etc.) | No flash-attention. CPU SIMD / panel GEMV by default; optional TornadoVM dense GEMV, attention, and elementwise kernels (**since 1.4.0**, full TornadoVM path **since 1.5.0**) when that add-on is present |
 
 ---
 
@@ -3844,7 +3844,7 @@ packages. Demos live in the separate Maven module `nano-vllm-java-samples`.
 | Split thinking UI                | `ChatReply`                                                          | `ChatReply.parse` / `parse(raw, llm)` / `salvageFromThinking`                                                 |
 | Text RAG (prepare + retrieve)    | `RagFactory`, `PreparedRag`, `DenseRagIndex`, `HybridRagIndex`, `RagSession`, `RagTuner` | `RagFactory.make` / `withEmbeddings` → `llm.rag(index).send(…)`; `Builder.addProcessor` tuners **since 1.2.0** (chapter 17); session knobs match `ChatSession` |
 | Resource caps                    | `ResourceLimits`                                                     | Process-wide defaults + builder for file/JSON/GGUF/corpus/history budgets (**since 1.0.0**)               |
-| Math bricks                      | `Ops`, `LinearKernel`, `EmbeddingKernel`, `MatmulRuntime`, `KernelBackend` | norms / MLP gates / softmax; linear & embed via kernels (internal); `.dedicatedMatmulPool()` **since 1.2.0**; optional TornadoVM GEMV / `-Dnanollvm.kernels` **since 1.4.0** |
+| Math bricks                      | `Ops`, `LinearKernel`, `EmbeddingKernel`, `MatmulRuntime`, `KernelBackend` | norms / MLP gates / softmax; linear & embed via kernels (internal); `.dedicatedMatmulPool()` **since 1.2.0**; optional TornadoVM GEMV, attention, and elementwise kernels / `-Dnanollvm.kernels` (**since 1.4.0**, full path **since 1.5.0**) |
 
 ### Sample A — library use (what most apps call)
 
@@ -4623,7 +4623,7 @@ Short glossary. For the Java home of each idea, prefer the **In the code** notes
 | Piper                 | Text→WAV from `*.onnx` + `*.onnx.json` via `generate(LlmInText, AUDIO)` (**since 1.3.0**; ch. 7e) |
 | fastText              | Text→ranked labels from `*.bin` / `*.ftz` via `generate(LlmInText, LABELS)` (**since 1.4.0**; ch. 7f) |
 | `LlmOptionalData`     | Typed load extras such as `ESPEAK_DATA` (**since 1.3.0**; `open(path).optionalData`) |
-| TornadoVM GEMV        | Optional large dense matmul offload when TornadoVM is on the module path (`-Dnanollvm.kernels`; **since 1.4.0**) |
+| TornadoVM GEMV        | Optional device path for dense GEMV, attention, and elementwise kernels when TornadoVM is on the module path (`-Dnanollvm.kernels`; GEMV **since 1.4.0**, full path **since 1.5.0**) |
 | Sentence embedding    | One fixed-length vector summarizing a string (cosine ≈ dot product after L2)                    |
 | RoPE                  | Rotary Position Embedding: rotate pairs inside Q/K by angle(position); encodes relative distance |
 | Tied embeddings       | Same matrix for input lookup and LM-head scoring (`tie_word_embeddings`)                         |
@@ -4706,7 +4706,7 @@ If this guide did its job, you can now explain to another non-specialist:
 
 That is enough to understand what this Java program is doing — and what it is not.
 
-**In the code (limits mirrored by design):** CPU kernels in `Ops` / `VectorMath`; optional TornadoVM GEMV (**since 1.4.0**)
+**In the code (limits mirrored by design):** CPU kernels in `Ops` / `VectorMath`; optional TornadoVM GEMV, attention, and elementwise kernels (**since 1.4.0**, full path **since 1.5.0**)
 when that add-on is present; one `LLM` is not safe for
 concurrent `generate` — use `cancel()` from another thread only to abort (chapter 16). A server that wants parallel
 matmul without the process-wide `nanollvm-matmul-*` pool uses `LLM.Builder.dedicatedMatmulPool()` (**since 1.2.0**)

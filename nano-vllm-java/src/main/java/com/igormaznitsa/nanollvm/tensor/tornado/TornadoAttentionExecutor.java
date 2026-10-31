@@ -20,7 +20,7 @@ import uk.ac.manchester.tornado.api.exceptions.TornadoExecutionPlanException;
 final class TornadoAttentionExecutor {
 
   private static final int MAX_CACHED_PLANS = 8;
-  private static final int PARAMS = 9;
+  private static final int PARAMS = 12;
   private static final Map<PlanKey, AttendPlan> CACHED_PLANS =
     new LinkedHashMap<>(MAX_CACHED_PLANS, 0.75f, true) {
       @Override
@@ -32,8 +32,6 @@ final class TornadoAttentionExecutor {
         return true;
       }
     };
-
-  private static volatile boolean unavailable;
 
   private TornadoAttentionExecutor() {
   }
@@ -48,7 +46,7 @@ final class TornadoAttentionExecutor {
     final float scale, final int slidingWindow,
     final boolean causal, final int[] keySlots
   ) {
-    if (unavailable || queryLength <= 0 || keyLength < 0 || headDim <= 0
+    if (queryLength <= 0 || keyLength < 0 || headDim <= 0
       || numHeads <= 0 || numKvHeads <= 0 || numHeads % numKvHeads != 0) {
       return false;
     }
@@ -74,11 +72,16 @@ final class TornadoAttentionExecutor {
       );
       return true;
     } catch (Throwable failure) {
-      if (failure instanceof OutOfMemoryError) {
-        throw (OutOfMemoryError) failure;
+      if (failure instanceof OutOfMemoryError outOfMemory) {
+        throw outOfMemory;
       }
-      unavailable = true;
-      return false;
+      if (failure instanceof Error error) {
+        throw error;
+      }
+      if (failure instanceof RuntimeException runtime) {
+        throw runtime;
+      }
+      throw new IllegalStateException("TornadoVM attention failed", failure);
     } finally {
       TornadoLaunchLock.unlock();
     }
@@ -106,8 +109,9 @@ final class TornadoAttentionExecutor {
   }
 
   private record AttendPlan(TornadoExecutionPlan plan, float[] query, float[] key, float[] value,
-                            float[] result, float[] params, int numHeads, int numKvHeads,
-                            int headDim, PackCursor cursor) implements AutoCloseable {
+                            float[] keyDelta, float[] valueDelta, float[] result, float[] params,
+                            int numHeads, int numKvHeads, int headDim, PackCursor cursor)
+    implements AutoCloseable {
 
     static AttendPlan compile(final PlanKey key) throws TornadoExecutionPlanException {
       int queryWidth = key.numHeads * key.headDim;
@@ -115,6 +119,8 @@ final class TornadoAttentionExecutor {
       float[] query = new float[key.queryLength * queryWidth];
       float[] keyScratch = new float[key.keyCapacity * keyWidth];
       float[] value = new float[key.keyCapacity * keyWidth];
+      float[] keyDelta = new float[keyWidth];
+      float[] valueDelta = new float[keyWidth];
       float[] result = new float[key.queryLength * queryWidth];
       float[] params = new float[PARAMS];
       params[0] = key.queryLength;
@@ -134,16 +140,20 @@ final class TornadoAttentionExecutor {
         kvHeadOfJob[job] = head / repeats;
       }
       TaskGraph graph = new TaskGraph("nanollvm-attend")
-        .transferToDevice(FIRST_EXECUTION, headOfJob, queryOfJob, kvHeadOfJob)
-        .transferToDevice(EVERY_EXECUTION, query, keyScratch, value, params)
+        .transferToDevice(FIRST_EXECUTION, headOfJob, queryOfJob, kvHeadOfJob, keyScratch, value)
+        .transferToDevice(EVERY_EXECUTION, query, keyDelta, valueDelta, params)
+        .task(
+          "append", TornadoAttentionKernels::appendLatest,
+          keyScratch, value, keyDelta, valueDelta, params
+        )
         .task(
           "attend", TornadoAttentionKernels::scoreHeads,
           query, keyScratch, value, result, headOfJob, queryOfJob, kvHeadOfJob, params
         )
         .transferToHost(EVERY_EXECUTION, (Object) result);
       TornadoExecutionPlan execution = TornadoPlans.open(graph.snapshot());
-      return new AttendPlan(execution, query, keyScratch, value, result, params,
-        key.numHeads, key.numKvHeads, key.headDim, new PackCursor());
+      return new AttendPlan(execution, query, keyScratch, value, keyDelta, valueDelta, result,
+        params, key.numHeads, key.numKvHeads, key.headDim, new PackCursor());
     }
 
     void execute(
@@ -158,8 +168,10 @@ final class TornadoAttentionExecutor {
       int queryWidth = this.numHeads * this.headDim;
       System.arraycopy(query, queryOffset + queryStart * queryWidth, this.query, 0,
         queryLength * queryWidth);
+      int packedBefore = this.cursor.packed;
       this.packKeys(key, keyOffset, value, valueOffset, keyIndexBase, keyLength, keyWidth,
         keySlots);
+      this.publishHistory(this.cursor.packed - packedBefore, keyWidth);
       this.params[0] = queryLength;
       this.params[1] = keyLength;
       this.params[2] = this.numHeads;
@@ -169,9 +181,28 @@ final class TornadoAttentionExecutor {
       this.params[6] = slidingWindow;
       this.params[7] = causal ? 1f : 0f;
       this.params[8] = Float.NEGATIVE_INFINITY;
+      this.params[11] = keyWidth;
       this.plan.execute();
       System.arraycopy(this.result, 0, result, resultOffset + queryStart * queryWidth,
         queryLength * queryWidth);
+    }
+
+    private void publishHistory(final int added, final int keyWidth)
+      throws TornadoExecutionPlanException {
+      if (this.cursor.replaced() || added > 1) {
+        this.plan.transferToDevice(this.key, this.value);
+        this.params[10] = 0f;
+        return;
+      }
+      if (added == 1) {
+        int at = this.cursor.packed - 1;
+        System.arraycopy(this.key, at * keyWidth, this.keyDelta, 0, keyWidth);
+        System.arraycopy(this.value, at * keyWidth, this.valueDelta, 0, keyWidth);
+        this.params[9] = at;
+        this.params[10] = 1f;
+        return;
+      }
+      this.params[10] = 0f;
     }
 
     private void packKeys(
@@ -191,6 +222,7 @@ final class TornadoAttentionExecutor {
       final float[] value, final int valueOffset,
       final int keyIndexBase, final int keyLength, final int keyWidth
     ) {
+      this.cursor.replaced = false;
       if (this.cursor.sameDense(key, keyOffset, value, valueOffset, keyIndexBase)) {
         if (keyLength == this.cursor.packed) {
           return;
@@ -204,6 +236,7 @@ final class TornadoAttentionExecutor {
       }
       this.copyDense(key, keyOffset, value, valueOffset, keyIndexBase, 0, keyLength, keyWidth);
       this.cursor.rememberDense(key, keyOffset, value, valueOffset, keyIndexBase, keyLength);
+      this.cursor.replaced = true;
     }
 
     private void packPaged(
@@ -211,6 +244,7 @@ final class TornadoAttentionExecutor {
       final float[] value, final int valueOffset,
       final int keyLength, final int keyWidth, final int[] keySlots
     ) {
+      this.cursor.replaced = false;
       if (this.cursor.samePaged(key, keyOffset, value, valueOffset)
         && this.cursor.slotsExtend(keySlots)) {
         if (keyLength == this.cursor.packed) {
@@ -225,6 +259,7 @@ final class TornadoAttentionExecutor {
       }
       this.copySlots(key, keyOffset, value, valueOffset, keyWidth, keySlots, 0, keyLength);
       this.cursor.rememberPaged(key, keyOffset, value, valueOffset, keySlots, keyLength);
+      this.cursor.replaced = true;
     }
 
     private void copyDense(
@@ -283,6 +318,11 @@ final class TornadoAttentionExecutor {
     private int keyIndexBase;
     private int packed;
     private int[] slots;
+    private boolean replaced;
+
+    private boolean replaced() {
+      return this.replaced;
+    }
 
     private boolean sameDense(
       final float[] key, final int keyOffset,

@@ -103,6 +103,31 @@ public final class VectorMath {
     KERNELS.tanhSoftcap(src, srcOff, cap, dst, dstOff, n);
   }
 
+  public static boolean rmsNormRows(
+    final float[] src, final int srcOff,
+    final float[] weight, final int weightOff,
+    final float eps, final boolean onePlusWeight,
+    final float[] dst, final int dstOff,
+    final int rows, final int last
+  ) {
+    return KERNELS.rmsNormRows(
+      src, srcOff, weight, weightOff, eps, onePlusWeight, dst, dstOff, rows, last);
+  }
+
+  public static boolean addRmsNormRows(
+    final float[] left, final int leftOff,
+    final float[] right, final int rightOff,
+    final float[] weight, final int weightOff,
+    final float eps, final boolean onePlusWeight,
+    final float[] summed, final int summedOff,
+    final float[] normed, final int normedOff,
+    final int rows, final int last
+  ) {
+    return KERNELS.addRmsNormRows(
+      left, leftOff, right, rightOff, weight, weightOff, eps, onePlusWeight,
+      summed, summedOff, normed, normedOff, rows, last);
+  }
+
   public static boolean attend(
     final float[] query, final int queryOffset,
     final float[] key, final int keyOffset,
