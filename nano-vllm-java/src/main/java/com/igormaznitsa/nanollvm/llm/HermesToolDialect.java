@@ -71,7 +71,8 @@ final class HermesToolDialect implements ToolDialect {
     final ThinkTags tags
   ) {
     String specs = tools.stream().map(ToolJson::openAiFunction).collect(joining("\n"));
-    return ChatMlTools.render(history, PREAMBLE.formatted(specs), false, tokenizer, enableThinking,
+    return ChatMlTools.render(history, PREAMBLE.replace("%s", specs), false, tokenizer,
+        enableThinking,
       tags);
   }
 

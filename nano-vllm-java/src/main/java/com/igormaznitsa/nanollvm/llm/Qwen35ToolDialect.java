@@ -176,7 +176,8 @@ final class Qwen35ToolDialect implements ToolDialect {
     String specs =
       tools.stream().map(ToolJson::openAiFunction).reduce((left, right) -> left + "\n" + right)
         .orElse("");
-    return ChatMlTools.render(history, PREAMBLE.formatted(specs), true, tokenizer, enableThinking,
+    return ChatMlTools.render(history, PREAMBLE.replace("%s", specs), true, tokenizer,
+        enableThinking,
       tags);
   }
 
