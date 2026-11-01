@@ -6,8 +6,9 @@ import java.util.Locale;
  * Speaker of a {@link ChatMessage}.
  *
  * <p>{@link #wireName()} is the string written into chat templates ({@code system} / {@code user} /
- * {@code assistant}). {@link #fromWire(String)} is the inverse for template maps: {@code model} is
- * treated as assistant (Gemma turn-based), anything else unknown becomes {@link #USER}.
+ * {@code assistant} / {@code tool}). {@link #fromWire(String)} is the inverse for template maps:
+ * {@code model} is treated as assistant (Gemma turn-based), anything else unknown becomes
+ * {@link #USER}.
  */
 public enum ChatRole {
   /**
@@ -21,7 +22,13 @@ public enum ChatRole {
   /**
    * Model turn (visible answer in session history).
    */
-  ASSISTANT("assistant");
+  ASSISTANT("assistant"),
+  /**
+   * Tool result turn. LFM2 keeps this role; Qwen folds the same result into a user turn.
+   *
+   * @since 1.5.0
+   */
+  TOOL("tool");
 
   private final String wireName;
 
@@ -33,7 +40,7 @@ public enum ChatRole {
    * Parses a template / JSON role string.
    *
    * @param role wire name; {@code null} / blank / unknown → {@link #USER}; {@code model} →
-   *             {@link #ASSISTANT}
+   *             {@link #ASSISTANT}; {@code tool} → {@link #TOOL}
    * @return never {@code null}
    */
   public static ChatRole fromWire(final String role) {
@@ -43,12 +50,13 @@ public enum ChatRole {
     return switch (role.strip().toLowerCase(Locale.ROOT)) {
       case "system" -> SYSTEM;
       case "assistant", "model" -> ASSISTANT;
+      case "tool" -> TOOL;
       default -> USER;
     };
   }
 
   /**
-   * Canonical template role string ({@code system}, {@code user}, or {@code assistant}).
+   * Canonical template role string ({@code system}, {@code user}, {@code assistant}, or {@code tool}).
    *
    * @return wire name used in chat templates
    */

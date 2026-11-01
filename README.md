@@ -164,6 +164,7 @@ Run from the repository root after the matching download in [`models/README.md`]
 | Sample | What it shows | Default model |
 |--------|----------------|---------------|
 | `HelloWorld` | One hello, one reply | Gemma3-270M |
+| `ToolsHelloWorld` | OS name and a directory listing via tools | Qwen3-0.6B |
 | `LogTriageHelloWorld` | Three bullets from a log excerpt | Gemma3-270M |
 | `NextTokenHelloWorld` | Continue a seed | Tiny-LLM-ONNX |
 | `EmbeddingsHelloWorld` | Sentence vector | multilingual-e5-small |

@@ -85,6 +85,9 @@ import java.util.stream.IntStream;
  * <ul>
  *   <li><b>A conversation that remembers earlier turns</b> — {@link #chat()} then
  *       {@link ChatSession#send(String)}; show {@link ChatReply#answer()} to the user.</li>
+ *   <li><b>Let the model call a Java function</b> — {@link Builder#tool(ModelTool...)} on a
+ *       Qwen3, Qwen3.5, LFM2, or Gemma 4 chat model. The engine reads that model's tool tokens,
+ *       runs the function, and writes the result back in the form the checkpoint expects.</li>
  *   <li><b>One question, no history</b> — {@link #chatOnce(String)}.</li>
  *   <li><b>Finish a sentence / continue a text as-is</b> — {@link #generate(LlmInput, LlmModality)}
  *       with {@link LlmInText} → {@link LlmModality#TEXT} (no chat role wrapping).</li>
@@ -206,6 +209,7 @@ public final class LLM implements AutoCloseable {
   private final AtomicBoolean cancelRequested = new AtomicBoolean();
   private final AtomicBoolean closed = new AtomicBoolean();
   private final List<LlmAdvisor> advisors;
+  private final List<ModelTool> tools;
   private final LlmAdvisorMixer advisorMixer;
   private final Predicate<String> advisorNoteFilter;
   private final SamplingParams defaultSampling;
@@ -235,6 +239,7 @@ public final class LLM implements AutoCloseable {
       this.listener = builder.listener;
       this.systemPromptOverride = builder.systemPromptOverride;
       this.advisors = builder.advisors;
+      this.tools = List.copyOf(builder.tools);
       this.advisorMixer = builder.advisorMixer;
       this.advisorNoteFilter = builder.advisorNoteFilter;
       this.defaultSampling = builder.resolveSampling();
@@ -1405,6 +1410,18 @@ public final class LLM implements AutoCloseable {
   }
 
   /**
+   * Functions the chat loop may run when the model emits a tool call. Empty unless
+   * {@link Builder#tool(ModelTool...)} was used. Raw {@link #generate(List, SamplingParams)} does
+   * not run them; {@link #chat()} does.
+   *
+   * @return immutable list; never {@code null}
+   * @since 1.5.0
+   */
+  public List<ModelTool> tools() {
+    return this.tools;
+  }
+
+  /**
    * Mixer used by {@link #runAdvisors} after advisor generates. Defaults to
    * {@link LlmAdvisorMixer#defaults()} (insert notes into the facts block).
    *
@@ -1550,7 +1567,7 @@ public final class LLM implements AutoCloseable {
    * <h2>Which setter?</h2>
    * <ul>
    *   <li><b>Reply style</b> — {@link #sampling}, {@link #systemPrompt} / {@link #noSystemPrompt},
-   *       {@link #advisors}, {@link #deterministic}, {@link #random}</li>
+   *       {@link #advisors}, {@link #tool(ModelTool...)}, {@link #deterministic}, {@link #random}</li>
    *   <li><b>How much text one generate may hold</b> — {@link #maxModelLen}
    *       (prompt + new tokens; not the same as {@code maxTokens} on sampling)</li>
    *   <li><b>CPU / speed</b> — {@link #cpuThreads(int)}, {@link #allCpuThreads}, {@link #disableMultiCpu},
@@ -1591,6 +1608,7 @@ public final class LLM implements AutoCloseable {
      */
     private String systemPromptOverride = null;
     private List<LlmAdvisor> advisors = List.of();
+    private final List<ModelTool> tools = new ArrayList<>();
     private LlmAdvisorMixer advisorMixer = LlmAdvisorMixer.defaults();
     private Predicate<String> advisorNoteFilter = note -> note != null && !note.isBlank();
     private SamplingParams samplingParams;
@@ -1655,6 +1673,35 @@ public final class LLM implements AutoCloseable {
      */
     public Builder noSystemPrompt() {
       return this.systemPrompt("");
+    }
+
+    /**
+     * Registers functions the chat model may call. Repeat to add more. Names must be unique.
+     * Qwen3, Qwen3.5, LFM2, and Gemma 4 are accepted at {@link #build()}; other architectures fail
+     * there. Chat reads the model's own tool tokens, runs the matching {@link ModelTool}, and
+     * injects the result before the next generate. At most four executions per user message.
+     *
+     * @param tools one or more tools; must not be {@code null} and must not contain {@code null}
+     * @return {@code this}
+     * @throws NullPointerException     if {@code tools} or an element is {@code null}
+     * @throws IllegalArgumentException if no tool is given or a name is already registered
+     * @since 1.5.0
+     */
+    public Builder tool(final ModelTool... tools) {
+      requireNonNull(tools, "tools");
+      if (tools.length == 0) {
+        throw new IllegalArgumentException("tool requires at least one ModelTool");
+      }
+      for (ModelTool tool : tools) {
+        requireNonNull(tool, "tool");
+        boolean duplicate =
+          this.tools.stream().anyMatch(existing -> existing.name().equals(tool.name()));
+        if (duplicate) {
+          throw new IllegalArgumentException("duplicate tool name: " + tool.name());
+        }
+        this.tools.add(tool);
+      }
+      return this;
     }
 
     /**
@@ -2076,6 +2123,13 @@ public final class LLM implements AutoCloseable {
       if (!this.sharedModel.isCausalModel() && !this.advisors.isEmpty()) {
         throw new IllegalStateException("advisors require a chat model");
       }
+      if (!this.tools.isEmpty()) {
+        if (!this.sharedModel.isCausalModel()) {
+          throw new IllegalStateException(
+            "tools require a chat model, got " + this.sharedModel.architectureName());
+        }
+        ToolDialects.of(this.sharedModel.architectureName());
+      }
       if (this.matmulExecutor != null && this.dedicatedMatmulPool) {
         throw new IllegalStateException("cannot combine matmulExecutor with dedicatedMatmulPool");
       }
@@ -2139,6 +2193,15 @@ public final class LLM implements AutoCloseable {
       }
       if (this.stopTokenIds != null) {
         config.stopTokenIds(this.stopTokenIds);
+      }
+      if (!this.tools.isEmpty()) {
+        List<Integer> base = this.stopTokenIds != null
+          ? this.stopTokenIds
+          : tokenizer.stopTokenIds();
+        config.stopTokenIds(ToolDialects.withExtraStops(
+          base,
+          ToolDialects.of(model.architectureName()),
+          tokenizer));
       }
       return config.build();
     }

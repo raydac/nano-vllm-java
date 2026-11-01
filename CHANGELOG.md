@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Development snapshot after the **1.4.0** public release.
 
+### Added
+- Chat can call Java functions registered with `LLM.Builder.tool`. Qwen3, Qwen3.5, LFM2, and Gemma 4 each use that model's own tool-call tokens. The function result is written back in the form that model expects, and the reply continues. A space inside the called name still matches the registered tool. Text the model writes after a call is not sent back, so a later step can still call another tool. A turn runs at most four calls. `ToolsHelloWorld` asks Qwen3-0.6B for the OS name, then for one directory listing.
+
 ### Changed
 - Nucleus sampling keeps the smallest high-probability prefix without sorting the whole vocabulary.
 - `Bench` can record an async-profiler sample of the timed generate

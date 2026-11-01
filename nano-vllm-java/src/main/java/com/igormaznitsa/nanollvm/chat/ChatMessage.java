@@ -62,6 +62,17 @@ public record ChatMessage(ChatRole role, String content) {
   }
 
   /**
+   * Tool-result turn. The content is the dialect's already-wrapped result text.
+   *
+   * @param content result text; {@code null} becomes {@code ""}
+   * @return tool message
+   * @since 1.5.0
+   */
+  public static ChatMessage tool(final String content) {
+    return new ChatMessage(ChatRole.TOOL, content);
+  }
+
+  /**
    * Rebuilds a message from a chat-template map ({@code role} / {@code content} keys).
    *
    * <p>Unknown or missing {@code role} becomes {@link ChatRole#USER}. Missing {@code content}

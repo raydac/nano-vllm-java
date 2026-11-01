@@ -15,6 +15,9 @@
  * continues a raw string with no template when the output modality is text.
  * {@link LLM#generate} / {@link LLM#generateTokenIds} are the batch primitives (optional
  * timeout, progress, token stream). {@link LLM#rag} wraps chat with a {@link com.igormaznitsa.nanollvm.rag.RagIndex}.
+ * {@link LLM.Builder#tool(ModelTool...)} registers functions {@link LLM#chat()} may run when the
+ * model emits its own tool-call tokens; raw {@link LLM#generate} does not. Qwen3, Qwen3.5, LFM2,
+ * and Gemma 4 each use that checkpoint's dialect ({@link ToolDialects}).
  * {@link LLM.Builder#toJev()} reads a typed decision from a causal chat model.
  *
  * <p><b>Knobs (where to look).</b> How long / how random a reply is:

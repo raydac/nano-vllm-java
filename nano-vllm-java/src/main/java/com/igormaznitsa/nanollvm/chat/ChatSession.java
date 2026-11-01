@@ -7,6 +7,9 @@ import com.igormaznitsa.nanollvm.llm.AdvisorResponse;
 import com.igormaznitsa.nanollvm.llm.GenerationStats;
 import com.igormaznitsa.nanollvm.llm.LLM;
 import com.igormaznitsa.nanollvm.llm.SamplingParams;
+import com.igormaznitsa.nanollvm.llm.ToolCall;
+import com.igormaznitsa.nanollvm.llm.ToolDialect;
+import com.igormaznitsa.nanollvm.llm.ToolDialects;
 import com.igormaznitsa.nanollvm.tokenizer.Tokenizer;
 import com.igormaznitsa.nanollvm.utils.ResourceLimits;
 import java.io.PrintStream;
@@ -33,6 +36,9 @@ import java.util.function.Predicate;
  *   <li><b>Print thinking vs answer as they arrive</b> — {@link #streamTo} or {@link #listen}</li>
  *   <li><b>Skip the model's private scratchpad</b> — {@link #enableThinking(boolean) enableThinking(false)}
  *       (saves tokens; RAG sessions already default this off)</li>
+ *   <li><b>Let the model call a function</b> — register {@link com.igormaznitsa.nanollvm.llm.ModelTool}
+ *       values with {@link LLM.Builder#tool}. This session runs at most four calls per user
+ *       message, then shows the reply that follows the last result.</li>
  *   <li><b>Fewer remembered turns</b> — {@link #maxHistoryMessages(int)} (process default:
  *       {@link ResourceLimits#maxHistoryMessages()})</li>
  *   <li><b>Retry blank / garbage answers</b> — {@link #recoverUnusableAnswers(boolean)} (off by default)</li>
@@ -518,9 +524,13 @@ public final class ChatSession {
     this.lastAdvisorNanos = System.nanoTime() - advisorStarted;
 
     this.lastGenerateStats = GenerationStats.NONE;
-    ChatReply reply = this.generateTurn(turn, enrichment.modelUserText(), isolateGeneration);
+    ChatReply reply = this.llm.tools().isEmpty()
+      ? this.generateTurn(turn, enrichment.modelUserText(), isolateGeneration)
+      : this.generateWithTools(turn, enrichment.modelUserText(), isolateGeneration);
 
-    if (this.recoverUnusableAnswers && this.isUnusableMainAnswer(reply.answer())) {
+    if (this.llm.tools().isEmpty()
+      && this.recoverUnusableAnswers
+      && this.isUnusableMainAnswer(reply.answer())) {
       ChatMessages.scrubMatchingAssistantTurns(this.history, this.unusableAnswer);
       this.emitDiagnostics("(unusable main answer — retrying without filler history)");
       this.discardPrintedAnswer();
@@ -671,6 +681,72 @@ public final class ChatSession {
         tags,
         this.llm.chatSpecials())
       .withStats(this.lastGenerateStats);
+  }
+
+  /**
+   * One user turn that may call tools. Each execution is a fresh generate. The session history
+   * still stores only the final visible answer; tool markup stays in the working copy.
+   */
+  private ChatReply generateWithTools(
+    final TurnStream turn,
+    final String lastUserOverride,
+    final boolean isolateGeneration
+  ) {
+    Tokenizer tokenizer = this.llm.tokenizer();
+    ThinkTags tags = this.thinkTags();
+    boolean enableThinking = this.thinkingEnabled(tokenizer);
+    ToolDialect dialect = ToolDialects.of(this.llm.model().architectureName());
+    List<ChatMessage> working = new ArrayList<>(isolateGeneration
+      ? this.isolatedTurn(lastUserOverride)
+      : this.historyForTemplate(lastUserOverride));
+
+    String raw = "";
+    int executed = 0;
+    while (true) {
+      String prompt = dialect.render(
+        working, this.llm.tools(), tokenizer, enableThinking, tags);
+      raw = this.generateRaw(turn, prompt, dialect, tags);
+      List<ToolCall> calls = dialect.parseCalls(raw);
+      if (calls.isEmpty() || executed == ToolDialects.MAX_EXECUTIONS) {
+        break;
+      }
+      working.addAll(
+        dialect.appendExchange(raw, calls, ToolDialects.execute(this.llm.tools(), calls)));
+      executed++;
+    }
+    return ChatReply.parse(dialect.visibleText(raw), tags, this.llm.chatSpecials())
+      .withStats(this.lastGenerateStats);
+  }
+
+  /**
+   * One generate whose raw decode keeps special tokens so a tool dialect can see them.
+   */
+  private String generateRaw(
+    final TurnStream turn,
+    final String prompt,
+    final ToolDialect dialect,
+    final ThinkTags tags
+  ) {
+    Tokenizer tokenizer = this.llm.tokenizer();
+    List<Integer> streamedIds = new ArrayList<>();
+    List<LLM.GenerationOutput> outputs = this.llm.generate(
+      List.of(prompt),
+      this.samplingParams,
+      false,
+      this.timeout,
+      tokenId -> {
+        streamedIds.add(tokenId);
+        String raw = tokenizer.decode(streamedIds, false);
+        turn.push(
+          this.llm,
+          this.listener,
+          raw,
+          ChatReply.parse(dialect.visibleText(raw), tags, this.llm.chatSpecials()));
+      }
+    );
+    LLM.GenerationOutput output = outputs.getFirst();
+    this.lastGenerateStats = this.mergeGenerateStats(this.lastGenerateStats, output.stats());
+    return tokenizer.decode(output.tokenIds(), false);
   }
 
   /**

@@ -14,6 +14,7 @@
 - IQ4NL codebook lives once as `GgufIqTables.kvalues_iq4nl` (signed bytes). `GgufDequant` and `GgufIqDequant` no longer each keep an `int[]` copy.
 
 ## 2. Architecture & Technical Discoveries
+- Tool calling is local `ModelTool` functions, not MCP. The dialect follows the checkpoint: Qwen3 Hermes JSON, Qwen3.5 XML function/parameter (the 0.8B template, same family as the `qwen3_coder` parser), LFM2 Pythonic tokens, Gemma 4 `call:`/`response:` with `<|"|>` strings. The chat loop parses the raw decode (special tokens kept), runs the function, and appends the result before the next generate.
 - Activation buffers: `ActivationWorkspace` is bound for a transformer step. Each causal forward keeps the tensors the next layer still needs and parks the rest (length ≥ 256) for reuse. `prefillLogits` detaches the returned logits so the freelist cannot overwrite them. `Sequence.pagedSlots` grows one slot index per sequence; `Context` publishes it once per step. `Sampler` selects top-k with an `int` heap. Nucleus sampling pops that same order until the cumulative mass reaches top-p, instead of mergesorting the vocabulary.
 - Zero-length `byte[]`, `int[]`, `float[]`, and `float[][]` are the shared `EmptyArrays` constants. `Tensor.zeros` with `numel == 0` returns that `float[]`. Tornado's no-bias sentinel is its own one-element array: TornadoVM 8 requires every kernel array to be transferred, and a zero-length buffer is not a device argument.
 - A Tornado device task cannot call `System.arraycopy`. It is a native method, so the compiler bails out with TC-E1003 ("has no bytecode"). The unrotated RoPE tail in `ropeHeads` is an element loop.
@@ -34,6 +35,8 @@
 - `LLM` still has many one-line generate overloads. They exist so callers do not pass unused flags.
 
 ## 4. Current Work In Progress
+- Sample `ToolsHelloWorld` registers `os_name` and `list_files` (names only, one directory, cap 100). It asks Qwen3-0.6B for the OS first, then for the directory, because one combined question made 0.6B call only `list_files` and then rewrite the names. `ToolsHelloWorldTest` covers the tools without a model load.
+- Tool calls are registered on `LLM.Builder.tool(ModelTool...)` and run inside `ChatSession.send`. Dialects: Qwen3 Hermes JSON (`<tool_call>` + user `<tool_response>`), Qwen3.5 XML `<function=` / `<parameter=` (including 0.8B; SGLang `qwen3_coder`), LFM2 Pythonic list between `<|tool_call_start|>` / `<|tool_call_end|>` with a `tool` role result, Gemma 4 `call:` / `response:` inside the same model turn (`<|tool_response>` is an extra stop). The assistant turn stored for the next generate ends at the last call close; prose after that call is dropped. A space inside a called name is removed before lookup (`os_ name` matches `os_name`); Qwen3-0.6B emits that split for `os_name`. Llama and Gemma 3 fail at build. MCP is not the engine protocol. At most four executions per user message. Raw `generate` does not run tools.
 - Speed work stays algorithmic. Nucleus sampling keeps a heap prefix instead of sorting the vocabulary. Vector GEMV stays one 8-row panel on `SPECIES_PREFERRED`. Splitting that panel onto `SPECIES_256` / a 2-row kernel was a JDK 27 inliner trick: the 2-row form measured slower (about 8 tok/s vs 11 tok/s on the same 4×16×8 Qwen3-0.6B smoke) and still spent most samples in the lane fallback.
 - KernelChatBench Qwen3-0.6B, 46 prompt + 256 completion, after streaming the vocabulary matrix and before layer grouping: scalar 5.35 tok/s, Vector 9.17 (1.71×), TornadoVM 1.50 (0.28×, 170 s). The pinned-vocabulary run was 0.15 tok/s. First use compiles one program per group of four layers. UHD 620 single-token F32 GEMV stays slower than AVX2. Grouping is device-tested (five layers match one-at-a-time) and not re-benched.
 - `Bench` Maven profile `bench` forks the timed generate under async-profiler 4.6. `package` and `exec:exec@bench` must be the same invocation, or the classpath is an older installed snapshot. Reports: `nano-vllm-java-samples/target/bench-profile/`.
@@ -49,6 +52,7 @@
 - Model loader rejects duplicate and wrong-shaped weights. Wrapper prefixes (`language_model`, `text_model`, `base_model`, `model.model`) and a swapped `[in, out]` matrix still bind to the schema name. Covered by `ModelLoaderTest`.
 
 ## 5. Known Issues & Limitations
+- Tool calls are chat-only (`chat` / `chatOnce`). Llama and Gemma 3 fail at `build()` if a tool is registered: there is no Llama 3 header template here, and Gemma 3 has no tool-call tokens. Gemma 3's pythonic prompt convention is not wired.
 - Qwen3.5 support is text-only safetensors. Vision inputs, LoRA adapters, Qwen3-Next, and Qwen3.5 MoE stay rejected. GGUF is not a load path for `qwen3_5`.
 - Tornado kernel tests skip when no Tornado device is on the module path. Maven Surefire does not launch the `tornado` CLI, so those tests skip there.
 
