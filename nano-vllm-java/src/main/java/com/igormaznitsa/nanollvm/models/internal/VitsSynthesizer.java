@@ -195,14 +195,12 @@ final class VitsSynthesizer {
     double inputHeight = heights[bin];
     double inputDerivative = derivatives[bin];
     double inputDerivativePlusOne = derivatives[bin + 1];
-    double a =
-      (input - inputCumHeight) * (inputDerivative + inputDerivativePlusOne - 2.0 *
-        (inputHeight / inputBinWidth))
-        + inputHeight * (inputHeight / inputBinWidth - inputDerivative);
-    double b = inputHeight * inputDerivative
-      - (input - inputCumHeight) * (inputDerivative + inputDerivativePlusOne - 2.0 *
-      (inputHeight / inputBinWidth));
-    double c = -(inputHeight / inputBinWidth) * (input - inputCumHeight);
+    double heightOffset = input - inputCumHeight;
+    double binSlope = inputHeight / inputBinWidth;
+    double curvature = inputDerivative + inputDerivativePlusOne - 2.0 * binSlope;
+    double a = heightOffset * curvature + inputHeight * (binSlope - inputDerivative);
+    double b = inputHeight * inputDerivative - heightOffset * curvature;
+    double c = -binSlope * heightOffset;
     if (Math.abs(a) < 1e-12) {
       return inputCumWidth + (-c / b) * inputBinWidth;
     }
