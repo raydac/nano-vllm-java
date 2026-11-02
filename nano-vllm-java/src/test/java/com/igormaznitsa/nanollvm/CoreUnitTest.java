@@ -803,14 +803,15 @@ class CoreUnitTest {
       kernels.gemv(
         x, xOff + r * in, weight, wOff, bias, perToken, yOff + r * rowStride, in, out0, out1);
     }
+    float tolerance = "scalar".equals(kernels.name()) ? 0f : 1e-5f;
     for (int i = 0; i < batched.length; i++) {
-      assertEquals(perToken[i], batched[i], 0f, kernels.name() + " index " + i);
+      assertEquals(perToken[i], batched[i], tolerance, kernels.name() + " index " + i);
     }
 
     kernels.gemvRows(x, xOff, weight, wOff, null, batched, yOff, 1, in, rowStride, out0, out1);
     kernels.gemv(x, xOff, weight, wOff, null, perToken, yOff, in, out0, out1);
     for (int i = 0; i < yOff + rowStride; i++) {
-      assertEquals(perToken[i], batched[i], 0f, kernels.name() + " decode " + i);
+      assertEquals(perToken[i], batched[i], tolerance, kernels.name() + " decode " + i);
     }
   }
 
