@@ -23,9 +23,13 @@ import java.util.Optional;
  * {@link FloatKernels#get()} calls {@link #create()} once at class init.
  *
  * <p>TornadoVM support is compiled into this module but probed reflectively so stock JDK runs work
- * without {@code tornado.api} on the module path.
+ * without {@code tornado.api} on the module path. Once that mode is selected,
+ * {@code -Dnanollvm.tornado.layers} and {@code -Dnanollvm.tornado.weight} tune the task-graph
+ * length and the largest resident weight. See {@link com.igormaznitsa.nanollvm.utils.NanoLlvmProps}.
  *
  * @see FloatKernels
+ * @see com.igormaznitsa.nanollvm.utils.NanoLlvmProps#PROP_TORNADO_LAYERS
+ * @see com.igormaznitsa.nanollvm.utils.NanoLlvmProps#PROP_TORNADO_WEIGHT
  */
 public final class FloatKernelsFactory {
 

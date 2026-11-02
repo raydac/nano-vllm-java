@@ -20,8 +20,11 @@ import uk.ac.manchester.tornado.api.exceptions.TornadoExecutionPlanException;
  * One compiled Tornado plan per weight matrix and token count. OpenCL uses CLBlast for more than
  * one token when {@code libclblast} runs; otherwise a device kernel. Activations are copied into a
  * plan-owned buffer so a new result array does not recompile the kernel or re-upload weights.
- * A matrix larger than 32 MiB is copied through one reusable device tile, so the vocabulary
- * projection is not allocated as a single buffer beside the resident layer graphs.
+ * A matrix larger than {@link TornadoDeviceBudget#weightBytes()} is copied through one reusable
+ * device tile, so the vocabulary projection is not allocated as a single buffer beside the
+ * resident layer graphs. That budget is {@code -Dnanollvm.tornado.weight}, or 32 MiB on TornadoVM's
+ * default 4 GiB heap when the property is unset. See
+ * {@link com.igormaznitsa.nanollvm.utils.NanoLlvmProps#PROP_TORNADO_WEIGHT}.
  *
  * @since 1.4.0
  */
@@ -29,7 +32,6 @@ final class TornadoGemvExecutor {
 
   private static final int MAX_CACHED_PLANS = 256;
 
-  private static final int TILE_WEIGHT_BYTES = 32 * 1024 * 1024;
   private static final Map<TileKey, StreamedTile> STREAMED_TILES = new LinkedHashMap<>();
 
   private static int residentRows = -1;
@@ -102,8 +104,8 @@ final class TornadoGemvExecutor {
     return (long) outCount * (long) in * Float.BYTES;
   }
 
-  private static int tileOutputRows(final int in) {
-    long rows = TILE_WEIGHT_BYTES / ((long) in * Float.BYTES);
+  private static int tileOutputRows(final int in, final long budgetBytes) {
+    long rows = budgetBytes / ((long) in * Float.BYTES);
     if (rows < 1L) {
       return 1;
     }
@@ -116,9 +118,9 @@ final class TornadoGemvExecutor {
     final float[] bias,
     final float[] y, final int yOff,
     final int rows, final int in, final int rowStride,
-    final int out0, final int out1
+    final int out0, final int out1, final long budgetBytes
   ) throws TornadoExecutionPlanException {
-    int tile = tileOutputRows(in);
+    int tile = tileOutputRows(in, budgetBytes);
     boolean withBias = bias != null;
     for (int out = out0; out < out1; ) {
       int count = Math.min(tile, out1 - out);
@@ -218,9 +220,10 @@ final class TornadoGemvExecutor {
     TornadoLaunchLock.lock();
     try {
       keepRowCount(rows);
-      if (weightSpanBytes(outCount, in) > TILE_WEIGHT_BYTES) {
+      long budgetBytes = TornadoDeviceBudget.weightBytes();
+      if (weightSpanBytes(outCount, in) > budgetBytes) {
         projectInWeightTiles(
-          x, xOff, w, wOff, bias, y, yOff, rows, in, rowStride, out0, out1);
+          x, xOff, w, wOff, bias, y, yOff, rows, in, rowStride, out0, out1, budgetBytes);
         return;
       }
       WeightKey key = WeightKey.of(w, wOff, bias, in, out0, outCount, rows);

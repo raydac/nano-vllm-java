@@ -15,8 +15,10 @@ package com.igormaznitsa.nanollvm.tensor;
  *   <li><strong>Vector</strong> — JDK incubator Vector API / SIMD ({@code VectorFloatKernels})</li>
  *   <li><strong>TornadoVM</strong> — optional heterogeneous backend when {@code tornado.api} and
  *       {@code tornado.runtime} are on the module path. Dense GEMV, chat attention, and the
- *       elementwise kernels run as TornadoVM tasks, including one-token decode. The Vector API
- *       is a separate mode</li>
+ *       elementwise kernels run as TornadoVM tasks, including one-token decode.
+ *       {@code -Dnanollvm.tornado.layers} sets how many decoder layers share one task graph
+ *       (default 4). {@code -Dnanollvm.tornado.weight} sets the largest weight kept in one device
+ *       buffer; a larger matrix is streamed in tiles. The Vector API is a separate mode</li>
  * </ul>
  * Selection is done once by {@link FloatKernelsFactory} (see {@code -Dnanollvm.kernels}).
  * The process-wide default instance is {@link #get()}; {@link VectorMath} delegates to it.
@@ -38,6 +40,8 @@ package com.igormaznitsa.nanollvm.tensor;
  * @see FloatKernelsFactory
  * @see VectorMath
  * @see Tensor
+ * @see com.igormaznitsa.nanollvm.utils.NanoLlvmProps#PROP_TORNADO_LAYERS
+ * @see com.igormaznitsa.nanollvm.utils.NanoLlvmProps#PROP_TORNADO_WEIGHT
  */
 public abstract class FloatKernels {
 

@@ -4,7 +4,8 @@ package com.igormaznitsa.nanollvm.utils;
  * Shared system-property / environment-variable keys and model-directory filenames.
  *
  * <p>Keys use the {@code nanollvm.*} / {@code NANOLLVM_*} spelling only. Library load and engine
- * code read {@link #PROP_ARCH}, {@link #PROP_KERNELS}, and {@link #PROP_CPU_THREADS}. The model-path
+ * code read {@link #PROP_ARCH}, {@link #PROP_KERNELS}, {@link #PROP_CPU_THREADS},
+ * {@link #PROP_TORNADO_LAYERS}, and {@link #PROP_TORNADO_WEIGHT}. The model-path
  * and color keys are conveniences for applications and the samples module — {@code LlmModelFactory}
  * does not read them; you pass a {@link java.nio.file.Path} yourself.
  *
@@ -35,6 +36,16 @@ package com.igormaznitsa.nanollvm.utils;
  *   <tr><td>{@link #PROP_COLOR}</td>
  *       <td>samples CLI</td>
  *       <td>{@code false} disables ANSI color on thinking streams.</td></tr>
+ *   <tr><td>{@link #PROP_TORNADO_LAYERS} ({@code -Dnanollvm.tornado.layers=N})</td>
+ *       <td>TornadoVM decoder graphs</td>
+ *       <td>Layers in one device task graph. Default {@code 4}, range {@code 1}–{@code 16}.
+ *           A larger group waits for the device less often and needs a larger
+ *           {@code -Dtornado.tvm.maxbytecodesize} when the graph no longer fits.</td></tr>
+ *   <tr><td>{@link #PROP_TORNADO_WEIGHT} ({@code -Dnanollvm.tornado.weight=512MB})</td>
+ *       <td>TornadoVM GEMV</td>
+ *       <td>Largest weight kept in one device buffer. A bigger matrix is streamed in tiles of
+ *           this size. Unset, the size follows the TornadoVM heap: 32 MiB on the default 4 GiB
+ *           heap, and the spare above 4 GiB when {@code -Dtornado.device.memory} is larger.</td></tr>
  * </table>
  */
 public final class NanoLlvmProps {
@@ -83,6 +94,65 @@ public final class NanoLlvmProps {
    * Samples CLI: {@code false} disables ANSI color on thinking streams.
    */
   public static final String PROP_COLOR = "nanollvm.color";
+  /**
+   * System property {@code nanollvm.tornado.layers}: how many decoder layers share one TornadoVM
+   * task graph.
+   *
+   * <p>Read once, on the first TornadoVM decoder frame. A missing or blank value means {@code 4}.
+   * The value must be an integer from {@code 1} to {@code 16}. Anything else throws
+   * {@link IllegalArgumentException} when that frame starts.
+   *
+   * <p>Matmul, norm, RoPE, and attention for the grouped layers stay on the device. The activation
+   * is copied back when the group ends, so a longer group waits for the device less often and
+   * keeps more layer weights resident together. A shorter group compiles a smaller graph and
+   * releases that resident set sooner. Prefill walks the same graph once per token.
+   *
+   * <p>TornadoVM encodes every graph into one bytecode buffer,
+   * {@code -Dtornado.tvm.maxbytecodesize} (4096 bytes on TornadoVM 8 unless you change it). A group
+   * that does not fit fails the launch. The failure names this property and that buffer: lower
+   * the layer count, or raise the buffer, and run again. A graph of a whole layer stack also
+   * measured slower than a short group, which is why the default stays at four.
+   *
+   * <p>Examples:
+   * <ul>
+   *   <li>{@code -Dnanollvm.tornado.layers=2} — shorter graphs on the default bytecode buffer</li>
+   *   <li>{@code -Dnanollvm.tornado.layers=8 -Dtornado.tvm.maxbytecodesize=16384} — longer graphs
+   *       when the device has room for the extra resident weights</li>
+   * </ul>
+   *
+   * @see #PROP_TORNADO_WEIGHT
+   * @since 1.5.0
+   */
+  public static final String PROP_TORNADO_LAYERS = "nanollvm.tornado.layers";
+  /**
+   * System property {@code nanollvm.tornado.weight}: the largest GEMV weight kept in one TornadoVM
+   * device buffer.
+   *
+   * <p>Read once, on the first TornadoVM matrix-vector product. A missing or blank value selects
+   * the budget from the device:
+   * <ul>
+   *   <li>TornadoVM's default heap is {@code -Dtornado.device.memory=4GB}. Decoder-layer graphs
+   *       already fill that heap, so a matrix larger than 32 MiB, including a vocabulary
+   *       projection, is copied through one reused tile of 32 MiB.</li>
+   *   <li>A heap larger than 4 GiB may hold one extra matrix in the bytes above 4 GiB. The
+   *       device's reported global memory and its maximum single allocation cap that figure. A
+   *       heap setting larger than the memory the device reports does not raise the budget.</li>
+   * </ul>
+   *
+   * <p>Set the property to replace that budget. The text is a byte count ({@code 33554432}) or a
+   * 1024-based size: {@code 32MB}, {@code 32MiB}, {@code 512M}, {@code 1GB}. The accepted range is
+   * 1 KiB through 64 GiB. A matrix that fits is uploaded once and reused for the current token
+   * count. A larger matrix is streamed in tiles of this size. TornadoVM still allocates the
+   * buffer from {@code -Dtornado.device.memory}, so this property cannot reserve memory the heap
+   * does not have.
+   *
+   * <p>Example: {@code -Dtornado.device.memory=8GB -Dnanollvm.tornado.weight=1GB} keeps a
+   * vocabulary projection resident when the heap has spare room above the layer graphs.
+   *
+   * @see #PROP_TORNADO_LAYERS
+   * @since 1.5.0
+   */
+  public static final String PROP_TORNADO_WEIGHT = "nanollvm.tornado.weight";
 
   /**
    * Hugging Face sidecar filename expected in a model folder.

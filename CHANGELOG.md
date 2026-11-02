@@ -29,12 +29,18 @@ Development snapshot after the **1.4.0** public release.
   row, then reduces in local memory). A failed multi-token CLBlast launch stays on that
   kernel. `-Dnanollvm.tornado.clblast=false` keeps the device kernel for multi-token matmul.
   A weight matrix stays resident for the current token count. A prefill plan is released when
-  decode starts, so the same matrix is not stored on the device twice. A matrix larger than 32 MiB,
-  including the vocabulary projection, is streamed through one reused device tile so it is not
-  kept beside the decoder-layer graphs.
+  decode starts, so the same matrix is not stored on the device twice. On TornadoVM's default
+  4 GiB device heap, a matrix larger than 32 MiB, including the vocabulary projection, is streamed
+  through one reused device tile so it is not kept beside the decoder-layer graphs. Raising
+  `-Dtornado.device.memory` keeps that matrix on the device when it fits in the memory above 4 GiB,
+  capped by the global memory and the maximum allocation the device reports.
+  `-Dnanollvm.tornado.weight` sets that buffer directly, for example `512MB`.
   Each dense decoder layer
   (Llama, Qwen3, Qwen3.5 full attention, Gemma 3, Gemma 4, and LFM2 attention) runs in a
-  TornadoVM task graph of four layers, including its prefill tokens: matmul, norm, RoPE, and
+  TornadoVM task graph. The graph holds four layers by default, and `-Dnanollvm.tornado.layers`
+  sets from 1 to 16. A longer graph waits for the device less often. When it no longer fits,
+  TornadoVM asks for a larger `-Dtornado.tvm.maxbytecodesize`. The graph includes prefill tokens:
+  matmul, norm, RoPE, and
   attention stay on the device, and the activation is copied back when the group ends. A whole
   stack does not fit TornadoVM's task-graph buffer. Packed and Gemma 4 QAT projections are expanded
   once into that graph. Qwen3.5 linear-attention recurrence and the LFM2 short convolution stay on

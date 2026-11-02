@@ -167,7 +167,7 @@ class TornadoFloatKernelsTest {
   }
 
   @Test
-  void vocabularySizedGemvStreamsWeightTiles() {
+  void vocabularySizedGemvFollowsDeviceBudget() {
     assumeTrue(TornadoFloatKernelsProvider.isAvailable(), "TornadoVM device required");
 
     FloatKernels cpu = FloatKernelsFactory.create("scalar");
@@ -187,19 +187,28 @@ class TornadoFloatKernelsTest {
       weight[i] = ((i % 5) - 2) * 0.01f;
     }
 
+    boolean streams = (long) out * in * Float.BYTES > TornadoDeviceBudget.weightBytes();
     int tiles = TornadoGemvExecutor.streamedTileCount();
+    int plans = TornadoGemvExecutor.cachedPlanCount();
     int launches = TornadoClBlastGemv.launchCount();
     cpu.gemv(x, 0, weight, 0, null, expected, 0, in, 0, out);
     tornado.gemv(x, 0, weight, 0, null, actual, 0, in, 0, out);
     assertClose(expected, actual);
-    assertTrue(TornadoGemvExecutor.streamedTileCount() > tiles);
-    int held = TornadoGemvExecutor.streamedTileCount();
+    if (streams) {
+      assertTrue(TornadoGemvExecutor.streamedTileCount() > tiles);
+    } else {
+      assertEquals(tiles, TornadoGemvExecutor.streamedTileCount());
+      assertTrue(TornadoGemvExecutor.cachedPlanCount() > plans);
+    }
+    int heldTiles = TornadoGemvExecutor.streamedTileCount();
+    int heldPlans = TornadoGemvExecutor.cachedPlanCount();
 
     x[0] = 0.4f;
     cpu.gemv(x, 0, weight, 0, null, expected, 0, in, 0, out);
     tornado.gemv(x, 0, weight, 0, null, actual, 0, in, 0, out);
     assertClose(expected, actual);
-    assertEquals(held, TornadoGemvExecutor.streamedTileCount());
+    assertEquals(heldTiles, TornadoGemvExecutor.streamedTileCount());
+    assertEquals(heldPlans, TornadoGemvExecutor.cachedPlanCount());
     assertEquals(launches, TornadoClBlastGemv.launchCount());
   }
 

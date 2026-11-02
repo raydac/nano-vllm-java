@@ -10,6 +10,7 @@ import static com.igormaznitsa.nanollvm.tensor.tornado.TornadoQwen3LayerKernels.
 import static com.igormaznitsa.nanollvm.tensor.tornado.TornadoQwen3LayerKernels.POSITION;
 import static com.igormaznitsa.nanollvm.tensor.tornado.TornadoQwen3LayerKernels.SLOT;
 import static com.igormaznitsa.nanollvm.tensor.tornado.TornadoQwen3LayerKernels.WINDOW;
+import static com.igormaznitsa.nanollvm.utils.NanoLlvmProps.PROP_TORNADO_LAYERS;
 import static java.util.Objects.requireNonNull;
 import static uk.ac.manchester.tornado.api.enums.DataTransferMode.EVERY_EXECUTION;
 import static uk.ac.manchester.tornado.api.enums.DataTransferMode.FIRST_EXECUTION;
@@ -20,6 +21,7 @@ import com.igormaznitsa.nanollvm.layers.DeviceDecoders.Layer;
 import com.igormaznitsa.nanollvm.layers.DeviceDecoders.Matrix;
 import com.igormaznitsa.nanollvm.layers.Norms.RotaryEmbedding;
 import com.igormaznitsa.nanollvm.tensor.Tensor;
+import com.igormaznitsa.nanollvm.utils.NanoLlvmProps;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -36,13 +38,33 @@ import uk.ac.manchester.tornado.api.WorkerGrid1D;
 import uk.ac.manchester.tornado.api.exceptions.TornadoExecutionPlanException;
 
 /**
- * Decoder layers on TornadoVM. A frame runs four layers in one task graph so a token waits for
- * the device once per group. Tornado encodes a graph into a fixed 8192-byte buffer, which is why
- * the group stays at four and not the whole stack. Prefill walks that graph once per token.
+ * Decoder layers on TornadoVM. A frame runs several layers in one task graph so a token waits for
+ * the device once per group. Matmul, norm, RoPE, and attention stay on the device inside the
+ * group, and the activation is copied back when the group ends. Prefill walks that graph once
+ * per token.
+ *
+ * <p>The group length is {@link com.igormaznitsa.nanollvm.utils.NanoLlvmProps#PROP_TORNADO_LAYERS}
+ * ({@code -Dnanollvm.tornado.layers}). The default is {@value #DEFAULT_LAYERS} and the accepted
+ * range is {@code 1}–{@value #MAX_LAYERS}. TornadoVM encodes the graph into
+ * {@code -Dtornado.tvm.maxbytecodesize}; a group that does not fit fails with that property named
+ * in the message.
+ *
+ * @see com.igormaznitsa.nanollvm.utils.NanoLlvmProps#PROP_TORNADO_LAYERS
+ * @see com.igormaznitsa.nanollvm.utils.NanoLlvmProps#PROP_TORNADO_WEIGHT
  */
 public final class TornadoDecoder {
 
-  private static final int LAYERS_PER_GRAPH = 4;
+  /**
+   * Layers per task graph when {@code -Dnanollvm.tornado.layers} is unset.
+   */
+  static final int DEFAULT_LAYERS = 4;
+
+  /**
+   * Largest accepted {@code -Dnanollvm.tornado.layers} value.
+   */
+  static final int MAX_LAYERS = 16;
+
+  private static int configuredLayers = -1;
 
   private static final Map<Key, LayerPlan> PLANS = new HashMap<>();
 
@@ -178,6 +200,71 @@ public final class TornadoDecoder {
     }
   }
 
+  /**
+   * Parses {@code -Dnanollvm.tornado.layers}. {@code null} and blank mean {@link #DEFAULT_LAYERS}.
+   *
+   * @param raw property text, or {@code null} when the property is unset
+   * @return layer count from {@code 1} to {@link #MAX_LAYERS}
+   * @throws IllegalArgumentException when {@code raw} is not an integer in that range
+   */
+  static int layersPerGraph(final String raw) {
+    if (raw == null || raw.isBlank()) {
+      return DEFAULT_LAYERS;
+    }
+    int parsed;
+    try {
+      parsed = Integer.parseInt(raw.strip());
+    } catch (NumberFormatException failed) {
+      throw new IllegalArgumentException(
+        "-D" + PROP_TORNADO_LAYERS + " must be an integer from 1 to " + MAX_LAYERS + ", got " + raw,
+        failed);
+    }
+    if (parsed < 1 || parsed > MAX_LAYERS) {
+      throw new IllegalArgumentException(
+        "-D" + PROP_TORNADO_LAYERS + " must be from 1 to " + MAX_LAYERS + ", got " + parsed);
+    }
+    return parsed;
+  }
+
+  private static int layersPerGraph() {
+    int known = configuredLayers;
+    if (known > 0) {
+      return known;
+    }
+    int parsed = layersPerGraph(NanoLlvmProps.systemProperty(PROP_TORNADO_LAYERS));
+    configuredLayers = parsed;
+    return parsed;
+  }
+
+  private static LayerPlan.GroupPlan compileGroup(final GroupKey key, final List<Pending> batch) {
+    try {
+      return LayerPlan.compileGroup(key, batch);
+    } catch (RuntimeException failed) {
+      if (!graphOverflow(failed)) {
+        throw failed;
+      }
+      throw new IllegalStateException(
+        ("TornadoVM task graph of %d layers does not fit -Dtornado.tvm.maxbytecodesize. "
+          + "Lower -D%s or raise that buffer.").formatted(batch.size(), PROP_TORNADO_LAYERS),
+        failed);
+    }
+  }
+
+  private static boolean graphOverflow(final Throwable failed) {
+    Throwable current = failed;
+    while (current != null) {
+      if (current instanceof java.nio.BufferOverflowException) {
+        return true;
+      }
+      String message = current.getMessage();
+      if (message != null && message.contains("tornado.tvm.maxbytecodesize")) {
+        return true;
+      }
+      current = current.getCause();
+    }
+    return false;
+  }
+
   private static float[] primary(final Layer layer) {
     if (layer.qkv() != null) {
       return layer.qkv().data();
@@ -227,7 +314,7 @@ public final class TornadoDecoder {
       if (cached != null) {
         return cached;
       }
-      LayerPlan.GroupPlan compiled = LayerPlan.compileGroup(key, batch);
+      LayerPlan.GroupPlan compiled = compileGroup(key, batch);
       GROUPS.put(key, compiled);
       return compiled;
     } finally {
@@ -248,7 +335,7 @@ public final class TornadoDecoder {
       }
       Tensor[] outputs = layerOutputs(layer);
       this.pending.add(new Pending(layer, outputs));
-      if (this.pending.size() == LAYERS_PER_GRAPH) {
+      if (this.pending.size() == layersPerGraph()) {
         this.flush();
       }
       return outputs;
