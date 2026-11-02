@@ -10,7 +10,9 @@ import com.igormaznitsa.nanollvm.models.LlmModel;
  * Parsed assistant turn: optional thinking scratchpad, visible answer, and engine stats.
  *
  * <p>Some chat models emit a tagged scratchpad (by default {@code <think>…</think>}) before the
- * user-visible reply. {@link #parse(String)} splits decoded assistant text into those two channels
+ * user-visible reply. Gemma 4 writes {@code <|channel>thought} … {@code <channel|>}; the thought
+ * runs through the last {@code <channel|>}, and the visible answer is the text after that token.
+ * {@link #parse(String)} splits decoded assistant text into those two channels
  * and strips chat specials ({@link ChatSpecials#DEFAULT}: {@code <|im_end|>}, {@code <|im_ended|>},
  * {@code <end_of_turn>}, …). Override scratchpad markers with {@link ThinkTags} via
  * {@link com.igormaznitsa.nanollvm.models.LlmModel#OPTION_THINK_TAGS} and the strip list with

@@ -160,7 +160,7 @@ public final class LlmModelImpl extends LlmModel {
     this.synthesisModel = synthesis != null;
     this.classificationModel = classifier != null;
     this.tokenizer = requireNonNull(tokenizer, "tokenizer");
-    this.options = copyAndValidateOptions(options);
+    this.options = optionsForTokenizer(options, this.tokenizer);
     this.modalities = LlmModalities.ofCheckpoint(this.hfConfig, this.embeddingModel);
     this.usableModalities = LlmModalities.usable(
       this.embeddingModel, this.speechModel, this.synthesisModel, this.classificationModel);
@@ -190,8 +190,16 @@ public final class LlmModelImpl extends LlmModel {
     });
     requireOptionType(copy, LlmModel.OPTION_THINK_TAGS, ThinkTags.class);
     requireOptionType(copy, LlmModel.OPTION_CHAT_SPECIALS, ChatSpecials.class);
-    copy.putIfAbsent(LlmModel.OPTION_THINK_TAGS, ThinkTags.DEFAULT);
-    copy.putIfAbsent(LlmModel.OPTION_CHAT_SPECIALS, ChatSpecials.DEFAULT);
+    return Map.copyOf(copy);
+  }
+
+  private static Map<String, Object> optionsForTokenizer(
+    final Map<String, ?> options,
+    final Tokenizer tokenizer
+  ) {
+    Map<String, Object> copy = new LinkedHashMap<>(copyAndValidateOptions(options));
+    copy.putIfAbsent(LlmModel.OPTION_THINK_TAGS, ThinkTags.ofTokenizer(tokenizer));
+    copy.putIfAbsent(LlmModel.OPTION_CHAT_SPECIALS, ChatSpecials.ofTokenizer(tokenizer));
     return Map.copyOf(copy);
   }
 
@@ -420,7 +428,7 @@ public final class LlmModelImpl extends LlmModel {
 
   private String thinkSuffix() {
     Object tags = this.options.get(LlmModel.OPTION_THINK_TAGS);
-    if (tags instanceof ThinkTags custom && !ThinkTags.DEFAULT.equals(custom)) {
+    if (tags instanceof ThinkTags custom && !custom.equals(ThinkTags.ofTokenizer(this.tokenizer))) {
       return ", thinkTags=%s/%s".formatted(custom.open(), custom.close());
     }
     return this.tokenizer.invitesThinking() ? ", think=true" : "";
@@ -428,7 +436,8 @@ public final class LlmModelImpl extends LlmModel {
 
   private String chatSpecialsSuffix() {
     Object specials = this.options.get(LlmModel.OPTION_CHAT_SPECIALS);
-    if (specials instanceof ChatSpecials custom && !ChatSpecials.DEFAULT.equals(custom)) {
+    if (specials instanceof ChatSpecials custom
+      && !custom.equals(ChatSpecials.ofTokenizer(this.tokenizer))) {
       return ", chatSpecials=%d".formatted(custom.markers().size());
     }
     return "";

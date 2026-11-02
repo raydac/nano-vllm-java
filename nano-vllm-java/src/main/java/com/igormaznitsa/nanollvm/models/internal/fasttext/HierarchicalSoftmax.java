@@ -22,7 +22,7 @@ final class HierarchicalSoftmax {
 
   static HierarchicalSoftmax build(final long[] labelCounts, final Matrix output) {
     final int osz = labelCounts.length;
-    if (osz <= 0) {
+    if (osz == 0) {
       throw new IllegalArgumentException("hierarchical softmax needs at least one label");
     }
     final Node[] tree = new Node[2 * osz - 1];

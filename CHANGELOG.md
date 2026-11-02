@@ -52,6 +52,7 @@ Development snapshot after the **1.4.0** public release.
   a separate mode. TileContext is CUDA-only and is not used.
 
 ### Fixed
+- Chat splits thinking from the answer using the special tokens that checkpoint defines. A `<think>` … `</think>` quoted inside the scratchpad stays in thinking; the answer is the text after the close that balances the opening tag. Those delimiters stay in the decode and do not stop generation.
 - Weight load fails on a duplicate or wrong-shaped tensor, and still accepts the same modules under common wrapper prefixes (`language_model`, `text_model`, `base_model`, repeated `model.`). A swapped `[in, out]` matrix is stored as `[out, in]`.
 - On Windows, TornadoVM samples start `tornado.exe`. The extensionless `tornado` file in the SDK is a shell script, and Windows cannot run it. When `TORNADOVM_HOME` is set, Maven `-Ptornado` launches `$TORNADOVM_HOME/bin` rather than relying on `PATH` alone. Kernel chat bench quotes TornadoVM worker classpath and model paths for `cmd.exe` so `;` and drive letters survive the launcher's `os.system` command line.
 

@@ -180,8 +180,8 @@ public final class GatedDeltaNet {
     float[] key = new float[tokens * this.keyDim];
     float[] value = new float[tokens * this.valueDim];
     this.splitQkv(mixed, tokens, query, key, value);
-    this.l2Normalize(query, tokens, this.numKeyHeads, this.keyHeadDim, this.queryScale);
-    this.l2Normalize(key, tokens, this.numKeyHeads, this.keyHeadDim, 1f);
+    l2Normalize(query, tokens, this.numKeyHeads, this.keyHeadDim, this.queryScale);
+    l2Normalize(key, tokens, this.numKeyHeads, this.keyHeadDim, 1f);
 
     float[] beta = sigmoid(this.betaProj.forward(hiddenStates, ctx).toFloatArray());
     float[] decay = this.decayOf(this.alphaProj.forward(hiddenStates, ctx).toFloatArray(), tokens);

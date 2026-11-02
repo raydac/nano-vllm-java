@@ -52,6 +52,14 @@ final class TokenizerLoader {
     }
   }
 
+  private static final Set<String> THOUGHT_CONTROLS = Set.of(
+    "<think>",
+    "</think>",
+    "<|channel>",
+    "<channel|>",
+    "<|think|>"
+  );
+
   static Tokenizer fromJsonDocuments(
     final String tokenizerJson,
     final String tokenizerConfigJson,
@@ -90,7 +98,7 @@ final class TokenizerLoader {
       int eos = resolveEos(vocab, sidecars.eosToken());
       int pad = resolvePad(vocab, sidecars.padToken(), eos);
       List<Integer> stopIds = stopIds(vocab, eos, sidecars.generationEosIds());
-      boolean inviteThinking = vocab.containsKey("<think>") && vocab.containsKey("</think>");
+      boolean inviteThinking = invitesThinking(vocab);
       TextNormalizer normalizer = TextNormalizer.fromHf(root.get("normalizer"));
       return new Tokenizer(
         tokenVocab, codec, normalizer, chatFormat, eos, stopIds, pad, inviteThinking);
@@ -163,6 +171,7 @@ final class TokenizerLoader {
     }
     addStopIfPresent(vocab, stopIds, "<|im_end|>");
     addStopIfPresent(vocab, stopIds, "<|endoftext|>");
+    stopIds = new ArrayList<>(withoutThoughtControls(vocab, stopIds, eos));
 
     String chatTemplate = source.metaString("tokenizer.chat_template", null);
     if (chatTemplate == null) {
@@ -172,47 +181,7 @@ final class TokenizerLoader {
       chatTemplate = "<|im_start|>";
     }
     ChatFormat chatFormat = detectChatFormat(vocab, chatTemplate, null);
-    boolean inviteThinking = vocab.containsKey("<think>") && vocab.containsKey("</think>");
-    return new Tokenizer(
-      tokenVocab, codec, normalizer, chatFormat, eos, stopIds, pad, inviteThinking);
-  }
-
-  /**
-   * Builds a tokenizer from a SentencePiece {@code tokenizer.model} protobuf.
-   *
-   * @since 1.2.0
-   */
-  static Tokenizer fromSentencePiece(
-    final byte[] modelBytes,
-    final String tokenizerConfigJson,
-    final String generationConfigJson
-  ) {
-    requireNonNull(modelBytes, "modelBytes");
-    SentencePieceModel.Parsed parsed = SentencePieceModel.parse(modelBytes);
-    Map<String, Integer> vocab = new LinkedHashMap<>(parsed.vocab());
-    Set<String> added = new HashSet<>(parsed.added());
-    Set<String> specials = new HashSet<>(parsed.specials());
-    TokenVocab tokenVocab = new TokenVocab(vocab, added, specials);
-    TokenCodec codec = switch (parsed.modelType()) {
-      case SentencePieceModel.BPE -> new MetaspaceBpeCodec(
-        tokenVocab, scoresArray(parsed), parsed.addDummyPrefix(), parsed.byteFallback());
-      case SentencePieceModel.WORD ->
-        new WordLevelCodec(tokenVocab, unkToken(vocab, parsed.unkId()));
-      case SentencePieceModel.CHAR -> new CharCodec(tokenVocab, unkToken(vocab, parsed.unkId()));
-      default -> new UnigramCodec(
-        tokenVocab,
-        UnigramScores.of(vocab, parsed.scores(), parsed.unkId()),
-        parsed.addDummyPrefix());
-    };
-    TextNormalizer normalizer = parsed.charsmap().length == 0
-      ? TextNormalizer.identity()
-      : TextNormalizer.of(PrecompiledCharsMap.parse(parsed.charsmap())::normalize);
-    Sidecars sidecars = Sidecars.read(tokenizerConfigJson, generationConfigJson);
-    ChatFormat chatFormat = detectChatFormat(vocab, sidecars.chatTemplate(), null);
-    int eos = resolveEos(vocab, sidecars.eosToken());
-    int pad = resolvePad(vocab, sidecars.padToken(), eos);
-    List<Integer> stopIds = stopIds(vocab, eos, sidecars.generationEosIds());
-    boolean inviteThinking = vocab.containsKey("<think>") && vocab.containsKey("</think>");
+    boolean inviteThinking = invitesThinking(vocab);
     return new Tokenizer(
       tokenVocab, codec, normalizer, chatFormat, eos, stopIds, pad, inviteThinking);
   }
@@ -482,6 +451,46 @@ final class TokenizerLoader {
     }
   }
 
+  /**
+   * Builds a tokenizer from a SentencePiece {@code tokenizer.model} protobuf.
+   *
+   * @since 1.2.0
+   */
+  static Tokenizer fromSentencePiece(
+    final byte[] modelBytes,
+    final String tokenizerConfigJson,
+    final String generationConfigJson
+  ) {
+    requireNonNull(modelBytes, "modelBytes");
+    SentencePieceModel.Parsed parsed = SentencePieceModel.parse(modelBytes);
+    Map<String, Integer> vocab = new LinkedHashMap<>(parsed.vocab());
+    Set<String> added = new HashSet<>(parsed.added());
+    Set<String> specials = new HashSet<>(parsed.specials());
+    TokenVocab tokenVocab = new TokenVocab(vocab, added, specials);
+    TokenCodec codec = switch (parsed.modelType()) {
+      case SentencePieceModel.BPE -> new MetaspaceBpeCodec(
+        tokenVocab, scoresArray(parsed), parsed.addDummyPrefix(), parsed.byteFallback());
+      case SentencePieceModel.WORD ->
+        new WordLevelCodec(tokenVocab, unkToken(vocab, parsed.unkId()));
+      case SentencePieceModel.CHAR -> new CharCodec(tokenVocab, unkToken(vocab, parsed.unkId()));
+      default -> new UnigramCodec(
+        tokenVocab,
+        UnigramScores.of(vocab, parsed.scores(), parsed.unkId()),
+        parsed.addDummyPrefix());
+    };
+    TextNormalizer normalizer = parsed.charsmap().length == 0
+      ? TextNormalizer.identity()
+      : TextNormalizer.of(PrecompiledCharsMap.parse(parsed.charsmap())::normalize);
+    Sidecars sidecars = Sidecars.read(tokenizerConfigJson, generationConfigJson);
+    ChatFormat chatFormat = detectChatFormat(vocab, sidecars.chatTemplate(), null);
+    int eos = resolveEos(vocab, sidecars.eosToken());
+    int pad = resolvePad(vocab, sidecars.padToken(), eos);
+    List<Integer> stopIds = stopIds(vocab, eos, sidecars.generationEosIds());
+    boolean inviteThinking = invitesThinking(vocab);
+    return new Tokenizer(
+      tokenVocab, codec, normalizer, chatFormat, eos, stopIds, pad, inviteThinking);
+  }
+
   private static List<Integer> stopIds(
     final Map<String, Integer> vocab,
     final int eos,
@@ -499,7 +508,32 @@ final class TokenizerLoader {
         stopIds.add(id);
       }
     }
-    return stopIds;
+    return withoutThoughtControls(vocab, stopIds, eos);
+  }
+
+  private static boolean invitesThinking(final Map<String, Integer> vocab) {
+    boolean tagged = vocab.containsKey("<think>") && vocab.containsKey("</think>");
+    boolean gemmaChannel = vocab.containsKey("<|think|>")
+      || (vocab.containsKey("<|channel>") && vocab.containsKey("<channel|>"));
+    return tagged || gemmaChannel;
+  }
+
+  private static boolean isThoughtControl(final Map<String, Integer> vocab, final int id) {
+    return THOUGHT_CONTROLS.stream().anyMatch(token -> id == vocab.getOrDefault(token, -2));
+  }
+
+  private static List<Integer> withoutThoughtControls(
+    final Map<String, Integer> vocab,
+    final List<Integer> stopIds,
+    final int eos
+  ) {
+    List<Integer> kept = stopIds.stream()
+      .filter(id -> !isThoughtControl(vocab, id))
+      .toList();
+    if (kept.isEmpty()) {
+      return List.of(eos);
+    }
+    return kept;
   }
 
   private static HfVocab readHfVocab(final Map<String, Object> model) {

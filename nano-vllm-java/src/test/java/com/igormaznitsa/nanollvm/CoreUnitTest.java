@@ -133,11 +133,13 @@ class CoreUnitTest {
       assertSame(model.tokenizer(), a.tokenizer());
       assertSame(model.tokenizer(), b.tokenizer());
       assertEquals(model.architectureName(), a.model().architectureName());
-      assertEquals(ThinkTags.DEFAULT, model.options().get(LlmModel.OPTION_THINK_TAGS));
-      assertEquals(ChatSpecials.DEFAULT, model.options().get(LlmModel.OPTION_CHAT_SPECIALS));
+      assertEquals(ThinkTags.ofTokenizer(model.tokenizer()),
+        model.options().get(LlmModel.OPTION_THINK_TAGS));
+      assertEquals(ChatSpecials.ofTokenizer(model.tokenizer()),
+        model.options().get(LlmModel.OPTION_CHAT_SPECIALS));
       assertEquals(2, model.options().size());
-      assertEquals(ThinkTags.DEFAULT, model.thinkTags());
-      assertEquals(ChatSpecials.DEFAULT, model.chatSpecials());
+      assertEquals(ThinkTags.ofTokenizer(model.tokenizer()), model.thinkTags());
+      assertEquals(ChatSpecials.ofTokenizer(model.tokenizer()), model.chatSpecials());
       assertEquals(LlmModalities.TEXT_TO_TEXT, model.modalities());
       assertEquals(LlmModalities.TEXT_TO_TEXT, model.usableModalities());
       assertEquals(Set.of(LlmModality.TEXT), model.inputModalities());
@@ -198,8 +200,9 @@ class CoreUnitTest {
          LLM llm = LLM.builder(model).maxModelLen(256).numKvcacheBlocks(32).build()) {
       assertEquals(custom, model.thinkTags());
       assertEquals(custom, model.options().get(LlmModel.OPTION_THINK_TAGS));
-      assertEquals(ChatSpecials.DEFAULT, model.chatSpecials());
-      assertEquals(ChatSpecials.DEFAULT, model.options().get(LlmModel.OPTION_CHAT_SPECIALS));
+      assertEquals(ChatSpecials.ofTokenizer(model.tokenizer()), model.chatSpecials());
+      assertEquals(ChatSpecials.ofTokenizer(model.tokenizer()),
+        model.options().get(LlmModel.OPTION_CHAT_SPECIALS));
       assertThrows(UnsupportedOperationException.class, () -> model.options().put("x", "y"));
       assertEquals(custom, llm.thinkTags());
       assertEquals(custom, llm.chat(16).thinkTags());
@@ -1545,6 +1548,171 @@ class CoreUnitTest {
     assertEquals(" Hello world", tok.decode(List.of(3, 4)));
     assertEquals(Optional.of(1), tok.tokenId("<s>"));
     assertEquals(Optional.of(2), tok.tokenId("</s>"));
+  }
+
+  @Test
+  void quotedThinkPairStaysInsideTheScratchpad() {
+    String raw = """
+      <think>
+      Okay, the user wants a longer phrase.
+      The reply starts with <think> and ends with </think>, and using the thinking lines.
+      Let me put that together.
+      </think>
+      Igor Maznitsa is a developer known for his work.
+      """;
+
+    ChatReply open = ChatReply.parse(raw.substring(0, raw.indexOf("Let me put")));
+    assertTrue(open.thinkOpen());
+    assertEquals("", open.answer());
+    assertTrue(open.thinking().contains("ends with"));
+    assertFalse(open.thinking().contains("</think>"));
+
+    ChatReply closed = ChatReply.parse(raw);
+    assertFalse(closed.thinkOpen());
+    assertTrue(closed.thinking().contains("Let me put that together."));
+    assertTrue(closed.thinking().contains("ends with"));
+    assertFalse(closed.thinking().contains("Igor Maznitsa"));
+    assertEquals("Igor Maznitsa is a developer known for his work.", closed.answer());
+
+    ChatReply lead = ChatReply.parse("Hello <think>plan</think> there");
+    assertEquals("plan", lead.thinking());
+    assertEquals("Hello\nthere", lead.answer());
+  }
+
+  @Test
+  void chatMarkersFollowTheTokenizerSpecials() {
+    var tok = com.igormaznitsa.nanollvm.tokenizer.Tokenizer.fromJsonDocuments("""
+        {
+          "model": {
+            "type": "BPE",
+            "vocab": {
+              "<|im_end|>": 0,
+              "<think>": 1,
+              "</think>": 2,
+              "Hi": 3
+            },
+            "merges": []
+          },
+          "added_tokens": [
+            {"id": 0, "content": "<|im_end|>", "special": true},
+            {"id": 1, "content": "<think>", "special": true},
+            {"id": 2, "content": "</think>", "special": true}
+          ]
+        }
+        """,
+      "{\"eos_token\":\"<|im_end|>\",\"chat_template\":\"<|im_start|>\"}",
+      null,
+      "{\"model_type\":\"qwen3\",\"vocab_size\":4}");
+
+    assertEquals(ThinkTags.DEFAULT, ThinkTags.ofTokenizer(tok));
+    ChatSpecials specials = ChatSpecials.ofTokenizer(tok);
+    assertTrue(specials.markers().contains("<think>"));
+    assertTrue(specials.markers().contains("</think>"));
+    assertTrue(specials.markers().contains("<|im_end|>"));
+    assertTrue(specials.markers().contains("<|im_ended|>"));
+    assertFalse(specials.markers().contains("<channel|>"));
+    assertFalse(tok.stopTokenIds().contains(tok.tokenId("</think>").orElseThrow()));
+
+    String decoded = tok.decode(java.util.List.of(1, 3, 2, 3, 0), true);
+    assertTrue(decoded.contains("<think>"));
+    assertTrue(decoded.contains("</think>"));
+    ChatReply parts = ChatReply.parse(decoded, ThinkTags.ofTokenizer(tok), specials);
+    assertEquals("Hi", parts.thinking());
+    assertEquals("Hi", parts.answer());
+  }
+
+  @Test
+  void gemmaChannelCloseSeparatesAnswerFromThought() {
+    ChatReply open = ChatReply.parse("""
+      <|channel>thought
+      still planning the phrase
+      """);
+    assertTrue(open.thinkOpen());
+    assertEquals("still planning the phrase", open.thinking());
+    assertEquals("", open.answer());
+
+    ChatReply closed = ChatReply.parse("""
+      <|channel>thought
+      notes about the phrase
+      <channel|>Igor Maznitsa is a developer.<turn|>
+      """);
+    assertFalse(closed.thinkOpen());
+    assertEquals("notes about the phrase", closed.thinking());
+    assertEquals("Igor Maznitsa is a developer.", closed.answer());
+
+    ChatReply quoted = ChatReply.parse("""
+      <|channel>thought
+      The reply starts with <|channel>thought and ends with <channel|>, then the visible line.
+      Let me put that together.
+      <channel|>Igor Maznitsa is a developer known for his work.
+      <turn|>
+      """);
+    assertFalse(quoted.thinkOpen());
+    assertTrue(quoted.thinking().contains("Let me put that together."));
+    assertTrue(quoted.thinking().contains("ends with"));
+    assertFalse(quoted.thinking().contains("<channel|>"));
+    assertFalse(quoted.thinking().contains("Igor Maznitsa"));
+    assertEquals("Igor Maznitsa is a developer known for his work.", quoted.answer());
+  }
+
+  @Test
+  void gemmaChannelDelimitersStayInSkippedDecodeAndDoNotStopGeneration() {
+    var tok = com.igormaznitsa.nanollvm.tokenizer.Tokenizer.fromJsonDocuments("""
+        {
+          "model": {
+            "type": "BPE",
+            "vocab": {
+              "<pad>": 0,
+              "<eos>": 1,
+              "<|channel>": 2,
+              "thought": 3,
+              "<channel|>": 4,
+              "Hi": 5,
+              "<|turn>": 6,
+              "<turn|>": 7,
+              "<|think|>": 8
+            },
+            "merges": []
+          },
+          "added_tokens": [
+            {"id": 0, "content": "<pad>", "special": true},
+            {"id": 1, "content": "<eos>", "special": true},
+            {"id": 2, "content": "<|channel>", "special": true},
+            {"id": 4, "content": "<channel|>", "special": true},
+            {"id": 6, "content": "<|turn>", "special": true},
+            {"id": 7, "content": "<turn|>", "special": true},
+            {"id": 8, "content": "<|think|>", "special": true}
+          ]
+        }
+        """,
+      """
+        {"eos_token":"<eos>","pad_token":"<pad>","chat_template":"<|turn>"}
+        """,
+      """
+        {"eos_token_id":[4,1]}
+        """,
+      "{\"model_type\":\"gemma4\",\"vocab_size\":9}");
+
+    assertTrue(tok.isTurnBasedChat());
+    assertTrue(tok.skipSpecialTokensOnChatDecode());
+    assertTrue(tok.invitesThinking());
+    String decoded = tok.decode(java.util.List.of(2, 3, 4, 5, 0), true);
+    assertEquals("<|channel>thought<channel|>Hi", decoded);
+    assertFalse(decoded.contains("<pad>"));
+    ChatReply parts = ChatReply.parse(decoded);
+    assertEquals("", parts.thinking());
+    assertEquals("Hi", parts.answer());
+    assertFalse(parts.thinkOpen());
+
+    assertTrue(tok.stopTokenIds().contains(1));
+    assertTrue(tok.stopTokenIds().contains(7));
+    assertFalse(tok.stopTokenIds().contains(4));
+    assertFalse(tok.stopTokenIds().contains(2));
+    assertFalse(tok.stopTokenIds().contains(8));
+
+    String prompted = tok.applyChatTemplate(
+      java.util.List.of(java.util.Map.of("role", "user", "content", "hi")), true, true);
+    assertTrue(prompted.contains("<|think|>"));
   }
 
   @Test

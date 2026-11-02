@@ -85,7 +85,8 @@ import java.util.Map;
  * the model). Known keys: {@link LlmModel#OPTION_THINK_TAGS} ({@link ThinkTags}),
  * {@link LlmModel#OPTION_CHAT_SPECIALS} ({@link ChatSpecials}), and
  * {@link LlmModel#OPTION_OPTIONAL_DATA} (a nested map of {@link LlmOptionalData} values).
- * Omitted keys receive library defaults; {@code optionalData} is omitted when empty.
+ * Omitted think tags and chat specials are filled from the checkpoint's special tokens;
+ * {@code optionalData} is omitted when empty.
  * Unknown option keys and wrong value types fail before weights are read. Typed extras such as
  * {@link LlmOptionalData#ESPEAK_DATA} are set with {@link Builder#optionalData}.
  *
@@ -995,7 +996,8 @@ public final class LlmModelFactory {
     }
 
     /**
-     * Replaces the load-time options map (omitted known keys receive library defaults).
+     * Replaces the load-time options map (omitted think tags and chat specials are filled from
+     * the checkpoint's special tokens).
      *
      * @since 1.1.0
      */

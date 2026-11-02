@@ -2,6 +2,8 @@ package com.igormaznitsa.nanollvm.chat;
 
 import static java.util.Objects.requireNonNull;
 
+import com.igormaznitsa.nanollvm.tokenizer.Tokenizer;
+
 /**
  * Open/close markers for a tagged thinking scratchpad in decoded assistant text.
  *
@@ -63,6 +65,27 @@ public record ThinkTags(String open, String close) {
    */
   public static ThinkTags of(final String open, final String close) {
     return new ThinkTags(open, close);
+  }
+
+  /**
+   * Scratchpad pair this tokenizer actually contains.
+   * {@code <think>} / {@code </think>} when both are vocabulary tokens, otherwise the Gemma
+   * channel pair when {@code <|channel>} and {@code <channel|>} are, otherwise {@link #DEFAULT}.
+   *
+   * @param tokenizer checkpoint tokenizer; must not be {@code null}
+   * @return pair to use when the caller did not set {@code thinkTags} at load
+   * @since 1.5.0
+   */
+  public static ThinkTags ofTokenizer(final Tokenizer tokenizer) {
+    requireNonNull(tokenizer, "tokenizer");
+    if (tokenizer.invitesThinking(DEFAULT.open(), DEFAULT.close())) {
+      return DEFAULT;
+    }
+    if (tokenizer.tokenId("<|channel>").isPresent() &&
+      tokenizer.tokenId("<channel|>").isPresent()) {
+      return of("<|channel>thought", "<channel|>");
+    }
+    return DEFAULT;
   }
 
   /**

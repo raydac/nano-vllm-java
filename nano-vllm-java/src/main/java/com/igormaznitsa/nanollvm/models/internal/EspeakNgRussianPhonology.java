@@ -70,7 +70,7 @@ final class EspeakNgRussianPhonology {
 
   private static int vowelAtGuessedSyllable(final List<String> tokens) {
     int vowels = (int) tokens.stream().filter(EspeakNgRussianPhonology::isVowel).count();
-    if (vowels <= 0) {
+    if (vowels == 0) {
       return -1;
     }
     int capped = Math.min(vowels, GUESS.length - 1);
@@ -78,7 +78,7 @@ final class EspeakNgRussianPhonology {
     int syllable = isVowel(last)
       ? GUESS_VOWEL_FINAL[capped]
       : STOPS.contains(last) ? GUESS_STOP_FINAL[capped] : GUESS[capped];
-    return nthVowel(tokens, syllable <= 0 ? 1 : syllable);
+    return nthVowel(tokens, syllable == 0 ? 1 : syllable);
   }
 
   private static String lastSpoken(final List<String> tokens) {

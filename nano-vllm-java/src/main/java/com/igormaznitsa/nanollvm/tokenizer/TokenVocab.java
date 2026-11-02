@@ -1,8 +1,9 @@
 package com.igormaznitsa.nanollvm.tokenizer;
 
+import static java.util.Comparator.comparingInt;
+import static java.util.Comparator.naturalOrder;
 import static java.util.Objects.requireNonNull;
 
-import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -16,9 +17,17 @@ import java.util.Set;
  */
 final class TokenVocab {
 
+  private static final Set<String> KEPT_WHEN_SPECIAL = Set.of(
+    "<think>",
+    "</think>",
+    "<|channel>",
+    "<channel|>"
+  );
+
   private final Map<String, Integer> tokenToId;
   private final Map<Integer, String> idToToken;
   private final List<String> addedTokensByLength;
+  private final List<String> specialTokens;
   private final Set<Integer> skipTokenIds;
 
   TokenVocab(
@@ -33,7 +42,7 @@ final class TokenVocab {
     }
     this.idToToken = Map.copyOf(inverse);
     this.addedTokensByLength = addedTokenTexts.stream()
-      .sorted(Comparator.comparingInt(String::length).reversed())
+      .sorted(comparingInt(String::length).reversed())
       .toList();
     Set<Integer> skip = new HashSet<>();
     for (String text : skipTokenTexts) {
@@ -43,6 +52,11 @@ final class TokenVocab {
       }
     }
     this.skipTokenIds = Set.copyOf(skip);
+    this.specialTokens = skipTokenTexts.stream()
+      .filter(text -> text != null && !text.isBlank() && this.tokenToId.containsKey(text))
+      .distinct()
+      .sorted(comparingInt(String::length).reversed().thenComparing(naturalOrder()))
+      .toList();
   }
 
   Integer id(final String token) {
@@ -57,8 +71,16 @@ final class TokenVocab {
     return this.tokenToId.containsKey(token);
   }
 
+  List<String> specialTokens() {
+    return this.specialTokens;
+  }
+
   boolean skip(final int id) {
-    return this.skipTokenIds.contains(id);
+    if (!this.skipTokenIds.contains(id)) {
+      return false;
+    }
+    String token = this.idToToken.get(id);
+    return token == null || !KEPT_WHEN_SPECIAL.contains(token);
   }
 
   String matchAdded(final String text, final int index) {

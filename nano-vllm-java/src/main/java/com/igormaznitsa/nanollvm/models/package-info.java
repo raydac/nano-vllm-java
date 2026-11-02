@@ -7,8 +7,8 @@
  * <p>{@link LlmModel} is safe to share across threads and across many
  * {@link com.igormaznitsa.nanollvm.llm.LLM} instances until {@link LlmModel#close()}. Scratchpad
  * markers are {@link LlmModel#thinkTags()} and answer-search specials are
- * {@link LlmModel#chatSpecials()} from load-time {@link LlmModel#options()} (library defaults
- * when omitted). {@link LlmModel#modalities()} is the input/output {@link LlmModality} catalog
+ * {@link LlmModel#chatSpecials()} from load-time {@link LlmModel#options()} (the checkpoint's
+ * special tokens when omitted). {@link LlmModel#modalities()} is the input/output {@link LlmModality} catalog
  * (chat graphs text→text, embedding encoders text→embedding, Whisper audio→text, Piper
  * text→audio; Gemma 4 also declares image/audio/video on {@link LlmModel#modalities()} while
  * {@link LlmModel#usableModalities()} stays text for that family). Close each

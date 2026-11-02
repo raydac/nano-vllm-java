@@ -82,13 +82,12 @@ public abstract class FloatKernels {
   }
 
   /**
-   * @param weights backing arrays of dense weight tensors; may be empty
+   * Drops device plans that captured these arrays. CPU backends do nothing.
+   *
+   * @param weights backing arrays of dense weight tensors; {@code null} elements are ignored
    * @since 1.5.0
    */
   public void releaseWeights(final float[]... weights) {
-    if (weights == null) {
-      return;
-    }
   }
 
   /**

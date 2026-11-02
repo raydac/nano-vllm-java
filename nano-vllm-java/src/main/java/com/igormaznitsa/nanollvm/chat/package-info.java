@@ -10,7 +10,7 @@
  * scratchpad some models write before the visible reply. Set scratchpad markers as
  * {@link com.igormaznitsa.nanollvm.models.LlmModel#OPTION_THINK_TAGS} and leftover chat-markup
  * strings as {@link com.igormaznitsa.nanollvm.models.LlmModel#OPTION_CHAT_SPECIALS} when the
- * checkpoint does not use the library defaults; {@link ChatSession#thinkTags(ThinkTags)}
+ * checkpoint's own special tokens are not the scratchpad pair you want; {@link ChatSession#thinkTags(ThinkTags)}
  * overrides the scratchpad pair for one conversation.
  *
  * <p><b>Which call.</b> {@link ChatSession#send(String)} is a normal turn (history and generate

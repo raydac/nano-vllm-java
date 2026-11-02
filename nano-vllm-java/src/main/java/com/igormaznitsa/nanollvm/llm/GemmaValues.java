@@ -206,10 +206,9 @@ final class GemmaValues {
     boolean floating = false;
     if (this.peek('.')) {
       floating = true;
-      this.pos++;
-      while (this.pos < this.text.length() && Character.isDigit(this.text.charAt(this.pos))) {
+      do {
         this.pos++;
-      }
+      } while (this.pos < this.text.length() && Character.isDigit(this.text.charAt(this.pos)));
     }
     String literal = this.text.substring(start, this.pos);
     if (floating) {

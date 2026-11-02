@@ -192,14 +192,25 @@ public final class Tokenizer {
   }
 
   /**
-   * Whether this chat path invites a {@code <think>} scratchpad.
-   * True only when the vocab contains both {@code <think>} and {@code </think>}.
+   * Whether this chat path invites a scratchpad.
+   * True when the vocab contains both {@code <think>} and {@code </think>}, or Gemma 4
+   * {@code <|think|>} / {@code <|channel>}…{@code <channel|>}.
    *
    * @return {@code true} when {@link #applyChatTemplate(List, boolean, boolean)} may emit an empty
-   * think block when thinking is disabled
+   * think block when thinking is disabled, or a Gemma {@code <|think|>} system turn when enabled
    */
   public boolean invitesThinking() {
     return this.inviteThinking;
+  }
+
+  /**
+   * Special-token strings this checkpoint defines, longest first.
+   *
+   * @return unmodifiable list; empty when the vocab has no special tokens
+   * @since 1.5.0
+   */
+  public List<String> specialTokens() {
+    return this.vocab.specialTokens();
   }
 
   /**
@@ -221,6 +232,8 @@ public final class Tokenizer {
 
   /**
    * Whether chat decode should omit special/control tokens (turn-based markup models).
+   * Thought delimiters ({@code <think>}, {@code </think>}, {@code <|channel>}, {@code <channel|>})
+   * stay in the string either way, so a later parse can still split the answer from the thought.
    *
    * @since 1.1.0
    */
@@ -253,7 +266,8 @@ public final class Tokenizer {
    * Decodes token ids to text.
    *
    * @param tokenIds          vocabulary ids; non-{@code null}
-   * @param skipSpecialTokens when {@code true}, omit ids in the special/skip set (e.g. think tags)
+   * @param skipSpecialTokens when {@code true}, omit ids in the special/skip set. Thought
+   *                          delimiters are kept so chat parse can see the channel boundary
    * @return decoded UTF-8 text (Metaspace {@code ▁} restored to spaces)
    */
   public String decode(final List<Integer> tokenIds, final boolean skipSpecialTokens) {

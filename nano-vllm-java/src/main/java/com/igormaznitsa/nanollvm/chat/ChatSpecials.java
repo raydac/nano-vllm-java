@@ -4,6 +4,7 @@ import static java.util.Comparator.comparingInt;
 import static java.util.Comparator.naturalOrder;
 import static java.util.Objects.requireNonNull;
 
+import com.igormaznitsa.nanollvm.tokenizer.Tokenizer;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -30,8 +31,8 @@ import java.util.List;
 public record ChatSpecials(List<String> markers) {
 
   /**
-   * ChatML ({@code <|im_end|>} and the typed lookalike {@code <|im_ended|>}), Gemma turn,
-   * Llama header/stop, and default {@link ThinkTags} strings, longest first.
+   * ChatML ({@code <|im_end|>} and the typed lookalike {@code <|im_ended|>}), Gemma turn and
+   * thought-channel markers, Llama header/stop, and default {@link ThinkTags} strings, longest first.
    */
   public static final ChatSpecials DEFAULT = new ChatSpecials(List.of(
     "<|im_ended|>",
@@ -49,6 +50,9 @@ public record ChatSpecials(List<String> markers) {
     "<|turn>system\n",
     "<|turn>",
     "<turn|>",
+    "<|channel>thought",
+    "<channel|>",
+    "<|channel>",
     "<|think|>",
     "<eos>",
     "<bos>",
@@ -91,6 +95,33 @@ public record ChatSpecials(List<String> markers) {
    */
   public static ChatSpecials of(final List<String> markers) {
     return new ChatSpecials(requireNonNull(markers, "markers"));
+  }
+
+  /**
+   * Markup taken from the checkpoint: its special tokens, the scratchpad pair those tokens
+   * select, and the typed {@code <|im_ended|>} lookalike when the model has {@code <|im_end|>}.
+   *
+   * @param tokenizer checkpoint tokenizer; must not be {@code null}
+   * @return specials for chat parse when the caller did not set them at load
+   * @since 1.5.0
+   */
+  public static ChatSpecials ofTokenizer(final Tokenizer tokenizer) {
+    requireNonNull(tokenizer, "tokenizer");
+    List<String> markers = new ArrayList<>(tokenizer.specialTokens());
+    if (tokenizer.invitesThinking(ThinkTags.DEFAULT.open(), ThinkTags.DEFAULT.close())) {
+      markers.add(ThinkTags.DEFAULT.open());
+      markers.add(ThinkTags.DEFAULT.close());
+    }
+    if (tokenizer.tokenId("<|channel>").isPresent() &&
+      tokenizer.tokenId("<channel|>").isPresent()) {
+      markers.add("<|channel>thought");
+      markers.add("<channel|>");
+    }
+    if (tokenizer.tokenId("<|im_end|>").isPresent()) {
+      markers.add("<|im_ended|>");
+    }
+    markers.removeIf(marker -> marker == null || marker.isBlank());
+    return new ChatSpecials(markers);
   }
 
   /**

@@ -93,8 +93,8 @@ public abstract sealed class LlmModel implements AutoCloseable permits LlmModelI
 
   /**
    * Load-time options frozen by {@link LlmModelFactory} ({@link Map#copyOf}). Always contains
-   * {@link #OPTION_THINK_TAGS} and {@link #OPTION_CHAT_SPECIALS} (library defaults when the caller
-   * omitted them).
+   * {@link #OPTION_THINK_TAGS} and {@link #OPTION_CHAT_SPECIALS}. Omitted keys are filled from
+   * the checkpoint's special tokens.
    *
    * @since 1.1.0
    */
@@ -102,7 +102,7 @@ public abstract sealed class LlmModel implements AutoCloseable permits LlmModelI
 
   /**
    * Scratchpad open/close markers for chat parse and ChatML skip-seed.
-   * {@link ThinkTags#DEFAULT} ({@code <think>} / {@code </think>}) unless
+   * Taken from the checkpoint's special tokens ({@link ThinkTags#ofTokenizer}) unless
    * {@link #OPTION_THINK_TAGS} was set at load.
    *
    * @since 1.1.0
@@ -111,7 +111,8 @@ public abstract sealed class LlmModel implements AutoCloseable permits LlmModelI
 
   /**
    * Special-token strings searched in decoded assistant text when stripping chat markup.
-   * {@link ChatSpecials#DEFAULT} unless {@link #OPTION_CHAT_SPECIALS} was set at load.
+   * Taken from the checkpoint ({@link ChatSpecials#ofTokenizer}) unless
+   * {@link #OPTION_CHAT_SPECIALS} was set at load.
    *
    * @since 1.1.0
    */

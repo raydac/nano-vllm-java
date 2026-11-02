@@ -700,7 +700,7 @@ public final class ChatSession {
       ? this.isolatedTurn(lastUserOverride)
       : this.historyForTemplate(lastUserOverride));
 
-    String raw = "";
+    String raw;
     int executed = 0;
     while (true) {
       String prompt = dialect.render(
@@ -766,11 +766,15 @@ public final class ChatSession {
   }
 
   /**
-   * Session {@link #enableThinking(boolean)} if set; otherwise vocab membership of the active tags.
+   * Session {@link #enableThinking(boolean)} if set; otherwise the tokenizer's scratchpad flag,
+   * then vocab membership of the active tags.
    */
   private boolean thinkingEnabled(final Tokenizer tokenizer) {
     if (this.enableThinking != null) {
       return this.enableThinking;
+    }
+    if (tokenizer.invitesThinking()) {
+      return true;
     }
     ThinkTags tags = this.thinkTags();
     return tokenizer.invitesThinking(tags.open(), tags.close());

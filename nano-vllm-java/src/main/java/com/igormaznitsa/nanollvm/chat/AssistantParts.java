@@ -13,6 +13,8 @@ import java.util.regex.Pattern;
 record AssistantParts(String thinking, String answer, boolean thinkOpen) {
 
   private static final Pattern LINE_BREAK = Pattern.compile("\\R");
+  private static final Pattern CHANNEL_OPEN = Pattern.compile("<\\|channel>\\s*thought\\s*");
+  private static final String CHANNEL_CLOSE = "<channel|>";
   private static final Pattern LEADING_ASSISTANT = Pattern.compile("(?i)^\\s*assistant\\s*:?\\s*");
   private static final Pattern STATED_ANSWER = Pattern.compile(
     "(?i)(?:answer(?:\\s+should)?\\s+be|returns?|result(?:\\s+is)?)\\s*[:\"']?\\s*(.+)$");
@@ -52,21 +54,44 @@ record AssistantParts(String thinking, String answer, boolean thinkOpen) {
 
     List<String> markup = specials.searchMarkers(tags);
     String text = holdIncompleteMarkupSuffix(raw, markup);
+    Channel channel = markup.contains(CHANNEL_CLOSE) ? takeChannel(text) : null;
+    if (channel != null) {
+      String thinking = stripChatMarkup(channel.thinking(), tags, specials);
+      if (channel.open()) {
+        return new AssistantParts(thinking, "", true);
+      }
+      AssistantParts rest = parseTagged(channel.answer(), tags, specials, markup);
+      return new AssistantParts(
+        joinThink(thinking, rest.thinking()),
+        rest.answer(),
+        rest.thinkOpen());
+    }
+    return parseTagged(text, tags, specials, markup);
+  }
+
+  private static AssistantParts parseTagged(
+    final String raw,
+    final ThinkTags tags,
+    final ChatSpecials specials,
+    final List<String> markup
+  ) {
+    String text = holdIncompleteMarkupSuffix(raw, markup);
     String open = tags.open();
     String close = tags.close();
     int startThink = text.indexOf(open);
     int endThink = startThink >= 0
-      ? text.indexOf(close, startThink + open.length())
+      ? matchingClose(text, open, close, startThink)
       : text.indexOf(close);
 
     String thinking;
     boolean thinkOpen;
     String after;
     if (startThink >= 0 && endThink > startThink) {
+      String lead = text.substring(0, startThink);
       thinking = text.substring(startThink + open.length(), endThink);
       Remainder rest = splitRemainder(afterThinkClose(text, endThink, close), tags, markup);
       thinking = joinThink(thinking, rest.thinking());
-      after = rest.answer();
+      after = joinAnswer(lead, rest.answer());
       thinkOpen = rest.open();
     } else if (startThink >= 0) {
       thinking = text.substring(startThink + open.length());
@@ -86,6 +111,57 @@ record AssistantParts(String thinking, String answer, boolean thinkOpen) {
     return new AssistantParts(stripChatMarkup(thinking, tags, specials),
       sanitizeAnswer(after, markup),
       thinkOpen);
+  }
+
+  private static Channel takeChannel(final String text) {
+    Matcher open = CHANNEL_OPEN.matcher(text);
+    boolean foundOpen = open.find();
+    int close = text.lastIndexOf(CHANNEL_CLOSE);
+    if (!foundOpen && close < 0) {
+      return null;
+    }
+    if (!foundOpen) {
+      return new Channel(
+        text.substring(0, close),
+        text.substring(close + CHANNEL_CLOSE.length()),
+        false);
+    }
+    String before = text.substring(0, open.start());
+    if (close < open.end()) {
+      return new Channel(joinThink(before, text.substring(open.end())), "", true);
+    }
+    return new Channel(
+      joinThink(before, text.substring(open.end(), close)),
+      text.substring(close + CHANNEL_CLOSE.length()),
+      false);
+  }
+
+  private static int matchingClose(
+    final String text,
+    final String open,
+    final String close,
+    final int openAt
+  ) {
+    int depth = 1;
+    int cursor = openAt + open.length();
+    while (cursor <= text.length()) {
+      int nextOpen = text.indexOf(open, cursor);
+      int nextClose = text.indexOf(close, cursor);
+      if (nextClose < 0) {
+        return -1;
+      }
+      if (nextOpen >= 0 && nextOpen < nextClose) {
+        depth++;
+        cursor = nextOpen + open.length();
+        continue;
+      }
+      depth--;
+      if (depth == 0) {
+        return nextClose;
+      }
+      cursor = nextClose + close.length();
+    }
+    return -1;
   }
 
   private static String afterThinkClose(final String text, final int closeAt, final String close) {
@@ -110,10 +186,11 @@ record AssistantParts(String thinking, String answer, boolean thinkOpen) {
     String before = text.substring(0, start);
     String fromThink = text.substring(start + open.length());
     String close = tags.close();
-    int end = fromThink.indexOf(close);
+    int end = matchingClose(open + fromThink, open, close, 0);
     if (end < 0) {
       return new Remainder(fromThink, before, true);
     }
+    end -= open.length();
 
     String inner = fromThink.substring(0, end);
     Remainder nested = splitRemainder(afterThinkClose(fromThink, end, close), tags, markup);
@@ -369,5 +446,8 @@ record AssistantParts(String thinking, String answer, boolean thinkOpen) {
    * Nested think-block remainder: extra thinking, answer text before the next open tag, still-open flag.
    */
   private record Remainder(String thinking, String answer, boolean open) {
+  }
+
+  private record Channel(String thinking, String answer, boolean open) {
   }
 }
