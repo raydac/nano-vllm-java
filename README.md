@@ -206,6 +206,8 @@ mvn -pl nano-vllm-java-samples -q exec:java
 
 Checkers: Enter selects White. A move is `a3 b4` or `A 3 B 4`. `q` quits. Download: `./models/download-jeff-qwen3.5-0.8b.sh`.
 
+![Russian checkers: you play White, Jeff answers with Qwen3.5, and the game ends when your king is taken](assets/russian_checkers_03nov26.gif)
+
 ![Gemma3 session: load, then questions about the Grimm brothers](assets/java_nano_llvm_session_1.gif)
 
 ## What you can load
