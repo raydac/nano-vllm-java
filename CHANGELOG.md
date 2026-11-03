@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Development snapshot after the **1.4.0** public release.
 
 ### Added
+- The weather sample looks up this computer's city and the weather there, prints a 64-column world map with that position marked, prints the temperature and sky, speaks that line, and logs how long each step took. If the chat model or a Piper voice is missing, it stops before loading and prints the download command for each one.
 - Chat can call Java functions registered with `LLM.Builder.tool`. Qwen3, Qwen3.5, LFM2, and Gemma 4 each use that model's own tool-call tokens. The function result is written back in the form that model expects, and the reply continues. A space inside the called name still matches the registered tool. Text the model writes after a call is not sent back, so a later step can still call another tool. A turn runs at most four calls. `ToolsHelloWorld` asks Qwen3-0.6B for the OS name, then for one directory listing.
 
 ### Changed

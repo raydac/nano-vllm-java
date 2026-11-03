@@ -3793,7 +3793,7 @@ You do not need to read every file. Use the tables to jump, then skim the named 
 `utils`. Everything else below (`models.internal`, `models.llmcontainer`, `models.llmarch`, `engine`, `layers`,
 `tensor`, `internal`, `prompts`) is
 **not exported** — fine to read in this guide; application code under the module system should stay on the exported
-packages. Demos live in the separate Maven module `nano-vllm-java-samples`.
+packages. Demos live in `nano-vllm-java-samples`. The weather desk is `nano-vllm-java-weather-sample`.
 
 | Folder / type                                                                          | Role in the story                                    | Exported? |
 |----------------------------------------------------------------------------------------|------------------------------------------------------|-----------|
@@ -3813,6 +3813,7 @@ packages. Demos live in the separate Maven module `nano-vllm-java-samples`.
 | `tensor/` — `Tensor`, `Ops`, `MatmulRuntime`, `LinearKernel`, `EmbeddingKernel`, …     | Arrays, float ops, parallel GEMM                     | **no** |
 | `prompts/` — `ChatPrompts`, `RagPrompts`, `AdvisorPrompts`                             | Default system / RAG / advisor wording               | **no** |
 | *(Maven module `nano-vllm-java-samples`)* `Example`, `HelloWorld`, `NextTokenHelloWorld`, `Bench`, `EmbeddingsHelloWorld`, `TranscribeHelloWorld`, `SynthesizeHelloWorld`, `VoiceReplyHelloWorld`, `LogTriageHelloWorld`, `AdvisorRagHelloWorld`, `RagTunerHelloWorld`, `utils/Bundled*` | Runnable demos (not in the library JAR) | n/a |
+| *(Maven module `nano-vllm-java-weather-sample`)* `WeatherSample` | City from the public address, a 64-column world card, then Open-Meteo, then Piper on the default mixer | n/a |
 
 `Config.HfConfig` (in `llm/Config`) holds the blueprint plus per-LLM engine knobs (`maxModelLen`, `kvHeapFraction`, …).
 

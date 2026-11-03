@@ -1,4 +1,5 @@
 ## 1. Implementation Progress
+- Weather sample module `nano-vllm-java-weather-sample`. `WeatherSample` stays in `com.igormaznitsa.nanollvm.weather`. The rest is `model` (checkpoints), `place` (city and map), `forecast` (Open-Meteo), `tools` (the two chat functions), `speech` (playback), `http`, `json`, and `time`. Qwen3-0.6B calls `current_location`, then `current_weather` (two turns; one question that names both tools makes 0.6B call only one). Place is the public address via ipwho.is, then geojs, then ipapi.co. Weather is Open-Meteo JSON (no API key, CC BY 4.0). Piper speaks the line on the default mixer. After the coordinates arrive it prints a 64-column Kavrayskiy VII card (Natural Earth 110m coast, public domain; the smallest-world-map file has no license so its bytes are not embedded) and marks the fix with the same projection. Startup checks the chat checkpoint and a Piper voice together and prints every missing download before any weights load. Each step logs its wall-clock time (`load chat model`, `place turn`, `location lookup`, `weather turn`, `weather lookup`, `synthesize`, `play`, `total`). The turn lines include the lookup inside them. Gemma 3 cannot take the tools. A live run located Tallinn and spoke 8.1°C, overcast.
 - Chat markers come from the checkpoint's special tokens (`ThinkTags.ofTokenizer`, `ChatSpecials.ofTokenizer`) when load options omit them. A quoted `<think>`…`</think>` inside the scratchpad does not close it; the answer starts after the balancing close. Think delimiters stay in the decode and are not generation stops. Gemma's `<|channel>thought`…`<channel|>` is used only when those tokens are in the vocab.
 - TornadoVM runs decoder layers in task graphs of four (Llama, Qwen3, Qwen3.5 full attention, Gemma 3, Gemma 4, LFM2 attention). The activation stays on the device inside the group. A single graph for the whole stack was slower: Qwen3-0.6B fell to 0.11 tok/s, and Tornado encodes a graph into a fixed 8192-byte buffer. A GEMV above the device budget (32 MiB on the default 4 GB heap; `-Dnanollvm.tornado.weight` overrides it) is streamed through one reused tile. `-Dnanollvm.tornado.layers` sets the task-graph length (default 4, range 1–16). Keeping that matrix resident beside the layer graphs overran the 4 GB device heap (0.15 tok/s). Streaming it, before this grouping, measured 1.50 tok/s on the same Qwen3-0.6B bench. Grouping is not re-benched yet.
 - A yes/no prompt ends on `Yes or No:` / `No or Yes:` after `Message:`. The old line `Answer Yes or No.` made Gemma3-270M continue with Yes for every refund state. `JevHelloWorld` asks whether the message asks for a refund, then repeats two states once the prior is on.
@@ -36,6 +37,7 @@
 - `LLM` still has many one-line generate overloads. They exist so callers do not pass unused flags.
 
 ## 4. Current Work In Progress
+- Weather sample is in and was run once with Qwen3-0.6B plus Lessac: both tools fired, the forecast was logged, and Piper played on the default line. Maven exec may warn that the Java Sound event thread is still alive; that thread is a daemon.
 - Example chat with Qwen left the answer on `thinking>` when the scratchpad quoted `</think>`. Balancing close plus model specials are in; a live Qwen turn is the check.
 - Sample `ToolsHelloWorld` registers `os_name` and `list_files` (names only, one directory, cap 100). It asks Qwen3-0.6B for the OS first, then for the directory, because one combined question made 0.6B call only `list_files` and then rewrite the names. `ToolsHelloWorldTest` covers the tools without a model load.
 - Tool calls are registered on `LLM.Builder.tool(ModelTool...)` and run inside `ChatSession.send`. Dialects: Qwen3 Hermes JSON (`<tool_call>` + user `<tool_response>`), Qwen3.5 XML `<function=` / `<parameter=` (including 0.8B; SGLang `qwen3_coder`), LFM2 Pythonic list between `<|tool_call_start|>` / `<|tool_call_end|>` with a `tool` role result, Gemma 4 `call:` / `response:` inside the same model turn (`<|tool_response>` is an extra stop). The assistant turn stored for the next generate ends at the last call close; prose after that call is dropped. A space inside a called name is removed before lookup (`os_ name` matches `os_name`); Qwen3-0.6B emits that split for `os_name`. Llama and Gemma 3 fail at build. MCP is not the engine protocol. At most four executions per user message. Raw `generate` does not run tools.
@@ -54,6 +56,7 @@
 - Model loader rejects duplicate and wrong-shaped weights. Wrapper prefixes (`language_model`, `text_model`, `base_model`, `model.model`) and a swapped `[in, out]` matrix still bind to the schema name. Covered by `ModelLoaderTest`.
 
 ## 5. Known Issues & Limitations
+- Weather place is the city of the public network address (often the ISP), not a street address. The lookup sends that address to ipwho.is / geojs / ipapi.co, then the coordinates to Open-Meteo.
 - Tool calls are chat-only (`chat` / `chatOnce`). Llama and Gemma 3 fail at `build()` if a tool is registered: there is no Llama 3 header template here, and Gemma 3 has no tool-call tokens. Gemma 3's pythonic prompt convention is not wired.
 - Qwen3.5 support is text-only safetensors. Vision inputs, LoRA adapters, Qwen3-Next, and Qwen3.5 MoE stay rejected. GGUF is not a load path for `qwen3_5`.
 - Tornado kernel tests skip when no Tornado device is on the module path. Maven Surefire does not launch the `tornado` CLI, so those tests skip there.
@@ -62,6 +65,8 @@
 - None from this compaction.
 
 ## 7. Useful References
+- Weather sample: `mvn22 -pl nano-vllm-java-weather-sample -q exec:java`
+- Weather tests (no model, no network): `mvn22 -pl nano-vllm-java-weather-sample test`
 - Profiled bench (scalar): `mvn22 -pl nano-vllm-java-samples -am -Pbench package exec:exec@bench`
 - Profiled bench (vector): `mvn22 -pl nano-vllm-java-samples -am -Pbench package exec:exec@bench -Dbench.kernels=vector`
 - Short profile: `mvn22 -pl nano-vllm-java-samples -am -Pbench package exec:exec@bench -Dbench.seqs=1 -Dbench.maxInput=32 -Dbench.maxOutput=8`

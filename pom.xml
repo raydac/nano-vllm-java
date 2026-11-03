@@ -14,6 +14,7 @@
     <modules>
         <module>nano-vllm-java</module>
         <module>nano-vllm-java-samples</module>
+        <module>nano-vllm-java-weather-sample</module>
     </modules>
 
     <properties>

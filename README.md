@@ -12,7 +12,7 @@ A Java library that **runs a pretrained model on the CPU** and returns an answer
 
 Use it when a Java app needs a small local model: a short chat reply, a sentence vector, a transcript, a spoken WAV, a language label, or a choice with a probability. It does not train models. It loads files you already have and runs inference.
 
-**1.4.0** is the release on Maven Central. This repository is **1.5.0-SNAPSHOT** and also includes Qwen3.5 text, typed decisions (Jev), and the checkers sample. The longer design tour (scheduler, attention, tensors, formats) is [`description.md`](description.md).
+**1.4.0** is the release on Maven Central. This repository is **1.5.0-SNAPSHOT** and also includes Qwen3.5 text, typed decisions (Jev), the checkers sample, and a weather sample. The longer design tour (scheduler, attention, tensors, formats) is [`description.md`](description.md).
 
 Ideas here were inspired by the Python [nano-vllm](https://github.com/GeeeekExplorer/nano-vllm) educational engine.
 
@@ -178,6 +178,16 @@ Run from the repository root after the matching download in [`models/README.md`]
 | `RussianCheckersHelloWorld` | Russian draughts in the terminal; you pick a colour (snapshot) | Jeff-Qwen3.5-0.8B |
 | `Example` | Interactive menu: chat, search, Jev | first model on disk |
 | `Bench` | Throughput smoke test | Qwen3-0.6B |
+
+`nano-vllm-java-weather-sample` is a separate module. Qwen3-0.6B asks where this computer is, then what the weather is there, prints the temperature and sky, and Piper speaks that line on the default audio output. Once the coordinates are known it prints a 64-column world map, Kavrayskiy VII over the Natural Earth coastline, with that position marked. The log gives the wall-clock time of each step. If the chat model or a Piper voice is missing, the sample stops before loading and prints the download command for each one. The two questions stay separate because this checkpoint calls one tool when a question names both. Gemma 3 has no tool-call tokens. Qwen3.5, LFM2, and Gemma 4 can replace it via the first argument.
+
+The place is this computer's public network address (ipwho.is, then geojs, then ipapi.co). The weather is [Open-Meteo](https://open-meteo.com/) (CC BY 4.0). Neither needs an API key.
+
+```bash
+mvn -pl nano-vllm-java-weather-sample -am -q exec:java
+```
+
+Downloads: `models/download-qwen3-0.6b.sh` and `models/download-piper-en-lessac-medium.sh` (or the Russian Irina voice).
 
 ```bash
 mvn -pl nano-vllm-java-samples -q exec:java \
