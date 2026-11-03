@@ -8,15 +8,41 @@
 
 # Nano-vLLM Java
 
-A Java library that **runs a pretrained model on the CPU** and returns an answer. You add a Maven or Gradle dependency and call it from ordinary Java. There is no Python process, no CUDA, and no PyTorch.
+A Java library that runs a pretrained model on the CPU and returns an answer. You add a Maven or Gradle dependency and call it from ordinary Java. The call stays in the JVM: no Python process, no CUDA, and no PyTorch.
 
-Use it when a Java app needs a small local model: a short chat reply, a sentence vector, a transcript, a spoken WAV, a language label, or a choice with a probability. It does not train models. It loads files you already have and runs inference.
+It does not train models. It loads files you already have and runs inference.
+
+**For** a Java application that needs a small local model: a short chat reply, a sentence vector, a transcript, a spoken WAV, a language label, or a choice with a probability.
+
+**Supports** Qwen3, Qwen3.5 text, Gemma 3, Gemma 4 text, Llama, LFM2, BERT embeddings, Whisper, Piper, and fastText. The full list is [below](#supported-models).
+
+**Attach** `com.igormaznitsa:nano-vllm-java:1.4.0` on JDK 21+. Coordinates and a first call are under [Add it to an application](#add-it-to-an-application).
+
+**Try a sample** from this repository after one download. Qwen3-0.6B needs no Hugging Face gate:
+
+```bash
+./models/download-qwen3-0.6b.sh
+mvn -pl nano-vllm-java-samples -q exec:java
+```
+
+That opens the interactive menu (chat, search, typed decisions). Every other sample, including weather and Russian checkers, is under [Run the samples](#run-the-samples).
 
 **1.4.0** is the release on Maven Central. This repository is **1.5.0-SNAPSHOT** and also includes Qwen3.5 text, typed decisions (Jev), the checkers sample, and a weather sample. The longer design tour (scheduler, attention, tensors, formats) is [`description.md`](description.md).
 
 Ideas here were inspired by the Python [nano-vllm](https://github.com/GeeeekExplorer/nano-vllm) educational engine.
 
-## What you can ask it to do
+## Contents
+
+- [What it is for](#what-it-is-for)
+- [Supported models](#supported-models)
+- [Add it to an application](#add-it-to-an-application)
+- [Chat](#chat)
+- [Run the samples](#run-the-samples)
+- [Other calls](#other-calls)
+- [Limits](#limits)
+- [Build from source](#build-from-source)
+
+## What it is for
 
 | You have | You get | Call |
 |----------|---------|------|
@@ -29,6 +55,26 @@ Ideas here were inspired by the Python [nano-vllm](https://github.com/GeeeekExpl
 | Your own notes on disk | A reply that can quote those notes | `llm.rag(…).ask(…)` |
 
 One `LLM` serves one caller at a time. Share the loaded `LlmModel` across engines; give each thread its own `LLM`.
+
+## Supported models
+
+`LlmModelFactory.make(path)` accepts a Hugging Face folder, a `.gguf` file, or a fastText `*.bin` / `*.ftz`. This is a curated set of families.
+
+| Family | Typical file | Job |
+|--------|----------------|-----|
+| Qwen3, Gemma 3, Llama | Safetensors folder, or ONNX weights in that folder | Chat |
+| Qwen3 | Also a `.gguf` file | Chat |
+| Qwen3.5 text | Safetensors only (snapshot). The vision tower is skipped | Chat, and Jev |
+| Gemma 4 text (QAT mobile) | Safetensors only | Chat |
+| LFM2 | `.gguf` only | Chat |
+| BERT (gte, E5, XLM-RoBERTa, …) | `.gguf` or ONNX | Embeddings |
+| Whisper | Safetensors folder | Speech to text |
+| Piper | `*.onnx` + `*.onnx.json` | Text to speech |
+| fastText | `*.bin` or `*.ftz` | Labels |
+
+If a folder has both safetensors and ONNX, safetensors is used. An unsupported file fails with `UnsupportedModelException` and the list of families this build knows.
+
+Download scripts and the folder each one creates are in [`models/README.md`](models/README.md). A good first chat model with no Hugging Face gate is Qwen3-0.6B (`./models/download-qwen3-0.6b.sh`). Gemma3-270M is smaller and needs you to accept the model license on Hugging Face first (`./models/download-gemma3-270m.sh`).
 
 ## Add it to an application
 
@@ -52,17 +98,9 @@ implementation 'com.igormaznitsa:nano-vllm-java:1.4.0'
 
 On the module path: `requires com.igormaznitsa.nanollvm;`.
 
-Weights are not in this git tree. Download scripts and folder layout are in [`models/README.md`](models/README.md). A good first chat model with no Hugging Face gate is Qwen3-0.6B:
-
-```bash
-./models/download-qwen3-0.6b.sh
-```
-
-Gemma3-270M is smaller and needs you to accept the model license on Hugging Face first (`./models/download-gemma3-270m.sh`).
+Weights are not in the published jar and not in this git tree. Point `LlmModelFactory` at a folder you downloaded (`config.json`, tokenizer, `*.safetensors`) or at a single `.gguf` file.
 
 ## Chat
-
-Point `LlmModelFactory` at a local folder (`config.json`, tokenizer, `*.safetensors`) or at a single `.gguf` file, then build an `LLM`.
 
 ```java
 import com.igormaznitsa.nanollvm.llm.LLM;
@@ -94,6 +132,83 @@ The same program is `LogTriageHelloWorld` in this repo (default folder `models/G
 mvn -pl nano-vllm-java-samples -q exec:java \
   -Dexec.mainClass=com.igormaznitsa.nanollvm.samples.LogTriageHelloWorld
 ```
+
+## Run the samples
+
+Run from the repository root after the matching download in [`models/README.md`](models/README.md). An optional first argument overrides the model path (`-Dexec.args=…`).
+
+Any row in the table:
+
+```bash
+mvn -pl nano-vllm-java-samples -q exec:java \
+  -Dexec.mainClass=com.igormaznitsa.nanollvm.samples.HelloWorld
+```
+
+Swap the class name. `Example` is the default main, so this is enough after a download:
+
+```bash
+mvn -pl nano-vllm-java-samples -q exec:java
+```
+
+| Sample | What it shows | Default model |
+|--------|----------------|---------------|
+| `HelloWorld` | One hello, one reply | Gemma3-270M |
+| `ToolsHelloWorld` | OS name and a directory listing via tools | Qwen3-0.6B |
+| `LogTriageHelloWorld` | Three bullets from a log excerpt | Gemma3-270M |
+| `NextTokenHelloWorld` | Continue a seed | Tiny-LLM-ONNX |
+| `EmbeddingsHelloWorld` | Sentence vector | multilingual-e5-small |
+| `TranscribeHelloWorld` | WAV or a tone → text | whisper-base |
+| `SynthesizeHelloWorld` | Text → `piper-hello.wav` | piper-en-lessac-medium |
+| `VoiceReplyHelloWorld` | Transcribe, then chat, then speak | whisper + chat + piper |
+| `LanguageIdHelloWorld` | Language label | fasttext lid.176 |
+| `AdvisorRagHelloWorld` | Named advisors plus search over `rag/` | Gemma3-270M |
+| `RagTunerHelloWorld` | Read a bundled EPUB, then ask about the play | Qwen3-0.6B |
+| `JevHelloWorld` | Choice, yes/no, and a score (snapshot) | Gemma3-270M |
+| `RussianCheckersHelloWorld` | Russian draughts in the terminal; you pick a colour (snapshot) | Jeff-Qwen3.5-0.8B |
+| `Example` | Interactive menu: chat, search, Jev | first model on disk |
+| `Bench` | Throughput smoke test | Qwen3-0.6B |
+
+### Interactive menu
+
+`Example` lists the models it finds, then chats. `/exit` leaves. `/clear` drops the conversation and keeps the document index. `NO_COLOR=1` turns ANSI colors off.
+
+![Example: pick Qwen3 or Gemma 3, then a Gemma 3 chat about the Grimm brothers](assets/java_nano_llvm_session_1.gif)
+
+*Pick a model, then ask. This run loads Gemma 3 and asks about the Grimm brothers.*
+
+### Weather
+
+`nano-vllm-java-weather-sample` is a separate module. Qwen3-0.6B asks where this computer is, then what the weather is there. It prints the temperature and the sky, and Piper speaks that line on the default audio output. Once the coordinates are known it prints a 64-column world map, Kavrayskiy VII over the Natural Earth coastline, with that position marked. The log gives the wall-clock time of each step.
+
+If the chat model or a Piper voice is missing, the sample stops before loading and prints the download command for each one. The two questions stay separate because this checkpoint calls one tool when a question names both. Gemma 3 has no tool-call tokens. Qwen3.5, LFM2, and Gemma 4 can replace it via the first argument.
+
+The place is this computer's public network address (ipwho.is, then geojs, then ipapi.co). The weather is [Open-Meteo](https://open-meteo.com/) (CC BY 4.0). Neither needs an API key.
+
+```bash
+./models/download-qwen3-0.6b.sh
+./models/download-piper-en-lessac-medium.sh
+mvn -pl nano-vllm-java-weather-sample -am -q exec:java
+```
+
+The Russian Irina voice can stand in for Lessac. Windows download scripts are in [`models/README.md`](models/README.md).
+
+![Weather sample: Qwen3 locates this computer, prints the map and the forecast, then Piper speaks the line](assets/weatherstation_03nov2027.gif)
+
+*Qwen3 locates this computer, prints the map and the forecast, then Piper speaks the line.*
+
+### Russian checkers
+
+You pick a colour. Enter selects White. Jeff (Qwen3.5) plays the other colour. A move is `a3 b4` or `A 3 B 4`. `q` quits.
+
+```bash
+./models/download-jeff-qwen3.5-0.8b.sh
+mvn -pl nano-vllm-java-samples -q exec:java \
+  -Dexec.mainClass=com.igormaznitsa.nanollvm.samples.RussianCheckersHelloWorld
+```
+
+![Russian checkers: you play White, Jeff answers with Qwen3.5, and the game ends when your king is taken](assets/russian_checkers_03nov26.gif)
+
+*You play White. Jeff answers with Qwen3.5. The game ends when your king is taken.*
 
 ## Other calls
 
@@ -156,77 +271,6 @@ PreparedRag notes = RagFactory.builder()
 
 String answer = llm.rag(notes).topK(4).ask("When is live chat open?");
 ```
-
-## Samples in this repository
-
-Run from the repository root after the matching download in [`models/README.md`](models/README.md). An optional first argument overrides the model path (`-Dexec.args=…`).
-
-| Sample | What it shows | Default model |
-|--------|----------------|---------------|
-| `HelloWorld` | One hello, one reply | Gemma3-270M |
-| `ToolsHelloWorld` | OS name and a directory listing via tools | Qwen3-0.6B |
-| `LogTriageHelloWorld` | Three bullets from a log excerpt | Gemma3-270M |
-| `NextTokenHelloWorld` | Continue a seed | Tiny-LLM-ONNX |
-| `EmbeddingsHelloWorld` | Sentence vector | multilingual-e5-small |
-| `TranscribeHelloWorld` | WAV or a tone → text | whisper-base |
-| `SynthesizeHelloWorld` | Text → `piper-hello.wav` | piper-en-lessac-medium |
-| `VoiceReplyHelloWorld` | Transcribe, then chat, then speak | whisper + chat + piper |
-| `LanguageIdHelloWorld` | Language label | fasttext lid.176 |
-| `AdvisorRagHelloWorld` | Named advisors plus search over `rag/` | Gemma3-270M |
-| `RagTunerHelloWorld` | Read a bundled EPUB, then ask about the play | Qwen3-0.6B |
-| `JevHelloWorld` | Choice, yes/no, and a score (snapshot) | Gemma3-270M |
-| `RussianCheckersHelloWorld` | Russian draughts in the terminal; you pick a colour (snapshot) | Jeff-Qwen3.5-0.8B |
-| `Example` | Interactive menu: chat, search, Jev | first model on disk |
-| `Bench` | Throughput smoke test | Qwen3-0.6B |
-
-`nano-vllm-java-weather-sample` is a separate module. Qwen3-0.6B asks where this computer is, then what the weather is there, prints the temperature and sky, and Piper speaks that line on the default audio output. Once the coordinates are known it prints a 64-column world map, Kavrayskiy VII over the Natural Earth coastline, with that position marked. The log gives the wall-clock time of each step. If the chat model or a Piper voice is missing, the sample stops before loading and prints the download command for each one. The two questions stay separate because this checkpoint calls one tool when a question names both. Gemma 3 has no tool-call tokens. Qwen3.5, LFM2, and Gemma 4 can replace it via the first argument.
-
-The place is this computer's public network address (ipwho.is, then geojs, then ipapi.co). The weather is [Open-Meteo](https://open-meteo.com/) (CC BY 4.0). Neither needs an API key.
-
-```bash
-mvn -pl nano-vllm-java-weather-sample -am -q exec:java
-```
-
-Downloads: `models/download-qwen3-0.6b.sh` and `models/download-piper-en-lessac-medium.sh` (or the Russian Irina voice).
-
-![Weather sample: Qwen3 locates this computer, prints the map and the forecast, then Piper speaks the line](assets/weatherstation_03nov2027.gif)
-
-```bash
-mvn -pl nano-vllm-java-samples -q exec:java \
-  -Dexec.mainClass=com.igormaznitsa.nanollvm.samples.HelloWorld
-```
-
-Swap the class name for any row above. `Example` is the default main, so this is enough after a download:
-
-```bash
-mvn -pl nano-vllm-java-samples -q exec:java
-```
-
-`/exit` leaves. `/clear` drops the conversation and keeps the document index. `NO_COLOR=1` turns ANSI colors off.
-
-Checkers: Enter selects White. A move is `a3 b4` or `A 3 B 4`. `q` quits. Download: `./models/download-jeff-qwen3.5-0.8b.sh`.
-
-![Russian checkers: you play White, Jeff answers with Qwen3.5, and the game ends when your king is taken](assets/russian_checkers_03nov26.gif)
-
-![Gemma3 session: load, then questions about the Grimm brothers](assets/java_nano_llvm_session_1.gif)
-
-## What you can load
-
-`LlmModelFactory.make(path)` accepts a Hugging Face folder, a `.gguf` file, or a fastText `*.bin` / `*.ftz`. This is a curated set of families.
-
-| Family | Typical file | Job |
-|--------|----------------|-----|
-| Qwen3, Gemma3, Llama | Safetensors folder, or ONNX weights in that folder | Chat |
-| Qwen3 | Also a `.gguf` file | Chat |
-| Qwen3.5 text | Safetensors only (snapshot). The vision tower is skipped | Chat, and Jev |
-| Gemma 4 text (QAT mobile) | Safetensors only | Chat |
-| LFM2 | `.gguf` only | Chat |
-| BERT (gte, E5, XLM-RoBERTa, …) | `.gguf` or ONNX | Embeddings |
-| Whisper | Safetensors folder | Speech to text |
-| Piper | `*.onnx` + `*.onnx.json` | Text to speech |
-| fastText | `*.bin` or `*.ftz` | Labels |
-
-If a folder has both safetensors and ONNX, safetensors is used. An unsupported file fails with `UnsupportedModelException` and the list of families this build knows.
 
 ## Limits
 
