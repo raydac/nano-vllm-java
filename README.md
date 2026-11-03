@@ -189,6 +189,8 @@ mvn -pl nano-vllm-java-weather-sample -am -q exec:java
 
 Downloads: `models/download-qwen3-0.6b.sh` and `models/download-piper-en-lessac-medium.sh` (or the Russian Irina voice).
 
+![Weather sample: Qwen3 locates this computer, prints the map and the forecast, then Piper speaks the line](assets/weatherstation_03nov2027.gif)
+
 ```bash
 mvn -pl nano-vllm-java-samples -q exec:java \
   -Dexec.mainClass=com.igormaznitsa.nanollvm.samples.HelloWorld
