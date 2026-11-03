@@ -37,6 +37,7 @@ Ideas here were inspired by the Python [nano-vllm](https://github.com/GeeeekExpl
 - [Supported models](#supported-models)
 - [Add it to an application](#add-it-to-an-application)
 - [Chat](#chat)
+- [Tools](#tools)
 - [Run the samples](#run-the-samples)
 - [Other calls](#other-calls)
 - [Threads](#threads)
@@ -54,6 +55,7 @@ Ideas here were inspired by the Python [nano-vllm](https://github.com/GeeeekExpl
 | A sentence | Ranked labels (language id, and similar) | `generate(text, LABELS)` |
 | A situation and a fixed list of options | The chosen option and a probability for each | `jev.decide(…)` (snapshot) |
 | Your own notes on disk | A reply that can quote those notes | `llm.rag(…).ask(…)` |
+| A question your Java function can answer | A reply after that function runs | `builder.tool(ModelTool.of(…))`, then `chat().send(…)` (snapshot) |
 
 One `LLM` runs one call at a time. Share the loaded `LlmModel` across engines when calls should overlap. The rules are in [Threads](#threads).
 
@@ -132,6 +134,47 @@ The same program is `LogTriageHelloWorld` in this repo (default folder `models/G
 ```bash
 mvn -pl nano-vllm-java-samples -q exec:java \
   -Dexec.mainClass=com.igormaznitsa.nanollvm.samples.LogTriageHelloWorld
+```
+
+## Tools
+
+This snapshot. A chat turn can call a Java function you register on the engine. The model writes the call in that checkpoint's own tool format. The engine runs the function, sends the returned text back, and continues the reply. `chat` and `chatOnce` do this. Raw `generate` does not.
+
+Qwen3, Qwen3.5, LFM2, and Gemma 4 are accepted. Gemma 3 and Llama fail at `build()` when a tool is registered.
+
+```java
+import com.igormaznitsa.nanollvm.llm.LLM;
+import com.igormaznitsa.nanollvm.llm.ModelTool;
+import com.igormaznitsa.nanollvm.models.LlmModel;
+import com.igormaznitsa.nanollvm.models.LlmModelFactory;
+
+import java.nio.file.Path;
+
+ModelTool osName = ModelTool.of(
+    "os_name",
+    "Operating system name of this machine.",
+    "{\"type\":\"object\",\"properties\":{}}",
+    arguments -> System.getProperty("os.name"));
+
+Path modelDir = Path.of("/opt/models/Qwen3-0.6B");
+
+try (LlmModel model = LlmModelFactory.make(modelDir);
+     LLM llm = LLM.builder(model)
+         .tool(osName)
+         .build()) {
+
+  String reply = llm.chatOnce("What operating system is this? Call os_name.");
+  System.out.println(reply);
+}
+```
+
+The function receives a JSON object (`{}` when the call has no arguments) and returns text. The third argument is a JSON Schema object for those arguments. A name matches `[A-Za-z_][A-Za-z0-9_]*`. A space inside the name the model wrote is ignored, so `os_ name` still matches `os_name`. One user message runs at most four calls. The function runs on the chat thread. A thrown exception goes back to the model as `error: …` and the turn continues.
+
+`ToolsHelloWorld` registers `os_name` and `list_files`, then asks Qwen3-0.6B for each in its own turn. One question that names both makes this checkpoint call only one of them.
+
+```bash
+mvn -pl nano-vllm-java-samples -q exec:java \
+  -Dexec.mainClass=com.igormaznitsa.nanollvm.samples.ToolsHelloWorld
 ```
 
 ## Run the samples
