@@ -39,6 +39,7 @@ Ideas here were inspired by the Python [nano-vllm](https://github.com/GeeeekExpl
 - [Chat](#chat)
 - [Run the samples](#run-the-samples)
 - [Other calls](#other-calls)
+- [Threads](#threads)
 - [Limits](#limits)
 - [Build from source](#build-from-source)
 
@@ -54,7 +55,7 @@ Ideas here were inspired by the Python [nano-vllm](https://github.com/GeeeekExpl
 | A situation and a fixed list of options | The chosen option and a probability for each | `jev.decide(…)` (snapshot) |
 | Your own notes on disk | A reply that can quote those notes | `llm.rag(…).ask(…)` |
 
-One `LLM` serves one caller at a time. Share the loaded `LlmModel` across engines; give each thread its own `LLM`.
+One `LLM` runs one call at a time. Share the loaded `LlmModel` across engines when calls should overlap. The rules are in [Threads](#threads).
 
 ## Supported models
 
@@ -272,6 +273,44 @@ PreparedRag notes = RagFactory.builder()
 String answer = llm.rag(notes).topK(4).ask("When is live chat open?");
 ```
 
+## Threads
+
+Weights are shared. A conversation is not. Load the model once, then give each concurrent caller its own engine.
+
+| Object | Across threads |
+|--------|----------------|
+| `LlmModel` | Yes. Weights, tokenizer, and load options stay frozen. Many `LLM` engines bind the same model. |
+| `PreparedRag`, a `RagIndex` | Yes. `retrieve` from many threads. A dense index keeps the embedding model open and embeds each query on its own. |
+| `LLM` | One call at a time. A second `generate`, chat, RAG ask, or `jev.decide` waits, then runs, and returns its own result. |
+| `ChatSession`, `RagSession`, `Jev` | No. One thread each. History, and a Jev level-0 prior, live on that object. |
+
+Two chats at once are two engines on one model. Each engine has its own KV cache, so two engines use about twice the cache RAM.
+
+```java
+Path modelDir = Path.of("/opt/models/Qwen3-0.6B");
+
+try (LlmModel model = LlmModelFactory.make(modelDir);
+     LLM first = LLM.builder(model).build();
+     LLM second = LLM.builder(model).build()) {
+
+  ChatSession left = first.chat();
+  ChatSession right = second.chat();
+  // left.send(...) and right.send(...) may run together
+}
+```
+
+Close every `LLM` before `model.close()`. Closing an engine does not unload the weights. `Jev.close()` closes its engine and leaves the model open.
+
+One shared `LLM` is a queue. Several `ChatSession`s may sit on it; their turns run one after another. A tool-calling turn lets the next waiter in between model calls. Each waiter still gets its own reply.
+
+`cancel()` belongs to the engine, not to the caller. It aborts whoever is generating on that `LLM` (`GenerationCancelledException`). A cancel that arrives before a call has started is dropped when the call starts. `close()` from any thread cancels the in-flight call; a later call throws `IllegalStateException`.
+
+A token callback runs inside the call that is still generating. Do not call `generate`, chat, or RAG from that callback.
+
+Pass `Builder.random` only to one engine. Two concurrent engines need two `Random` instances.
+
+With `cpuThreads` above 1, engines share a process-wide pool named `nanollvm-matmul-*` unless you change it. `matmulExecutor` uses a pool you own and shut down. `dedicatedMatmulPool` uses a pool that closes with that engine. `disableMultiCpu` keeps the work on the calling thread.
+
 ## Limits
 
 - **CPU, small models.** Answers are slower than a GPU server, and a 270M–0.8B model will miss facts, waffle, or invent a detail. Search over your notes can supply a passage; the model can still garble it.
@@ -282,7 +321,7 @@ String answer = llm.rag(notes).topK(4).ask("When is live chat open?");
 - **GGUF chat** is Qwen3 and LFM2. **GGUF embeddings** are BERT. Other GGUF architectures are out.
 - **ONNX** contributes weights to the Java engine. Quantized community exports and graphs that need ONNX Runtime are skipped.
 - **Documents for search** are UTF-8 text. PDF and EPUB need a small extractor you register (`RagTunerHelloWorld` shows an EPUB).
-- **One `LLM` at a time.** Do not call `generate` or chat on the same instance from two threads. `cancel()` from another thread is safe.
+- **One call at a time per `LLM`.** Overlap needs one engine per caller on a shared `LlmModel`. See [Threads](#threads).
 
 Format tables, quant types, and the engine internals are in [`description.md`](description.md), especially chapters **7–7g** and **19**.
 
