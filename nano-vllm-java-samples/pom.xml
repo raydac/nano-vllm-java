@@ -64,6 +64,7 @@
                 <groupId>org.codehaus.mojo</groupId>
                 <artifactId>exec-maven-plugin</artifactId>
                 <configuration>
+                    <skip>false</skip>
                     <workingDirectory>${maven.multiModuleProjectDirectory}</workingDirectory>
                     <mainClass>${exec.mainClass}</mainClass>
                 </configuration>

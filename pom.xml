@@ -146,6 +146,11 @@
                     <groupId>org.codehaus.mojo</groupId>
                     <artifactId>exec-maven-plugin</artifactId>
                     <version>3.6.3</version>
+                    <configuration>
+                        <!-- exec:java is invoked on every reactor module. mainClass is required even when the goal is skipped. -->
+                        <skip>true</skip>
+                        <mainClass>unused</mainClass>
+                    </configuration>
                 </plugin>
             </plugins>
         </pluginManagement>

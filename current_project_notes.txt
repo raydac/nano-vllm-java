@@ -65,7 +65,7 @@
 - None from this compaction.
 
 ## 7. Useful References
-- Weather sample: `mvn22 -pl nano-vllm-java-weather-sample -q exec:java`
+- Weather sample: `mvn22 -pl nano-vllm-java-weather-sample -am -q exec:java`. `-am` also selects the parent POM, which has no main class. `exec:java` is skipped there and on the library; the weather and samples modules set `skip` false.
 - Weather tests (no model, no network): `mvn22 -pl nano-vllm-java-weather-sample test`
 - Profiled bench (scalar): `mvn22 -pl nano-vllm-java-samples -am -Pbench package exec:exec@bench`
 - Profiled bench (vector): `mvn22 -pl nano-vllm-java-samples -am -Pbench package exec:exec@bench -Dbench.kernels=vector`
