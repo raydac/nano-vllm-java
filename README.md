@@ -38,6 +38,7 @@ Ideas here were inspired by the Python [nano-vllm](https://github.com/GeeeekExpl
 - [Add it to an application](#add-it-to-an-application)
 - [Chat](#chat)
 - [Tools](#tools)
+- [Jev](#jev)
 - [Run the samples](#run-the-samples)
 - [Other calls](#other-calls)
 - [Threads](#threads)
@@ -177,6 +178,78 @@ mvn -pl nano-vllm-java-samples -q exec:java \
   -Dexec.mainClass=com.igormaznitsa.nanollvm.samples.ToolsHelloWorld
 ```
 
+## Jev
+
+This snapshot. A decision is not a written sentence. You give a state and a typed question — a choice, a yes/no, or a score — and the engine reads the next-token probability of a few labels (`A` / `B`, `Yes` / `No`, or `1` / `2`). The answer is the option with the highest probability. Nothing is parsed from generated text, and nothing is trained.
+
+There is one call, `LLM.builder(model).toJev()`, for both kinds of checkpoint below. Embeddings, Whisper, Piper, and fastText are refused. `Jev.close()` closes the engine and leaves the model open, so the same folder can still chat through `LLM.builder(model).build()`.
+
+The default readout is `L0`. A choice is read once per option, a yes/no is read as both phrasings, and those probabilities are averaged. After eight states of the same question on that `Jev`, a label prior from those states is applied. `jevLevel(JevLevel.RAW)` is one prefill in the order you passed. `decision.require(JevLevel.L0)` throws when the read was `RAW`.
+
+### A chat model
+
+Any causal chat checkpoint. Gemma3-270M is the small one. Qwen3, Qwen3.5, Llama, LFM2, and Gemma 4 work the same way.
+
+```java
+import com.igormaznitsa.nanollvm.jev.Jev;
+import com.igormaznitsa.nanollvm.jev.JevDecision;
+import com.igormaznitsa.nanollvm.jev.JevQuestion;
+import com.igormaznitsa.nanollvm.llm.LLM;
+import com.igormaznitsa.nanollvm.models.LlmModel;
+import com.igormaznitsa.nanollvm.models.LlmModelFactory;
+
+import java.nio.file.Path;
+import java.util.List;
+
+try (LlmModel model = LlmModelFactory.make(Path.of("models/Gemma3-270M"));
+     Jev jev = LLM.builder(model).toJev()) {
+
+  JevDecision route = jev.decide(
+      "My card was charged twice for one order.",
+      JevQuestion.choice("Which team should handle this?",
+          List.of("billing", "technical", "sales", "other")));
+  System.out.println(route.answer() + " " + route.probability("billing"));
+
+  JevDecision refund = jev.decide(
+      "I want my money back for order 441.",
+      JevQuestion.yesNo("Does this message ask for a refund?"));
+  System.out.println(refund.answer());
+
+  JevDecision urgency = jev.decide(
+      "The payment page returns 500 and the customer cannot check out.",
+      JevQuestion.score("How urgent is the customer's request?",
+          List.of("low", "medium", "high")));
+  System.out.println(urgency.score().getAsDouble());
+}
+```
+
+`JevHelloWorld` runs this tour: one choice at L0 and at RAW, a yes/no, a score, then eight states until the label prior turns on.
+
+```bash
+mvn -pl nano-vllm-java-samples -q exec:java \
+  -Dexec.mainClass=com.igormaznitsa.nanollvm.samples.JevHelloWorld
+```
+
+### Jeff
+
+Jeff-Qwen3.5-0.8B is a Qwen3.5 fine-tune aimed at decisions. The download skips the vision files and the separate readout head. There is no second API for that head. `toJev()` reads the causal next-token scores, the same way it does for Gemma or Qwen3.
+
+```java
+import com.igormaznitsa.nanollvm.jev.JevLevel;
+
+try (LlmModel model = LlmModelFactory.make(Path.of("models/Jeff-Qwen3.5-0.8B"));
+     Jev jev = LLM.builder(model).jevLevel(JevLevel.RAW).toJev()) {
+
+  JevDecision route = jev.decide(
+      "My card was charged twice for one order.",
+      JevQuestion.choice("Which team should handle this?",
+          List.of("billing", "technical", "sales", "other")));
+  System.out.println(route.answer());
+}
+```
+
+Download: `./models/download-jeff-qwen3.5-0.8b.sh`. Russian checkers uses this checkpoint at `RAW`, one prefill per move, because a turn can have many legal moves and each L0 rotation would be another full read.
+
 ## Run the samples
 
 Run from the repository root after the matching download in [`models/README.md`](models/README.md). An optional first argument overrides the model path (`-Dexec.args=…`).
@@ -292,18 +365,7 @@ LlmOutLabels labels = llm.generate(
 System.out.println(labels.topLabel());
 ```
 
-**A choice with probabilities** (this snapshot, any causal chat model). Nothing is parsed from the reply; the engine reads the next-token scores.
-
-```java
-try (LlmModel model = LlmModelFactory.make(Path.of("models/Gemma3-270M"));
-     Jev jev = LLM.builder(model).toJev()) {
-  JevDecision route = jev.decide(
-      "My card was charged twice for one order.",
-      JevQuestion.choice("Which team should handle this?",
-          List.of("billing", "technical", "sales", "other")));
-  System.out.println(route.answer());
-}
-```
+**A choice with probabilities** — [Jev](#jev) (this snapshot). A chat checkpoint and the Jeff checkpoint use the same `toJev()` call.
 
 **Notes beside the model.** UTF-8 `.txt` / `.md` files. The model still writes the answer; retrieval only puts passages into the prompt.
 
