@@ -10,14 +10,16 @@ willingness to learn technical vocabulary — but **without** assuming prior mac
 You do not need fluency in Java. Linear algebra appears where it clarifies structure (vectors, matrices, shapes); each
 term is defined on first use. Occasional metaphors remain only as scaffolding, never as substitutes for the concepts.
 
-The subject is a small program that **loads a pretrained model** and runs **inference** on an ordinary CPU, without
-CUDA or other native backends: continuing text or short chat with a **causal** language model; (**since 1.1.0**)
+The subject is a small program that **loads a pretrained model** and runs **inference** on an ordinary CPU. CUDA is not
+required. It continues text or short chat with a **causal** language model; (**since 1.1.0**)
 encoding sentences to vectors with a **BERT-family embedding** GGUF or ONNX; (**since 1.3.0**) transcribing speech
 with **Whisper** safetensors and synthesizing speech with **Piper** ONNX voices; (**since 1.4.0**) classifying text
-with **Meta fastText** (`*.bin` / `*.ftz`), and optionally offloading large dense GEMV through **TornadoVM** when that
-add-on is present. (**since 1.5.0**, unreleased) a causal chat model can also answer a typed
-**Jev** decision — a choice, a yes/no, or a score — with a probability for every option. Java package / JPMS module: `com.igormaznitsa.nanollvm`. This guide matches **1.4.0**
-(released 2026-09-06; previous **1.3.0** 2026-08-29).
+with **Meta fastText** (`*.bin` / `*.ftz`). When **TornadoVM** is on the module path, dense GEMV can run on the device
+(**since 1.4.0**); **since 1.5.0** attention, elementwise kernels, and short groups of decoder layers do too.
+(**since 1.5.0**) a causal chat model can answer a typed **Jev** decision — a choice, a yes/no, or a score — with a
+probability for every option, and `chat` / `chatOnce` can call Java functions you register (chapter **7h**).
+Java package / JPMS module: `com.igormaznitsa.nanollvm`. This guide matches **1.5.0**
+(previous public release **1.4.0**, 2026-09-06; **1.3.0**, 2026-08-29).
 
 Where a topic has a standard paper or format specification, a short **Further reading** note lists links. Those are
 optional depth; the exposition here is self-contained. A curated **learning path** (what to read in which order) is
@@ -46,6 +48,7 @@ file paths.
 7e. [Piper text-to-speech (**since 1.3.0**)](#7e-piper-text-to-speech-since-130)
 7f. [fastText classification (**since 1.4.0**)](#7f-fasttext-classification-since-140)
 7g. [Typed decisions (**since 1.5.0**)](#7g-typed-decisions-since-150)
+7h. [Tool calls (**since 1.5.0**)](#7h-tool-calls-since-150)
 8. [Attention: kinds of looking-back, and how they work](#8-attention-kinds-of-looking-back-and-how-they-work) —
     **how Query, Key, and Value are made**
 9. [The thinking process: how it is organized and how it works with the model](#9-the-thinking-process-how-it-is-organized-and-how-it-works-with-the-model)
@@ -85,7 +88,9 @@ The rest of this guide unpacks that sentence without assuming prior ML coursewor
 **In the code:** front door is `LLM` / `LLM.Builder`; interactive demo is `samples.Example`; linear mains include
 `HelloWorld`, `NextTokenHelloWorld`, `LogTriageHelloWorld`, `AdvisorRagHelloWorld`,
 `RagTunerHelloWorld`, `EmbeddingsHelloWorld`, `TranscribeHelloWorld`, `SynthesizeHelloWorld`,
-`VoiceReplyHelloWorld` (chapter 16).
+`VoiceReplyHelloWorld`, `LanguageIdHelloWorld`, `JevHelloWorld`, `ToolsHelloWorld`,
+`RussianCheckersHelloWorld`, `KernelChatBench` (chapter 16). The weather desk is
+`nano-vllm-java-weather-sample` → `WeatherSample`.
 
 ---
 
@@ -311,7 +316,11 @@ worksheets change while answering. Close order: close each **`LLM` first**, then
 text→text; Gemma 4 QAT mobile also declares image, audio, and video input. Embedding encoders are
 text→embedding. Whisper is audio→text; Piper is text→audio. `LlmModel.usableModalities()` is what this library
 actually runs (vision/audio towers on Gemma 4 stay skipped). Optional `Map` load options (**since 1.1.0**) include `LlmModel.OPTION_THINK_TAGS` (`ThinkTags`) and
-`LlmModel.OPTION_CHAT_SPECIALS` (`ChatSpecials`; both frozen on the model, library defaults when omitted).
+`LlmModel.OPTION_CHAT_SPECIALS` (`ChatSpecials`; both frozen on the model). Omitted keys are filled from the
+checkpoint tokenizer (`ThinkTags.ofTokenizer`, `ChatSpecials.ofTokenizer`, **since 1.5.0**): `<think>` /
+`</think>` when both are vocabulary tokens, otherwise Gemma’s `<|channel>thought` … `<channel|>` when those
+tokens exist, otherwise the library `<think>` pair. `ChatSpecials.ofTokenizer` also keeps the checkpoint’s
+special tokens.
 **Since 1.3.0**, `LlmModelFactory.open(path).optionalData(key, value)` stores typed extras (Piper
 `LlmOptionalData.ESPEAK_DATA`). Empty extras stay off `options()`.
 A non-silent `LlmListener` sees the same in-place percent/ETA bar while **safetensors**, **GGUF**, or **ONNX** weights
@@ -771,10 +780,12 @@ embedding alone and twists Q and K inside each attention layer.
 Larger `rope_theta` is often used for longer contexts (slower angle growth with distance). Local Gemma layers with a
 smaller base keep nearby positions distinct when the sliding window is short.
 
-**In this library:** `Norms.RotaryEmbedding` precomputes a cos/sin cache of shape roughly
-`[max_position_embeddings, head_dim]` from `rope_theta` (or the local base). Each attention block calls
-`RotaryEmbedding#forward(positions, q, k)` **before** `Attention#forward`. See also chapter 8 and the embeddings section
-in chapter 10.
+**In this library:** `Norms.RotaryEmbedding` precomputes a cos/sin cache from `rope_theta` (or the local base).
+Full-head RoPE (`RotaryEmbedding.of`) is the usual chat path. **Since 1.5.0**, Qwen3.5 full attention rotates only
+the leading fraction of the head (`partial_rotary_factor`, `RotaryEmbedding.leading`; the tail is copied unchanged).
+Gemma 4 global RoPE uses the same config field with `RotaryEmbedding.proportional` (a tail of angles at frequency 0).
+Each attention block calls `RotaryEmbedding#forward(positions, q, k)` **before** `Attention#forward`. See also
+chapter 8 and the embeddings section in chapter 10.
 
 **Real values:** both use `rope_theta` ≈ 1 000 000; Gemma also sets `rope_local_base_freq` to 10000; `rope_scaling` is
 null in both samples.
@@ -1660,7 +1671,7 @@ This is **weight import**, not an ONNX Runtime session:
 | Float initializers: **FLOAT**, **FLOAT16**, **BFLOAT16**, **DOUBLE** → float32 | Filename contains `_q4`, `_int8`, `_uint8`, `_bnb4`, `_quantized`, or `with_past` (community quant / KV-past exports) |
 | `make(Path)` may follow **external_data** sidecars next to the `.onnx` | **`ModelFileSource` / classpath** loads: `external_data` → `ModelLoadException` (use `make(Path)`) |
 | File size up to **8 GiB** on disk; in-memory buffer path capped at **~2 GiB** | Empty initializer list; float8 / nibble / unknown TensorProto weight types (fail loud) |
-| Architectures that map to Qwen3 / Gemma3 / **Llama** / BERT embedding schemas | **LFM2-from-ONNX**; **Gemma 4** (safetensors QAT only, ch. 7); QDQ / int8 weight graphs; running the ONNX op graph. **Piper** voices are a separate synthesis path (ch. **7e**), not this chat/BERT remap. |
+| Architectures that map to Qwen3 / Gemma3 / **Llama** / BERT embedding schemas | **LFM2-from-ONNX**; **Gemma 4** (safetensors QAT only); **Qwen3.5** (safetensors text only, **since 1.5.0**); QDQ / int8 weight graphs; running the ONNX op graph. **Piper** voices are a separate synthesis path (ch. **7e**), not this chat/BERT remap. |
 
 INT/UINT/BOOL/STRING/COMPLEX initializers and float **scalars** are **skipped** as graph constants (not weight
 tensors). See the TensorProto table below.
@@ -1723,8 +1734,8 @@ try (LlmModel model = LlmModelFactory.make(Path.of("models/SmolLM2-135M-Instruct
 
 > **Since 1.1.0, an HF folder may use ONNX initializers instead of safetensors. The engine extracts weights only (no
 > ORT), applies file-name and TensorProto filters, builds Qwen3 / Gemma3 / Llama / BERT graphs as usual, and rejects
-> float8/nibble weight types, unsupported community quant exports, LFM2-from-ONNX, and Gemma 4 (safetensors QAT only)
-> explicitly.**
+> float8/nibble weight types, unsupported community quant exports, LFM2-from-ONNX, Gemma 4 (safetensors QAT only),
+> and Qwen3.5 (safetensors text only) explicitly.**
 
 **In the code:** `models.llmcontainer.OnnxTransport` reads graph initializers (no ORT); `models.llmcontainer.LoadProgress` reports decode
 with the same percent/ETA bar as safetensors and GGUF; `ModelLoader.assembleFromNamedTensors` matches names into
@@ -1972,10 +1983,10 @@ The answer is the option with the highest probability. Nothing is parsed and not
 | Level | What it reads |
 |-------|----------------|
 | `RAW` | One prefill, options in the order you passed |
-| `L0` (default) | Every cyclic rotation of a choice (both phrasings of a yes/no), averaged in log space. After eight states of the same question, a label prior estimated from those states is divided out. Ordered scores stay one prefill. |
+| `L0` (default) | A choice is rotated so each option sits under each letter once (one prefill per option). A yes/no is two prefills, `Yes or No` and `No or Yes`. Those probabilities are averaged in log space. After eight states of the same question, a label prior estimated from those states is divided out at three-quarter strength. An ordered score stays one prefill; the same prior still applies after eight states of that score. |
 
 Each label must be a single vocabulary token. A choice has at most 26 options. L0 costs one prefill
-per option.
+per choice option, and two prefills for a yes/no. RAW is always one prefill.
 
 ```java
 try (LlmModel model = LlmModelFactory.make(path);
@@ -2003,9 +2014,9 @@ causal models if their family already loads; this library does not train them.
 
 ### Limits (honest)
 
-- Causal chat only. One prefill per rotation; a 20-way choice is 20 prefills.
+- Causal chat only. One prefill per rotation; a 20-way choice is 20 prefills. A yes/no is two.
 - No early-stop rotation budget and no capped “think, then re-read” route.
-- The label prior stays off until eight states of that question have been decided on the same `Jev`.
+- The label prior stays off until eight states of that question (including an ordered score) have been decided on the same `Jev`.
 
 ### Summary
 
@@ -2014,6 +2025,65 @@ causal models if their family already loads; this library does not train them.
 
 **Further reading:** [AnyJev](https://github.com/nokia-applied-research/AnyJev);
 [Zhang et al., AnyJev Technical Report (arXiv)](https://arxiv.org/abs/2610.00831).
+
+
+---
+
+## 7h. Tool calls (**since 1.5.0**)
+
+A chat turn can call a Java function you registered on the engine. The model still only writes tokens.
+Those tokens happen to be that checkpoint’s own tool-call markup. The engine parses the raw decode
+(special tokens kept), runs the matching function, writes the returned text back in the form that
+model expects, and continues the reply. Raw `generate` does not do this. `chat` and `chatOnce` do.
+
+Register with `LLM.Builder.tool(ModelTool…)`. Each tool is a name (`[A-Za-z_][A-Za-z0-9_]*`), a
+description, a JSON Schema object for the arguments, and a `ToolBody`. Names must be unique. A space
+the model inserts inside a called name is removed before lookup (`os_ name` matches `os_name`).
+The body runs on the chat thread. If it throws, the engine sends `error:` plus the exception message
+back to the model and does not fail the turn. At most four executions per user message. Text the
+model writes after the last call close is not stored for the next generate, so a later step can still
+call another tool.
+
+| Family | Call markup | Result written back as |
+|--------|-------------|------------------------|
+| Qwen3 | Hermes JSON inside `<tool_call>` | user `<tool_response>` |
+| Qwen3.5 (including 0.8B) | XML `<function=` / `<parameter=` inside `<tool_call>` (a JSON object in that span is still accepted) | user `<tool_response>` |
+| LFM2 | a Pythonic list between `<\|tool_call_start\|>` and `<\|tool_call_end\|>` | a `tool` role turn |
+| Gemma 4 | `call:` / `response:` in the same model turn | the reply continues in that turn (`<\|tool_response>` is an extra stop) |
+
+Gemma 3 and Llama fail at `build()` when a tool is registered: this engine has no Llama 3 tool-turn
+template, and Gemma 3 has no tool-call tokens. Embeddings, Whisper, Piper, and fastText are not chat
+graphs, so they are not a tool path either.
+
+```java
+try (LlmModel model = LlmModelFactory.make(path);
+     LLM llm = LLM.builder(model)
+         .tool(ModelTool.of(
+             "os_name",
+             "Operating system name of this computer.",
+             "{\"type\":\"object\",\"properties\":{}}",
+             argumentsJson -> System.getProperty("os.name")))
+         .build()) {
+  String reply = llm.chatOnce("What operating system is this?");
+}
+```
+
+**In the code:** `ModelTool`, `ToolBody`, `ToolCall`, `ToolDialects` (`HermesToolDialect`,
+`Qwen35ToolDialect`, `Lfm2ToolDialect`, `Gemma4ToolDialect`). The loop lives in `ChatSession.send`.
+Sample: `ToolsHelloWorld` (OS name, then one directory listing). The weather sample registers
+`current_location` and `current_weather` the same way.
+
+### Limits (honest)
+
+- Chat only. Raw `generate` never runs a tool.
+- Four executions per user message, then the next decode is the reply even if it still contains a call.
+- Not a remote protocol. The function is local Java on the chat thread.
+
+### Summary
+
+> **Since 1.5.0, `LLM.builder(model).tool(ModelTool.of(…)).build()` lets `chat` / `chatOnce` run a
+> Java function when the checkpoint writes its own tool-call tokens, then continue the reply with
+> the text that function returned.**
 
 
 ---
@@ -2158,9 +2228,9 @@ token only: a new Query, a new Key/Value line, then the Query searches the noteb
 Formal scoring math: **chapter 10**. Notebooks: **chapter 12**. Thinking uses this same trio every Sense A step:
 **chapter 9**.
 
-**In the code:** `Linear.Qkv#forward` then `Ops.splitLast` in `Qwen3Attention` / `Gemma3Attention` /
-`LlamaForCausalLM` / `Lfm2Attention`; Gemma 4 text may keep separate Q/K/V linears; RoPE then `Attention#forward`
-(chapter 16).
+**In the code:** `Linear.Qkv#forward` then `Ops.splitLast` in `Qwen3Attention` / `Qwen35Attention` /
+`Gemma3Attention` / `LlamaForCausalLM` / `Lfm2Attention`; Gemma 4 text may keep separate Q/K/V linears; RoPE then
+`Attention#forward` (Qwen3.5 full-attention layers) or `GatedDeltaNet` (Qwen3.5 linear layers) (chapter 16).
 
 ---
 
@@ -2170,8 +2240,9 @@ Formal scoring math: **chapter 10**. Notebooks: **chapter 12**. Thinking uses th
 attends to itself. That is what chat and completion models do for your prompt and reply.
 
 **Cross-attention** (mentioned only for contrast) would let one text attend to *another* text — e.g. a translator’s
-decoder looking at the source sentence. Classic encoder–decoder machines used that. **This project’s Qwen3 / Gemma3
-paths are self-attention only** — one stream, looking at itself.
+decoder looking at the source sentence. Classic encoder–decoder machines used that. **This project’s causal chat
+paths are self-attention only** — one stream, looking at itself. Qwen3.5 also inserts Gated DeltaNet layers, which
+are a recurrent mix of the same stream, not a second text.
 
 ---
 
@@ -2323,8 +2394,8 @@ table to the token embedding.
 ```
 
 **Where:** built once in `Norms.RotaryEmbedding` (cos/sin cache); applied each layer in
-`Qwen3Attention#forward` / `Gemma3Attention#forward` via `rotaryEmb.forward(positions, q, k)` before
-`Attention#forward`. Gemma may use a different `rope_theta` / `rope_local_base_freq` for sliding vs global layers; the
+`Qwen3Attention#forward` / `Qwen35Attention#forward` / `Gemma3Attention#forward` via `rotaryEmb.forward(positions, q, k)` before
+`Attention#forward`. Qwen3.5 rotates only the leading fraction of the head. Gemma may use a different `rope_theta` / `rope_local_base_freq` for sliding vs global layers; Gemma 4 global RoPE may leave a tail unrotated. The
 idea is the same.
 
 Config fields: chapter 5 (`rope_theta`, …). Formal RoPE and attention scoring: **chapter 10**. Contrast with **token
@@ -2345,16 +2416,19 @@ embedding**: also chapter 10.
 | MQA (extreme sharing)                     | Only if a model’s config collapses to one KV head |
 | Sliding-window / local layers             | Yes, for Gemma layers marked as such              |
 | Global layers                             | Yes (Qwen; some Gemma layers)                     |
+| Qwen3.5 Gated DeltaNet                    | Yes, text safetensors (**since 1.5.0**): conv + delta-rule recurrence on the CPU, then the MLP. Full-attention layers in the same stack use leading partial RoPE |
 | Cross-attention to a second text          | No                                                |
-| Bidirectional BERT-style                  | Yes, for embedding GGUFs only (**since 1.1.0**; ch. 7b) |
-| Fancy GPU kernels (flash-attention, etc.) | No flash-attention. CPU SIMD / panel GEMV by default; optional TornadoVM dense GEMV, attention, and elementwise kernels (**since 1.4.0**, full TornadoVM path **since 1.5.0**) when that add-on is present |
+| Bidirectional BERT-style                  | Yes, for embedding GGUFs and embedding ONNX (**since 1.1.0**; ch. 7b) |
+| Fancy GPU kernels (flash-attention, etc.) | No flash-attention. CPU SIMD / panel GEMV by default; optional TornadoVM dense GEMV (**since 1.4.0**), and **since 1.5.0** attention, elementwise kernels, and decoder-layer task graphs (default four layers) when that add-on is present. Gated DeltaNet and the LFM2 short convolution stay on the CPU |
 
 ---
 
 **In the code (kinds this port runs):** causal self-attention + GQA/MQA geometry in `layers.Attention` for chat LMs;
-bidirectional self-attention in `layers.BidirectionalAttention` for BERT embedding GGUFs (**since 1.1.0**, chapter 7b);
-Gemma sliding window / global via model config in `Gemma3ForCausalLM`; RoPE in `Norms.RotaryEmbedding` (causal path);
-prefill vs decode branches inside `Attention.forward` (chapter 16).
+Qwen3.5 linear attention in `layers.GatedDeltaNet` (**since 1.5.0**); bidirectional self-attention in
+`layers.BidirectionalAttention` for BERT embedding GGUFs and ONNX (**since 1.1.0**, chapter 7b);
+Gemma sliding window / global via model config in `Gemma3ForCausalLM`; RoPE in `Norms.RotaryEmbedding`
+(`of` full head, `leading` for Qwen3.5, `proportional` for Gemma 4 global); prefill vs decode branches
+inside `Attention.forward` (chapter 16).
 
 ---
 
@@ -2373,7 +2447,8 @@ Each reading room also contains a large feed-forward block (MLP):
 Both happen in **every** room, stacked many times.
 
 **In the code:** `Attention.forward`, `storeKvCache`, `attendRange`; model path `Qwen3Attention.forward` /
-`Gemma3Attention.forward` / `Lfm2Attention.forward` (plus LFM2 short-conv layers; chapter 16).
+`Qwen35Attention.forward` / `Gemma3Attention.forward` / `Lfm2Attention.forward` (plus LFM2 short-conv and Qwen3.5
+`GatedDeltaNet` layers; chapter 16).
 
 ### One sentence to keep
 
@@ -2615,9 +2690,15 @@ Plan: answer with 4.
 Custom open/close markers are not Qwen- or GGUF-only: pass `ThinkTags` at load with
 `LlmModelFactory.open(path).thinkTags(tags).make()` (**since 1.1.0**). That pair is frozen on the
 `LlmModel` and inherited by every `LLM`. `ChatSession.thinkTags` / `RagSession.thinkTags` override one conversation.
-`ChatReply.parse(raw)` without tags still assumes `<think>` / `</think>`.
+`ChatReply.parse(raw)` without tags still assumes `<think>` / `</think>` and `ChatSpecials.DEFAULT`.
+`parse(raw, llm)` uses the pair frozen on that engine.
 Chat markup stripped from the visible answer is `ChatSpecials` (`open(path).chatSpecials(…)` /
-`OPTION_CHAT_SPECIALS`); omitted options receive `ThinkTags.DEFAULT` and `ChatSpecials.DEFAULT` on the model.
+`OPTION_CHAT_SPECIALS`). When those options are omitted, **since 1.5.0** the model stores
+`ThinkTags.ofTokenizer` and `ChatSpecials.ofTokenizer` — the checkpoint’s own specials, not a
+hard-coded library pair. A `<think>` quoted inside the scratchpad does not end it: the answer
+starts after the close that balances the opening tag. Those delimiters stay in the decode and
+are not generation stops. Gemma’s `<|channel>thought` … `<channel|>` is used only when those
+tokens are in the vocabulary.
 
 #### How the program organizes Sense C around the model
 
@@ -2629,8 +2710,8 @@ Chat markup stripped from the visible answer is `ChatSpecials` (`open(path).chat
   3. Prefill + decode (pure Sense A) until the turn ends
   4. Decode tokens → raw assistant text
   5. AssistantParts.parse splits raw text into:
-        thinking  = inside <think>…</think>
-        answer    = after the closed tag
+        thinking  = inside the scratchpad, up to the balancing close
+        answer    = after that close (a quoted close inside the notes stays in thinking)
         thinkOpen = tag never closed (incomplete)
   6. ChatSession may:
         • stream TEXT_RAW (unparsed decode, think tags and chat specials kept)
@@ -2659,8 +2740,8 @@ before Sense A runs.
 
 While tokens arrive, the printer updates:
 
-- text still inside an open `<think>` → thinking channel;
-- after `</think>` → answer channel;
+- text still inside an open scratchpad → thinking channel;
+- after the balancing close → answer channel;
 - if the tag never closes, the session may recover a visible answer from the notes (`salvageFromThinking`).
 
 That is bookkeeping for humans. The model only ever produced one token stream.
@@ -2992,7 +3073,7 @@ Qwen with `attention_bias = false` then RMSNorms each Query/Key **head** ($d$ ch
 and $\mathbf{k}$ by position (next section). $\mathbf{v}$ is not rotated. The next section is the scoring math that
 uses those vectors.
 
-**In the code:** `Qwen3Attention#forward` / `Gemma3Attention#forward` (and Llama / LFM2 analogues) → `Linear.Qkv` →
+**In the code:** `Qwen3Attention#forward` / `Qwen35Attention#forward` / `Gemma3Attention#forward` (and Llama / LFM2 analogues; Gemma 4 may use separate Q/K/V linears) → `Linear.Qkv` →
 `Ops.splitLast` → optional head RMSNorm → `RotaryEmbedding#forward` → `Attention#forward`.
 
 ### Causal self-attention (the scoring math)
@@ -3468,7 +3549,7 @@ ONE TURN
                       → Scheduler#schedule          (BlockManager#allocate / #mayAppend)
                       → Transformer#step
                           → preparePrefill | prepareDecode
-                          → CausalLM#forward        (Qwen3 / Gemma3 / Llama / Lfm2)
+                          → CausalLM#forward        (Qwen3 / Qwen3.5 / Gemma3 / Gemma 4 / Llama / Lfm2)
                           → CausalLM#computeLogits
                           → Sampler#forward
                       → Scheduler#postprocess       (append token / finish on stop)
@@ -3789,30 +3870,31 @@ You do not need to read every file. Use the tables to jump, then skim the named 
 
 ### Package layout (folders ↔ ideas)
 
-**JPMS:** module `com.igormaznitsa.nanollvm` **exports** `models`, `llm`, `chat`, `rag`, `exceptions`, `tokenizer`,
+**JPMS:** module `com.igormaznitsa.nanollvm` **exports** `models`, `llm`, `chat`, `rag`, `jev`, `exceptions`, `tokenizer`,
 `utils`. Everything else below (`models.internal`, `models.llmcontainer`, `models.llmarch`, `engine`, `layers`,
-`tensor`, `internal`, `prompts`) is
+`tensor`, `tensor.tornado`, `internal`, `prompts`) is
 **not exported** — fine to read in this guide; application code under the module system should stay on the exported
 packages. Demos live in `nano-vllm-java-samples`. The weather desk is `nano-vllm-java-weather-sample`.
 
 | Folder / type                                                                          | Role in the story                                    | Exported? |
 |----------------------------------------------------------------------------------------|------------------------------------------------------|-----------|
-| `llm/` — `LLM`, `LLM.Builder`, `Config`, `SamplingParams`, `GenerationStats`, `LlmAdvisor`, `LlmAdvisorMixer`, `AdvisorResponse`, `AdvisorEnrichment` | Front door; named advisors + mixer; stats; typed `generate(LlmInput, modality)` | yes |
+| `llm/` — `LLM`, `LLM.Builder`, `Config`, `SamplingParams`, `GenerationStats`, `LlmAdvisor`, `LlmAdvisorMixer`, `AdvisorResponse`, `AdvisorEnrichment`, `ModelTool` | Front door; named advisors + mixer; stats; typed `generate`; chat tool registration (**since 1.5.0**) | yes |
 | `models/` — `LlmModel`, `LlmModelFactory`, `ModelSupport`, `LlmOptionalData`, `LlmModality` / `LlmModalities`, `LlmInput` / `LlmOutput` (+ text/sound/embedding records), `ModelFileId`, `ModelFileSource`, `ModelFileSources` | Shared immutable loaded model + architecture catalog + load extras + typed generate facade + stream/classpath sources | yes |
 | `models.internal/` — `WeightBag`, `CausalLM*`, `BertForEmbedding`, `EmbeddingEncoder`, `WhisperForAsr`, `PiperForTts`, `FastTextForClassification`, … | Graphs, weight bags, BERT encode, Whisper ASR, Piper TTS, fastText | **no** |
 | `models.llmcontainer/` — `ContainerTransport`, `GgufTransport`, `SafetensorsTransport`, `OnnxTransport`, `LoadProgress` | Weight-file I/O and catalog | **no** |
 | `models.llmarch/` — `ArchitectureProcessor`, family processors, `ModelBinding` / `ModelFill` | Bind / fill / create per architecture (causal, embedding, speech, synthesis) | **no** |
 | `chat/` — `ChatSession`, `ChatHistory`, `ChatMessage`, `ChatMessages`, `ThinkTags`, `ChatSpecials`, `LlmListener`, `LlmTextKind`, `ChatReply`, `StreamPrinter` | Dialog + unified text/status events | yes |
+| `jev/` — `Jev`, `JevQuestion`, `JevDecision`, `JevLevel` | Typed next-token decisions (**since 1.5.0**) | yes |
 | `tokenizer/Tokenizer`, `GgufTokenizerSource`                                           | HF / GGUF / SentencePiece vocab → encode / decode / chat template (**`fromSentencePiece` since 1.2.0**) | yes |
 | `utils/NanoLlvmProps`, `ResourceLimits`                                                | Property/env knobs; process-wide parser/corpus caps (**since 1.0.0**) | yes |
 | `exceptions/`                                                                          | Typed library failures                               | yes |
 | `rag/` — `RagFactory`, `PreparedRag`, `DenseRagIndex`, `HybridRagIndex`, `RagSession`, `RagIndex`, `RagHit`, `RagLoadOptions`, `RagTuner`, `RagResource`, … | Text RAG: BM25 and (since **1.1.0**) dense/hybrid + classpath docs; load-time tuners since **1.2.0** | yes |
 | `internal/` — `Json`, `Context`, `GgufDequant`, `ModelFileBundle` | JSON helper, per-step context, GGUF dequant, in-memory file bundle | **no** |
 | `engine/` — `Scheduler`, `Sequence`, `BlockManager`, `Transformer`, `KvCacheArena`     | Prefill/decode loop, pages, one forward+sample       | **no** |
-| `layers/` — `Attention`, `BidirectionalAttention`, `Sampler`, `Linear`, `Norms`, …     | Attention, sampling, projections, norms/RoPE         | **no** |
+| `layers/` — `Attention`, `BidirectionalAttention`, `GatedDeltaNet`, `Sampler`, `Linear`, `Norms`, …     | Attention, Qwen3.5 linear attention, sampling, projections, norms/RoPE         | **no** |
 | `tensor/` — `Tensor`, `Ops`, `MatmulRuntime`, `LinearKernel`, `EmbeddingKernel`, …     | Arrays, float ops, parallel GEMM                     | **no** |
 | `prompts/` — `ChatPrompts`, `RagPrompts`, `AdvisorPrompts`                             | Default system / RAG / advisor wording               | **no** |
-| *(Maven module `nano-vllm-java-samples`)* `Example`, `HelloWorld`, `NextTokenHelloWorld`, `Bench`, `EmbeddingsHelloWorld`, `TranscribeHelloWorld`, `SynthesizeHelloWorld`, `VoiceReplyHelloWorld`, `LogTriageHelloWorld`, `AdvisorRagHelloWorld`, `RagTunerHelloWorld`, `utils/Bundled*` | Runnable demos (not in the library JAR) | n/a |
+| *(Maven module `nano-vllm-java-samples`)* `Example`, `HelloWorld`, `NextTokenHelloWorld`, `Bench`, `KernelChatBench`, `EmbeddingsHelloWorld`, `TranscribeHelloWorld`, `SynthesizeHelloWorld`, `VoiceReplyHelloWorld`, `LanguageIdHelloWorld`, `LogTriageHelloWorld`, `AdvisorRagHelloWorld`, `RagTunerHelloWorld`, `JevHelloWorld`, `ToolsHelloWorld`, `RussianCheckersHelloWorld`, `utils/Bundled*` | Runnable demos (not in the library JAR) | n/a |
 | *(Maven module `nano-vllm-java-weather-sample`)* `WeatherSample` | City from the public address, a 64-column world card, then Open-Meteo, then Piper on the default mixer | n/a |
 
 `Config.HfConfig` (in `llm/Config`) holds the blueprint plus per-LLM engine knobs (`maxModelLen`, `kvHeapFraction`, …).
@@ -3822,12 +3904,13 @@ packages. Demos live in `nano-vllm-java-samples`. The weather desk is `nano-vllm
 | Story idea                       | Primary type                                                         | Methods / entry points to open                                                                                |
 |----------------------------------|----------------------------------------------------------------------|---------------------------------------------------------------------------------------------------------------|
 | Open a model                     | `LlmModelFactory`, `LlmModel`, `LLM.Builder`                               | `open(Path).make()` / `make(Path)` / `make(…, Map)` / `fromClasspath*` / `openClasspath*`; HF **safetensors or ONNX** (**since 1.1.0**); Gemma 4 **text QAT** packed safetensors; GGUF **`qwen3`** / **`lfm2`** chat + **`bert`** embed; Whisper safetensors / Piper ONNX **since 1.3.0**; fastText `*.bin`/`*.ftz` **since 1.4.0**; `thinkTags(ThinkTags)` / `OPTION_THINK_TAGS`; `chatSpecials(ChatSpecials)` / `OPTION_CHAT_SPECIALS`; `optionalData` / `OPTION_OPTIONAL_DATA`; `LLM.builder(model)` for every kind; `toString()` summarizes load |
-| Custom scratchpad / answer specials | `ThinkTags`, `ChatSpecials`, `LlmModel`                                 | `open(path).thinkTags(tags).chatSpecials(specials).make()`; `ChatSession.thinkTags` / `RagSession.thinkTags` (**since 1.1.0**); omitted options get library defaults |
+| Custom scratchpad / answer specials | `ThinkTags`, `ChatSpecials`, `LlmModel`                                 | `open(path).thinkTags(tags).chatSpecials(specials).make()`; `ChatSession.thinkTags` / `RagSession.thinkTags` (**since 1.1.0**); omitted options use `ThinkTags.ofTokenizer` / `ChatSpecials.ofTokenizer` (**since 1.5.0**) |
 | Sentence embedding (BERT GGUF / ONNX) | `LLM` / `LlmModel` (internal `BertForEmbedding`)                                   | `make(gteGguf)` → `isEmbeddingModel()` → `generate(LlmInText, EMBEDDING)` (**since 1.3.0**); `LlmModel.generate` sequential shortcut (chapter **7b**, embeddings **since 1.1.0**)                        |
 | Speech to text (Whisper)         | `LLM` / `LlmModel` (internal `WhisperForAsr`)                                      | `make(whisperDir)` → `isSpeechModel()` → `generate(LlmInSound, TEXT)` (**since 1.3.0**, chapter **7d**) |
 | Text to speech (Piper)           | `LLM` / `LlmModel` (internal `PiperForTts`)                                        | `open(voice).optionalData(ESPEAK_DATA, dir).make()` → `generate(LlmInText, AUDIO)` → `LlmOutSoundData` (**since 1.3.0**, chapter **7e**) |
 | Text classification (fastText)   | `LLM` / `LlmModel` (internal `FastTextForClassification`)                          | `make(lidBinOrFolder)` → `isClassificationModel()` → `generate(LlmInText, LABELS)` → `LlmOutLabels` (**since 1.4.0**, chapter **7f**) |
-| Typed decision (Jev)             | `Jev`, `JevQuestion`, `JevDecision`                                                | `LLM.builder(model).toJev()` → `decide(state, question)` (**since 1.5.0**, chapter **7g**) |
+| Typed decision (Jev)             | `Jev`, `JevQuestion`, `JevDecision`, `JevLevel`                                    | `LLM.builder(model).toJev()` → `decide(state, question)`; `jevLevel(JevLevel.RAW)` before `toJev()` (**since 1.5.0**, chapter **7g**) |
+| Chat tool call                   | `ModelTool`, `ToolDialects`, `ChatSession`                                         | `LLM.builder(model).tool(ModelTool.of(…)).build()` then `chat` / `chatOnce` (**since 1.5.0**, chapter **7h**). Raw `generate` does not run tools |
 | Named advisors                   | `LlmAdvisor`, `LlmAdvisorMixer`, `AdvisorEnrichment`, `ChatHistory`        | `Builder.advisors(mixer, …)` — unique non-blank names; `LLM#runAdvisors` → `AdvisorEnrichment`; one batched `generate` |
 | Chat turn                        | `ChatSession`                                                        | `llm.chat(maxTokens)`, `.listen(…)`, `.streamTo(…)` (`TEXT_THINKING` / `TEXT_ASSISTANT`; ignores `TEXT_RAW`), `.send(user)`, `.clear()`; `emitDebugPrompts(true)` opts in `TEXT_DEBUG` (off by default); `recoverUnusableAnswers` / `unusableAnswer` opt-in |
 | Stream unparsed decode           | `LlmTextKind.TEXT_RAW`, `LlmListener`                                  | `ChatSession.listen`; deltas of tokenizer decode with think tags / chat specials kept (**since 1.1.0**) |
@@ -3845,7 +3928,7 @@ packages. Demos live in `nano-vllm-java-samples`. The weather desk is `nano-vllm
 | Split thinking UI                | `ChatReply`                                                          | `ChatReply.parse` / `parse(raw, llm)` / `salvageFromThinking`                                                 |
 | Text RAG (prepare + retrieve)    | `RagFactory`, `PreparedRag`, `DenseRagIndex`, `HybridRagIndex`, `RagSession`, `RagTuner` | `RagFactory.make` / `withEmbeddings` → `llm.rag(index).send(…)`; `Builder.addProcessor` tuners **since 1.2.0** (chapter 17); session knobs match `ChatSession` |
 | Resource caps                    | `ResourceLimits`                                                     | Process-wide defaults + builder for file/JSON/GGUF/corpus/history budgets (**since 1.0.0**)               |
-| Math bricks                      | `Ops`, `LinearKernel`, `EmbeddingKernel`, `MatmulRuntime`, `KernelBackend` | norms / MLP gates / softmax; linear & embed via kernels (internal); `.dedicatedMatmulPool()` **since 1.2.0**; optional TornadoVM GEMV, attention, and elementwise kernels / `-Dnanollvm.kernels` (**since 1.4.0**, full path **since 1.5.0**) |
+| Math bricks                      | `Ops`, `LinearKernel`, `EmbeddingKernel`, `MatmulRuntime`, `KernelBackend` | norms / MLP gates / softmax; linear & embed via kernels (internal); `.dedicatedMatmulPool()` **since 1.2.0**; optional TornadoVM GEMV (`-Dnanollvm.kernels`, **since 1.4.0**). **Since 1.5.0** attention, elementwise kernels, and decoder-layer graphs (`-Dnanollvm.tornado.layers`, default 4, range 1–16; `-Dnanollvm.tornado.weight`; `-Dnanollvm.tornado.clblast=false` keeps multi-token GEMV on the device kernel) |
 
 ### Sample A — library use (what most apps call)
 
@@ -3913,10 +3996,11 @@ try (LlmModel model = LlmModelFactory.open(Path.of("models/Qwen3-0.6B")).make();
 
 Interactive CLI wiring lives in `nano-vllm-java-samples` → `samples.Example.main`: load status and chat share
 `samples.utils.OrderedConsole` (millis-stamped queue → stdout vs stderr), then **model menu**
-(downloaded first, Qwen3-0.6B preferred for chat quality; Enter = first; empty disk → download instructions),
+(downloaded first, Qwen3-0.6B preferred for chat quality; Enter = first; empty disk → download instructions).
+A causal checkpoint then asks **Chat or Jev** (**since 1.5.0**; Enter = chat). Chat continues to the
 **RAG-mode menu** (none / BM25 / dense / hybrid — dense needs a BERT-encoder checkpoint under `models/`; **since 1.1.0**; Enter =
 none), **advisor-count menu** (`0`–`3`; Enter = none), then `llm.chat(…).streamTo(…)` or
-`llm.rag(index).streamTo(…)`. Prepared-prompt
+`llm.rag(index).streamTo(…)`. Jev skips RAG and advisors. Prepared-prompt
 `TEXT_DEBUG` lines are off by default (`ChatSession.emitDebugPrompts(true)` to enable; `Example`
 opts in with `--debug`, chapter 17). Embedding
 checkpoints skip RAG/advisors, then an encoder-session menu: embed REPL, or few-shot classify
@@ -4077,22 +4161,26 @@ slots, and how that differs from chat history: **chapter 12**.
 ```text
 LlmModelFactory.make(dir|gguf|ModelFileSource):
   HF safetensors: HfConfig + ArchitectureProcessor → WeightBag → causal graph
-                  (Qwen3 / Gemma3 / Gemma 4 text / Llama)
+                  (Qwen3 / Qwen3.5 text / Gemma3 / Gemma 4 text / Llama)
                   tokenizer.json, else tokenizer.model (1.2.0), else config.json fallback
   HF ONNX (1.1.0): OnnxTransport → ArchitectureProcessor bind/fill/create → same causal / BERT graphs
+                  (not Qwen3.5, not Gemma 4)
   Whisper (1.3.0): SpeechArchitecture → WhisperForAsr; generate(LlmInSound, TEXT)
   Piper (1.3.0): SynthesisArchitecture → PiperForTts; optionalData(ESPEAK_DATA); generate(LlmInText, AUDIO)
   fastText (1.4.0): FastTextModel → FastTextForClassification; generate(LlmInText, LABELS)
   GGUF: GgufTransport → ArchitectureProcessor bind/fill/create
         → Qwen3ForCausalLM or Lfm2ForCausalLM or BertForEmbedding; Tokenizer.fromGguf
+        (not Qwen3.5)
   Classpath / streams (1.1.0): ModelFileSources → heap bytes (no disk cache)
   Load status (all three weight formats): models.llmcontainer.LoadProgress — one in-place percent/ETA bar
   Optional Map (1.1.0): LlmModel.OPTION_THINK_TAGS → ThinkTags; OPTION_CHAT_SPECIALS → ChatSpecials
-                        (frozen on the model; omitted keys get library defaults)
+                        (frozen on the model; omitted keys use ThinkTags.ofTokenizer / ChatSpecials.ofTokenizer, since 1.5.0)
   Optional (1.3.0): LlmModelFactory.Builder.optionalData / OPTION_OPTIONAL_DATA
 LLM.builder(model).build():   // every kind — chat / EMBEDDING / STT / TTS / LABELS via typed generate
   chat: Transformer allocates KvCacheArena (per LLM); optional warmup / allowUnpackParameters
+  tools (1.5.0): Builder.tool(ModelTool…) — chat / chatOnce only; Qwen3, Qwen3.5, LFM2, Gemma 4
   non-chat: numKvcacheBlocks 0; same cpuThreads / matmul pool
+LLM.builder(model).toJev():   // causal chat only (1.5.0); closes the engine, not the model
 ```
 
 ### Sample E — chat thinking path (Sense C)
@@ -4225,6 +4313,20 @@ LLM.builder(model).toJev()          // closes the engine; does not close the mod
 
 Narrative: **chapter 7g**. Demo: `samples.JevHelloWorld` (L0 and RAW on one choice, a yes/no, a score, then eight states until the label prior turns on, then two of those states again so the probability change is visible). `samples.RussianCheckersHelloWorld` plays Russian draughts and uses one RAW choice per computer move. `samples.Example` offers the same loop: choose Jev, then `/choice`, `/yesno`, or `/score`, and type a state on each line.
 
+### Sample G0g — tool calls (**since 1.5.0**)
+
+```text
+LlmModelFactory.make(qwen3 | qwen3_5 | lfm2 | gemma4)
+LLM.builder(model).tool(ModelTool.of(name, description, schema, body)).build()
+    → chat / chatOnce
+    → dialect parses the checkpoint's own call tokens
+    → ToolBody.call(argumentsJson) on the chat thread
+    → result markup appended; generate continues
+    → at most four executions, then the next decode is the reply
+```
+
+Narrative: **chapter 7h**. Demo: `samples.ToolsHelloWorld`. The weather sample uses the same registration for place and forecast.
+
 ### Sample G — text RAG (prepare once, ask many times)
 
 ```text
@@ -4256,6 +4358,8 @@ Narrative and design notes: **chapter 17**.
 nano-vllm-java/src/main/java/com/igormaznitsa/nanollvm/
   llm/LLM.java                 ← start here for API
   llm/Config.java / SamplingParams.java
+  llm/ModelTool.java           ← since 1.5.0: chat function registration
+  jev/Jev.java / JevQuestion.java / JevDecision.java / JevLevel.java   ← since 1.5.0
   chat/LlmListener.java / LlmListeners.java / LlmTextKind.java
   llm/AdvisorRunner.java / AdvisorPrompt.java
   llm/LlmAdvisor.java / LlmAdvisorMixer.java / AdvisorResponse.java / AdvisorEnrichment.java
@@ -4275,8 +4379,10 @@ nano-vllm-java/src/main/java/com/igormaznitsa/nanollvm/
   models/internal/CausalLMFactory.java / WeightBag.java
   models/internal/BertForEmbedding.java / EmbeddingEncoder.java   ← since 1.1.0
   models/internal/WhisperForAsr.java / PiperForTts.java / TextToSpeech.java / SpeechToText.java   ← since 1.3.0
-  models/internal/Qwen3ForCausalLM.java / Gemma3ForCausalLM.java / Gemma4ForCausalLM.java / LlamaForCausalLM.java / Lfm2ForCausalLM.java
+  models/internal/Qwen3ForCausalLM.java / Qwen35ForCausalLM.java / Gemma3ForCausalLM.java / Gemma4ForCausalLM.java / LlamaForCausalLM.java / Lfm2ForCausalLM.java
+  layers/GatedDeltaNet.java        ← Qwen3.5 linear attention (since 1.5.0; CPU)
   layers/BidirectionalAttention.java   ← BERT embed path (since 1.1.0)
+  tensor/tornado/                  ← optional TornadoVM kernels (not exported)
   tokenizer/Tokenizer.java / GgufTokenizerSource.java   ← fromSentencePiece since 1.2.0; codecs package-private
   prompts/ChatPrompts.java / RagPrompts.java / AdvisorPrompts.java
   models/llmcontainer/SafetensorsTransport.java / SafetensorsReader.java / OnnxTransport.java / ContainerTransport.java
@@ -4623,8 +4729,10 @@ Short glossary. For the Java home of each idea, prefer the **In the code** notes
 | Whisper               | Audio→text from HF safetensors via `generate(LlmInSound, TEXT)` (**since 1.3.0**; ch. 7d) |
 | Piper                 | Text→WAV from `*.onnx` + `*.onnx.json` via `generate(LlmInText, AUDIO)` (**since 1.3.0**; ch. 7e) |
 | fastText              | Text→ranked labels from `*.bin` / `*.ftz` via `generate(LlmInText, LABELS)` (**since 1.4.0**; ch. 7f) |
+| Jev                   | Typed decision from the next-token distribution: choice, yes/no, or score, with a probability per option (`LLM.builder(model).toJev()`, **since 1.5.0**; ch. 7g) |
+| Tool call             | A Java `ModelTool` run from `chat` / `chatOnce` when the checkpoint writes its own call tokens (**since 1.5.0**; ch. 7h). Raw `generate` does not |
 | `LlmOptionalData`     | Typed load extras such as `ESPEAK_DATA` (**since 1.3.0**; `open(path).optionalData`) |
-| TornadoVM GEMV        | Optional device path for dense GEMV, attention, and elementwise kernels when TornadoVM is on the module path (`-Dnanollvm.kernels`; GEMV **since 1.4.0**, full path **since 1.5.0**) |
+| TornadoVM             | Optional device path. Dense GEMV **since 1.4.0**. **Since 1.5.0**: attention, elementwise kernels, and decoder-layer task graphs (default four layers, `-Dnanollvm.tornado.layers`). Gated DeltaNet and the LFM2 short convolution stay on the CPU. Multi-token OpenCL GEMV may use CLBlast; one-token GEMV does not |
 | Sentence embedding    | One fixed-length vector summarizing a string (cosine ≈ dot product after L2)                    |
 | RoPE                  | Rotary Position Embedding: rotate pairs inside Q/K by angle(position); encodes relative distance |
 | Tied embeddings       | Same matrix for input lookup and LM-head scoring (`tie_word_embeddings`)                         |
@@ -4636,13 +4744,14 @@ Short glossary. For the Java home of each idea, prefer the **In the code** notes
 | Causal                | May only attend to past and present positions, not the future                                    |
 | Multi-head (MHA)      | Several parallel attention heads; each may have its own KV                                       |
 | GQA                   | Grouped-query: several Query heads share one Key/Value group                                     |
+| Gated DeltaNet        | Qwen3.5 linear-attention block: causal depthwise conv, then a gated delta-rule recurrence (**since 1.5.0**; CPU even when TornadoVM runs the MLP) |
 | MQA                   | Multi-query: all Query heads share a single Key/Value pair                                       |
 | Sliding window        | Attend only within a fixed recent span, not the full past                                        |
 | Global attention      | Attend over the whole allowed past                                                               |
 | Query / Key / Value   | Three linear views of a hidden portrait: search / address / payload ($W_Q,W_K,W_V$ from the crate; ch. 8, 10). Only **K** and **V** are cached (ch. 12) |
 | Inner work (Sense A)  | Invisible stack of attention + MLP for each next token                                           |
 | Chain of thought (B)  | Reasoning written as ordinary tokens in the reply                                                |
-| Tagged scratchpad (C) | Written reasoning inside open/close markers (default `<think>…</think>`; override with `ThinkTags`) |
+| Tagged scratchpad (C) | Written reasoning inside open/close markers. Omitted load options take the pair from the checkpoint (`ThinkTags.ofTokenizer`, **since 1.5.0**): `<think>…</think>` when both tokens exist, otherwise Gemma `<|channel>thought`…`<channel|>` when those tokens exist. A quoted close inside the notes does not end the scratchpad |
 | ChatReply             | Parsed assistant turn: `thinking` (scratchpad), `answer` / `text()` (visible), `thinkOpen` (unclosed scratchpad while streaming), `stats` (`GenerationStats`; `NONE` until generate finishes). `parse(raw)` uses default think tags and `ChatSpecials`; `parse(raw, ThinkTags)` / `parse(raw, ThinkTags, ChatSpecials)` / `parse(raw, llm)` / `open(path).thinkTags` / `.chatSpecials` at load / `ChatSession.thinkTags` for custom markers. `ChatSession.send` salvages + attaches stats. History stores **answer only**. |
 | `TEXT_RAW`            | `LlmTextKind` for the unparsed tokenizer decode on a `ChatSession` listener (think tags and chat specials kept). `TEXT_THINKING` / `TEXT_ASSISTANT` stay parsed. CLI `streamTo` ignores `TEXT_RAW`. |
 | KV cache              | Per-layer **Key** and **Value** tensors for already-seen token positions (RoPE already applied to K). Query, weights, and chat strings are **not** stored. Paged blocks; lives inside one `generate` (ch. 12) |
@@ -4682,12 +4791,18 @@ This project is a **teaching instrument**, not a production cloud service.
   demo `maxTokens` cap so answers can look cut off. `samples.NextTokenHelloWorld` is the linear next-token demo
   for Tiny-LLM.
 - **Gemma 4:** text-only QAT mobile loads (**since 1.1.0**). Vision/audio generation, Gemma 4 GGUF, and MoE
-  (`enable_moe_block`) are out of scope.
+  (`enable_moe_block`) are out of scope. Global RoPE may rotate only part of the head (`partial_rotary_factor`).
+- **Qwen3.5 (**since 1.5.0**):** text safetensors only. The vision tower is skipped. GGUF, ONNX, MoE, and
+  Qwen3-Next are rejected. Full-attention layers use leading partial RoPE. Gated DeltaNet (conv + recurrence)
+  stays on the CPU. `toJev()` reads the causal logits; the Jeff readout head is not loaded.
+- **Tool calls (**since 1.5.0**, ch. **7h**):** `chat` and `chatOnce` only, on Qwen3, Qwen3.5, LFM2, and Gemma 4.
+  Gemma 3 and Llama fail at `build()` if a tool is registered. At most four executions per user message.
+  Raw `generate` does not run tools.
 - **Whisper (**since 1.3.0**, ch. **7d**):** Hugging Face safetensors only; greedy multilingual decode; uncompressed
   WAV or PCM; no MP3, timestamps, VAD, beam search, CTranslate2 `model.bin`, Whisper GGUF, or Whisper ONNX.
 - **Piper (**since 1.3.0**, ch. **7e**):** official `*.onnx` + `*.onnx.json`; Java VITS + optional espeak-ng-data;
   no streaming / SSML / JNI. Missing dictionaries fall back to letter-to-sound.
-- **Weight formats are curated, not universal:** safetensors float dtypes plus packed Gemma 4 QAT (ch. 7); GGUF = `qwen3|lfm2|bert` + listed
+- **Weight formats are curated, not universal:** safetensors float dtypes plus packed Gemma 4 QAT (ch. 7); Qwen3.5 text is safetensors only; GGUF = `qwen3|lfm2|bert` + listed
   GGML quants (ch. 7a); ONNX = Tier A initializers, no ORT / no community `*_q4*`/`*_int8*`/`with_past` names, no
   float8 weights, no LFM2-from-ONNX (ch. **7c**); Piper is a separate ONNX synthesis path (ch. **7e**).
 - **RAG binaries:** folder walks are UTF-8 text. There is no built-in PDF extractor; index PDF/EPUB with
@@ -4701,14 +4816,16 @@ If this guide did its job, you can now explain to another non-specialist:
 > page — causally, often with shared notebooks (GQA), sometimes through a sliding window. Thinking is organized as a
 > loop: silent layer-walks for every next token, and optionally written notes (even tagged ones) that later attention
 > can reuse. Text RAG prepares a separate box of document cards once, pulls a few into the prompt, then the same loop
-> continues. Whisper transcribes audio; Piper speaks text as WAV; fastText ranks labels for a string. Then the program
-> repeatedly draws the next scrap of text until the reply ends — or returns a vector, a transcript, a waveform, or
-> ranked labels.
+> continues. Whisper transcribes audio; Piper speaks text as WAV; fastText ranks labels for a string. A causal
+> chat model can also return a typed Jev decision, or call a Java function you registered and then continue.
+> Then the program repeatedly draws the next scrap of text until the reply ends — or returns a vector, a transcript,
+> a waveform, ranked labels, a decision, or the text a tool returned.
 
 That is enough to understand what this Java program is doing — and what it is not.
 
-**In the code (limits mirrored by design):** CPU kernels in `Ops` / `VectorMath`; optional TornadoVM GEMV, attention, and elementwise kernels (**since 1.4.0**, full path **since 1.5.0**)
-when that add-on is present; one `LLM` is not safe for
+**In the code (limits mirrored by design):** CPU kernels in `Ops` / `VectorMath`; optional TornadoVM dense GEMV
+(**since 1.4.0**) and, **since 1.5.0**, attention, elementwise kernels, and decoder-layer task graphs when that
+add-on is present. Gated DeltaNet and the LFM2 short convolution stay on the CPU. One `LLM` is not safe for
 concurrent `generate` — use `cancel()` from another thread only to abort (chapter 16). A server that wants parallel
 matmul without the process-wide `nanollvm-matmul-*` pool uses `LLM.Builder.dedicatedMatmulPool()` (**since 1.2.0**)
 or supplies `.matmulExecutor(appPool)`. RAG defaults to lexical BM25;
@@ -4724,7 +4841,8 @@ page.
 
 Implementation homes stay in the **In the code** notes, **chapter 16**, **chapter 7b** (BERT embeddings **since
 1.1.0**), **chapter 7c** (ONNX / Llama **since 1.1.0**), **chapter 7d** (Whisper **since 1.3.0**), **chapter 7e**
-(Piper **since 1.3.0**), **chapter 7f** (fastText **since 1.4.0**), and **chapter 17** (RAG); this index is papers and format docs
+(Piper **since 1.3.0**), **chapter 7f** (fastText **since 1.4.0**), **chapter 7g** (Jev **since 1.5.0**),
+**chapter 7h** (tool calls **since 1.5.0**), and **chapter 17** (RAG); this index is papers and format docs
 only.
 
 | Topic                      | Link                                                                                                                               |
@@ -4763,11 +4881,14 @@ only.
 | Whisper speech             | (this guide §7d — `generate(LlmInSound, TEXT)`, HF safetensors) |
 | Piper synthesis            | (this guide §7e — `generate(LlmInText, AUDIO)`, `optionalData(ESPEAK_DATA)`) |
 | fastText language id       | (this guide §7f — `generate(LlmInText, LABELS)`, `*.bin` / `*.ftz`) |
+| Typed decisions (Jev)      | [AnyJev](https://github.com/nokia-applied-research/AnyJev) · [Zhang et al. (arXiv)](https://arxiv.org/abs/2610.00831) · (this guide §7g **since 1.5.0**) |
+| Tool calls                 | (this guide §7h — `ModelTool`, checkpoint dialects, `chat` / `chatOnce` **since 1.5.0**) |
 
 For a **curated learning order** (what to read first, and why it helps this project), see **chapter 21**.
 
 **Link check:** every URL in chapters 20–21 was HTTP-checked against live hosts (2026-08-21); Whisper / Piper entries
-added with **1.3.0** (2026-08-25); fastText with **1.4.0** (2026-09-06). Prefer the arXiv abs page, the PDF host named here, or the project GitHub/docs URL — do not invent alternate slugs.
+added with **1.3.0** (2026-08-25); fastText with **1.4.0** (2026-09-06). The AnyJev links in §7g / chapter 20 were
+already cited with **1.5.0** and were not re-checked in this pass. Prefer the arXiv abs page, the PDF host named here, or the project GitHub/docs URL — do not invent alternate slugs.
 
 ---
 
@@ -4775,8 +4896,8 @@ added with **1.3.0** (2026-08-25); fastText with **1.4.0** (2026-09-06). Prefer 
 
 Chapter 20 is a **bookmark table** of links already cited in this guide. This chapter is a **reading list**: a small set
 of papers, format docs, and tutorials ordered so a careful reader can build intuition for *this* codebase — inference,
-not training; CPU; Qwen3 / Gemma3 / Gemma 4 text / Llama / LFM2 / BERT-GGUF; ONNX weight folders (**since 1.1.0**);
-Whisper and Piper (**since 1.3.0**); fastText classification (**since 1.4.0**); BM25 and dense RAG.
+not training; CPU; Qwen3 / Qwen3.5 text / Gemma3 / Gemma 4 text / Llama / LFM2 / BERT-GGUF; ONNX weight folders (**since 1.1.0**);
+Whisper and Piper (**since 1.3.0**); fastText classification (**since 1.4.0**); Jev and chat tool calls (**since 1.5.0**); BM25 and dense RAG.
 
 **Provenance:** every link below names a real paper, format doc, blog, Hub page, or video that was resolved live
 (HTTP 200 / valid PDF / arXiv title match / YouTube oEmbed) on **2026-08-21**. Titles match the cited work (e.g. arXiv
@@ -4866,6 +4987,7 @@ technical report.
 | Family | Starting points | Guide |
 |--------|-----------------|-------|
 | **Qwen3** | Model cards on [Hugging Face (Qwen)](https://huggingface.co/Qwen); this repo’s `models/download-*.sh` | ch. 5, 15 |
+| **Qwen3.5 text** | Same Qwen cards; `models/download-jeff-qwen3.5-0.8b.sh`. Safetensors text only; vision tower skipped; Gated DeltaNet + leading partial RoPE | ch. 2, 8, 7g |
 | **Gemma3** | [Gemma docs](https://ai.google.dev/gemma/docs) · example Hub card [google/gemma-3-270m-it](https://huggingface.co/google/gemma-3-270m-it) | ch. 5, 8 (sliding window) |
 | **Gemma 4 text** | [Gemma docs](https://ai.google.dev/gemma/docs) — this port loads **text QAT mobile** safetensors only (not vision/audio, not GGUF/ONNX) | ch. 2, 7 |
 | **Llama** | HF safetensors or ONNX (Tiny-LLM / SmolLM2 Instruct demos) | ch. **7c** |
@@ -4873,6 +4995,7 @@ technical report.
 | **BERT / GTE / E5 embeddings** | Devlin + Sentence-BERT above; Hub **gte-small** GGUF; [multilingual-e5-small](https://huggingface.co/intfloat/multilingual-e5-small) ONNX | ch. 7b |
 | **Whisper** | [Radford et al.](https://arxiv.org/abs/2212.04356) · [openai/whisper-base](https://huggingface.co/openai/whisper-base) | ch. **7d** |
 | **Piper** | [VITS](https://arxiv.org/abs/2106.06103) · [Piper](https://github.com/OHF-Voice/piper1-gpl) | ch. **7e** |
+| **fastText** | [Joulin et al.](https://arxiv.org/abs/1607.01759) · [fastText](https://fasttext.cc/) · `lid.176` | ch. **7f** |
 
 ### I. Java / platform notes (only as needed)
 
@@ -4880,8 +5003,9 @@ This guide is not a Java textbook. When the **code map** (chapter 16) is the bot
 
 | Topic | Where |
 |-------|--------|
-| Module exports vs internals | `src/main/java/module-info.java` (exported: `models`, `llm`, `chat`, `rag`, `exceptions`, `tokenizer`, `utils`) |
+| Module exports vs internals | `src/main/java/module-info.java` (exported: `models`, `llm`, `chat`, `rag`, `jev`, `exceptions`, `tokenizer`, `utils`) |
 | Optional Vector API | JDK incubating `jdk.incubator.vector` — used when present; scalar fallback otherwise |
+| Optional TornadoVM | `requires static tornado.api` and `tornado.clblast`. `-Dnanollvm.kernels`; layer groups `-Dnanollvm.tornado.layers` (**since 1.5.0**) |
 | Build / run | project `README.md`, `pom.xml`, `.mvn/jvm.config` (heap / module flags) |
 
 ### A short recommended order
