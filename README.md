@@ -14,7 +14,7 @@ It does not train models. It loads files you already have and runs inference.
 
 **For** a Java application that needs a small local model: a short chat reply, a sentence vector, a transcript, a spoken WAV, a language label, or a choice with a probability.
 
-**Supports** Qwen3, Qwen3.5 text, Gemma 3, Gemma 4 text, Llama, LFM2, BERT embeddings, Whisper, Piper, fastText, and YOLO26 nano images. The full list is [below](#supported-models).
+**Supports** Qwen3, Qwen3.5 text, Gemma 3, Gemma 4 text, Llama, LFM2, BERT embeddings, Whisper, Piper, fastText, and YOLO26 nano and small images. The full list is [below](#supported-models).
 
 **Attach** `com.igormaznitsa:nano-vllm-java:1.4.0` on JDK 21+. Coordinates and a first call are under [Add it to an application](#add-it-to-an-application).
 
@@ -27,7 +27,7 @@ mvn -pl nano-vllm-java-samples -q exec:java
 
 That opens the interactive menu (chat, search, typed decisions). Every other sample, including weather and Russian checkers, is under [Run the samples](#run-the-samples).
 
-**1.4.0** is the release on Maven Central. This repository is **1.5.0-SNAPSHOT** and also includes Qwen3.5 text, typed decisions (Jev), the checkers sample, and a weather sample. The longer design tour (scheduler, attention, tensors, formats) is [`description.md`](description.md).
+**1.4.0** is the release on Maven Central. This repository is **1.5.0-SNAPSHOT** and also includes Qwen3.5 text, typed decisions (Jev), YOLO26 images, the checkers sample, and a weather sample. The longer design tour (scheduler, attention, tensors, formats) is [`description.md`](description.md).
 
 Ideas here were inspired by the Python [nano-vllm](https://github.com/GeeeekExplorer/nano-vllm) educational engine.
 
@@ -39,6 +39,7 @@ Ideas here were inspired by the Python [nano-vllm](https://github.com/GeeeekExpl
 - [Chat](#chat)
 - [Tools](#tools)
 - [Jev](#jev)
+- [Images](#images)
 - [Run the samples](#run-the-samples)
 - [Other calls](#other-calls)
 - [Threads](#threads)
@@ -54,6 +55,7 @@ Ideas here were inspired by the Python [nano-vllm](https://github.com/GeeeekExpl
 | A WAV clip | A transcript | `generate(sound, TEXT)` |
 | A sentence | A WAV file | `generate(text, AUDIO)` |
 | A sentence | Ranked labels (language id, and similar) | `generate(text, LABELS)` |
+| A picture | Object boxes, a mask, pose points, a map, depth, or image labels | `model.generate(new LlmInImage(…), IMAGE)` (snapshot) |
 | A situation and a fixed list of options | The chosen option and a probability for each | `jev.decide(…)` (snapshot) |
 | Your own notes on disk | A reply that can quote those notes | `llm.rag(…).ask(…)` |
 | A question your Java function can answer | A reply after that function runs | `builder.tool(ModelTool.of(…))`, then `chat().send(…)` (snapshot) |
@@ -251,6 +253,60 @@ try (LlmModel model = LlmModelFactory.make(Path.of("models/Jeff-Qwen3.5-0.8B"));
 
 Download: `./models/download-jeff-qwen3.5-0.8b.sh`. Russian checkers uses this checkpoint at `RAW`, one prefill per move, because a turn can have many legal moves and each L0 rotation would be another full read.
 
+## Images
+
+This snapshot. A picture goes in as packed pixels and the file decides the job: objects, a mask, pose points, oriented boxes, a semantic map, depth, or image labels. Chat is unchanged. The library does not use `java.desktop`.
+
+Nano and small share one graph. The call below is the same for `yolo26n.onnx` and `yolo26s.onnx`. The loader reads the first convolution's channel count (16 for nano, 32 for small) and builds every later layer from that. The file is a fused end-to-end export (`nms=False`, image size 640). Medium, large, and extra-large are refused: those scales use a `C3k` inner block, a deeper or wider compound, and a channel cap of 512. P2, P6, YOLOE, and a `.pt` file are refused too.
+
+```java
+import com.igormaznitsa.nanollvm.models.ArgbImage;
+import com.igormaznitsa.nanollvm.models.Box;
+import com.igormaznitsa.nanollvm.models.LlmInImage;
+import com.igormaznitsa.nanollvm.models.LlmModality;
+import com.igormaznitsa.nanollvm.models.LlmModel;
+import com.igormaznitsa.nanollvm.models.LlmModelFactory;
+import com.igormaznitsa.nanollvm.models.LlmOutObjects;
+import com.igormaznitsa.nanollvm.models.VisionHit;
+
+import java.nio.file.Path;
+
+int[] pixels = /* row-major 0xAARRGGBB, index y * width + x */;
+
+try (LlmModel model = LlmModelFactory.make(
+    Path.of("models/YOLO26n/detect/yolo26n.onnx"))) {
+
+  LlmOutObjects found = model.generate(
+      new LlmInImage(new ArgbImage(width, height, pixels)), LlmModality.IMAGE);
+
+  for (VisionHit hit : found.objects()) {
+    Box box = (Box) hit.shape();
+    System.out.println(hit.className() + " " + hit.probability()
+        + " @ " + box.left() + "," + box.top());
+  }
+}
+```
+
+The picture is letterboxed to 640×640. Boxes, mask outlines, rotated corners, and pose points come back in the original picture's pixels. A detection keeps at most 300 objects whose score is at least 0.25. `YoloStreetHelloWorld.fromBufferedImage` copies a `BufferedImage` into the packed layout, and `toBufferedImage` copies a result raster back.
+
+| File | `generate` result |
+|------|-------------------|
+| `yolo26n.onnx` or `yolo26s.onnx` | `LlmOutObjects` — a `Box` per object |
+| `…-seg.onnx`, `…-obb.onnx` | `LlmOutObjects` — a polygon (mask outline, or four rotated corners) |
+| `…-pose.onnx` | `LlmOutObjects` — a box plus keypoints |
+| `…-sem.onnx`, `…-depth.onnx` | `LlmOutImage` — class indexes, or grayscale depth with the min and max in meters |
+| `…-cls.onnx` | `LlmOutLabels` via `generate(image, LABELS)` |
+
+Class names are `classes.txt` beside the ONNX, one name per line. Detect, segment, and pose use the 80 COCO names when that file is missing and the head has 80 classes. Oriented boxes use the 15 DOTA names. A one-class pose head is `person`. Semantic and classification need the sidecar. Depth has no names.
+
+```bash
+./models/download-yolo26n.sh
+mvn -pl nano-vllm-java-samples -q exec:java \
+  -Dexec.mainClass=com.igormaznitsa.nanollvm.samples.YoloStreetHelloWorld
+```
+
+With no argument the sample asks for a head. `detect`, `seg`, `pose`, or `obb` skips the menu. Detect, segment, and pose use a street photo. Oriented boxes use an overhead parking lot. The marked picture is `yolo-street-<head>.png`. There is no download script for small; point `LlmModelFactory.make` at a `yolo26s*.onnx` you exported the same way.
+
 ## Run the samples
 
 Run from the repository root after the matching download in [`models/README.md`](models/README.md). An optional first argument overrides the model path (`-Dexec.args=…`).
@@ -367,14 +423,7 @@ LlmOutLabels labels = llm.generate(
 System.out.println(labels.topLabel());
 ```
 
-**Images** — YOLO26 nano (the small scale uses the same graph). `./models/download-yolo26n.sh`. Pass an `ArgbImage`: row-major `0xAARRGGBB` pixels, index `y * width + x`. Chat is unchanged. Boxes come back in that picture's pixels. `YoloStreetHelloWorld.fromBufferedImage` builds the raster from a `BufferedImage`.
-
-```java
-try (LlmModel model = LlmModelFactory.make(Path.of("models/YOLO26n/detect/yolo26n.onnx"))) {
-  LlmOutObjects found = model.generate(
-      new LlmInImage(new ArgbImage(width, height, pixels)), LlmModality.IMAGE);
-}
-```
+**Images** — [Images](#images). YOLO26 nano and small. `./models/download-yolo26n.sh`.
 
 **A choice with probabilities** — [Jev](#jev) (this snapshot). A chat checkpoint and the Jeff checkpoint use the same `toJev()` call.
 
@@ -431,7 +480,7 @@ With `cpuThreads` above 1, engines share a process-wide pool named `nanollvm-mat
 
 - **CPU, small models.** Answers are slower than a GPU server, and a 270M–0.8B model will miss facts, waffle, or invent a detail. Search over your notes can supply a passage; the model can still garble it.
 - **Inference only.** The files do not change while you chat.
-- **Text in, and the jobs in the table above.** YOLO26 nano reads a picture (objects, a map, depth, or labels). No other image understanding, and no image generation. Qwen3.5 vision, LoRA adapters, mixture-of-experts, and Qwen3-Next are refused.
+- **Text in, and the jobs in the table above.** YOLO26 nano and small read a picture (objects, a map, depth, or labels). Medium, large, extra-large, P2, P6, and YOLOE are refused. No other image understanding, and no image generation. Qwen3.5 vision, LoRA adapters, mixture-of-experts, and Qwen3-Next are refused.
 - **Whisper** reads uncompressed WAV or PCM. No MP3, no timestamps, no voice-activity detection.
 - **Piper** returns one WAV per call. No streaming audio and no SSML.
 - **GGUF chat** is Qwen3 and LFM2. **GGUF embeddings** are BERT. Other GGUF architectures are out.
