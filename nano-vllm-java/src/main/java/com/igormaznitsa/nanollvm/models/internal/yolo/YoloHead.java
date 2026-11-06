@@ -347,7 +347,7 @@ final class YoloHead {
     int[] channels = {width.c256(), width.c512(), width.c1024()};
     int[] strides = {8, 16, 32};
     int c2 = Math.max(16, Math.max(channels[0] / 4, 4));
-    int c3 = Math.clamp(classes, channels[0], 100);
+    int c3 = Math.max(channels[0], Math.min(classes, 100));
     int extra = extraChannels(task);
     int c4 = sideChannels(channels[0], extra, task);
     Level[] levels = new Level[3];
