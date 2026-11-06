@@ -3,6 +3,7 @@ package com.igormaznitsa.nanollvm.models.internal.yolo;
 import static java.util.Objects.requireNonNull;
 
 import com.igormaznitsa.nanollvm.models.ArgbImage;
+import com.igormaznitsa.nanollvm.models.LlmInImage;
 import com.igormaznitsa.nanollvm.models.LlmModality;
 import com.igormaznitsa.nanollvm.models.LlmOutput;
 import com.igormaznitsa.nanollvm.tensor.MatmulRuntime;
@@ -13,7 +14,6 @@ import java.util.List;
  */
 public final class Yolo26Model {
 
-  static final float CONFIDENCE = 0.25f;
   static final int MAX_DET = 300;
 
   private final YoloTask task;
@@ -76,12 +76,51 @@ public final class Yolo26Model {
   }
 
   public LlmOutput forward(final ArgbImage image, final MatmulRuntime runtime) {
+    return this.forward(image, LlmInImage.DEFAULT_MIN_PROBABILITY, runtime);
+  }
+
+  public LlmOutput forward(
+    final ArgbImage image,
+    final float minProbability,
+    final MatmulRuntime runtime
+  ) {
     requireNonNull(image, "image");
-    return this.forwardLetter(YoloLetterbox.of(image), runtime);
+    return this.forwardLetter(YoloLetterbox.of(image), minProbability, runtime);
   }
 
   LlmOutput forwardLetter(final YoloLetterbox letter, final MatmulRuntime runtime) {
+    return this.forwardLetter(letter, LlmInImage.DEFAULT_MIN_PROBABILITY, runtime);
+  }
+
+  LlmOutput forwardLetter(
+    final YoloLetterbox letter,
+    final float minProbability,
+    final MatmulRuntime runtime
+  ) {
+    this.requireObjectProbability(minProbability);
     MatmulRuntime kernels = runtime == null ? MatmulRuntime.sequential() : runtime;
-    return this.head.read(this.trunk.forward(letter.tensor, kernels), letter, this.names, kernels);
+    return this.head.read(
+      this.trunk.forward(letter.tensor, kernels),
+      letter,
+      this.names,
+      minProbability,
+      kernels);
+  }
+
+  private void requireObjectProbability(final float minProbability) {
+    if (!Float.isFinite(minProbability) || minProbability < 0f || minProbability > 1f) {
+      throw new IllegalArgumentException("minProbability must be in [0, 1]");
+    }
+    if (!this.emitsObjects() && minProbability != LlmInImage.DEFAULT_MIN_PROBABILITY) {
+      throw new IllegalArgumentException(
+        "minProbability applies to detection, segmentation, pose, and oriented boxes");
+    }
+  }
+
+  private boolean emitsObjects() {
+    return switch (this.task) {
+      case DETECT, SEGMENT, POSE, OBB -> true;
+      case SEMANTIC, DEPTH, CLASSIFY -> false;
+    };
   }
 }

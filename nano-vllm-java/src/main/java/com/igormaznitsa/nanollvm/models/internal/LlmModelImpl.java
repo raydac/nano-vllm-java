@@ -651,7 +651,7 @@ public final class LlmModelImpl extends LlmModel {
         new LlmOutText(this.transcribeSound(sound, runtime));
       case LlmInImage image when this.vision.get() != null
         && outputModality == this.vision.get().outputModality() ->
-        this.requireVision().forward(image.image(), runtime);
+        this.requireVision().forward(image.image(), image.minProbability(), runtime);
       default -> throw new IllegalArgumentException(
         "unsupported generate pair: %s → %s (usable %s)".formatted(
           input.getClass().getSimpleName(),

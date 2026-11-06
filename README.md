@@ -287,7 +287,7 @@ try (LlmModel model = LlmModelFactory.make(
 }
 ```
 
-The picture is letterboxed to 640×640. Boxes, mask outlines, rotated corners, and pose points come back in the original picture's pixels. A detection keeps at most 300 objects whose score is at least 0.25. `YoloStreetHelloWorld.fromBufferedImage` copies a `BufferedImage` into the packed layout, and `toBufferedImage` copies a result raster back.
+The picture is letterboxed to 640×640. Boxes, mask outlines, rotated corners, and pose points come back in the original picture's pixels. A detection ranks at most 300 objects, then drops any whose score is below the minimum on the input. Omit that argument and the minimum stays `0.25`. A lower minimum only adds hits that were already in those 300. `new LlmInImage(raster, 0.4f)` keeps scores of `0.4` and above. Semantic maps, depth, and classification have no object score, and a minimum other than `0.25` is rejected for those files. `YoloStreetHelloWorld.fromBufferedImage` copies a `BufferedImage` into the packed layout, and `toBufferedImage` copies a result raster back.
 
 | File | `generate` result |
 |------|-------------------|

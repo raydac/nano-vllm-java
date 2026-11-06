@@ -398,6 +398,7 @@ final class YoloHead {
     final List<Tensor> layers,
     final YoloLetterbox letter,
     final List<String> names,
+    final float minProbability,
     final MatmulRuntime runtime
   ) {
     if (this.classify != null) {
@@ -410,13 +411,14 @@ final class YoloHead {
       return this.depth.read(List.of(layers.get(16), layers.get(19), layers.get(22)), letter,
         runtime);
     }
-    return this.objects(layers, letter, names, runtime);
+    return this.objects(layers, letter, names, minProbability, runtime);
   }
 
   private LlmOutput objects(
     final List<Tensor> layers,
     final YoloLetterbox letter,
     final List<String> names,
+    final float minProbability,
     final MatmulRuntime runtime
   ) {
     Tensor[] feats = {layers.get(16), layers.get(19), layers.get(22)};
@@ -428,7 +430,7 @@ final class YoloHead {
     Tensor masks = this.proto == null ? null : this.proto.forward(feats, runtime);
     List<VisionHit> hits = new ArrayList<>();
     for (Pick pick : picks) {
-      if (pick.score < Yolo26Model.CONFIDENCE) {
+      if (pick.score < minProbability) {
         continue;
       }
       hits.add(this.hit(raws.get(pick.anchor), pick, masks, letter, names));

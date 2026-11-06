@@ -174,6 +174,26 @@ final class Yolo26Test {
   }
 
   @Test
+  void minProbabilityDropsScoresBelowTheCutoff() {
+    Yolo26Model model = Yolo26Model.synthetic(YoloTask.DETECT);
+    YoloLetterbox letter = YoloLetterbox.direct(Tensor.zeros(3, 64, 64), 64, 64);
+
+    LlmOutObjects kept = (LlmOutObjects) model.forwardLetter(letter, 0.4f, null);
+    LlmOutObjects dropped = (LlmOutObjects) model.forwardLetter(letter, 0.6f, null);
+
+    assertEquals(300, kept.objects().size());
+    assertTrue(kept.objects().stream().allMatch(hit -> hit.probability() >= 0.4f));
+    assertTrue(dropped.objects().isEmpty());
+    assertEquals(
+      LlmInImage.DEFAULT_MIN_PROBABILITY,
+      new LlmInImage(new ArgbImage(1, 1, new int[1])).minProbability());
+    assertThrows(IllegalArgumentException.class,
+      () -> new LlmInImage(new ArgbImage(1, 1, new int[1]), 1.1f));
+    assertThrows(IllegalArgumentException.class,
+      () -> Yolo26Model.synthetic(YoloTask.CLASSIFY).forwardLetter(letter, 0.9f, null));
+  }
+
+  @Test
   void maskOutlineWalksTheBorderAndIgnoresASmallerBlob() {
     boolean[] mask = new boolean[16 * 16];
     fill(mask, 16, 1, 1, 4, 4);

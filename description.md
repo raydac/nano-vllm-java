@@ -2112,7 +2112,9 @@ try (LlmModel model = LlmModelFactory.make(Path.of("models/YOLO26n/detect/yolo26
 `pixels` are row-major `0xAARRGGBB` (`ArgbImage`). The library does not use `java.desktop`.
 `YoloStreetHelloWorld.fromBufferedImage` copies a `BufferedImage` into that layout, and
 `toBufferedImage` copies a result raster back. The picture is letterboxed to 640×640. Boxes, mask outlines, rotated
-corners, and pose points come back in the original picture's pixels.
+corners, and pose points come back in the original picture's pixels. Object heads keep a hit whose score is at
+least `LlmInImage`'s minimum (`0.25` when the picture is passed alone). At most 300 candidates are ranked before
+that cutoff. A minimum other than the default is rejected for a semantic map, depth, or classification file.
 
 | File | `generate` result |
 |--|--|
