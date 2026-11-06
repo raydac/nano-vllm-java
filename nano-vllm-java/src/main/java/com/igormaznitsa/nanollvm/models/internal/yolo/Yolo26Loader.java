@@ -23,7 +23,7 @@ import java.util.Map;
 import java.util.stream.Stream;
 
 /**
- * Loads a fused YOLO26 nano or small ONNX file and the class names beside it.
+ * Loads a fused YOLO26 ONNX file and the class names beside it.
  */
 public final class Yolo26Loader {
 
@@ -40,6 +40,16 @@ public final class Yolo26Loader {
     if (task == null) {
       throw new ModelLoadException("not a YOLO26 ONNX file: " + file);
     }
+    return load(file, task, io);
+  }
+
+  public static Yolo26Model load(
+      final Path onnxFile,
+      final YoloTask task,
+      final LlmListener io
+  ) throws IOException {
+    Path file = requireNonNull(onnxFile, "onnxFile").toAbsolutePath().normalize();
+    requireNonNull(task, "task");
     LlmListener streams = io == null ? LlmListeners.silent() : io;
     LlmListeners.info(streams, null, "Loading YOLO26 " + task.wireName() + " weights…");
     Map<String, Tensor> named = readInitializers(file);
@@ -108,6 +118,11 @@ public final class Yolo26Loader {
   }
 
   public static Path resolveOnnx(final Path path) throws IOException {
+    return resolveOnnx(path, true);
+  }
+
+  public static Path resolveOnnx(final Path path, final boolean requireYoloName)
+      throws IOException {
     Path file = requireNonNull(path, "path").toAbsolutePath().normalize();
     if (Files.isRegularFile(file)) {
       return file;
@@ -118,20 +133,26 @@ public final class Yolo26Loader {
     try (Stream<Path> stream = Files.list(file)) {
       List<Path> onnx = stream
         .filter(Files::isRegularFile)
-        .filter(candidate -> {
-          Path fileName = candidate.getFileName();
-          if (fileName == null) {
-            return false;
-          }
-          String name = fileName.toString().toLowerCase(Locale.ROOT);
-          return name.endsWith(".onnx") && name.contains("yolo26");
-        })
+          .filter(candidate -> isOnnx(candidate, requireYoloName))
         .sorted()
         .toList();
       if (onnx.size() == 1) {
         return onnx.getFirst();
       }
+      if (!requireYoloName && onnx.size() > 1) {
+        throw new ModelLoadException(
+            "folder has " + onnx.size() + " ONNX files; point open() at one file: " + file);
+      }
     }
     return null;
+  }
+
+  private static boolean isOnnx(final Path candidate, final boolean requireYoloName) {
+    Path fileName = candidate.getFileName();
+    if (fileName == null) {
+      return false;
+    }
+    String name = fileName.toString().toLowerCase(Locale.ROOT);
+    return name.endsWith(".onnx") && (!requireYoloName || name.contains("yolo26"));
   }
 }

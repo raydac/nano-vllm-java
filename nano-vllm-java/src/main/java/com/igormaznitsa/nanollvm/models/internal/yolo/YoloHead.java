@@ -33,7 +33,6 @@ final class YoloHead {
   private final Semantic semantic;
   private final Depth depth;
   private final Classify classify;
-  private final int classes;
 
   private YoloHead(
     final YoloTask task,
@@ -41,8 +40,7 @@ final class YoloHead {
     final Proto proto,
     final Semantic semantic,
     final Depth depth,
-    final Classify classify,
-    final int classes
+    final Classify classify
   ) {
     this.task = task;
     this.levels = levels;
@@ -50,19 +48,18 @@ final class YoloHead {
     this.semantic = semantic;
     this.depth = depth;
     this.classify = classify;
-    this.classes = classes;
   }
 
   static YoloHead load(final YoloTensors weights, final YoloWidths width, final YoloTask task) {
     int classes = declaredClasses(weights, task);
     return switch (task) {
       case CLASSIFY -> new YoloHead(
-        task, null, null, null, null, Classify.load(weights, width.c1024(), classes), classes);
+        task, null, null, null, null, Classify.load(weights, width.c1024(), classes));
       case SEMANTIC -> new YoloHead(
-        task, null, null, Semantic.load(weights, width.c256(), classes), null, null, classes);
+        task, null, null, Semantic.load(weights, width.c256(), classes), null, null);
       case DEPTH -> new YoloHead(
         task, null, null, null,
-        Depth.load(weights, width.c256(), width.c512(), width.c1024()), null, 0);
+        Depth.load(weights, width.c256(), width.c512(), width.c1024()), null);
       case DETECT, SEGMENT, POSE, OBB -> pyramid(weights, width, task, classes);
     };
   }
@@ -363,7 +360,7 @@ final class YoloHead {
       ? YoloMath.channels(256, width.scale.width(), width.scale.maxChannels())
       : 0;
     Proto proto = masks == 0 ? null : Proto.load(weights, channels, protos, masks);
-    return new YoloHead(task, levels, proto, null, null, null, classes);
+    return new YoloHead(task, levels, proto, null, null, null);
   }
 
   private static int declaredClasses(final YoloTensors weights, final YoloTask task) {

@@ -14,7 +14,7 @@ It does not train models. It loads files you already have and runs inference.
 
 **For** a Java application that needs a small local model: a short chat reply, a sentence vector, a transcript, a spoken WAV, a language label, or a choice with a probability.
 
-**Supports** Qwen3, Qwen3.5 text, Gemma 3, Gemma 4 text, Llama, LFM2, BERT embeddings, Whisper, Piper, fastText, and YOLO26 nano and small images. The full list is [below](#supported-models).
+**Supports** Qwen3, Qwen3.5 text, Gemma 3, Gemma 4 text, Llama, LFM2, BERT embeddings, Whisper, Piper, fastText, and YOLO26 images. The full list is [below](#supported-models).
 
 **Attach** `com.igormaznitsa:nano-vllm-java:1.4.0` on JDK 21+. Coordinates and a first call are under [Add it to an application](#add-it-to-an-application).
 
@@ -77,7 +77,7 @@ One `LLM` runs one call at a time. Share the loaded `LlmModel` across engines wh
 | Whisper | Safetensors folder | Speech to text |
 | Piper | `*.onnx` + `*.onnx.json` | Text to speech |
 | fastText | `*.bin` or `*.ftz` | Labels |
-| YOLO26 nano (and the same graph for small) | fused `*.onnx`, `nms=False`, 640 | Detect, segment, pose, oriented boxes, semantic map, depth, or image labels |
+| YOLO26 (nano through extra-large) | fused `*.onnx`, `nms=False`, 640 | Detect, segment, pose, oriented boxes, semantic map, depth, or image labels |
 
 If a folder has both safetensors and ONNX, safetensors is used. An unsupported file fails with `UnsupportedModelException` and the list of families this build knows.
 
@@ -257,7 +257,18 @@ Download: `./models/download-jeff-qwen3.5-0.8b.sh`. Russian checkers uses this c
 
 This snapshot. A picture goes in as packed pixels and the file decides the job: objects, a mask, pose points, oriented boxes, a semantic map, depth, or image labels. Chat is unchanged. The library does not use `java.desktop`.
 
-Nano and small share one graph. The call below is the same for `yolo26n.onnx` and `yolo26s.onnx`. The loader reads the first convolution's channel count (16 for nano, 32 for small) and builds every later layer from that. The file is a fused end-to-end export (`nms=False`, image size 640). Medium, large, and extra-large are refused: those scales use a `C3k` inner block, a deeper or wider compound, and a channel cap of 512. P2, P6, YOLOE, and a `.pt` file are refused too.
+The call below is the same for `yolo26n.onnx` through `yolo26x.onnx`. The loader reads the first convolution: 16 channels is nano, 32 is small, 64 is medium or large, and 96 is extra-large. Medium and large share that 64-channel stem; a second copy of the first block selects large. Medium and larger use a `C3k` inner block and a channel cap of 512. Large and extra-large also repeat those blocks. The file is a fused end-to-end export (`nms=False`, image size 640). P2, P6, YOLOE, and a `.pt` file are refused.
+
+`open(path)` detects the kind and calls `open(path, LlmModelType)`. A renamed file such as `lalala.onnx` has nothing to detect, so pass the kind. A YOLO constant selects the head. The scale is still read from the weights, and a GGUF or Hugging Face file still reads its architecture from the file.
+
+```java
+import com.igormaznitsa.nanollvm.models.LlmModelType;
+
+try (LlmModel model = LlmModelFactory.open(Path.of("lalala.onnx"), LlmModelType.YOLO_DETECT).make()) {
+  LlmOutObjects found = model.generate(
+      new LlmInImage(new ArgbImage(width, height, pixels)), LlmModality.IMAGE);
+}
+```
 
 ```java
 import com.igormaznitsa.nanollvm.models.ArgbImage;
@@ -305,7 +316,7 @@ mvn -pl nano-vllm-java-samples -q exec:java \
   -Dexec.mainClass=com.igormaznitsa.nanollvm.samples.YoloStreetHelloWorld
 ```
 
-With no argument the sample asks for a head. `detect`, `seg`, `pose`, or `obb` skips the menu. Detect, segment, and pose use a street photo. Oriented boxes use an overhead parking lot. The marked picture is `yolo-street-<head>.png`. There is no download script for small; point `LlmModelFactory.make` at a `yolo26s*.onnx` you exported the same way.
+With no argument the sample asks for a head. `detect`, `seg`, `pose`, or `obb` skips the menu. Detect, segment, and pose use a street photo. Oriented boxes use an overhead parking lot. The marked picture is `yolo-street-<head>.png`. The download script fetches nano. Point the same call at a `yolo26s`, `yolo26m`, `yolo26l`, or `yolo26x` ONNX you exported the same way.
 
 ## Run the samples
 
@@ -423,7 +434,7 @@ LlmOutLabels labels = llm.generate(
 System.out.println(labels.topLabel());
 ```
 
-**Images** — [Images](#images). YOLO26 nano and small. `./models/download-yolo26n.sh`.
+**Images** — [Images](#images). YOLO26 nano through extra-large. `./models/download-yolo26n.sh`.
 
 **A choice with probabilities** — [Jev](#jev) (this snapshot). A chat checkpoint and the Jeff checkpoint use the same `toJev()` call.
 
@@ -480,7 +491,7 @@ With `cpuThreads` above 1, engines share a process-wide pool named `nanollvm-mat
 
 - **CPU, small models.** Answers are slower than a GPU server, and a 270M–0.8B model will miss facts, waffle, or invent a detail. Search over your notes can supply a passage; the model can still garble it.
 - **Inference only.** The files do not change while you chat.
-- **Text in, and the jobs in the table above.** YOLO26 nano and small read a picture (objects, a map, depth, or labels). Medium, large, extra-large, P2, P6, and YOLOE are refused. No other image understanding, and no image generation. Qwen3.5 vision, LoRA adapters, mixture-of-experts, and Qwen3-Next are refused.
+- **Text in, and the jobs in the table above.** YOLO26 nano through extra-large reads a picture (objects, a map, depth, or labels). P2, P6, and YOLOE are refused. No other image understanding, and no image generation. Qwen3.5 vision, LoRA adapters, mixture-of-experts, and Qwen3-Next are refused.
 - **Whisper** reads uncompressed WAV or PCM. No MP3, no timestamps, no voice-activity detection.
 - **Piper** returns one WAV per call. No streaming audio and no SSML.
 - **GGUF chat** is Qwen3 and LFM2. **GGUF embeddings** are BERT. Other GGUF architectures are out.

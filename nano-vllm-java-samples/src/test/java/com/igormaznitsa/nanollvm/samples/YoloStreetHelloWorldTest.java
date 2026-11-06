@@ -156,8 +156,8 @@ class YoloStreetHelloWorldTest {
     assertThrows(IllegalArgumentException.class, () -> YoloStreetHelloWorld.parseHead("depth"));
     assertThrows(IllegalArgumentException.class, () -> YoloStreetHelloWorld.parseHead("cls"));
     assertThrows(IllegalArgumentException.class, () -> YoloStreetHelloWorld.parseHead("house"));
-    assertThrows(IllegalArgumentException.class,
-      () -> YoloStreetHelloWorld.parseHead("yolo26m.onnx"));
+    assertEquals(StreetHead.DETECT, YoloStreetHelloWorld.parseHead("yolo26m.onnx"));
+    assertEquals(StreetHead.POSE, YoloStreetHelloWorld.parseHead("yolo26x-pose.onnx"));
   }
 
   @Test

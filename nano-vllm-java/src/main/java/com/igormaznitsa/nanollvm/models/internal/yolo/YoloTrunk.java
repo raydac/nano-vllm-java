@@ -78,9 +78,9 @@ final class YoloTrunk {
     return new YoloTrunk(
       conv(weights, 0, 3, width.c64(), 2),
       conv(weights, 1, width.c64(), width.c128(), 2),
-      c3(weights, 2, width.c128(), width.c256(), repeats, false, 0.25f, false),
+      c3(weights, 2, width.c128(), width.c256(), repeats, width.scale.usesC3k(), 0.25f, false),
       conv(weights, 3, width.c256(), width.c256(), 2),
-      c3(weights, 4, width.c256(), width.c512(), repeats, false, 0.25f, false),
+      c3(weights, 4, width.c256(), width.c512(), repeats, width.scale.usesC3k(), 0.25f, false),
       conv(weights, 5, width.c512(), width.c512(), 2),
       c3(weights, 6, width.c512(), width.c512(), repeats, true, 0.5f, false),
       conv(weights, 7, width.c512(), width.c1024(), 2),

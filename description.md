@@ -14,7 +14,7 @@ The subject is a small program that **loads a pretrained model** and runs **infe
 required. It continues text or short chat with a **causal** language model; (**since 1.1.0**)
 encoding sentences to vectors with a **BERT-family embedding** GGUF or ONNX; (**since 1.3.0**) transcribing speech
 with **Whisper** safetensors and synthesizing speech with **Piper** ONNX voices; (**since 1.4.0**) classifying text
-with **Meta fastText** (`*.bin` / `*.ftz`); (**since 1.5.0**) reading a picture with **YOLO26 nano**
+with **Meta fastText** (`*.bin` / `*.ftz`); (**since 1.5.0**) reading a picture with **YOLO26**
 (detect, segment, pose, oriented boxes, semantic map, depth, or image labels). When **TornadoVM** is on the module path, dense GEMV can run on the device
 (**since 1.4.0**); **since 1.5.0** attention, elementwise kernels, and short groups of decoder layers do too.
 (**since 1.5.0**) a causal chat model can answer a typed **Jev** decision — a choice, a yes/no, or a score — with a
@@ -147,7 +147,7 @@ The same Qwen3 graph also loads from a **GGUF** file (**since 1.1.0**). A furthe
 (hybrid short-convolution + GQA). Sentence embeddings use **BERT**-family GGUF or ONNX (**since 1.1.0**, chapter 7b).
 **Since 1.3.0**, the same factory also loads **Whisper** speech-to-text (Hugging Face safetensors, chapter **7d**) and
 **Piper** text-to-speech (ONNX voice folder, chapter **7e**). **Since 1.4.0**, it also loads **fastText**
-classifiers (`*.bin` / `*.ftz`, chapter **7f**). **Since 1.5.0**, it also loads **YOLO26 nano** image
+classifiers (`*.bin` / `*.ftz`, chapter **7f**). **Since 1.5.0**, it also loads **YOLO26** image
 models from a fused ONNX file (chapter **7i**). You usually need not care which; the program detects
 which files you pointed it at.
 
@@ -225,7 +225,7 @@ You (or a download script in this project’s `models/` folder) fetch weights fr
 | **Hugging Face folder** | A directory | `config.json` + tokenizer (`tokenizer.json`, else SentencePiece `tokenizer.model` **since 1.2.0**) + `*.safetensors` **or** supported `*.onnx` (Qwen3 / Gemma3 / **Gemma 4 text** / **Llama**; **Qwen3.5 text** safetensors **since 1.5.0**, vision tower skipped, not ONNX; BERT embeddings from ONNX; **Whisper** speech safetensors **since 1.3.0**) — **since 1.1.0** for ONNX and Gemma 4. **Piper** voices are a folder of `*.onnx` + `*.onnx.json` (**since 1.3.0**, chapter **7e**). |
 | **Single GGUF file** | One `.gguf` | Metadata + embedded tokenizer + quantized weights (**Qwen3** or **LFM2** chat, or **BERT** embeddings — not Gemma/Llama GGUF) |
 | **fastText file / folder** (**since 1.4.0**) | `*.bin` / `*.ftz` or a directory containing one | Supervised classifier (e.g. lid.176); no `config.json` — chapter **7f** |
-| **YOLO26 ONNX** (**since 1.5.0**) | `yolo26n*.onnx` or `yolo26s*.onnx`, or a folder with one | Fused end-to-end export (`nms=False`, 640). Nano download; small uses the same graph. Chapter **7i** |
+| **YOLO26 ONNX** (**since 1.5.0**) | `yolo26n*.onnx` through `yolo26x*.onnx`, or a folder with one | Fused end-to-end export (`nms=False`, 640). Nano download; small through extra-large use the same call. Chapter **7i** |
 | **Stream / classpath** (**since 1.1.0**) | A `ModelFileSource` (or `fromClasspath*` helpers) | Same roles as HF/GGUF above, but bytes come from streams into **heap** (no disk cache); `make(Path)` stays direct disk I/O |
 
 **Format restrictions are real:** each crate shape accepts only a **subset** of hub files (dtypes, architectures,
@@ -2099,8 +2099,7 @@ Sample: `ToolsHelloWorld` (OS name, then one directory listing). The weather sam
 
 **Since 1.5.0** the factory also loads a **YOLO26** picture model from one fused ONNX file. It is not a
 chat model and it does not run the Qwen or Gemma vision towers. The download script fetches the seven
-**nano** tasks. A **small** file (`yolo26s*.onnx`) uses the same blocks. Medium, large, extra-large,
-P2, P6, YOLOE, and a `.pt` file are refused.
+**nano** tasks. Small through extra-large use the same call. The loader reads the stem width. Medium and large share a 64-channel stem; a second copy of the first block selects large. Medium and larger use a `C3k` inner block. P2, P6, YOLOE, and a `.pt` file are refused. `open(path)` detects the kind and calls `open(path, LlmModelType)`. Pass that type when the name does not say which kind it is. A YOLO constant selects the head. The scale is still read from the weights.
 
 ```java
 try (LlmModel model = LlmModelFactory.make(Path.of("models/YOLO26n/detect/yolo26n.onnx"))) {
@@ -2142,7 +2141,7 @@ photo. Oriented boxes use an overhead parking lot and the DOTA vehicle names. Ea
 long the weights took to load and how long recognition took, then writes each score onto a PNG.
 
 **In the code:** `LlmModelFactory` → `Yolo26Loader` → `Yolo26Model`. Weights are ONNX initializers.
-The graph is the published nano/small layout (`Conv2d`, `C3k2`, `SPPF`, `C2PSA`, then the task head).
+The graph is the published YOLO26 layout (`Conv2d`, `C3k2`, `SPPF`, `C2PSA`, then the task head). Medium and larger scales use a `C3k` inner block on the early stages.
 There is no ONNX interpreter.
 
 

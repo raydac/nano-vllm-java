@@ -10,7 +10,7 @@ import com.igormaznitsa.nanollvm.tensor.MatmulRuntime;
 import java.util.List;
 
 /**
- * YOLO26 nano or small graph. Weights come from a fused end-to-end ONNX export.
+ * YOLO26 graph for nano through extra-large. Weights come from a fused end-to-end ONNX export.
  */
 public final class Yolo26Model {
 
@@ -43,7 +43,7 @@ public final class Yolo26Model {
   ) {
     requireNonNull(task, "task");
     requireNonNull(names, "names");
-    YoloScale scale = YoloScale.ofStem(weights.stemChannels());
+    YoloScale scale = YoloScale.from(weights);
     YoloWidths width = YoloWidths.of(scale);
     return new Yolo26Model(
       task,

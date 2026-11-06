@@ -5,7 +5,7 @@ import com.igormaznitsa.nanollvm.tensor.MatmulRuntime;
 import com.igormaznitsa.nanollvm.tensor.Tensor;
 
 /**
- * YOLO26 n/s blocks: bottleneck, C3k, C3k2, SPPF, and C2PSA.
+ * YOLO26 blocks: bottleneck, C3k, C3k2, SPPF, and C2PSA.
  */
 final class YoloBlocks {
 

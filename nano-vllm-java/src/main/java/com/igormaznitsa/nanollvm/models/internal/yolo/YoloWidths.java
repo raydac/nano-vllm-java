@@ -1,7 +1,7 @@
 package com.igormaznitsa.nanollvm.models.internal.yolo;
 
 /**
- * Channel widths for the nano ({@code n}) and small ({@code s}) YOLO26 scales.
+ * Channel widths for one YOLO26 compound scale.
  */
 final class YoloWidths {
 

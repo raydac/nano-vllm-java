@@ -1,6 +1,9 @@
 package com.igormaznitsa.nanollvm.models.internal.yolo;
 
+import static java.util.Objects.requireNonNull;
+
 import com.igormaznitsa.nanollvm.exceptions.UnsupportedModelException;
+import com.igormaznitsa.nanollvm.models.LlmModelType;
 import com.igormaznitsa.nanollvm.models.ModelSupport;
 import java.util.Locale;
 
@@ -22,6 +25,20 @@ public enum YoloTask {
     this.wireName = wireName;
   }
 
+  public static YoloTask fromType(final LlmModelType type) {
+    return switch (requireNonNull(type, "type")) {
+      case YOLO_DETECT -> DETECT;
+      case YOLO_SEGMENT -> SEGMENT;
+      case YOLO_SEMANTIC -> SEMANTIC;
+      case YOLO_DEPTH -> DEPTH;
+      case YOLO_CLASSIFY -> CLASSIFY;
+      case YOLO_POSE -> POSE;
+      case YOLO_OBB -> OBB;
+      case GGUF, HUGGING_FACE, PIPER, FASTTEXT ->
+        throw new IllegalArgumentException("not a YOLO head: " + type);
+    };
+  }
+
   /**
    * @return the task, or {@code null} when the name is not a YOLO26 checkpoint
    */
@@ -36,8 +53,7 @@ public enum YoloTask {
     if (!name.contains("yolo26")) {
       return null;
     }
-    if (name.endsWith(".pt") || name.contains("-p2") || name.contains("-p6")
-      || name.contains("yolo26m") || name.contains("yolo26l") || name.contains("yolo26x")) {
+    if (name.endsWith(".pt") || name.contains("-p2") || name.contains("-p6")) {
       throw rejected(fileName);
     }
     if (name.contains("-sem")) {
@@ -58,7 +74,8 @@ public enum YoloTask {
     if (name.contains("-obb")) {
       return OBB;
     }
-    if (name.contains("yolo26n") || name.contains("yolo26s")) {
+    if (name.contains("yolo26n") || name.contains("yolo26s") || name.contains("yolo26m")
+      || name.contains("yolo26l") || name.contains("yolo26x")) {
       return DETECT;
     }
     return null;
@@ -66,9 +83,9 @@ public enum YoloTask {
 
   private static UnsupportedModelException rejected(final String fileName) {
     return new UnsupportedModelException(
-      "YOLO26 file is not a nano or small ONNX export: " + fileName
-        +
-        ". Use yolo26n or yolo26s with nms=False. P2, P6, YOLOE, and the .pt pickle are not loaded."
+      "YOLO26 file is not a fused ONNX export: " + fileName
+        + ". Use yolo26n, yolo26s, yolo26m, yolo26l, or yolo26x with nms=False. "
+        + "P2, P6, YOLOE, and the .pt pickle are not loaded."
         + System.lineSeparator() + System.lineSeparator() + ModelSupport.CATALOG,
       "yolo26",
       java.util.List.of(fileName));

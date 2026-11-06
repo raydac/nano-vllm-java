@@ -295,7 +295,8 @@ public final class YoloStreetHelloWorld {
     if (name.contains("-obb")) {
       return StreetHead.OBB;
     }
-    if (name.contains("yolo26n") || name.contains("yolo26s")) {
+    if (name.contains("yolo26n") || name.contains("yolo26s") || name.contains("yolo26m")
+      || name.contains("yolo26l") || name.contains("yolo26x")) {
       return StreetHead.DETECT;
     }
     throw unknown(fileName);

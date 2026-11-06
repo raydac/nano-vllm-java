@@ -17,17 +17,29 @@ final class YoloTensors {
     "yolo export model=yolo26n.pt format=onnx nms=False imgsz=640";
 
   private final Map<String, Tensor> weights;
+  private final int syntheticStem;
+  private final boolean syntheticDeep;
 
-  private YoloTensors(final Map<String, Tensor> weights) {
+  private YoloTensors(
+    final Map<String, Tensor> weights,
+    final int syntheticStem,
+    final boolean syntheticDeep
+  ) {
     this.weights = weights;
+    this.syntheticStem = syntheticStem;
+    this.syntheticDeep = syntheticDeep;
   }
 
   static YoloTensors of(final Map<String, Tensor> weights) {
-    return new YoloTensors(requireNonNull(weights, "weights"));
+    return new YoloTensors(requireNonNull(weights, "weights"), 0, false);
   }
 
   static YoloTensors synthetic() {
-    return new YoloTensors(null);
+    return synthetic(16, false);
+  }
+
+  static YoloTensors synthetic(final int stemChannels, final boolean deeper) {
+    return new YoloTensors(null, stemChannels, deeper);
   }
 
   Tensor take(final String name, final int... shape) {
@@ -76,9 +88,16 @@ final class YoloTensors {
     return found.shape();
   }
 
+  boolean hasDeeperBlock() {
+    if (this.weights == null) {
+      return this.syntheticDeep;
+    }
+    return this.weights.keySet().stream().anyMatch(name -> name.contains("model.2.m.1."));
+  }
+
   int stemChannels() {
     if (this.weights == null) {
-      return 16;
+      return this.syntheticStem;
     }
     Tensor stem = this.find("model.0.conv.weight");
     if (stem == null || stem.shape().length != 4) {

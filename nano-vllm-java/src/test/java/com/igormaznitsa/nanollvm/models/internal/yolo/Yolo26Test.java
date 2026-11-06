@@ -1,6 +1,7 @@
 package com.igormaznitsa.nanollvm.models.internal.yolo;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -14,6 +15,7 @@ import com.igormaznitsa.nanollvm.models.LlmInImage;
 import com.igormaznitsa.nanollvm.models.LlmModality;
 import com.igormaznitsa.nanollvm.models.LlmModel;
 import com.igormaznitsa.nanollvm.models.LlmModelFactory;
+import com.igormaznitsa.nanollvm.models.LlmModelType;
 import com.igormaznitsa.nanollvm.models.LlmOutImage;
 import com.igormaznitsa.nanollvm.models.LlmOutLabels;
 import com.igormaznitsa.nanollvm.models.LlmOutObjects;
@@ -24,6 +26,7 @@ import com.igormaznitsa.nanollvm.tensor.Tensor;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Map;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIf;
 import org.junit.jupiter.api.io.TempDir;
@@ -80,6 +83,9 @@ final class Yolo26Test {
   void fileNameSelectsTheNanoTask() {
     assertEquals(YoloTask.DETECT, YoloTask.fromFileName("yolo26n.onnx"));
     assertEquals(YoloTask.DETECT, YoloTask.fromFileName("yolo26s.onnx"));
+    assertEquals(YoloTask.DETECT, YoloTask.fromFileName("yolo26m.onnx"));
+    assertEquals(YoloTask.DETECT, YoloTask.fromFileName("yolo26l.onnx"));
+    assertEquals(YoloTask.SEGMENT, YoloTask.fromFileName("yolo26x-seg.onnx"));
     assertEquals(YoloTask.SEGMENT, YoloTask.fromFileName("yolo26n-seg.onnx"));
     assertEquals(YoloTask.SEMANTIC, YoloTask.fromFileName("yolo26n-sem.onnx"));
     assertEquals(YoloTask.DEPTH, YoloTask.fromFileName("yolo26n-depth.onnx"));
@@ -90,14 +96,55 @@ final class Yolo26Test {
   }
 
   @Test
-  void rejectsWideScalesPickleAndYoloe(@TempDir final Path dir) throws Exception {
+  void rejectsPickleP2P6AndYoloe(@TempDir final Path dir) throws Exception {
     for (String name : List.of(
-      "yolo26m.onnx", "yolo26l.onnx", "yolo26x.onnx", "yolo26n.pt",
-      "yolo26n-p2.onnx", "yolo26n-p6.onnx", "yoloe-26n.onnx")) {
+      "yolo26n.pt", "yolo26m-p2.onnx", "yolo26l-p6.onnx", "yoloe-26n.onnx")) {
       Path file = dir.resolve(name);
       Files.writeString(file, "not-an-onnx");
       assertThrows(UnsupportedModelException.class, () -> LlmModelFactory.make(file));
     }
+  }
+
+  @Test
+  void renamedFileNeedsTheHeadPassedToOpen(@TempDir final Path dir) throws Exception {
+    Path renamed = dir.resolve("lalala.onnx");
+    Files.writeString(renamed, "not-an-onnx");
+    ModelLoadException unnamed = assertThrows(
+      ModelLoadException.class, () -> LlmModelFactory.make(renamed));
+    assertTrue(unnamed.getMessage().contains("not an HF model folder"));
+
+    ModelLoadException typed = assertThrows(
+      ModelLoadException.class,
+      () -> LlmModelFactory.open(renamed, LlmModelType.YOLO_DETECT).make());
+    assertFalse(typed.getMessage().contains("not an HF model folder"));
+    ModelLoadException forced = assertThrows(
+      ModelLoadException.class,
+      () -> LlmModelFactory.open(renamed, LlmModelType.GGUF).make());
+    assertFalse(forced.getMessage().contains("not an HF model folder"));
+
+    Path named = dir.resolve("yolo26n.onnx");
+    Files.writeString(named, "not-an-onnx");
+    ModelLoadException detected = assertThrows(
+      ModelLoadException.class, () -> LlmModelFactory.make(named));
+    assertFalse(detected.getMessage().contains("not an HF model folder"));
+
+    assertEquals(YoloTask.DETECT, YoloTask.fromType(LlmModelType.YOLO_DETECT));
+    assertEquals(YoloTask.SEGMENT, YoloTask.fromType(LlmModelType.YOLO_SEGMENT));
+    assertEquals(YoloTask.SEMANTIC, YoloTask.fromType(LlmModelType.YOLO_SEMANTIC));
+    assertEquals(YoloTask.DEPTH, YoloTask.fromType(LlmModelType.YOLO_DEPTH));
+    assertEquals(YoloTask.CLASSIFY, YoloTask.fromType(LlmModelType.YOLO_CLASSIFY));
+    assertEquals(YoloTask.POSE, YoloTask.fromType(LlmModelType.YOLO_POSE));
+    assertEquals(YoloTask.OBB, YoloTask.fromType(LlmModelType.YOLO_OBB));
+    assertThrows(IllegalArgumentException.class, () -> YoloTask.fromType(LlmModelType.GGUF));
+
+    Path folder = dir.resolve("weights");
+    Files.createDirectory(folder);
+    Files.writeString(folder.resolve("a.onnx"), "not-an-onnx");
+    Files.writeString(folder.resolve("b.onnx"), "not-an-onnx");
+    ModelLoadException many = assertThrows(
+      ModelLoadException.class,
+      () -> LlmModelFactory.open(folder, LlmModelType.YOLO_SEGMENT).make());
+    assertTrue(many.getMessage().contains("2 ONNX files"));
   }
 
   @Test
@@ -171,6 +218,39 @@ final class Yolo26Test {
     assertTrue(box.left() >= 0f && box.right() <= 64f);
     assertTrue(box.top() >= 0f && box.bottom() <= 64f);
     assertTrue(first.keypoints().isEmpty());
+  }
+
+  @Test
+  void stemAndSecondBlockSelectTheScale() {
+    assertEquals("n", YoloScale.from(YoloTensors.synthetic()).suffix);
+    assertEquals("s", YoloScale.from(YoloTensors.synthetic(32, false)).suffix);
+    assertEquals("m", YoloScale.from(YoloTensors.synthetic(64, false)).suffix);
+    assertEquals("l", YoloScale.from(YoloTensors.synthetic(64, true)).suffix);
+    assertEquals("x", YoloScale.from(YoloTensors.synthetic(96, true)).suffix);
+    assertEquals("m", YoloScale.from(YoloTensors.of(Map.of(
+      "model.0.conv.weight", Tensor.zeros(64, 3, 3, 3)))).suffix);
+    assertEquals("l", YoloScale.from(YoloTensors.of(Map.of(
+      "model.0.conv.weight", Tensor.zeros(64, 3, 3, 3),
+      "model.2.m.1.cv1.weight", Tensor.zeros(1)))).suffix);
+    assertThrows(ModelLoadException.class, () -> YoloScale.from(YoloTensors.synthetic(48, false)));
+  }
+
+  @Test
+  void widerScalesRunDetect() {
+    YoloLetterbox letter = YoloLetterbox.direct(Tensor.zeros(3, 32, 32), 32, 32);
+    record Scale(int stem, boolean deeper, String suffix) {
+    }
+    for (Scale scale : List.of(
+      new Scale(32, false, "s"),
+      new Scale(64, false, "m"),
+      new Scale(64, true, "l"),
+      new Scale(96, true, "x"))) {
+      Yolo26Model model = Yolo26Model.load(
+        YoloTensors.synthetic(scale.stem(), scale.deeper()), YoloTask.DETECT, YoloCoco.NAMES);
+      assertEquals("yolo26" + scale.suffix() + "-detect", model.architectureName());
+      LlmOutObjects found = (LlmOutObjects) model.forwardLetter(letter, null);
+      assertTrue(found.objects().size() <= 300);
+    }
   }
 
   @Test
