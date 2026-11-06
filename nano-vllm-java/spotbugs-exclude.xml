@@ -25,6 +25,9 @@
             <Class name="com.igormaznitsa.nanollvm.models.LlmModel"/>
             <Class name="com.igormaznitsa.nanollvm.rag.PreparedRag"/>
             <Class name="com.igormaznitsa.nanollvm.rag.RagSession"/>
+            <!-- The raster is the value. Copying it would duplicate the pixel buffer. -->
+            <Class name="com.igormaznitsa.nanollvm.models.LlmInImage"/>
+            <Class name="com.igormaznitsa.nanollvm.models.LlmOutImage"/>
         </Or>
         <Bug pattern="EI_EXPOSE_REP,EI_EXPOSE_REP2"/>
     </Match>

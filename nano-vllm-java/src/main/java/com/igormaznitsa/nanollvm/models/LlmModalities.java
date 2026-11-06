@@ -56,6 +56,20 @@ public record LlmModalities(Set<LlmModality> input, Set<LlmModality> output) {
   public static final LlmModalities TEXT_TO_LABELS = of(LlmModality.TEXT, LlmModality.LABELS);
 
   /**
+   * YOLO26 detection, segmentation, pose, oriented boxes, semantic maps, and depth.
+   *
+   * @since 1.5.0
+   */
+  public static final LlmModalities IMAGE_TO_IMAGE = of(LlmModality.IMAGE, LlmModality.IMAGE);
+
+  /**
+   * YOLO26 image classification: image in, ranked labels out.
+   *
+   * @since 1.5.0
+   */
+  public static final LlmModalities IMAGE_TO_LABELS = of(LlmModality.IMAGE, LlmModality.LABELS);
+
+  /**
    * Canonical constructor: copies both sides, rejects a null or empty input set.
    *
    * @throws NullPointerException     if a set or an element is {@code null}

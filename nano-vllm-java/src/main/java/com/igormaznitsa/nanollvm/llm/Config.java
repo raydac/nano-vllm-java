@@ -940,6 +940,52 @@ public final class Config {
         null);
     }
 
+    /**
+     * Stub blueprint for a loaded YOLO26 image model.
+     *
+     * @param classCount number of labels, or {@code 1} for a depth head
+     * @return blueprint with {@link #isYolo()} true
+     * @since 1.5.0
+     */
+    public static HfConfig forYolo(final int classCount) {
+      if (classCount <= 0) {
+        throw new IllegalArgumentException("classCount must be positive");
+      }
+      return new HfConfig(
+        classCount,
+        0,
+        0,
+        3,
+        0,
+        0,
+        0,
+        0,
+        1e-5f,
+        "silu",
+        false,
+        false,
+        0f,
+        null,
+        "float32",
+        "yolo26",
+        List.of("Yolo26"),
+        "silu",
+        0,
+        List.of(),
+        0f,
+        0f,
+        0,
+        false,
+        false,
+        false,
+        false,
+        false,
+        null,
+        null,
+        null,
+        null);
+    }
+
     private static PiperSpec parsePiper(final Map<String, Object> root, final String modelType) {
       if (Json.asObject(root.get("phoneme_id_map")) == null) {
         return null;
@@ -1260,6 +1306,15 @@ public final class Config {
      */
     public boolean isFastText() {
       return "fasttext".equals(this.modelType);
+    }
+
+    /**
+     * {@code true} when this blueprint is a YOLO26 image model.
+     *
+     * @since 1.5.0
+     */
+    public boolean isYolo() {
+      return "yolo26".equals(this.modelType);
     }
 
     private record ModalityFlags(boolean image, boolean audio, boolean video) {

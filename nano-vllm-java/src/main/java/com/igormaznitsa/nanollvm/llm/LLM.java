@@ -329,49 +329,21 @@ public final class LLM implements AutoCloseable {
     return this.model;
   }
 
-  /**
-   * Cross-kind entry: runs the graph that produces {@code outputModality} from {@code input}.
-   * Exclusive on this instance (same lock as {@link #generate(List, SamplingParams)}).
-   *
-   * <p>Supported pairs:
-   * <ul>
-   *   <li>{@link LlmInText} → {@link LlmModality#TEXT} — raw completion (no chat template)</li>
-   *   <li>{@link LlmInText} → {@link LlmModality#EMBEDDING} — embedding encoders</li>
-   *   <li>{@link LlmInTokenIds} → {@link LlmModality#EMBEDDING} — already-tokenized ids</li>
-   *   <li>{@link LlmInText} → {@link LlmModality#AUDIO} — Piper synthesis ({@link com.igormaznitsa.nanollvm.models.LlmOutSoundData})</li>
-   *   <li>{@link com.igormaznitsa.nanollvm.models.LlmInSound} → {@link LlmModality#TEXT} — Whisper transcription</li>
-   *   <li>{@link LlmInText} → {@link LlmModality#LABELS} — fastText classification ({@link com.igormaznitsa.nanollvm.models.LlmOutLabels})</li>
-   * </ul>
-   *
-   * @param input          typed payload; must not be {@code null}
-   * @param outputModality desired result type; must not be {@code null}
-   * @return typed result matching {@code outputModality}'s {@link LlmModality#resultType()}
-   * @throws NullPointerException     if either argument is {@code null}
-   * @throws IllegalArgumentException if the input/output pair is unsupported
-   * @throws IllegalStateException    if this engine is closed or the wrong graph kind
-   * @since 1.3.0
-   */
-  @SuppressWarnings("TypeParameterUnusedInFormals")
-  public <T extends LlmOutput> T generate(final LlmInput input, final LlmModality outputModality) {
-    requireNonNull(input, "input");
-    requireNonNull(outputModality, "outputModality");
-    this.assertNotClosed();
-
-    if (input instanceof LlmInText(CharSequence text1) && outputModality == LlmModality.TEXT) {
-      this.requireCausal();
-      List<GenerationOutput> outputs = this.generate(
-        List.of(text1.toString()), this.defaultSampling());
-      return outputModality.cast(new LlmOutText(outputs.getFirst().text()));
+  private static String causalMisuseMessage(final LlmModel model) {
+    String architecture = model.architectureName();
+    if (model.isVisionModel()) {
+      return ModelSupport.visionEngineMisuseMessage(architecture);
     }
-
-    this.generateLock.lock();
-    try {
-      this.assertNotClosed();
-      return outputModality.cast(
-        LlmModelImpl.peer(this.model).generate(input, outputModality, this.matmul, this.random));
-    } finally {
-      this.generateLock.unlock();
+    if (model.isClassificationModel()) {
+      return ModelSupport.classificationEngineMisuseMessage(architecture);
     }
+    if (model.isSpeechModel()) {
+      return ModelSupport.speechEngineMisuseMessage(architecture);
+    }
+    if (model.isSynthesisModel()) {
+      return ModelSupport.synthesisEngineMisuseMessage(architecture);
+    }
+    return ModelSupport.chatMisuseMessage(architecture);
   }
 
   private void warmup() {
@@ -1541,15 +1513,56 @@ public final class LLM implements AutoCloseable {
     }
   }
 
+  /**
+   * Cross-kind entry: runs the graph that produces {@code outputModality} from {@code input}.
+   * Exclusive on this instance (same lock as {@link #generate(List, SamplingParams)}).
+   *
+   * <p>Supported pairs:
+   * <ul>
+   *   <li>{@link LlmInText} → {@link LlmModality#TEXT} — raw completion (no chat template)</li>
+   *   <li>{@link LlmInText} → {@link LlmModality#EMBEDDING} — embedding encoders</li>
+   *   <li>{@link LlmInTokenIds} → {@link LlmModality#EMBEDDING} — already-tokenized ids</li>
+   *   <li>{@link LlmInText} → {@link LlmModality#AUDIO} — Piper synthesis ({@link com.igormaznitsa.nanollvm.models.LlmOutSoundData})</li>
+   *   <li>{@link com.igormaznitsa.nanollvm.models.LlmInSound} → {@link LlmModality#TEXT} — Whisper transcription</li>
+   *   <li>{@link LlmInText} → {@link LlmModality#LABELS} — fastText classification ({@link com.igormaznitsa.nanollvm.models.LlmOutLabels})</li>
+   *   <li>{@link com.igormaznitsa.nanollvm.models.LlmInImage} → {@link LlmModality#IMAGE} — YOLO26 objects, maps, or depth</li>
+   *   <li>{@link com.igormaznitsa.nanollvm.models.LlmInImage} → {@link LlmModality#LABELS} — YOLO26 classification</li>
+   * </ul>
+   *
+   * @param input          typed payload; must not be {@code null}
+   * @param outputModality desired result type; must not be {@code null}
+   * @return typed result matching {@code outputModality}'s {@link LlmModality#resultType()}
+   * @throws NullPointerException     if either argument is {@code null}
+   * @throws IllegalArgumentException if the input/output pair is unsupported
+   * @throws IllegalStateException    if this engine is closed or the wrong graph kind
+   * @since 1.3.0
+   */
+  @SuppressWarnings("TypeParameterUnusedInFormals")
+  public <T extends LlmOutput> T generate(final LlmInput input, final LlmModality outputModality) {
+    requireNonNull(input, "input");
+    requireNonNull(outputModality, "outputModality");
+    this.assertNotClosed();
+
+    if (input instanceof LlmInText(CharSequence text1) && outputModality == LlmModality.TEXT) {
+      this.requireCausal();
+      List<GenerationOutput> outputs = this.generate(
+        List.of(text1.toString()), this.defaultSampling());
+      return outputModality.cast(new LlmOutText(outputs.getFirst().text()));
+    }
+
+    this.generateLock.lock();
+    try {
+      this.assertNotClosed();
+      return outputModality.cast(
+        LlmModelImpl.peer(this.model).generate(input, outputModality, this.matmul, this.random));
+    } finally {
+      this.generateLock.unlock();
+    }
+  }
+
   private void requireCausal() {
     if (!this.model.isCausalModel()) {
-      throw new IllegalStateException(this.model.isClassificationModel()
-        ? ModelSupport.classificationEngineMisuseMessage(this.model.architectureName())
-        : this.model.isSpeechModel()
-        ? ModelSupport.speechEngineMisuseMessage(this.model.architectureName())
-        : this.model.isSynthesisModel()
-        ? ModelSupport.synthesisEngineMisuseMessage(this.model.architectureName())
-        : ModelSupport.chatMisuseMessage(this.model.architectureName()));
+      throw new IllegalStateException(causalMisuseMessage(this.model));
     }
   }
 
@@ -2139,17 +2152,7 @@ public final class LLM implements AutoCloseable {
     }
 
     private String causalMisuseMessage() {
-      String architecture = this.sharedModel.architectureName();
-      if (this.sharedModel.isClassificationModel()) {
-        return ModelSupport.classificationEngineMisuseMessage(architecture);
-      }
-      if (this.sharedModel.isSpeechModel()) {
-        return ModelSupport.speechEngineMisuseMessage(architecture);
-      }
-      if (this.sharedModel.isSynthesisModel()) {
-        return ModelSupport.synthesisEngineMisuseMessage(architecture);
-      }
-      return ModelSupport.chatMisuseMessage(architecture);
+      return LLM.causalMisuseMessage(this.sharedModel);
     }
 
     private LlmModel resolveModel() {

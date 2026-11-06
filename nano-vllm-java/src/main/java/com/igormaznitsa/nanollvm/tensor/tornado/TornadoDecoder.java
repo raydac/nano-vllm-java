@@ -1376,18 +1376,18 @@ public final class TornadoDecoder {
       if (data == null || !this.seen.add(data)) {
         return;
       }
-      this.graph = this.graph.transferToDevice(FIRST_EXECUTION, data);
+      this.graph = this.graph.transferToDevice(FIRST_EXECUTION, (Object) data);
     }
 
     private void every(final float[] data) {
       if (data == null || !this.seen.add(data)) {
         return;
       }
-      this.graph = this.graph.transferToDevice(EVERY_EXECUTION, data);
+      this.graph = this.graph.transferToDevice(EVERY_EXECUTION, (Object) data);
     }
 
     private void every(final int[] data) {
-      this.graph = this.graph.transferToDevice(EVERY_EXECUTION, data);
+      this.graph = this.graph.transferToDevice(EVERY_EXECUTION, (Object) data);
     }
 
     private void host(final List<float[]> outputs) {

@@ -1,6 +1,9 @@
 package com.igormaznitsa.nanollvm;
 
+import static java.lang.module.ModuleDescriptor.Requires.Modifier.MANDATED;
+import static java.lang.module.ModuleDescriptor.Requires.Modifier.STATIC;
 import static java.util.Objects.requireNonNull;
+import static java.util.stream.Collectors.toMap;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -17,6 +20,7 @@ import com.igormaznitsa.nanollvm.utils.ResourceLimits;
 import java.io.IOException;
 import java.io.InputStream;
 import java.lang.module.ModuleDescriptor;
+import java.lang.module.ModuleDescriptor.Requires;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
 import java.lang.reflect.GenericArrayType;
@@ -32,6 +36,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -63,11 +68,7 @@ final class ModuleExportsTest {
 
   private static List<Class<?>> publicTypesInExportedPackages()
     throws IOException, URISyntaxException {
-    Path classes =
-      Path.of(LlmModelFactory.class.getProtectionDomain().getCodeSource().getLocation().toURI());
-    if (!Files.isDirectory(classes)) {
-      throw new IllegalStateException("expected exploded classes directory, got " + classes);
-    }
+    Path classes = classesDirectory();
     try (Stream<Path> walk = Files.walk(classes)) {
       return walk
         .filter(path -> path.getFileName().toString().endsWith(".class"))
@@ -174,19 +175,67 @@ final class ModuleExportsTest {
     }
   }
 
-  @Test
-  void moduleDescriptorExportsOnlyApplicationPackages() throws IOException {
+  private static ModuleDescriptor moduleDescriptor() throws IOException {
     try (InputStream bytes = requireNonNull(
       LlmModelFactory.class.getResourceAsStream("/module-info.class"),
       "module-info.class")) {
-      ModuleDescriptor descriptor = ModuleDescriptor.read(bytes);
-      assertEquals(LIBRARY, descriptor.name());
-      assertEquals(
-        EXPORTED,
-        descriptor.exports().stream()
-          .filter(exports -> exports.targets().isEmpty())
-          .map(ModuleDescriptor.Exports::source)
-          .collect(Collectors.toSet()));
+      return ModuleDescriptor.read(bytes);
+    }
+  }
+
+  private static Path classesDirectory() throws URISyntaxException {
+    Path classes =
+      Path.of(LlmModelFactory.class.getProtectionDomain().getCodeSource().getLocation().toURI());
+    if (!Files.isDirectory(classes)) {
+      throw new IllegalStateException("expected exploded classes directory, got " + classes);
+    }
+    return classes;
+  }
+
+  @Test
+  void moduleDescriptorExportsOnlyApplicationPackages() throws IOException {
+    ModuleDescriptor descriptor = moduleDescriptor();
+    assertEquals(LIBRARY, descriptor.name());
+    assertEquals(
+      EXPORTED,
+      descriptor.exports().stream()
+        .filter(exports -> exports.targets().isEmpty())
+        .map(ModuleDescriptor.Exports::source)
+        .collect(Collectors.toSet()));
+    assertTrue(descriptor.exports().stream().allMatch(exports -> exports.targets().isEmpty()));
+    assertTrue(descriptor.opens().isEmpty());
+    assertTrue(descriptor.uses().isEmpty());
+    assertTrue(descriptor.provides().isEmpty());
+  }
+
+  @Test
+  void moduleDescriptorRequiresMatchTheLibrariesGraph() throws IOException {
+    Map<String, Set<Requires.Modifier>> requires = moduleDescriptor().requires().stream()
+      .collect(toMap(Requires::name, Requires::modifiers));
+    assertEquals(Set.of(MANDATED), requires.get("java.base"));
+    assertEquals(Set.of(STATIC), requires.get("jdk.incubator.vector"));
+    assertEquals(Set.of(STATIC), requires.get("tornado.api"));
+    assertEquals(Set.of(STATIC), requires.get("tornado.clblast"));
+    assertEquals(4, requires.size());
+  }
+
+  @Test
+  void everyCompiledPackageIsExportedOrHidden() throws IOException, URISyntaxException {
+    Path classes = classesDirectory();
+    try (Stream<Path> walk = Files.walk(classes)) {
+      List<String> unknown = walk
+        .filter(path -> path.getFileName().toString().endsWith(".class"))
+        .filter(path -> !path.getFileName().toString().equals("module-info.class"))
+        .map(path -> packageName(binaryName(classes.relativize(path))))
+        .filter(pkg -> pkg.startsWith(LIBRARY))
+        .distinct()
+        .filter(pkg -> !pkg.equals(LIBRARY))
+        .filter(pkg -> !EXPORTED.contains(pkg))
+        .filter(pkg -> HIDDEN.stream().noneMatch(
+          hidden -> pkg.equals(hidden) || pkg.startsWith(hidden + ".")))
+        .sorted()
+        .toList();
+      assertTrue(unknown.isEmpty(), () -> String.join(System.lineSeparator(), unknown));
     }
   }
 

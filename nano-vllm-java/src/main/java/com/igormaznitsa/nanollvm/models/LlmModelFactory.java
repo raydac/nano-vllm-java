@@ -21,6 +21,9 @@ import com.igormaznitsa.nanollvm.models.internal.SpeechToText;
 import com.igormaznitsa.nanollvm.models.internal.TextToSpeech;
 import com.igormaznitsa.nanollvm.models.internal.WeightBag;
 import com.igormaznitsa.nanollvm.models.internal.fasttext.FastTextModel;
+import com.igormaznitsa.nanollvm.models.internal.yolo.Yolo26Loader;
+import com.igormaznitsa.nanollvm.models.internal.yolo.Yolo26Model;
+import com.igormaznitsa.nanollvm.models.internal.yolo.YoloTask;
 import com.igormaznitsa.nanollvm.models.llmarch.GgufModelLoader;
 import com.igormaznitsa.nanollvm.models.llmarch.GgufModelLoader.LoadedGguf;
 import com.igormaznitsa.nanollvm.models.llmarch.ModelBinding;
@@ -42,7 +45,8 @@ import java.util.Map;
 
 /**
  * Loads a {@link LlmModel} from a HuggingFace model directory (safetensors or ONNX weights), a
- * {@code .gguf} file, a Meta fastText {@code *.bin}/{@code *.ftz} classifier, or a
+ * {@code .gguf} file, a YOLO26 nano or small {@code *.onnx} image model, a Meta fastText
+ * {@code *.bin}/{@code *.ftz} classifier, or a
  * {@link ModelFileSource} (classpath / custom streams read into heap; no filesystem cache).
  *
  * <p>One {@link LlmModel} may be reused by any number of {@link LLM} instances until
@@ -519,11 +523,20 @@ public final class LlmModelFactory {
       if (Files.isRegularFile(path) && ModelSupport.isClassificationCheckpoint(path)) {
         return loadFastText(path, streams, frozen);
       }
-      if (!Files.isDirectory(path)) {
+      if (Files.isRegularFile(path)) {
+        Path fileName = path.getFileName();
+        YoloTask yolo = fileName == null ? null : YoloTask.fromFileName(fileName.toString());
+        if (yolo != null) {
+          return loadYolo(path, streams, frozen);
+        }
         throw new ModelLoadException(
           "model path is not an HF model folder (safetensors/ONNX), a Piper voice folder, "
-            + "a fastText *.bin/*.ftz, or a .gguf file: "
+            + "a YOLO26 *.onnx, a fastText *.bin/*.ftz, or a .gguf file: "
             + path);
+      }
+      Path yoloFile = Yolo26Loader.resolveOnnx(path);
+      if (yoloFile != null) {
+        return loadYolo(yoloFile, streams, frozen);
       }
       if (ModelSupport.isSynthesisCheckpoint(path)) {
         return loadPiperFolder(path, streams, frozen);
@@ -658,6 +671,23 @@ public final class LlmModelFactory {
       (System.nanoTime() - t0) / 1e9);
     return new LlmModelImpl(
       path, config, new WeightBag(Map.of()), classifier, tokenizer, options);
+  }
+
+  private static LlmModel loadYolo(
+    final Path onnxFile,
+    final LlmListener io,
+    final Map<String, Object> options
+  ) throws IOException {
+    long t0 = System.nanoTime();
+    LlmListeners.info(io, null, "CPU backend: " + MatmulRuntime.sequential().backendInfo());
+    long tGraph = System.nanoTime();
+    Yolo26Model yolo = Yolo26Loader.load(onnxFile, io);
+    Config.HfConfig config = Config.HfConfig.forYolo(Math.max(yolo.task().classes(), 1));
+    Tokenizer tokenizer = Tokenizer.fromJsonDocuments(null, null, null, "{\"vocab_size\":1}");
+    LlmListeners.infof(io, null, "Vision graph ready (%s) in %.1fs%n",
+      yolo.architectureName(), (System.nanoTime() - tGraph) / 1e9);
+    LlmListeners.infof(io, null, "Model loaded in %.1fs%n", (System.nanoTime() - t0) / 1e9);
+    return new LlmModelImpl(onnxFile, config, new WeightBag(Map.of()), yolo, tokenizer, options);
   }
 
   private static LlmModel loadHf(

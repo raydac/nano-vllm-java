@@ -11,17 +11,17 @@ import java.util.Optional;
  * Content type a loaded {@link LlmModel} can accept or produce.
  *
  * <p>Chat graphs in this library currently <em>run</em> {@link #TEXT} on both sides. Embedding
- * encoders accept {@link #TEXT} and produce {@link #EMBEDDING}. {@link #IMAGE}, {@link #AUDIO},
- * and {@link #VIDEO} appear on {@link LlmModel#modalities()} when the checkpoint declares those
- * towers (Gemma 4 QAT mobile does). Whisper speech graphs run {@link #AUDIO} in and
- * {@link #TEXT} out. fastText classifiers run {@link #TEXT} in and {@link #LABELS} out.
- * {@link LlmModel#usableModalities()} stays text-only for chat checkpoints until
- * vision/audio towers are wired.
+ * encoders accept {@link #TEXT} and produce {@link #EMBEDDING}. Chat checkpoints may declare
+ * {@link #IMAGE}, {@link #AUDIO}, and {@link #VIDEO} towers (Gemma 4 QAT mobile does) without
+ * running them. YOLO26 image models run {@link #IMAGE} in and {@link #IMAGE} or {@link #LABELS}
+ * out. Whisper speech graphs run {@link #AUDIO} in and {@link #TEXT} out. fastText classifiers
+ * run {@link #TEXT} in and {@link #LABELS} out. {@link LlmModel#usableModalities()} stays
+ * text-only for chat checkpoints.
  *
  * <p>Constants used as {@code generate} outputs carry a {@link #resultType()}: {@link #TEXT} →
  * {@link LlmOutText}, {@link #AUDIO} → {@link LlmOutSoundData}, {@link #EMBEDDING} →
- * {@link LlmOutEmbedding}, {@link #LABELS} → {@link LlmOutLabels}. {@link #IMAGE} and
- * {@link #VIDEO} are declaration-only until those towers run.
+ * {@link LlmOutEmbedding}, {@link #LABELS} → {@link LlmOutLabels}, {@link #IMAGE} →
+ * {@link LlmOutVision}. {@link #VIDEO} is declaration-only.
  *
  * @since 1.2.0
  */
@@ -34,7 +34,7 @@ public enum LlmModality {
   /**
    * Pixel / image content.
    */
-  IMAGE("image", null),
+  IMAGE("image", LlmOutVision.class),
   /**
    * Waveform / audio content (Whisper input; Piper output).
    */
@@ -90,7 +90,7 @@ public enum LlmModality {
 
   /**
    * Concrete {@link LlmOutput} type produced when this constant is used as a {@code generate}
-   * output modality. Empty for declaration-only towers ({@link #IMAGE}, {@link #VIDEO}).
+   * output modality. Empty for the declaration-only tower {@link #VIDEO}.
    *
    * @since 1.4.0
    */

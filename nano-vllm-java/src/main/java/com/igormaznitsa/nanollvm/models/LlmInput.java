@@ -9,5 +9,5 @@ package com.igormaznitsa.nanollvm.models;
  *
  * @since 1.3.0
  */
-public sealed interface LlmInput permits LlmInText, LlmInSound, LlmInTokenIds {
+public sealed interface LlmInput permits LlmInText, LlmInSound, LlmInTokenIds, LlmInImage {
 }

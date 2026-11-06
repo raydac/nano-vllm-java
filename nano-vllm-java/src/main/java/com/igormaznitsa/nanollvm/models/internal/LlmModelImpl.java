@@ -9,6 +9,7 @@ import com.igormaznitsa.nanollvm.chat.LlmListeners;
 import com.igormaznitsa.nanollvm.chat.ThinkTags;
 import com.igormaznitsa.nanollvm.internal.EmptyArrays;
 import com.igormaznitsa.nanollvm.llm.Config;
+import com.igormaznitsa.nanollvm.models.LlmInImage;
 import com.igormaznitsa.nanollvm.models.LlmInSound;
 import com.igormaznitsa.nanollvm.models.LlmInText;
 import com.igormaznitsa.nanollvm.models.LlmInTokenIds;
@@ -61,6 +62,7 @@ public final class LlmModelImpl extends LlmModel {
   private final boolean speechModel;
   private final boolean synthesisModel;
   private final boolean classificationModel;
+  private final boolean visionModel;
   private final LlmModalities modalities;
   private final LlmModalities usableModalities;
   private final AtomicReference<WeightBag> weights;
@@ -69,6 +71,7 @@ public final class LlmModelImpl extends LlmModel {
   private final AtomicReference<SpeechToText> speech;
   private final AtomicReference<TextToSpeech> synthesis;
   private final AtomicReference<TextClassifier> classifier;
+  private final AtomicReference<com.igormaznitsa.nanollvm.models.internal.yolo.Yolo26Model> vision;
   private final ReentrantLock unpackLock = new ReentrantLock();
   private final AtomicBoolean closed = new AtomicBoolean();
   private final AtomicInteger liveEngines = new AtomicInteger();
@@ -81,7 +84,7 @@ public final class LlmModelImpl extends LlmModel {
     final Tokenizer tokenizer,
     final Map<String, ?> options
   ) {
-    this(path, hfConfig, weights, network, null, null, null, null, tokenizer, options);
+    this(path, hfConfig, weights, network, null, null, null, null, null, tokenizer, options);
   }
 
   public LlmModelImpl(
@@ -92,7 +95,7 @@ public final class LlmModelImpl extends LlmModel {
     final Tokenizer tokenizer,
     final Map<String, ?> options
   ) {
-    this(path, hfConfig, weights, null, encoder, null, null, null, tokenizer, options);
+    this(path, hfConfig, weights, null, encoder, null, null, null, null, tokenizer, options);
   }
 
   public LlmModelImpl(
@@ -103,7 +106,7 @@ public final class LlmModelImpl extends LlmModel {
     final Tokenizer tokenizer,
     final Map<String, ?> options
   ) {
-    this(path, hfConfig, weights, null, null, speech, null, null, tokenizer, options);
+    this(path, hfConfig, weights, null, null, speech, null, null, null, tokenizer, options);
   }
 
   public LlmModelImpl(
@@ -114,7 +117,7 @@ public final class LlmModelImpl extends LlmModel {
     final Tokenizer tokenizer,
     final Map<String, ?> options
   ) {
-    this(path, hfConfig, weights, null, null, null, synthesis, null, tokenizer, options);
+    this(path, hfConfig, weights, null, null, null, synthesis, null, null, tokenizer, options);
   }
 
   public LlmModelImpl(
@@ -125,7 +128,18 @@ public final class LlmModelImpl extends LlmModel {
     final Tokenizer tokenizer,
     final Map<String, ?> options
   ) {
-    this(path, hfConfig, weights, null, null, null, null, classifier, tokenizer, options);
+    this(path, hfConfig, weights, null, null, null, null, classifier, null, tokenizer, options);
+  }
+
+  public LlmModelImpl(
+    final Path path,
+    final Config.HfConfig hfConfig,
+    final WeightBag weights,
+    final com.igormaznitsa.nanollvm.models.internal.yolo.Yolo26Model vision,
+    final Tokenizer tokenizer,
+    final Map<String, ?> options
+  ) {
+    this(path, hfConfig, weights, null, null, null, null, null, vision, tokenizer, options);
   }
 
   private LlmModelImpl(
@@ -137,15 +151,16 @@ public final class LlmModelImpl extends LlmModel {
     final SpeechToText speech,
     final TextToSpeech synthesis,
     final TextClassifier classifier,
+    final com.igormaznitsa.nanollvm.models.internal.yolo.Yolo26Model vision,
     final Tokenizer tokenizer,
     final Map<String, ?> options
   ) {
     int graphs = (network != null ? 1 : 0) + (encoder != null ? 1 : 0)
       + (speech != null ? 1 : 0) + (synthesis != null ? 1 : 0)
-      + (classifier != null ? 1 : 0);
+      + (classifier != null ? 1 : 0) + (vision != null ? 1 : 0);
     if (graphs != 1) {
       throw new IllegalArgumentException(
-        "exactly one of network, encoder, speech, synthesis, or classifier must be set");
+        "exactly one of network, encoder, speech, synthesis, classifier, or vision must be set");
     }
     this.path = requireNonNull(path, "path").toAbsolutePath().normalize();
     this.hfConfig = requireNonNull(hfConfig, "hfConfig");
@@ -155,15 +170,24 @@ public final class LlmModelImpl extends LlmModel {
     this.speech = new AtomicReference<>(speech);
     this.synthesis = new AtomicReference<>(synthesis);
     this.classifier = new AtomicReference<>(classifier);
+    this.vision = new AtomicReference<>(vision);
     this.embeddingModel = encoder != null;
     this.speechModel = speech != null;
     this.synthesisModel = synthesis != null;
     this.classificationModel = classifier != null;
+    this.visionModel = vision != null;
     this.tokenizer = requireNonNull(tokenizer, "tokenizer");
     this.options = optionsForTokenizer(options, this.tokenizer);
-    this.modalities = LlmModalities.ofCheckpoint(this.hfConfig, this.embeddingModel);
-    this.usableModalities = LlmModalities.usable(
-      this.embeddingModel, this.speechModel, this.synthesisModel, this.classificationModel);
+    if (vision != null) {
+      this.modalities = vision.outputModality() == LlmModality.LABELS
+        ? LlmModalities.IMAGE_TO_LABELS
+        : LlmModalities.IMAGE_TO_IMAGE;
+      this.usableModalities = this.modalities;
+    } else {
+      this.modalities = LlmModalities.ofCheckpoint(this.hfConfig, this.embeddingModel);
+      this.usableModalities = LlmModalities.usable(
+        this.embeddingModel, this.speechModel, this.synthesisModel, this.classificationModel);
+    }
   }
 
   public static LlmModelImpl peer(final LlmModel model) {
@@ -291,29 +315,20 @@ public final class LlmModelImpl extends LlmModel {
     return Optional.of(LlmOptionalData.cast(key, data.get(key.id())));
   }
 
-  @Override
-  public String architectureName() {
-    EmbeddingEncoder encoder = this.encoder.get();
-    if (encoder != null) {
-      return encoder.architectureName();
+  private static String causalMisuse(final LlmModelImpl model) {
+    if (model.vision.get() != null) {
+      return ModelSupport.visionEngineMisuseMessage(model.architectureName());
     }
-    CausalLM network = this.network.get();
-    if (network != null) {
-      return network.architectureName();
+    if (model.classifier.get() != null) {
+      return ModelSupport.classificationEngineMisuseMessage(model.architectureName());
     }
-    SpeechToText speech = this.speech.get();
-    if (speech != null) {
-      return speech.architectureName();
+    if (model.synthesis.get() != null) {
+      return ModelSupport.synthesisEngineMisuseMessage(model.architectureName());
     }
-    TextToSpeech synthesis = this.synthesis.get();
-    if (synthesis != null) {
-      return synthesis.architectureName();
+    if (model.speech.get() != null) {
+      return ModelSupport.speechEngineMisuseMessage(model.architectureName());
     }
-    TextClassifier classifier = this.classifier.get();
-    if (classifier != null) {
-      return classifier.architectureName();
-    }
-    return this.hfConfig.modelType();
+    return ModelSupport.chatMisuseMessage(model.architectureName());
   }
 
   @Override
@@ -354,6 +369,35 @@ public final class LlmModelImpl extends LlmModel {
   public boolean isClassificationModel() {
     this.assertNotClosed();
     return this.classifier.get() != null;
+  }
+
+  @Override
+  public String architectureName() {
+    EmbeddingEncoder encoder = this.encoder.get();
+    if (encoder != null) {
+      return encoder.architectureName();
+    }
+    CausalLM network = this.network.get();
+    if (network != null) {
+      return network.architectureName();
+    }
+    SpeechToText speech = this.speech.get();
+    if (speech != null) {
+      return speech.architectureName();
+    }
+    TextToSpeech synthesis = this.synthesis.get();
+    if (synthesis != null) {
+      return synthesis.architectureName();
+    }
+    TextClassifier classifier = this.classifier.get();
+    if (classifier != null) {
+      return classifier.architectureName();
+    }
+    com.igormaznitsa.nanollvm.models.internal.yolo.Yolo26Model vision = this.vision.get();
+    if (vision != null) {
+      return vision.architectureName();
+    }
+    return this.hfConfig.modelType();
   }
 
   @Override
@@ -400,9 +444,18 @@ public final class LlmModelImpl extends LlmModel {
       : ", usable=" + this.usableModalities;
   }
 
+  @Override
+  public boolean isVisionModel() {
+    this.assertNotClosed();
+    return this.vision.get() != null;
+  }
+
   private String kindLabel() {
     if (this.classificationModel) {
       return "classification";
+    }
+    if (this.visionModel) {
+      return "vision";
     }
     if (this.synthesisModel) {
       return "synthesis";
@@ -411,19 +464,6 @@ public final class LlmModelImpl extends LlmModel {
       return "speech";
     }
     return this.embeddingModel ? "embedding" : "chat";
-  }
-
-  private String containerLabel() {
-    Path fileName = this.path.getFileName();
-    String name = (fileName == null ? this.path.toString() : fileName.toString()).toLowerCase(ROOT);
-    if (name.endsWith(".gguf")) {
-      return "gguf";
-    }
-    if (name.endsWith(".bin") || name.endsWith(".ftz")
-      || FastTextForClassification.ARCH_FASTTEXT.equals(this.architectureName())) {
-      return "fasttext";
-    }
-    return this.path.toString().contains("nanollvm-memory") ? "memory" : "folder";
   }
 
   private String thinkSuffix() {
@@ -507,39 +547,20 @@ public final class LlmModelImpl extends LlmModel {
       outputModality == LlmModality.AUDIO ? new Random(1L) : new Random());
   }
 
-  public LlmOutput generate(
-    final LlmInput input,
-    final LlmModality outputModality,
-    final MatmulRuntime runtime,
-    final Random random
-  ) {
-    requireNonNull(input, "input");
-    requireNonNull(outputModality, "outputModality");
-    requireNonNull(runtime, "runtime");
-    requireNonNull(random, "random");
-    this.assertNotClosed();
-
-    return switch (input) {
-      case LlmInText text when outputModality == LlmModality.EMBEDDING ->
-        new LlmOutEmbedding(this.embedAll(List.of(text.text()), runtime)[0]);
-      case LlmInTokenIds ids when outputModality == LlmModality.EMBEDDING ->
-        new LlmOutEmbedding(this.embed(ids.tokenIds(), runtime));
-      case LlmInText text when outputModality == LlmModality.AUDIO ->
-        this.synthesizeSound(text.text(), runtime, random);
-      case LlmInText text when outputModality == LlmModality.LABELS ->
-        this.classifyLabels(text.text());
-      case LlmInText ignored when outputModality == LlmModality.TEXT ->
-        throw new IllegalStateException(
-          "text completion requires LLM.builder(model).build() then "
-            + "LLM.generate(LlmInput, LlmModality); LlmModel has no KV engine");
-      case LlmInSound sound when outputModality == LlmModality.TEXT ->
-        new LlmOutText(this.transcribeSound(sound, runtime));
-      default -> throw new IllegalArgumentException(
-        "unsupported generate pair: %s → %s (usable %s)".formatted(
-          input.getClass().getSimpleName(),
-          outputModality.wireName(),
-          this.usableModalities()));
-    };
+  private String containerLabel() {
+    Path fileName = this.path.getFileName();
+    String name = (fileName == null ? this.path.toString() : fileName.toString()).toLowerCase(ROOT);
+    if (name.endsWith(".gguf")) {
+      return "gguf";
+    }
+    if (name.endsWith(".onnx") || name.contains("yolo26")) {
+      return "onnx";
+    }
+    if (name.endsWith(".bin") || name.endsWith(".ftz")
+      || FastTextForClassification.ARCH_FASTTEXT.equals(this.architectureName())) {
+      return "fasttext";
+    }
+    return this.path.toString().contains("nanollvm-memory") ? "memory" : "folder";
   }
 
   private LlmOutLabels classifyLabels(final CharSequence text) {
@@ -601,6 +622,44 @@ public final class LlmModelImpl extends LlmModel {
         "embedding tokenizer missing %s or %s".formatted(bertToken, xlmToken)));
   }
 
+  public LlmOutput generate(
+    final LlmInput input,
+    final LlmModality outputModality,
+    final MatmulRuntime runtime,
+    final Random random
+  ) {
+    requireNonNull(input, "input");
+    requireNonNull(outputModality, "outputModality");
+    requireNonNull(runtime, "runtime");
+    requireNonNull(random, "random");
+    this.assertNotClosed();
+
+    return switch (input) {
+      case LlmInText text when outputModality == LlmModality.EMBEDDING ->
+        new LlmOutEmbedding(this.embedAll(List.of(text.text()), runtime)[0]);
+      case LlmInTokenIds ids when outputModality == LlmModality.EMBEDDING ->
+        new LlmOutEmbedding(this.embed(ids.tokenIds(), runtime));
+      case LlmInText text when outputModality == LlmModality.AUDIO ->
+        this.synthesizeSound(text.text(), runtime, random);
+      case LlmInText text when outputModality == LlmModality.LABELS ->
+        this.classifyLabels(text.text());
+      case LlmInText ignored when outputModality == LlmModality.TEXT ->
+        throw new IllegalStateException(
+          "text completion requires LLM.builder(model).build() then "
+            + "LLM.generate(LlmInput, LlmModality); LlmModel has no KV engine");
+      case LlmInSound sound when outputModality == LlmModality.TEXT ->
+        new LlmOutText(this.transcribeSound(sound, runtime));
+      case LlmInImage image when this.vision.get() != null
+        && outputModality == this.vision.get().outputModality() ->
+        this.requireVision().forward(image.image(), runtime);
+      default -> throw new IllegalArgumentException(
+        "unsupported generate pair: %s → %s (usable %s)".formatted(
+          input.getClass().getSimpleName(),
+          outputModality.wireName(),
+          this.usableModalities()));
+    };
+  }
+
   @Override
   public void close() {
     if (!this.closed.compareAndSet(false, true)) {
@@ -615,6 +674,7 @@ public final class LlmModelImpl extends LlmModel {
       this.speech.set(null);
       this.synthesis.set(null);
       this.classifier.set(null);
+      this.vision.set(null);
       if (bag != null) {
         FloatKernels.releaseRetainedWeights(bag.denseBackingArrays());
         bag.releaseResources();
@@ -622,28 +682,6 @@ public final class LlmModelImpl extends LlmModel {
     } finally {
       this.unpackLock.unlock();
     }
-  }
-
-  public CausalLM resolveNetwork(final boolean allowUnpackParameters, final LlmListener io) {
-    if (this.isEmbeddingModel() || this.isSpeechModel() || this.isSynthesisModel()
-      || this.isClassificationModel()) {
-      throw new IllegalStateException(
-        this.isClassificationModel()
-          ? ModelSupport.classificationEngineMisuseMessage(this.architectureName())
-          : this.isSynthesisModel()
-          ? ModelSupport.synthesisEngineMisuseMessage(this.architectureName())
-          : this.isSpeechModel()
-          ? ModelSupport.speechEngineMisuseMessage(this.architectureName())
-          : ModelSupport.chatMisuseMessage(this.architectureName()));
-    }
-    CausalLM current = this.requireNetwork();
-    if (!allowUnpackParameters) {
-      return current;
-    }
-    if (!this.requireWeights().hasPacked()) {
-      return current;
-    }
-    return this.unpackCausalToDense(io == null ? LlmListeners.silent() : io);
   }
 
   public void acquireEngine() {
@@ -678,22 +716,19 @@ public final class LlmModelImpl extends LlmModel {
     }
   }
 
-  private CausalLM requireNetwork() {
-    this.assertNotClosed();
-    CausalLM current = this.network.get();
-    if (current == null) {
-      throw new IllegalStateException(
-        this.classifier.get() != null
-          ? ModelSupport.classificationEngineMisuseMessage(this.architectureName())
-          : this.synthesis.get() != null
-          ? ModelSupport.synthesisEngineMisuseMessage(this.architectureName())
-          : this.speech.get() != null
-          ? ModelSupport.speechEngineMisuseMessage(this.architectureName())
-          : this.encoder.get() != null
-          ? ModelSupport.chatMisuseMessage(this.architectureName())
-          : "LlmModel is closed");
+  public CausalLM resolveNetwork(final boolean allowUnpackParameters, final LlmListener io) {
+    if (this.isEmbeddingModel() || this.isSpeechModel() || this.isSynthesisModel()
+      || this.isClassificationModel() || this.isVisionModel()) {
+      throw new IllegalStateException(causalMisuse(this));
     }
-    return current;
+    CausalLM current = this.requireNetwork();
+    if (!allowUnpackParameters) {
+      return current;
+    }
+    if (!this.requireWeights().hasPacked()) {
+      return current;
+    }
+    return this.unpackCausalToDense(io == null ? LlmListeners.silent() : io);
   }
 
   private EmbeddingEncoder requireEncoder() {
@@ -740,6 +775,36 @@ public final class LlmModelImpl extends LlmModel {
     if (current == null) {
       throw new IllegalStateException(
         ModelSupport.classifyMisuseMessage(this.architectureName()));
+    }
+    return current;
+  }
+
+  private CausalLM requireNetwork() {
+    this.assertNotClosed();
+    CausalLM current = this.network.get();
+    if (current == null) {
+      throw new IllegalStateException(
+        this.vision.get() != null
+          ? ModelSupport.visionEngineMisuseMessage(this.architectureName())
+          : this.classifier.get() != null
+          ? ModelSupport.classificationEngineMisuseMessage(this.architectureName())
+          : this.synthesis.get() != null
+          ? ModelSupport.synthesisEngineMisuseMessage(this.architectureName())
+          : this.speech.get() != null
+          ? ModelSupport.speechEngineMisuseMessage(this.architectureName())
+          : this.encoder.get() != null
+          ? ModelSupport.chatMisuseMessage(this.architectureName())
+          : "LlmModel is closed");
+    }
+    return current;
+  }
+
+  private com.igormaznitsa.nanollvm.models.internal.yolo.Yolo26Model requireVision() {
+    this.assertNotClosed();
+    com.igormaznitsa.nanollvm.models.internal.yolo.Yolo26Model current = this.vision.get();
+    if (current == null) {
+      throw new IllegalStateException(
+        "this checkpoint is not a YOLO26 image model (usable " + this.usableModalities() + ")");
     }
     return current;
   }

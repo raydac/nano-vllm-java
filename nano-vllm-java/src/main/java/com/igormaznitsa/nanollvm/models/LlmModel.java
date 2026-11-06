@@ -220,6 +220,16 @@ public abstract sealed class LlmModel implements AutoCloseable permits LlmModelI
   public abstract boolean isClassificationModel();
 
   /**
+   * {@code true} when this file is a YOLO26 image model — use
+   * {@link LLM#builder(LlmModel)} then {@link LLM#generate(LlmInput, LlmModality)} with
+   * {@link LlmInImage}. Detection, segmentation, pose, oriented boxes, semantic maps, and depth
+   * produce {@link LlmModality#IMAGE}. Classification produces {@link LlmModality#LABELS}.
+   *
+   * @since 1.5.0
+   */
+  public abstract boolean isVisionModel();
+
+  /**
    * {@code true} when GGUF/QAT weights are still packed (not widened to float32).
    */
   public abstract boolean hasPackedWeights();
@@ -249,6 +259,8 @@ public abstract sealed class LlmModel implements AutoCloseable permits LlmModelI
    *   <li>{@link LlmInText} → {@link LlmModality#AUDIO} — Piper synthesis ({@link LlmOutSoundData})</li>
    *   <li>{@link LlmInSound} → {@link LlmModality#TEXT} — Whisper transcription</li>
    *   <li>{@link LlmInText} → {@link LlmModality#LABELS} — fastText classification ({@link LlmOutLabels})</li>
+   *   <li>{@link LlmInImage} → {@link LlmModality#IMAGE} — YOLO26 objects, maps, or depth</li>
+   *   <li>{@link LlmInImage} → {@link LlmModality#LABELS} — YOLO26 classification</li>
    * </ul>
    * Text completion ({@link LlmInText} → {@link LlmModality#TEXT}) needs an {@link LLM} engine —
    * call {@link LLM#generate(LlmInput, LlmModality)} instead.

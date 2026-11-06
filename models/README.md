@@ -306,6 +306,33 @@ try (LlmModel model = LlmModelFactory.open(Path.of("models/piper-ru-irina-medium
 Prefer `LLM.builder` for the shared matmul pool; do not use chat. Sample:
 `nano-vllm-java-samples` → `com.igormaznitsa.nanollvm.samples.SynthesizeHelloWorld`.
 
+## YOLO26 nano (optional, images)
+
+Seven nano tasks: detect, instance segmentation, semantic segmentation, depth, classification, pose,
+and oriented boxes. The small scale (`yolo26s*.onnx`) uses the same graph. Medium, large, extra-large,
+P2, P6, YOLOE, and `.pt` files are refused. The files come from the Ultralytics assets release.
+
+```bash
+./models/download-yolo26n.sh
+```
+
+Windows: `.\models\download-yolo26n.ps1` or `models\download-yolo26n.cmd`.
+
+Creates `models/YOLO26n/<task>/`. Detect example:
+
+```java
+try (LlmModel model = LlmModelFactory.make(Path.of("models/YOLO26n/detect/yolo26n.onnx"))) {
+  LlmOutObjects found = model.generate(
+      new LlmInImage(new ArgbImage(width, height, pixels)), LlmModality.IMAGE);
+}
+```
+
+`pixels` are row-major `0xAARRGGBB`. Put `classes.txt` (one name per line) beside semantic and classification
+files. Detect, segment, and pose use COCO names when that file is missing and the head has 80 classes.
+Oriented boxes use the 15 DOTA names. A one-class pose head is `person`.
+`YoloStreetHelloWorld` marks people, bicycles, and cars on a bundled street photo, uses a parking-lot
+photo for oriented boxes, and writes each score onto a PNG.
+
 ## Selecting a model
 
 | Mechanism          | Example                                                                                           |

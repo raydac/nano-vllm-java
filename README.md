@@ -14,7 +14,7 @@ It does not train models. It loads files you already have and runs inference.
 
 **For** a Java application that needs a small local model: a short chat reply, a sentence vector, a transcript, a spoken WAV, a language label, or a choice with a probability.
 
-**Supports** Qwen3, Qwen3.5 text, Gemma 3, Gemma 4 text, Llama, LFM2, BERT embeddings, Whisper, Piper, and fastText. The full list is [below](#supported-models).
+**Supports** Qwen3, Qwen3.5 text, Gemma 3, Gemma 4 text, Llama, LFM2, BERT embeddings, Whisper, Piper, fastText, and YOLO26 nano images. The full list is [below](#supported-models).
 
 **Attach** `com.igormaznitsa:nano-vllm-java:1.4.0` on JDK 21+. Coordinates and a first call are under [Add it to an application](#add-it-to-an-application).
 
@@ -62,7 +62,7 @@ One `LLM` runs one call at a time. Share the loaded `LlmModel` across engines wh
 
 ## Supported models
 
-`LlmModelFactory.make(path)` accepts a Hugging Face folder, a `.gguf` file, or a fastText `*.bin` / `*.ftz`. This is a curated set of families.
+`LlmModelFactory.make(path)` accepts a Hugging Face folder, a `.gguf` file, a YOLO26 `*.onnx`, or a fastText `*.bin` / `*.ftz`. This is a curated set of families.
 
 | Family | Typical file | Job |
 |--------|----------------|-----|
@@ -75,6 +75,7 @@ One `LLM` runs one call at a time. Share the loaded `LlmModel` across engines wh
 | Whisper | Safetensors folder | Speech to text |
 | Piper | `*.onnx` + `*.onnx.json` | Text to speech |
 | fastText | `*.bin` or `*.ftz` | Labels |
+| YOLO26 nano (and the same graph for small) | fused `*.onnx`, `nms=False`, 640 | Detect, segment, pose, oriented boxes, semantic map, depth, or image labels |
 
 If a folder has both safetensors and ONNX, safetensors is used. An unsupported file fails with `UnsupportedModelException` and the list of families this build knows.
 
@@ -278,6 +279,7 @@ mvn -pl nano-vllm-java-samples -q exec:java
 | `SynthesizeHelloWorld` | Text → `piper-hello.wav` | piper-en-lessac-medium |
 | `VoiceReplyHelloWorld` | Transcribe, then chat, then speak | whisper + chat + piper |
 | `LanguageIdHelloWorld` | Language label | fasttext lid.176 |
+| `YoloStreetHelloWorld` | People, bicycles, and cars marked on a street photo, with scores | YOLO26n detect, seg, pose, or obb |
 | `AdvisorRagHelloWorld` | Named advisors plus search over `rag/` | Gemma3-270M |
 | `RagTunerHelloWorld` | Read a bundled EPUB, then ask about the play | Qwen3-0.6B |
 | `JevHelloWorld` | Choice, yes/no, and a score (snapshot) | Gemma3-270M |
@@ -365,6 +367,15 @@ LlmOutLabels labels = llm.generate(
 System.out.println(labels.topLabel());
 ```
 
+**Images** — YOLO26 nano (the small scale uses the same graph). `./models/download-yolo26n.sh`. Pass an `ArgbImage`: row-major `0xAARRGGBB` pixels, index `y * width + x`. Chat is unchanged. Boxes come back in that picture's pixels. `YoloStreetHelloWorld.fromBufferedImage` builds the raster from a `BufferedImage`.
+
+```java
+try (LlmModel model = LlmModelFactory.make(Path.of("models/YOLO26n/detect/yolo26n.onnx"))) {
+  LlmOutObjects found = model.generate(
+      new LlmInImage(new ArgbImage(width, height, pixels)), LlmModality.IMAGE);
+}
+```
+
 **A choice with probabilities** — [Jev](#jev) (this snapshot). A chat checkpoint and the Jeff checkpoint use the same `toJev()` call.
 
 **Notes beside the model.** UTF-8 `.txt` / `.md` files. The model still writes the answer; retrieval only puts passages into the prompt.
@@ -420,7 +431,7 @@ With `cpuThreads` above 1, engines share a process-wide pool named `nanollvm-mat
 
 - **CPU, small models.** Answers are slower than a GPU server, and a 270M–0.8B model will miss facts, waffle, or invent a detail. Search over your notes can supply a passage; the model can still garble it.
 - **Inference only.** The files do not change while you chat.
-- **Text in, and the jobs in the table above.** No image or audio understanding beyond Whisper. No image generation. Qwen3.5 vision, LoRA adapters, mixture-of-experts, and Qwen3-Next are refused.
+- **Text in, and the jobs in the table above.** YOLO26 nano reads a picture (objects, a map, depth, or labels). No other image understanding, and no image generation. Qwen3.5 vision, LoRA adapters, mixture-of-experts, and Qwen3-Next are refused.
 - **Whisper** reads uncompressed WAV or PCM. No MP3, no timestamps, no voice-activity detection.
 - **Piper** returns one WAV per call. No streaming audio and no SSML.
 - **GGUF chat** is Qwen3 and LFM2. **GGUF embeddings** are BERT. Other GGUF architectures are out.

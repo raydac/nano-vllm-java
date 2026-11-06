@@ -1,7 +1,8 @@
 /**
  * Application model surface: {@link LlmModel}, {@link LlmModelFactory}, {@link ModelSupport},
  * {@link LlmModality} / {@link LlmModalities}, {@link LlmOptionalData}, typed
- * {@link LlmInput} / {@link LlmOutput} for {@link LlmModel#generate(LlmInput, LlmModality)}, and
+ * {@link LlmInput} / {@link LlmOutput} for {@link LlmModel#generate(LlmInput, LlmModality)}
+ * (a picture is {@link ArgbImage}), and
  * stream-backed load helpers ({@link ModelFileId}, {@link ModelFileSource}, {@link ModelFileSources}).
  *
  * <p>{@link LlmModel} is safe to share across threads and across many

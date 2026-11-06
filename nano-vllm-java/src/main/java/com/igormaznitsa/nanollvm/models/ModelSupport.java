@@ -51,7 +51,8 @@ public final class ModelSupport {
       Speech from a Hugging Face folder (config.json + *.safetensors): whisper (openai/whisper-*)
       Speech synthesis from a Piper voice folder (*.onnx + *.onnx.json): piper
       Text classification / language id from a Meta fastText file (*.bin / *.ftz): fasttext (lid.176)
-    Not supported: Qwen2 / Qwen2.5, Qwen3-Next, Qwen3.5 MoE, vision-language inputs, Gemma 1 / 2, \
+      Images from a fused YOLO26 ONNX file (nms=False, imgsz 640): yolo26n and yolo26s detect, seg, sem, depth, cls, pose, obb
+    Not supported: Qwen2 / Qwen2.5, Qwen3-Next, Qwen3.5 MoE, vision-language chat, YOLO26 m/l/x, P2/P6, YOLOE, Gemma 1 / 2, \
     Gemma 4 vision/audio towers, Mistral / Mixtral, Phi, MoE, GGUF Llama / Gemma, Hugging Face BERT safetensors, \
     CTranslate2 / faster-whisper model.bin, Whisper GGUF / ONNX, ONNX Runtime Piper execution, \
     unsupervised fastText word vectors, JNI fastText bindings.""";
@@ -451,6 +452,17 @@ public final class ModelSupport {
     return ("This checkpoint is a %s model, not a fastText classifier. Chat uses LLM.chat; "
       + "embeddings use LLM.generate(..., EMBEDDING); Whisper uses LLM.generate(..., TEXT); "
       + "Piper uses LLM.generate(..., AUDIO).%n%n%s")
+      .formatted(blank(architectureName), CATALOG);
+  }
+
+  /**
+   * Message when chat APIs are used on a YOLO26 image checkpoint.
+   *
+   * @since 1.5.0
+   */
+  public static String visionEngineMisuseMessage(final String architectureName) {
+    return ("This checkpoint is a %s image model, not a chat model. Use "
+      + "LLM.builder(model).build() then LLM.generate(LlmInImage, IMAGE) or LABELS.%n%n%s")
       .formatted(blank(architectureName), CATALOG);
   }
 
@@ -912,7 +924,14 @@ public final class ModelSupport {
      *
      * @since 1.4.0
      */
-    CLASSIFICATION
+    CLASSIFICATION,
+    /**
+     * YOLO26 image model used with {@link LlmModel#generate(LlmInput, LlmModality)}
+     * ({@link LlmInImage} → image or labels).
+     *
+     * @since 1.5.0
+     */
+    VISION
   }
 
   /**
@@ -994,6 +1013,15 @@ public final class ModelSupport {
      */
     public boolean isClassification() {
       return this.kind == Kind.CLASSIFICATION;
+    }
+
+    /**
+     * {@code true} when this checkpoint is a YOLO26 image model.
+     *
+     * @since 1.5.0
+     */
+    public boolean isVision() {
+      return this.kind == Kind.VISION;
     }
   }
 

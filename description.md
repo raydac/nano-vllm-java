@@ -14,7 +14,8 @@ The subject is a small program that **loads a pretrained model** and runs **infe
 required. It continues text or short chat with a **causal** language model; (**since 1.1.0**)
 encoding sentences to vectors with a **BERT-family embedding** GGUF or ONNX; (**since 1.3.0**) transcribing speech
 with **Whisper** safetensors and synthesizing speech with **Piper** ONNX voices; (**since 1.4.0**) classifying text
-with **Meta fastText** (`*.bin` / `*.ftz`). When **TornadoVM** is on the module path, dense GEMV can run on the device
+with **Meta fastText** (`*.bin` / `*.ftz`); (**since 1.5.0**) reading a picture with **YOLO26 nano**
+(detect, segment, pose, oriented boxes, semantic map, depth, or image labels). When **TornadoVM** is on the module path, dense GEMV can run on the device
 (**since 1.4.0**); **since 1.5.0** attention, elementwise kernels, and short groups of decoder layers do too.
 (**since 1.5.0**) a causal chat model can answer a typed **Jev** decision — a choice, a yes/no, or a score — with a
 probability for every option, and `chat` / `chatOnce` can call Java functions you register (chapter **7h**).
@@ -49,6 +50,7 @@ file paths.
 7f. [fastText classification (**since 1.4.0**)](#7f-fasttext-classification-since-140)
 7g. [Typed decisions (**since 1.5.0**)](#7g-typed-decisions-since-150)
 7h. [Tool calls (**since 1.5.0**)](#7h-tool-calls-since-150)
+7i. [YOLO26 images (**since 1.5.0**)](#7i-yolo26-images-since-150)
 8. [Attention: kinds of looking-back, and how they work](#8-attention-kinds-of-looking-back-and-how-they-work) —
     **how Query, Key, and Value are made**
 9. [The thinking process: how it is organized and how it works with the model](#9-the-thinking-process-how-it-is-organized-and-how-it-works-with-the-model)
@@ -88,7 +90,8 @@ The rest of this guide unpacks that sentence without assuming prior ML coursewor
 **In the code:** front door is `LLM` / `LLM.Builder`; interactive demo is `samples.Example`; linear mains include
 `HelloWorld`, `NextTokenHelloWorld`, `LogTriageHelloWorld`, `AdvisorRagHelloWorld`,
 `RagTunerHelloWorld`, `EmbeddingsHelloWorld`, `TranscribeHelloWorld`, `SynthesizeHelloWorld`,
-`VoiceReplyHelloWorld`, `LanguageIdHelloWorld`, `JevHelloWorld`, `ToolsHelloWorld`,
+`VoiceReplyHelloWorld`, `LanguageIdHelloWorld`, `YoloStreetHelloWorld`,
+`JevHelloWorld`, `ToolsHelloWorld`,
 `RussianCheckersHelloWorld`, `KernelChatBench` (chapter 16). The weather desk is
 `nano-vllm-java-weather-sample` → `WeatherSample`.
 
@@ -144,7 +147,8 @@ The same Qwen3 graph also loads from a **GGUF** file (**since 1.1.0**). A furthe
 (hybrid short-convolution + GQA). Sentence embeddings use **BERT**-family GGUF or ONNX (**since 1.1.0**, chapter 7b).
 **Since 1.3.0**, the same factory also loads **Whisper** speech-to-text (Hugging Face safetensors, chapter **7d**) and
 **Piper** text-to-speech (ONNX voice folder, chapter **7e**). **Since 1.4.0**, it also loads **fastText**
-classifiers (`*.bin` / `*.ftz`, chapter **7f**). You usually need not care which; the program detects
+classifiers (`*.bin` / `*.ftz`, chapter **7f**). **Since 1.5.0**, it also loads **YOLO26 nano** image
+models from a fused ONNX file (chapter **7i**). You usually need not care which; the program detects
 which files you pointed it at.
 
 **In the code:** architecture pick is `ArchitectureProcessors.of` → `Qwen3ForCausalLM`,
@@ -152,7 +156,8 @@ which files you pointed it at.
 `models.llmcontainer.GgufTransport` (container catalog) → `models.llmarch.ArchitectureProcessor.bind` / `fill` / `create`;
 ONNX folders use `models.llmcontainer.OnnxTransport` → the same architecture processor (chapter **7c**); Whisper uses
 `SpeechArchitecture` / `WhisperForAsr` (chapter **7d**); Piper uses `SynthesisArchitecture` / `PiperForTts`
-(chapter **7e**); fastText uses `FastTextForClassification` (chapter **7f**); one next-token
+(chapter **7e**); fastText uses `FastTextForClassification` (chapter **7f**); YOLO26 uses
+`Yolo26Model` (chapter **7i**); one next-token
 step is `Transformer.step` → `CausalLM.forward` / `computeLogits` → `Sampler.forward` (chapter 16). Linear demo:
 `samples.NextTokenHelloWorld` (Tiny-LLM-ONNX) encodes a seed and prints the next sampled tokens.
 
@@ -220,6 +225,7 @@ You (or a download script in this project’s `models/` folder) fetch weights fr
 | **Hugging Face folder** | A directory | `config.json` + tokenizer (`tokenizer.json`, else SentencePiece `tokenizer.model` **since 1.2.0**) + `*.safetensors` **or** supported `*.onnx` (Qwen3 / Gemma3 / **Gemma 4 text** / **Llama**; **Qwen3.5 text** safetensors **since 1.5.0**, vision tower skipped, not ONNX; BERT embeddings from ONNX; **Whisper** speech safetensors **since 1.3.0**) — **since 1.1.0** for ONNX and Gemma 4. **Piper** voices are a folder of `*.onnx` + `*.onnx.json` (**since 1.3.0**, chapter **7e**). |
 | **Single GGUF file** | One `.gguf` | Metadata + embedded tokenizer + quantized weights (**Qwen3** or **LFM2** chat, or **BERT** embeddings — not Gemma/Llama GGUF) |
 | **fastText file / folder** (**since 1.4.0**) | `*.bin` / `*.ftz` or a directory containing one | Supervised classifier (e.g. lid.176); no `config.json` — chapter **7f** |
+| **YOLO26 ONNX** (**since 1.5.0**) | `yolo26n*.onnx` or `yolo26s*.onnx`, or a folder with one | Fused end-to-end export (`nms=False`, 640). Nano download; small uses the same graph. Chapter **7i** |
 | **Stream / classpath** (**since 1.1.0**) | A `ModelFileSource` (or `fromClasspath*` helpers) | Same roles as HF/GGUF above, but bytes come from streams into **heap** (no disk cache); `make(Path)` stays direct disk I/O |
 
 **Format restrictions are real:** each crate shape accepts only a **subset** of hub files (dtypes, architectures,
@@ -486,7 +492,8 @@ Whisper reports **audio → text**. Piper reports **text → audio**.
 
 `LlmModel.usableModalities()` is the narrower set this Java engine actually runs: **text → text** for chat,
 **text → embedding** for BERT, **audio → text** for Whisper, **text → audio** for Piper, or
-**text → labels** for fastText (**since 1.4.0**). Gemma 4’s extra towers stay skipped (`Gemma4QatLoader` drops `vision_tower` /
+**text → labels** for fastText (**since 1.4.0**), **image → image** for YOLO26 objects, maps, and
+depth, or **image → labels** for YOLO26 classification (**since 1.5.0**). Gemma 4’s extra towers stay skipped (`Gemma4QatLoader` drops `vision_tower` /
 `audio_tower` weights). The `Example` demo prints the checkpoint pair after load, then a second “this library runs”
 line when the two differ.
 
@@ -2084,6 +2091,57 @@ Sample: `ToolsHelloWorld` (OS name, then one directory listing). The weather sam
 > **Since 1.5.0, `LLM.builder(model).tool(ModelTool.of(…)).build()` lets `chat` / `chatOnce` run a
 > Java function when the checkpoint writes its own tool-call tokens, then continue the reply with
 > the text that function returned.**
+
+
+---
+
+## 7i. YOLO26 images (**since 1.5.0**)
+
+**Since 1.5.0** the factory also loads a **YOLO26** picture model from one fused ONNX file. It is not a
+chat model and it does not run the Qwen or Gemma vision towers. The download script fetches the seven
+**nano** tasks. A **small** file (`yolo26s*.onnx`) uses the same blocks. Medium, large, extra-large,
+P2, P6, YOLOE, and a `.pt` file are refused.
+
+```java
+try (LlmModel model = LlmModelFactory.make(Path.of("models/YOLO26n/detect/yolo26n.onnx"))) {
+  LlmOutObjects found = model.generate(
+      new LlmInImage(new ArgbImage(width, height, pixels)), LlmModality.IMAGE);
+}
+```
+
+`pixels` are row-major `0xAARRGGBB` (`ArgbImage`). The library does not use `java.desktop`.
+`YoloStreetHelloWorld.fromBufferedImage` copies a `BufferedImage` into that layout, and
+`toBufferedImage` copies a result raster back. The picture is letterboxed to 640×640. Boxes, mask outlines, rotated
+corners, and pose points come back in the original picture's pixels.
+
+| File | `generate` result |
+|--|--|
+| `yolo26n.onnx` | `LlmOutObjects` — a box per object |
+| `yolo26n-seg.onnx`, `yolo26n-obb.onnx` | `LlmOutObjects` — a polygon (mask outline, or four rotated corners) |
+| `yolo26n-pose.onnx` | `LlmOutObjects` — a box plus keypoints |
+| `yolo26n-sem.onnx`, `yolo26n-depth.onnx` | `LlmOutImage` — class indexes, or grayscale depth with the min and max in meters |
+| `yolo26n-cls.onnx` | `LlmOutLabels` via `generate(image, LABELS)` |
+
+Class names are `classes.txt` beside the ONNX, one name per line. Detect, segment, pose, and oriented
+boxes fall back to the 80 COCO names when that file is missing and the head has 80 classes. Semantic
+and classification need the sidecar. Depth has no names.
+
+The file must be the end-to-end export (`nms=False`, image size 640). An anonymous or unfused export
+fails and the message includes:
+
+```text
+yolo export model=yolo26n.pt format=onnx nms=False imgsz=640
+```
+
+`./models/download-yolo26n.sh` (and the `.ps1` / `.cmd` twins) downloads the seven nano ONNX files
+into `models/YOLO26n/<task>/` from the Ultralytics assets release.
+`YoloStreetHelloWorld` asks for detect, seg, pose, or obb. Detect, segment, and pose use a street
+photo. Oriented boxes use an overhead parking lot and the DOTA vehicle names. Each run prints how
+long the weights took to load and how long recognition took, then writes each score onto a PNG.
+
+**In the code:** `LlmModelFactory` → `Yolo26Loader` → `Yolo26Model`. Weights are ONNX initializers.
+The graph is the published nano/small layout (`Conv2d`, `C3k2`, `SPPF`, `C2PSA`, then the task head).
+There is no ONNX interpreter.
 
 
 ---
@@ -3894,7 +3952,7 @@ packages. Demos live in `nano-vllm-java-samples`. The weather desk is `nano-vllm
 | `layers/` — `Attention`, `BidirectionalAttention`, `GatedDeltaNet`, `Sampler`, `Linear`, `Norms`, …     | Attention, Qwen3.5 linear attention, sampling, projections, norms/RoPE         | **no** |
 | `tensor/` — `Tensor`, `Ops`, `MatmulRuntime`, `LinearKernel`, `EmbeddingKernel`, …     | Arrays, float ops, parallel GEMM                     | **no** |
 | `prompts/` — `ChatPrompts`, `RagPrompts`, `AdvisorPrompts`                             | Default system / RAG / advisor wording               | **no** |
-| *(Maven module `nano-vllm-java-samples`)* `Example`, `HelloWorld`, `NextTokenHelloWorld`, `Bench`, `KernelChatBench`, `EmbeddingsHelloWorld`, `TranscribeHelloWorld`, `SynthesizeHelloWorld`, `VoiceReplyHelloWorld`, `LanguageIdHelloWorld`, `LogTriageHelloWorld`, `AdvisorRagHelloWorld`, `RagTunerHelloWorld`, `JevHelloWorld`, `ToolsHelloWorld`, `RussianCheckersHelloWorld`, `utils/Bundled*` | Runnable demos (not in the library JAR) | n/a |
+| *(Maven module `nano-vllm-java-samples`)* `Example`, `HelloWorld`, `NextTokenHelloWorld`, `Bench`, `KernelChatBench`, `EmbeddingsHelloWorld`, `TranscribeHelloWorld`, `SynthesizeHelloWorld`, `VoiceReplyHelloWorld`, `LanguageIdHelloWorld`, `YoloStreetHelloWorld`, `LogTriageHelloWorld`, `AdvisorRagHelloWorld`, `RagTunerHelloWorld`, `JevHelloWorld`, `ToolsHelloWorld`, `RussianCheckersHelloWorld`, `utils/Bundled*` | Runnable demos (not in the library JAR) | n/a |
 | *(Maven module `nano-vllm-java-weather-sample`)* `WeatherSample` | City from the public address, a 64-column world card, then Open-Meteo, then Piper on the default mixer | n/a |
 
 `Config.HfConfig` (in `llm/Config`) holds the blueprint plus per-LLM engine knobs (`maxModelLen`, `kvHeapFraction`, …).
@@ -4327,6 +4385,20 @@ LLM.builder(model).tool(ModelTool.of(name, description, schema, body)).build()
 
 Narrative: **chapter 7h**. Demo: `samples.ToolsHelloWorld`. The weather sample uses the same registration for place and forecast.
 
+### Sample G0h — YOLO26 street photo (**since 1.5.0**)
+
+```text
+select detect | seg | pose | obb
+detect, seg, pose → images/yolo-street.jpg
+obb → images/yolo-obb.jpg
+LlmModelFactory.make(models/YOLO26n/<task>/…)   // prints loaded in
+    → generate(LlmInImage, IMAGE) → LlmOutObjects   // prints recognized in
+    → keep person, bicycle, car, small vehicle, large vehicle
+    → PNG with the shape and the score
+```
+
+Narrative: **chapter 7i**. Demo: `samples.YoloStreetHelloWorld`. Detect, segment, and pose use `images/yolo-street.jpg`. Oriented boxes use `images/yolo-obb.jpg`.
+
 ### Sample G — text RAG (prepare once, ask many times)
 
 ```text
@@ -4397,7 +4469,7 @@ nano-vllm-java/src/main/java/com/igormaznitsa/nanollvm/
   exceptions/…
 
 nano-vllm-java-samples/src/main/java/com/igormaznitsa/nanollvm/samples/
-  Example.java / HelloWorld.java / NextTokenHelloWorld.java / Bench.java / EmbeddingsHelloWorld.java / TranscribeHelloWorld.java / SynthesizeHelloWorld.java / VoiceReplyHelloWorld.java / LogTriageHelloWorld.java / AdvisorRagHelloWorld.java / RagTunerHelloWorld.java
+  Example.java / HelloWorld.java / NextTokenHelloWorld.java / Bench.java / EmbeddingsHelloWorld.java / TranscribeHelloWorld.java / SynthesizeHelloWorld.java / VoiceReplyHelloWorld.java / LogTriageHelloWorld.java / AdvisorRagHelloWorld.java / RagTunerHelloWorld.java / YoloStreetHelloWorld.java
   utils/BundledModels.java / BundledRag.java / OrderedConsole.java / EpubText.java
 ```
 
