@@ -1,5 +1,6 @@
 package com.igormaznitsa.nanollvm.models.internal.yolo;
 
+import com.igormaznitsa.nanollvm.tensor.MatmulRuntime;
 import com.igormaznitsa.nanollvm.tensor.Tensor;
 
 /**
@@ -19,14 +20,17 @@ final class YoloMath {
     return count > 1 ? Math.max(1, Math.round(count * depth)) : count;
   }
 
-  static Tensor silu(final Tensor input) {
+  static Tensor silu(final Tensor input, final MatmulRuntime runtime) {
     float[] src = input.data();
     int off = input.offset();
     float[] dest = new float[input.numel()];
-    for (int i = 0; i < dest.length; i++) {
-      float x = src[off + i];
-      dest[i] = x / (1f + (float) Math.exp(-x));
-    }
+    MatmulRuntime pool = runtime == null ? MatmulRuntime.sequential() : runtime;
+    pool.parallelRanges(dest.length, (start, end) -> {
+      for (int i = start; i < end; i++) {
+        float x = src[off + i];
+        dest[i] = x / (1f + (float) Math.exp(-x));
+      }
+    });
     return Tensor.of(dest, input.shape());
   }
 

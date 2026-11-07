@@ -33,6 +33,7 @@ public final class MatmulRuntime implements AutoCloseable {
   private static final int TILE_N = 64;
   private static final int TILE_K = 256;
   private static final int MIN_PARALLEL_OUT = TILE_N * 2;
+  private static final int MIN_PARALLEL_ROWS = 32;
   private static final FloatKernels KERNELS = FloatKernels.get();
   private static final MatmulRuntime SEQUENTIAL = new MatmulRuntime(1, null, false, false, false);
   private static final AtomicReference<SharedPool> SHARED = new AtomicReference<>();
@@ -231,7 +232,8 @@ public final class MatmulRuntime implements AutoCloseable {
    * {@code out} outputs {@code y = x Wᵀ (+ bias)}.
    *
    * <p>Layouts match {@link VectorMath} / HF {@code [out, in]} weights. With
-   * {@code cpuThreads > 1}, disjoint {@code out} ranges run on this runtime's executor.
+   * {@code cpuThreads > 1}, a wide output is split into disjoint {@code out} ranges. A tall
+   * map with fewer outputs, such as an image convolution, is split into disjoint input rows.
    */
   public void linear(
     final float[] x, final int xOffset,
@@ -245,31 +247,19 @@ public final class MatmulRuntime implements AutoCloseable {
       this.linearDecode1(x, xOffset, w, wOffset, bias, y, yOffset, in, out);
       return;
     }
-    if (KERNELS.prefersSingleShotGemv() || !this.parallelEnabled() || out < MIN_PARALLEL_OUT) {
+    if (KERNELS.prefersSingleShotGemv() || !this.parallelEnabled()) {
       this.linearRange(x, xOffset, w, wOffset, bias, y, yOffset, rows, in, out, 0, out);
       return;
     }
-
-    int workers = Math.min(this.cpuThreads, (out + TILE_N - 1) / TILE_N);
-    if (workers <= 1) {
-      this.linearRange(x, xOffset, w, wOffset, bias, y, yOffset, rows, in, out, 0, out);
+    if (out >= MIN_PARALLEL_OUT) {
+      this.parallelOutputRanges(x, xOffset, w, wOffset, bias, y, yOffset, rows, in, out);
       return;
     }
-
-    int chunk = (out + workers - 1) / workers;
-    List<Callable<Void>> tasks = new ArrayList<>(workers);
-    for (int worker = 0; worker < workers; worker++) {
-      int out0 = worker * chunk;
-      int out1 = Math.min(out, out0 + chunk);
-      if (out0 >= out1) {
-        break;
-      }
-      tasks.add(() -> {
-        this.linearRange(x, xOffset, w, wOffset, bias, y, yOffset, rows, in, out, out0, out1);
-        return null;
-      });
+    if (rows >= MIN_PARALLEL_ROWS) {
+      this.parallelInputRows(x, xOffset, w, wOffset, bias, y, yOffset, rows, in, out);
+      return;
     }
-    this.awaitAll(tasks);
+    this.linearRange(x, xOffset, w, wOffset, bias, y, yOffset, rows, in, out, 0, out);
   }
 
   /**
@@ -394,6 +384,69 @@ public final class MatmulRuntime implements AutoCloseable {
       }
       throw new IllegalStateException("CPU matmul failed", cause);
     }
+  }
+
+  private void parallelOutputRanges(
+    final float[] x, final int xOffset,
+    final float[] w, final int wOffset,
+    final float[] bias,
+    final float[] y, final int yOffset,
+    final int rows, final int in, final int out
+  ) {
+    int workers = Math.min(this.cpuThreads, (out + TILE_N - 1) / TILE_N);
+    if (workers <= 1) {
+      this.linearRange(x, xOffset, w, wOffset, bias, y, yOffset, rows, in, out, 0, out);
+      return;
+    }
+
+    int chunk = (out + workers - 1) / workers;
+    List<Callable<Void>> tasks = new ArrayList<>(workers);
+    for (int worker = 0; worker < workers; worker++) {
+      int out0 = worker * chunk;
+      int out1 = Math.min(out, out0 + chunk);
+      if (out0 >= out1) {
+        break;
+      }
+      tasks.add(() -> {
+        this.linearRange(x, xOffset, w, wOffset, bias, y, yOffset, rows, in, out, out0, out1);
+        return null;
+      });
+    }
+    this.awaitAll(tasks);
+  }
+
+  private void parallelInputRows(
+    final float[] x, final int xOffset,
+    final float[] w, final int wOffset,
+    final float[] bias,
+    final float[] y, final int yOffset,
+    final int rows, final int in, final int out
+  ) {
+    int workers = Math.min(this.cpuThreads, rows);
+    if (workers <= 1) {
+      this.linearRange(x, xOffset, w, wOffset, bias, y, yOffset, rows, in, out, 0, out);
+      return;
+    }
+
+    int chunk = (rows + workers - 1) / workers;
+    List<Callable<Void>> tasks = new ArrayList<>(workers);
+    for (int worker = 0; worker < workers; worker++) {
+      int row0 = worker * chunk;
+      int row1 = Math.min(rows, row0 + chunk);
+      if (row0 >= row1) {
+        break;
+      }
+      tasks.add(() -> {
+        this.linearRange(
+          x, xOffset + row0 * in,
+          w, wOffset,
+          bias,
+          y, yOffset + row0 * out,
+          row1 - row0, in, out, 0, out);
+        return null;
+      });
+    }
+    this.awaitAll(tasks);
   }
 
   private void linearRange(

@@ -61,7 +61,7 @@ final class YoloAttention {
     float[] attended = new float[channels * tokens];
     int queryKey = this.keyDim * 2 + this.headDim;
     for (int head = 0; head < this.heads; head++) {
-      this.attendHead(src, off, head, queryKey, tokens, height, width, attended);
+      this.attendHead(src, off, head, queryKey, tokens, height, width, attended, runtime);
     }
     Tensor values = Tensor.of(attended, channels, height, width);
     Tensor positioned = YoloMath.add(values, this.position.forward(values, runtime));
@@ -76,57 +76,82 @@ final class YoloAttention {
     final int tokens,
     final int height,
     final int width,
-    final float[] attended
+    final float[] attended,
+    final MatmulRuntime runtime
   ) {
     int headBase = head * queryKey;
+    float[] query = this.packTokens(mixed, offset, headBase, this.keyDim, tokens, height, width);
+    float[] key = this.packTokens(
+      mixed, offset, headBase + this.keyDim, this.keyDim, tokens, height, width);
+    float[] value = this.packTokens(
+      mixed, offset, headBase + this.keyDim * 2, this.headDim, tokens, height, width);
     float[] scores = new float[tokens * tokens];
+    runtime.linear(query, 0, key, 0, null, scores, 0, tokens, this.keyDim, tokens);
     float[] sums = new float[tokens];
-    for (int query = 0; query < tokens; query++) {
-      float max = Float.NEGATIVE_INFINITY;
-      for (int key = 0; key < tokens; key++) {
-        float dot = 0f;
-        for (int d = 0; d < this.keyDim; d++) {
-          dot += this.at(mixed, offset, headBase + d, query, height, width)
-            * this.at(mixed, offset, headBase + this.keyDim + d, key, height, width);
+    runtime.parallelRanges(tokens, (query0, query1) -> {
+      for (int q = query0; q < query1; q++) {
+        int row = q * tokens;
+        float max = Float.NEGATIVE_INFINITY;
+        for (int k = 0; k < tokens; k++) {
+          float scaled = scores[row + k] * this.scale;
+          scores[row + k] = scaled;
+          if (scaled > max) {
+            max = scaled;
+          }
         }
-        float scaled = dot * this.scale;
-        scores[query * tokens + key] = scaled;
-        max = Math.max(max, scaled);
+        float sum = 0f;
+        for (int k = 0; k < tokens; k++) {
+          float exp = (float) Math.exp(scores[row + k] - max);
+          scores[row + k] = exp;
+          sum += exp;
+        }
+        sums[q] = sum;
       }
-      float sum = 0f;
-      for (int key = 0; key < tokens; key++) {
-        float exp = (float) Math.exp(scores[query * tokens + key] - max);
-        scores[query * tokens + key] = exp;
-        sum += exp;
+    });
+    float[] valueByChannel = new float[this.headDim * tokens];
+    for (int token = 0; token < tokens; token++) {
+      int src = token * this.headDim;
+      for (int d = 0; d < this.headDim; d++) {
+        valueByChannel[d * tokens + token] = value[src + d];
       }
-      sums[query] = sum;
     }
-    int valueBase = headBase + this.keyDim * 2;
+    float[] mixedOut = new float[tokens * this.headDim];
+    runtime.linear(
+      scores, 0, valueByChannel, 0, null, mixedOut, 0, tokens, tokens, this.headDim);
     int outBase = head * this.headDim;
-    for (int d = 0; d < this.headDim; d++) {
-      for (int query = 0; query < tokens; query++) {
-        float acc = 0f;
-        for (int key = 0; key < tokens; key++) {
-          acc += this.at(mixed, offset, valueBase + d, key, height, width)
-            * scores[query * tokens + key];
-        }
-        int y = query / width;
-        int x = query - y * width;
-        attended[((outBase + d) * height + y) * width + x] = acc / sums[query];
+    int plane = height * width;
+    for (int q = 0; q < tokens; q++) {
+      float inv = 1f / sums[q];
+      int y = q / width;
+      int x = q - y * width;
+      int pixel = y * width + x;
+      int src = q * this.headDim;
+      for (int d = 0; d < this.headDim; d++) {
+        attended[(outBase + d) * plane + pixel] = mixedOut[src + d] * inv;
       }
     }
   }
 
-  private float at(
+  private float[] packTokens(
     final float[] mixed,
     final int offset,
-    final int channel,
-    final int token,
+    final int channel0,
+    final int count,
+    final int tokens,
     final int height,
     final int width
   ) {
-    int y = token / width;
-    int x = token - y * width;
-    return mixed[offset + (channel * height + y) * width + x];
+    float[] packed = new float[tokens * count];
+    int plane = height * width;
+    for (int token = 0; token < tokens; token++) {
+      int y = token / width;
+      int x = token - y * width;
+      int pixel = y * width + x;
+      int dst = token * count;
+      for (int d = 0; d < count; d++) {
+        packed[dst + d] = mixed[offset + (channel0 + d) * plane + pixel];
+      }
+    }
+    return packed;
   }
 }

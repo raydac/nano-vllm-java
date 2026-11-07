@@ -3,6 +3,7 @@ package com.igormaznitsa.nanollvm.samples;
 import static java.util.Locale.ROOT;
 import static java.util.Objects.requireNonNull;
 
+import com.igormaznitsa.nanollvm.llm.LLM;
 import com.igormaznitsa.nanollvm.models.ArgbImage;
 import com.igormaznitsa.nanollvm.models.Box;
 import com.igormaznitsa.nanollvm.models.LlmInImage;
@@ -43,8 +44,9 @@ import javax.imageio.ImageIO;
  * {@code images/yolo-obb.jpg}, an overhead parking lot. With no argument the sample asks for a
  * head: detect, seg, pose, or obb. Enter selects detect. A head name or a YOLO26 ONNX path skips
  * the menu. Weights are {@code models/YOLO26n} ({@code ./models/download-yolo26n.sh}). The marked
- * picture is {@code yolo-street-<head>.png} in the working directory. The log gives the wall-clock
- * time to load the weights and to recognize the picture. Run from the repository root.
+ * picture is {@code yolo-street-<head>.png} in the working directory. Recognition runs on every
+ * processor. The log gives the wall-clock time to load the weights and to recognize the picture.
+ * Run from the repository root.
  *
  * @since 1.5.0
  */
@@ -69,10 +71,11 @@ public final class YoloStreetHelloWorld {
 
     System.out.println("Loading " + selection.model().toAbsolutePath());
     long started = System.nanoTime();
-    try (LlmModel model = LlmModelFactory.make(selection.model())) {
+    try (LlmModel model = LlmModelFactory.make(selection.model());
+         LLM llm = LLM.builder(model).allCpuThreads().build()) {
       long loaded = System.nanoTime();
       System.out.println("loaded in " + seconds(loaded - started));
-      LlmOutObjects found = model.generate(
+      LlmOutObjects found = llm.generate(
         new LlmInImage(fromBufferedImage(photo)), LlmModality.IMAGE);
       long recognized = System.nanoTime();
       List<VisionHit> street = streetObjects(found.objects());

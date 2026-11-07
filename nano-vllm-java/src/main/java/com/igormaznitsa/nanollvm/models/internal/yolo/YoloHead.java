@@ -399,10 +399,10 @@ final class YoloHead {
     final MatmulRuntime runtime
   ) {
     if (this.classify != null) {
-      return this.classify.read(layers.getLast(), names);
+      return this.classify.read(layers.getLast(), names, runtime);
     }
     if (this.semantic != null) {
-      return this.semantic.read(layers.get(16), letter);
+      return this.semantic.read(layers.get(16), letter, runtime);
     }
     if (this.depth != null) {
       return this.depth.read(List.of(layers.get(16), layers.get(19), layers.get(22)), letter,
@@ -643,8 +643,12 @@ final class YoloHead {
         classes);
     }
 
-    LlmOutImage read(final Tensor feature, final YoloLetterbox letter) {
-      Tensor logits = this.project.forward(this.conv.forward(feature, MatmulRuntime.sequential()));
+    LlmOutImage read(
+      final Tensor feature,
+      final YoloLetterbox letter,
+      final MatmulRuntime runtime
+    ) {
+      Tensor logits = this.project.forward(this.conv.forward(feature, runtime));
       int height = logits.size(1);
       int width = logits.size(2);
       float[] data = logits.data();
@@ -769,8 +773,12 @@ final class YoloHead {
         weights.take("model.10.linear.bias", classes));
     }
 
-    LlmOutLabels read(final Tensor feature, final List<String> names) {
-      Tensor conv = this.conv.forward(feature, MatmulRuntime.sequential());
+    LlmOutLabels read(
+      final Tensor feature,
+      final List<String> names,
+      final MatmulRuntime runtime
+    ) {
+      Tensor conv = this.conv.forward(feature, runtime);
       int channels = conv.size(0);
       int plane = conv.size(1) * conv.size(2);
       float[] pooled = new float[channels];
