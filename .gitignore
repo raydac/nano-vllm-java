@@ -38,3 +38,5 @@ models/YOLO26n/
 /kernel-chat-bench.svg
 /yolo-street-detect.png
 /yolo-street-seg.png
+/kernel-bench.svg
+/kernel-yolo-bench.svg

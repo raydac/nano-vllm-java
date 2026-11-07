@@ -245,4 +245,24 @@ final class Conv2dTest {
       conv.forward(Tensor.of(input, inPerGroup * groups, height, width)).data(),
       1e-5f);
   }
+
+  @Test
+  void fusedSiluMatchesTheActivationOfTheFilter() {
+    Conv2d conv = new Conv2d(
+      Tensor.of(new float[] {2f}, 1, 1, 1, 1),
+      Tensor.of(new float[] {0.5f}, 1),
+      1,
+      0,
+      1);
+    float[] expected = new float[4];
+    float[] linear = {2.5f, 4.5f, 6.5f, 8.5f};
+    for (int i = 0; i < linear.length; i++) {
+      expected[i] = linear[i] / (1f + (float) Math.exp(-linear[i]));
+    }
+
+    assertArrayEquals(
+      expected,
+      conv.forward(Tensor.of(new float[] {1f, 2f, 3f, 4f}, 1, 2, 2), null, true).data(),
+      1e-5f);
+  }
 }

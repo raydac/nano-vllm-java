@@ -228,6 +228,28 @@ public final class MatmulRuntime implements AutoCloseable {
   }
 
   /**
+   * Convolution over an NCHW picture. Returns {@code false} when this backend has no device
+   * convolution, and the caller keeps its own filter loop.
+   *
+   * @param fuseSilu when {@code true}, the written picture is {@code silu(conv + bias)}
+   * @return {@code true} when {@code output} holds the filtered picture
+   */
+  public boolean conv2d(
+    final float[] input, final int inputOffset,
+    final float[] weight, final int weightOffset,
+    final float[] bias, final int biasOffset,
+    final float[] output, final int outputOffset,
+    final int inChannels, final int height, final int width,
+    final int outChannels, final int kernel, final int stride, final int padding, final int groups,
+    final boolean fuseSilu
+  ) {
+    this.requireOpen();
+    return KERNELS.conv2d(
+      input, inputOffset, weight, weightOffset, bias, biasOffset, output, outputOffset,
+      inChannels, height, width, outChannels, kernel, stride, padding, groups, fuseSilu);
+  }
+
+  /**
    * Dense batched linear map: for each of {@code rows} inputs of width {@code in}, write
    * {@code out} outputs {@code y = x Wᵀ (+ bias)}.
    *

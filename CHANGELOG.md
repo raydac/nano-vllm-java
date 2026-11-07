@@ -15,7 +15,7 @@ Development snapshot after the **1.4.0** public release.
 - Chat can call Java functions registered with `LLM.Builder.tool`. Qwen3, Qwen3.5, LFM2, and Gemma 4 each use that model's own tool-call tokens. The function result is written back in the form that model expects, and the reply continues. A space inside the called name still matches the registered tool. Text the model writes after a call is not sent back, so a later step can still call another tool. A turn runs at most four calls. `ToolsHelloWorld` asks Qwen3-0.6B for the OS name, then for one directory listing.
 
 ### Changed
-- Wide image convolutions, including YOLO26, use the same matmul kernels as chat instead of a scalar filter loop. A layer with fewer than 128 outputs is split by image rows, so every processor takes a band of the picture. Position attention and SiLU use that same pool. A 3×3 window copies its interior without a bounds check on every pixel. Classification and semantic heads use the engine's CPU threads for that work.
+- Wide image convolutions, including YOLO26, use the same matmul kernels as chat instead of a scalar filter loop. A layer with fewer than 128 outputs is split by image rows, so every processor takes a band of the picture. Position attention and SiLU use that same pool. A 3×3 window copies its interior without a bounds check on every pixel. Classification and semantic heads use the engine's CPU threads for that work. When TornadoVM is the kernel backend, each convolution runs on the device from the picture itself, keeps its weights there, and applies SiLU in that same task.
 - Nucleus sampling keeps the smallest high-probability prefix without sorting the whole vocabulary.
 - `Bench` can record an async-profiler sample of the timed generate
   (`mvn22 -pl nano-vllm-java-samples -am -Pbench package exec:exec@bench`).
@@ -86,7 +86,13 @@ Development snapshot after the **1.4.0** public release.
   incubator module, which previously dropped the vector bar). The TornadoVM run starts through
   the `tornado` command when that command is on `PATH`, because a Maven `exec:java` parent
   cannot see SDK devices. Child JVMs take the sample classpath from the launching class loader,
-  so `mvn exec:java` does not start them on Maven's own classpath.
+  so `mvn exec:java` does not start them on Maven's own classpath. The same run then recognizes
+  the street photo with YOLO26n when `models/YOLO26n/detect/yolo26n.onnx` is present, prints
+  milliseconds per image and images per second, and writes `kernel-yolo-bench.svg`.
+  `--skip-yolo` keeps the chat comparison only. `--yolo <onnx>` selects another detection file.
+  The run ends with one table of chat tok/s beside YOLO milliseconds, and `kernel-bench.svg`
+  draws those two speeds on separate scales. The number sits in its own column so the fastest
+  bar does not cover it.
 - `KernelBackend.availableModes()` lists kernels this JVM can run; `FloatKernelsFactory.isTornadoAvailable()`
   mirrors the existing Vector API probe.
 

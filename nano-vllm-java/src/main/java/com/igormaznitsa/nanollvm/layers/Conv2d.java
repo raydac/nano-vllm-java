@@ -11,8 +11,10 @@ import com.igormaznitsa.nanollvm.tensor.Tensor;
  *
  * <p>A single-group filter with a patch of at least {@value #MIN_PACKED_PATCH} floats and at least
  * {@value #MIN_PACKED_OUTPUTS} outputs is packed once and multiplied with
- * {@link MatmulRuntime#linear}, so it uses the same vector or device GEMV as a chat layer.
- * Depthwise and smaller filters stay on the direct channel loop.
+ * {@link MatmulRuntime#linear}, so it uses the same vector GEMV as a chat layer.
+ * When the process backend is TornadoVM, the filter runs on the device from the picture itself:
+ * weights stay resident, and SiLU can be applied in that same task. Depthwise and smaller filters
+ * on a CPU backend stay on the direct channel loop.
  *
  * @since 1.5.0
  */
@@ -75,7 +77,7 @@ public final class Conv2d {
    * @return {@code [outChannels, outHeight, outWidth]}
    */
   public Tensor forward(final Tensor input) {
-    return this.forward(input, MatmulRuntime.sequential());
+    return this.forward(input, MatmulRuntime.sequential(), false);
   }
 
   /**
@@ -86,6 +88,19 @@ public final class Conv2d {
    * @return {@code [outChannels, outHeight, outWidth]}
    */
   public Tensor forward(final Tensor input, final MatmulRuntime runtime) {
+    return this.forward(input, runtime, false);
+  }
+
+  /**
+   * Applies the filter. When {@code fuseSilu} is set, the returned picture is
+   * {@code silu(conv + bias)}. A TornadoVM backend does that in the convolution task.
+   *
+   * @param input    {@code [inChannels, height, width]}
+   * @param runtime  dense kernel runtime; {@code null} is sequential
+   * @param fuseSilu apply SiLU to the convolution
+   * @return {@code [outChannels, outHeight, outWidth]}
+   */
+  public Tensor forward(final Tensor input, final MatmulRuntime runtime, final boolean fuseSilu) {
     requireNonNull(input, "input");
     if (input.shape().length != 3 || input.size(0) != this.inChannels) {
       throw new IllegalArgumentException(
@@ -100,12 +115,44 @@ public final class Conv2d {
     }
     Tensor output = Tensor.zeros(this.outChannels, outHeight, outWidth);
     MatmulRuntime matmul = runtime == null ? MatmulRuntime.sequential() : runtime;
+    if (this.onDevice(input, output, height, width, matmul, fuseSilu)) {
+      return output;
+    }
     if (this.usesPackedMatmul(outHeight * outWidth)) {
       this.forwardPacked(input, output, height, width, outHeight, outWidth, matmul);
     } else {
       this.forwardDirect(input, output, height, width, outHeight, outWidth, matmul);
     }
+    if (fuseSilu) {
+      this.applySilu(output, matmul);
+    }
     return output;
+  }
+
+  private boolean onDevice(
+      final Tensor input, final Tensor output, final int height, final int width,
+      final MatmulRuntime runtime, final boolean fuseSilu
+  ) {
+    return runtime.conv2d(
+        input.data(), input.offset(),
+        this.weight.data(), this.weight.offset(),
+        this.bias == null ? null : this.bias.data(),
+        this.bias == null ? 0 : this.bias.offset(),
+        output.data(), output.offset(),
+        this.inChannels, height, width,
+        this.outChannels, this.kernel, this.stride, this.padding, this.groups,
+        fuseSilu);
+  }
+
+  private void applySilu(final Tensor output, final MatmulRuntime runtime) {
+    float[] data = output.data();
+    int offset = output.offset();
+    runtime.parallelRanges(output.numel(), (start, end) -> {
+      for (int i = start; i < end; i++) {
+        float value = data[offset + i];
+        data[offset + i] = value / (1f + (float) Math.exp(-value));
+      }
+    });
   }
 
   private boolean usesPackedMatmul(final int spatial) {

@@ -16,6 +16,8 @@ package com.igormaznitsa.nanollvm.tensor;
  *   <li><strong>TornadoVM</strong> — optional heterogeneous backend when {@code tornado.api} and
  *       {@code tornado.runtime} are on the module path. Dense GEMV, chat attention, and the
  *       elementwise kernels run as TornadoVM tasks, including one-token decode.
+ *       Image convolution reads the NCHW picture on the device: the layer weights stay
+ *       resident, and SiLU is applied in that same task.
  *       {@code -Dnanollvm.tornado.layers} sets how many decoder layers share one task graph
  *       (default 4). {@code -Dnanollvm.tornado.weight} sets the largest weight kept in one device
  *       buffer; a larger matrix is streamed in tiles. The Vector API is a separate mode</li>
@@ -105,6 +107,26 @@ public abstract class FloatKernels {
    * @since 1.4.0
    */
   public boolean prefersSingleShotGemv() {
+    return false;
+  }
+
+  /**
+   * Convolution over an NCHW picture. The default returns {@code false} and the caller keeps its
+   * own loop. A device backend may run the filter, the bias, and an optional SiLU as one task.
+   *
+   * @param fuseSilu when {@code true}, the written picture is {@code silu(conv + bias)}
+   * @return {@code true} when {@code output} holds the filtered picture
+   * @since 1.5.0
+   */
+  public boolean conv2d(
+    final float[] input, final int inputOffset,
+    final float[] weight, final int weightOffset,
+    final float[] bias, final int biasOffset,
+    final float[] output, final int outputOffset,
+    final int inChannels, final int height, final int width,
+    final int outChannels, final int kernel, final int stride, final int padding, final int groups,
+    final boolean fuseSilu
+  ) {
     return false;
   }
 

@@ -39,7 +39,23 @@ public final class TornadoFloatKernels extends FloatKernels {
   @Override
   public void releaseWeights(final float[]... weights) {
     TornadoGemvExecutor.releaseWeights(weights);
+    TornadoConvExecutor.releaseWeights(weights);
     TornadoDecoder.releaseWeights(weights);
+  }
+
+  @Override
+  public boolean conv2d(
+    final float[] input, final int inputOffset,
+    final float[] weight, final int weightOffset,
+    final float[] bias, final int biasOffset,
+    final float[] output, final int outputOffset,
+    final int inChannels, final int height, final int width,
+    final int outChannels, final int kernel, final int stride, final int padding, final int groups,
+    final boolean fuseSilu
+  ) {
+    return TornadoConvExecutor.conv2d(
+      input, inputOffset, weight, weightOffset, bias, biasOffset, output, outputOffset,
+      inChannels, height, width, outChannels, kernel, stride, padding, groups, fuseSilu);
   }
 
   @Override

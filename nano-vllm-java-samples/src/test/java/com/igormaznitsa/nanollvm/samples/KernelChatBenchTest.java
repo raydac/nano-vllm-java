@@ -57,6 +57,86 @@ class KernelChatBenchTest {
     assertTrue(command.stream().anyMatch(arg ->
         arg.contains("--worker") && arg.contains(KernelChatBench.shellQuote("/models/Gemma 3"))));
     assertEquals(KernelChatBench.class.getName(), command.getLast());
+    assertTrue(command.stream().anyMatch(arg ->
+      arg.contains("--workload " + KernelChatBench.WORKLOAD_CHAT)));
+  }
+
+  @Test
+  void tornadoYoloChildNamesThePictureWorkload() {
+    List<String> command = KernelChatBench.tornadoChildCommand(
+      Path.of("/opt/tornado"),
+      "classes",
+      "/models/yolo26n.onnx",
+      8,
+      2,
+      KernelChatBench.WORKLOAD_YOLO);
+    assertTrue(command.stream().anyMatch(arg ->
+      arg.contains("--workload yolo")
+        && arg.contains(KernelChatBench.shellQuote("/models/yolo26n.onnx"))));
+  }
+
+  @Test
+  void yoloResultLineRoundTrips() {
+    KernelChatBench.YoloResult original = new KernelChatBench.YoloResult(
+      "vector", "Vector API (SIMD)", 800, 544, 940_000_000L, 2.12766d);
+    String line = KernelChatBench.formatYoloLine(original);
+    KernelChatBench.YoloResult result = KernelChatBench.parseYoloLine(line).orElseThrow();
+    assertEquals(original.mode(), result.mode());
+    assertEquals(original.label(), result.label());
+    assertEquals(original.width(), result.width());
+    assertEquals(original.height(), result.height());
+    assertEquals(original.elapsedNanos(), result.elapsedNanos());
+    assertEquals(original.imagesPerSecond(), result.imagesPerSecond(), 1e-6);
+    assertTrue(KernelChatBench.parseYoloLine("KERNEL_RESULT\tx").isEmpty());
+  }
+
+  @Test
+  void yoloTableReportsMillisecondsAndImagesPerSecond() {
+    KernelChatBench.Options options = KernelChatBench.Options.parse(
+      new String[] {"--svg", "-", "--runs", "2", "--skip-yolo"});
+    List<KernelChatBench.YoloResult> results = List.of(
+      new KernelChatBench.YoloResult("scalar", "Scalar Java", 800, 544, 2_000_000_000L, 1.0d),
+      new KernelChatBench.YoloResult("vector", "Vector API (SIMD)", 800, 544, 1_000_000_000L,
+        2.0d));
+    String table = KernelChatBench.formatYoloTable(
+      Path.of("models/YOLO26n/detect/yolo26n.onnx"),
+      options,
+      List.of(),
+      results);
+
+    assertTrue(table.contains("800x544"));
+    assertTrue(table.contains("1000.0"));
+    assertTrue(table.contains("500.0"));
+    assertTrue(table.contains("2.00x"));
+    assertTrue(options.skipYolo());
+    assertEquals(
+      Path.of("out", "kernel-yolo-bench.svg"),
+      KernelChatBench.yoloSvg(Path.of("out", "kernel-chat-bench.svg")));
+    assertNull(KernelChatBench.yoloSvg(null));
+    assertEquals(
+      Path.of("out", "kernel-bench.svg"),
+      KernelChatBench.benchSvg(Path.of("out", "kernel-chat-bench.svg")));
+  }
+
+  @Test
+  void speedSummaryShowsChatAndYoloOnSeparateColumns() {
+    List<KernelChatBench.Result> chat = List.of(
+      new KernelChatBench.Result("scalar", "Scalar Java", 18, 64, 10_000_000_000L, 6.4d),
+      new KernelChatBench.Result("vector", "Vector API (SIMD)", 18, 64, 4_000_000_000L, 16.0d));
+    List<KernelChatBench.YoloResult> yolo = List.of(
+      new KernelChatBench.YoloResult("scalar", "Scalar Java", 800, 544, 2_000_000_000L, 1.0d),
+      new KernelChatBench.YoloResult("vector", "Vector API (SIMD)", 800, 544, 1_000_000_000L,
+        2.0d));
+    String table = KernelChatBench.formatSpeedSummary(chat, yolo, 2);
+
+    assertTrue(table.contains("Chat tok/s"));
+    assertTrue(table.contains("YOLO ms/image"));
+    assertTrue(table.contains("6.40"));
+    assertTrue(table.contains("16.00"));
+    assertTrue(table.contains("1000"));
+    assertTrue(table.contains("500"));
+    assertTrue(table.contains("2.50x"));
+    assertTrue(table.contains("2.00x"));
   }
 
   @Test

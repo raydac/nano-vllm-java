@@ -76,7 +76,6 @@ final class YoloConv {
   }
 
   Tensor forward(final Tensor input, final MatmulRuntime runtime) {
-    Tensor conv = this.conv.forward(input, runtime);
-    return this.silu ? YoloMath.silu(conv, runtime) : conv;
+    return this.conv.forward(input, runtime, this.silu);
   }
 }

@@ -2110,7 +2110,7 @@ try (LlmModel model = LlmModelFactory.make(Path.of("models/YOLO26n/detect/yolo26
 
 `pixels` are row-major `0xAARRGGBB` (`ArgbImage`). The library does not use `java.desktop`.
 `YoloStreetHelloWorld.fromBufferedImage` copies a `BufferedImage` into that layout, and
-`toBufferedImage` copies a result raster back. The picture is letterboxed to 640×640. Boxes, mask outlines, rotated
+`toBufferedImage` copies a result raster back. The picture is letterboxed to 640×640. When TornadoVM is the kernel backend, each convolution runs on the device from that picture and applies SiLU in the same task. Boxes, mask outlines, rotated
 corners, and pose points come back in the original picture's pixels. Object heads keep a hit whose score is at
 least `LlmInImage`'s minimum (`0.25` when the picture is passed alone). At most 300 candidates are ranked before
 that cutoff. A minimum other than the default is rejected for a semantic map, depth, or classification file.
@@ -2478,7 +2478,7 @@ embedding**: also chapter 10.
 | Qwen3.5 Gated DeltaNet                    | Yes, text safetensors (**since 1.5.0**): conv + delta-rule recurrence on the CPU, then the MLP. Full-attention layers in the same stack use leading partial RoPE |
 | Cross-attention to a second text          | No                                                |
 | Bidirectional BERT-style                  | Yes, for embedding GGUFs and embedding ONNX (**since 1.1.0**; ch. 7b) |
-| Fancy GPU kernels (flash-attention, etc.) | No flash-attention. CPU SIMD / panel GEMV by default; optional TornadoVM dense GEMV (**since 1.4.0**), and **since 1.5.0** attention, elementwise kernels, and decoder-layer task graphs (default four layers) when that add-on is present. Gated DeltaNet and the LFM2 short convolution stay on the CPU |
+| Fancy GPU kernels (flash-attention, etc.) | No flash-attention. CPU SIMD / panel GEMV by default; optional TornadoVM dense GEMV (**since 1.4.0**), and **since 1.5.0** attention, elementwise kernels, decoder-layer task graphs (default four layers), and YOLO convolution from the picture with fused SiLU, when that add-on is present. Gated DeltaNet and the LFM2 short convolution stay on the CPU |
 
 ---
 
@@ -4805,7 +4805,7 @@ Short glossary. For the Java home of each idea, prefer the **In the code** notes
 | Jev                   | Typed decision from the next-token distribution: choice, yes/no, or score, with a probability per option (`LLM.builder(model).toJev()`, **since 1.5.0**; ch. 7g) |
 | Tool call             | A Java `ModelTool` run from `chat` / `chatOnce` when the checkpoint writes its own call tokens (**since 1.5.0**; ch. 7h). Raw `generate` does not |
 | `LlmOptionalData`     | Typed load extras such as `ESPEAK_DATA` (**since 1.3.0**; `open(path).optionalData`) |
-| TornadoVM             | Optional device path. Dense GEMV **since 1.4.0**. **Since 1.5.0**: attention, elementwise kernels, and decoder-layer task graphs (default four layers, `-Dnanollvm.tornado.layers`). Gated DeltaNet and the LFM2 short convolution stay on the CPU. Multi-token OpenCL GEMV may use CLBlast; one-token GEMV does not |
+| TornadoVM             | Optional device path. Dense GEMV **since 1.4.0**. **Since 1.5.0**: attention, elementwise kernels, decoder-layer task graphs (default four layers, `-Dnanollvm.tornado.layers`), and YOLO convolution from the picture with fused SiLU. Gated DeltaNet and the LFM2 short convolution stay on the CPU. Multi-token OpenCL GEMV may use CLBlast; one-token GEMV does not |
 | Sentence embedding    | One fixed-length vector summarizing a string (cosine ≈ dot product after L2)                    |
 | RoPE                  | Rotary Position Embedding: rotate pairs inside Q/K by angle(position); encodes relative distance |
 | Tied embeddings       | Same matrix for input lookup and LM-head scoring (`tie_word_embeddings`)                         |
