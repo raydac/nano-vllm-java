@@ -1,4 +1,4 @@
-package com.igormaznitsa.nanollvm.weather.http;
+package com.igormaznitsa.nanollvm.weather;
 
 import static java.nio.charset.StandardCharsets.UTF_8;
 import static java.util.Objects.requireNonNull;

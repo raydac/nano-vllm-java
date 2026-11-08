@@ -364,7 +364,7 @@ mvn -pl nano-vllm-java-samples -q exec:java
 
 ### Weather
 
-`nano-vllm-java-weather-sample` is a separate module. Qwen3-0.6B asks where this computer is, then what the weather is there. It prints the temperature and the sky, and Piper speaks that line on the default audio output. Once the coordinates are known it prints a 64-column world map, Kavrayskiy VII over the Natural Earth coastline, with that position marked. The log gives the wall-clock time of each step.
+`nano-vllm-java-weather-sample` is a separate module. Qwen3-0.6B asks where this computer is, then what the weather is there. Piper says it is looking for the location before that question. When the coordinates arrive it prints a 64-column world map, Kavrayskiy VII over the Natural Earth coastline, with that position marked. Piper then says it is getting the weather in that city. It prints the temperature and the sky, and Piper speaks that line on the default audio output. Each spoken line finishes before the next step starts. The log gives the wall-clock time of each step.
 
 If the chat model or a Piper voice is missing, the sample stops before loading and prints the download command for each one. The two questions stay separate because this checkpoint calls one tool when a question names both. Gemma 3 has no tool-call tokens. Qwen3.5, LFM2, and Gemma 4 can replace it via the first argument.
 
@@ -376,7 +376,7 @@ The place is this computer's public network address (ipwho.is, then geojs, then 
 mvn -pl nano-vllm-java-weather-sample -am -q exec:java
 ```
 
-The Russian Irina voice can stand in for Lessac. Windows download scripts are in [`models/README.md`](models/README.md).
+Speech is English, with the Lessac voice. Windows download scripts are in [`models/README.md`](models/README.md).
 
 ![Weather sample: Qwen3 locates this computer, prints the map and the forecast, then Piper speaks the line](assets/weatherstation_03nov2027.gif)
 

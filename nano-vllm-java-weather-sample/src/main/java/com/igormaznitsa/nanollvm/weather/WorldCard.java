@@ -1,4 +1,4 @@
-package com.igormaznitsa.nanollvm.weather.place;
+package com.igormaznitsa.nanollvm.weather;
 
 import static java.lang.Math.PI;
 import static java.lang.Math.clamp;

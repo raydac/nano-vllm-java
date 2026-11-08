@@ -1,4 +1,4 @@
-package com.igormaznitsa.nanollvm.weather.model;
+package com.igormaznitsa.nanollvm.weather;
 
 import static java.nio.charset.StandardCharsets.UTF_8;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -24,8 +24,8 @@ class WeatherModelsTest {
 
   @Test
   void missingChatModelNamesTheQwenDownload() {
-    MissingModels ex = assertThrows(
-      MissingModels.class,
+    WeatherModels.MissingModels ex = assertThrows(
+      WeatherModels.MissingModels.class,
       () -> WeatherModels.chatModel(new String[] {"/no/such/weather-chat-model"}));
 
     assertTrue(ex.getMessage().contains("was not found"));
@@ -36,8 +36,8 @@ class WeatherModelsTest {
   void emptyDirectoryIsNotAChatCheckpoint() throws IOException {
     Path dir = Files.createTempDirectory("weather-model");
 
-    MissingModels ex = assertThrows(
-      MissingModels.class,
+    WeatherModels.MissingModels ex = assertThrows(
+      WeatherModels.MissingModels.class,
       () -> WeatherModels.chatModel(new String[] {dir.toString()}));
 
     assertTrue(ex.getMessage().contains("not a checkpoint"));
@@ -48,12 +48,12 @@ class WeatherModelsTest {
     Path root = Files.createTempDirectory("weather-models");
     String previous = System.setProperty(NanoLlvmProps.PROP_MODELS_DIR, root.toString());
     try {
-      MissingModels ex =
-        assertThrows(MissingModels.class, () -> WeatherModels.require(new String[0]));
+      WeatherModels.MissingModels ex =
+        assertThrows(WeatherModels.MissingModels.class, () -> WeatherModels.require(new String[0]));
       assertTrue(ex.getMessage().contains("cannot start"));
       assertTrue(ex.getMessage().contains("download-qwen3-0.6b.sh"));
       assertTrue(ex.getMessage().contains("download-piper-en-lessac-medium.sh"));
-      assertTrue(ex.getMessage().contains("download-piper-ru-irina-medium.sh"));
+      assertFalse(ex.getMessage().contains("irina"));
     } finally {
       restoreModelsDir(previous);
     }
@@ -70,9 +70,4 @@ class WeatherModelsTest {
       WeatherModels.chatModel(new String[] {dir.toString()}));
   }
 
-  @Test
-  void lessacIsTheEnglishVoice() {
-    assertTrue(WeatherModels.englishVoice(Path.of("models/piper-en-lessac-medium")));
-    assertFalse(WeatherModels.englishVoice(Path.of("models/piper-ru-irina-medium")));
-  }
 }

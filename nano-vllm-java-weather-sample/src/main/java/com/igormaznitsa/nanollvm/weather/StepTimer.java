@@ -1,4 +1,4 @@
-package com.igormaznitsa.nanollvm.weather.time;
+package com.igormaznitsa.nanollvm.weather;
 
 import static java.util.Objects.requireNonNull;
 

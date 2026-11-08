@@ -3953,7 +3953,7 @@ packages. Demos live in `nano-vllm-java-samples`. The weather desk is `nano-vllm
 | `tensor/` — `Tensor`, `Ops`, `MatmulRuntime`, `LinearKernel`, `EmbeddingKernel`, …     | Arrays, float ops, parallel GEMM                     | **no** |
 | `prompts/` — `ChatPrompts`, `RagPrompts`, `AdvisorPrompts`                             | Default system / RAG / advisor wording               | **no** |
 | *(Maven module `nano-vllm-java-samples`)* `Example`, `HelloWorld`, `NextTokenHelloWorld`, `Bench`, `KernelChatBench`, `EmbeddingsHelloWorld`, `TranscribeHelloWorld`, `SynthesizeHelloWorld`, `VoiceReplyHelloWorld`, `LanguageIdHelloWorld`, `YoloStreetHelloWorld`, `LogTriageHelloWorld`, `AdvisorRagHelloWorld`, `RagTunerHelloWorld`, `JevHelloWorld`, `ToolsHelloWorld`, `RussianCheckersHelloWorld`, `utils/Bundled*` | Runnable demos (not in the library JAR) | n/a |
-| *(Maven module `nano-vllm-java-weather-sample`)* `WeatherSample` | City from the public address, a 64-column world card, then Open-Meteo, then Piper on the default mixer | n/a |
+| *(Maven module `nano-vllm-java-weather-sample`)* `WeatherSample` | City from the public address, a 64-column world card, then Open-Meteo. Piper says, in English, that it is looking up the location, then the weather in that city, then speaks the forecast | n/a |
 
 `Config.HfConfig` (in `llm/Config`) holds the blueprint plus per-LLM engine knobs (`maxModelLen`, `kvHeapFraction`, …).
 

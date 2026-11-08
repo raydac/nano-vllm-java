@@ -1,9 +1,8 @@
-package com.igormaznitsa.nanollvm.weather.tools;
+package com.igormaznitsa.nanollvm.weather;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import com.igormaznitsa.nanollvm.weather.time.StepTimer;
 import org.junit.jupiter.api.Test;
 
 class LocalConditionsTest {

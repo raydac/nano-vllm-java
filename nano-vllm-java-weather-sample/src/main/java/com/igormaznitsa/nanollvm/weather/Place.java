@@ -1,4 +1,4 @@
-package com.igormaznitsa.nanollvm.weather.place;
+package com.igormaznitsa.nanollvm.weather;
 
 import static java.util.stream.Collectors.joining;
 

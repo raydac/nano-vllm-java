@@ -1,8 +1,7 @@
-package com.igormaznitsa.nanollvm.weather.forecast;
+package com.igormaznitsa.nanollvm.weather;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
-import com.igormaznitsa.nanollvm.weather.place.Place;
 import org.junit.jupiter.api.Test;
 
 class ForecastTest {
@@ -19,22 +18,16 @@ class ForecastTest {
     assertEquals("Tallinn, Harjumaa, Estonia: 8.1°C, An overcast sky", forecast.logLine());
     assertEquals(
       "In Tallinn, Harjumaa, Estonia, it is 8.1 degrees, with an overcast sky.",
-      forecast.speech(true));
-    assertEquals(
-      "В Tallinn, Harjumaa, Estonia температура 8.1 по Цельсию, пасмурно.",
-      forecast.speech(false));
+      forecast.speech());
   }
 
   @Test
   void oneDegreeAndANegativeTemperature() {
     assertEquals(
       "In Tallinn, Harjumaa, Estonia, it is 1 degree, with a clear sky.",
-      new Forecast(TALLINN, 1.04d, 0).speech(true));
+      new Forecast(TALLINN, 1.04d, 0).speech());
     assertEquals(
       "In Tallinn, Harjumaa, Estonia, it is minus 2 degrees, with snow.",
-      new Forecast(TALLINN, -2.04d, 73).speech(true));
-    assertEquals(
-      "В Tallinn, Harjumaa, Estonia температура минус 2 по Цельсию, снег.",
-      new Forecast(TALLINN, -2.04d, 73).speech(false));
+      new Forecast(TALLINN, -2.04d, 73).speech());
   }
 }

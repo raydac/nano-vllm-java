@@ -1,4 +1,4 @@
-package com.igormaznitsa.nanollvm.weather.model;
+package com.igormaznitsa.nanollvm.weather;
 
 import static com.igormaznitsa.nanollvm.utils.NanoLlvmProps.ENV_MODEL;
 import static com.igormaznitsa.nanollvm.utils.NanoLlvmProps.ENV_MODELS_DIR;
@@ -49,23 +49,11 @@ public final class WeatherModels {
 
   static Path piperVoice() {
     Path root = modelsRoot();
-    Path english = root.resolve("piper-en-lessac-medium");
-    if (ModelSupport.isSynthesisCheckpoint(english)) {
-      return english.toAbsolutePath().normalize();
-    }
-    Path russian = root.resolve("piper-ru-irina-medium");
-    if (ModelSupport.isSynthesisCheckpoint(russian)) {
-      return russian.toAbsolutePath().normalize();
+    Path lessac = root.resolve("piper-en-lessac-medium");
+    if (ModelSupport.isSynthesisCheckpoint(lessac)) {
+      return lessac.toAbsolutePath().normalize();
     }
     throw new MissingModels(voiceNotice(root));
-  }
-
-  public static boolean englishVoice(final Path voiceDir) {
-    String name = voiceDir.getFileName() == null
-      ? voiceDir.toString()
-      : voiceDir.getFileName().toString();
-    String lower = name.toLowerCase(Locale.ROOT);
-    return lower.contains("-en-") || lower.contains("lessac");
   }
 
   static Path modelsRoot() {
@@ -115,8 +103,7 @@ public final class WeatherModels {
   private static String voiceNotice(final Path root) {
     return """
       Piper voice was not found under %s
-      Download models/download-piper-en-lessac-medium.sh
-      or models/download-piper-ru-irina-medium.sh.""".formatted(root).strip();
+      Download models/download-piper-en-lessac-medium.sh.""".formatted(root).strip();
   }
 
   private static boolean isChatCheckpoint(final Path path) {
@@ -182,5 +169,11 @@ public final class WeatherModels {
    * @param voice Piper voice folder
    */
   public record Required(Path chat, Path voice) {
+  }
+
+  static final class MissingModels extends IllegalStateException {
+    MissingModels(final String message) {
+      super(message);
+    }
   }
 }

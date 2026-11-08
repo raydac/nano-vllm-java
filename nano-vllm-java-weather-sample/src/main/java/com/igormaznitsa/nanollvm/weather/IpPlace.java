@@ -1,9 +1,6 @@
-package com.igormaznitsa.nanollvm.weather.place;
+package com.igormaznitsa.nanollvm.weather;
 
 import static java.util.Objects.requireNonNull;
-
-import com.igormaznitsa.nanollvm.weather.http.HttpsGet;
-import com.igormaznitsa.nanollvm.weather.json.JsonValues;
 
 import java.io.IOException;
 import java.net.URI;

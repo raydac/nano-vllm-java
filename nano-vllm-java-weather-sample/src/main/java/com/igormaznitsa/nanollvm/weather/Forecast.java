@@ -1,10 +1,6 @@
-package com.igormaznitsa.nanollvm.weather.forecast;
+package com.igormaznitsa.nanollvm.weather;
 
 import static java.util.Objects.requireNonNull;
-
-import com.igormaznitsa.nanollvm.weather.http.HttpsGet;
-import com.igormaznitsa.nanollvm.weather.json.JsonValues;
-import com.igormaznitsa.nanollvm.weather.place.Place;
 
 import java.io.IOException;
 import java.net.URI;
@@ -72,29 +68,64 @@ public record Forecast(Place place, double celsius, int weatherCode) {
     return String.format(Locale.ROOT, "%.1f", magnitude);
   }
 
+  private static String skyTitle(final int code) {
+    String phrase = sky(code);
+    return phrase.substring(0, 1).toUpperCase(Locale.ROOT) + phrase.substring(1);
+  }
+
+  private static String sky(final int code) {
+    return switch (code) {
+      case 0 -> "a clear sky";
+      case 1 -> "a mainly clear sky";
+      case 2 -> "a partly cloudy sky";
+      case 3 -> "an overcast sky";
+      case 45 -> "fog";
+      case 48 -> "freezing fog";
+      case 51 -> "light drizzle";
+      case 53 -> "drizzle";
+      case 55 -> "dense drizzle";
+      case 56 -> "light freezing drizzle";
+      case 57 -> "dense freezing drizzle";
+      case 61 -> "light rain";
+      case 63 -> "rain";
+      case 65 -> "heavy rain";
+      case 66 -> "light freezing rain";
+      case 67 -> "heavy freezing rain";
+      case 71 -> "light snow";
+      case 73 -> "snow";
+      case 75 -> "heavy snow";
+      case 77 -> "snow grains";
+      case 80 -> "light rain showers";
+      case 81 -> "rain showers";
+      case 82 -> "heavy rain showers";
+      case 85 -> "light snow showers";
+      case 86 -> "heavy snow showers";
+      case 95 -> "a thunderstorm";
+      case 96 -> "a thunderstorm and slight hail";
+      case 99 -> "a thunderstorm and heavy hail";
+      default -> "weather code " + code;
+    };
+  }
+
   public String logLine() {
     return String.format(
       Locale.ROOT,
       "%s: %.1f°C, %s",
       this.place.where(),
       tenths(this.celsius),
-      WeatherCodes.title(this.weatherCode));
+      skyTitle(this.weatherCode));
   }
 
-  public String speech(final boolean english) {
+  public String speech() {
     double rounded = tenths(this.celsius);
     double magnitude = Math.abs(rounded);
     String number = digits(magnitude);
     if (rounded < 0d) {
-      number = (english ? "minus " : "минус ") + number;
-    }
-    if (!english) {
-      return "В %s температура %s по Цельсию, %s.".formatted(
-        this.place.where(), number, WeatherCodes.russian(this.weatherCode));
+      number = "minus " + number;
     }
     String unit = new MessageFormat("{0,choice,0#degrees|1#degree|1<degrees}", Locale.ROOT)
       .format(new Object[] {magnitude});
     return "In %s, it is %s %s, with %s.".formatted(
-      this.place.where(), number, unit, WeatherCodes.english(this.weatherCode));
+      this.place.where(), number, unit, sky(this.weatherCode));
   }
 }

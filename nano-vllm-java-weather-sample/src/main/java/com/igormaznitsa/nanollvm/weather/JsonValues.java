@@ -1,4 +1,4 @@
-package com.igormaznitsa.nanollvm.weather.json;
+package com.igormaznitsa.nanollvm.weather;
 
 import java.util.Optional;
 

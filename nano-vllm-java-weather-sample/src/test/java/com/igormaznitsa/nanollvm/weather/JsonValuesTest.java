@@ -1,4 +1,4 @@
-package com.igormaznitsa.nanollvm.weather.json;
+package com.igormaznitsa.nanollvm.weather;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;

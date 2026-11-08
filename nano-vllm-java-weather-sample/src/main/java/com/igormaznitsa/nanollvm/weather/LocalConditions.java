@@ -1,13 +1,8 @@
-package com.igormaznitsa.nanollvm.weather.tools;
+package com.igormaznitsa.nanollvm.weather;
 
 import static java.util.Objects.requireNonNull;
 
 import com.igormaznitsa.nanollvm.llm.ModelTool;
-import com.igormaznitsa.nanollvm.weather.forecast.Forecast;
-import com.igormaznitsa.nanollvm.weather.place.IpPlace;
-import com.igormaznitsa.nanollvm.weather.place.Place;
-import com.igormaznitsa.nanollvm.weather.place.WorldCard;
-import com.igormaznitsa.nanollvm.weather.time.StepTimer;
 import java.util.Optional;
 
 /**
@@ -48,6 +43,10 @@ public final class LocalConditions {
       "Temperature and weather at that city. Call current_location first. No arguments.",
       EMPTY_SCHEMA,
       this::reportWeather);
+  }
+
+  public Optional<Place> place() {
+    return Optional.ofNullable(this.place);
   }
 
   public Optional<Forecast> forecast() {
