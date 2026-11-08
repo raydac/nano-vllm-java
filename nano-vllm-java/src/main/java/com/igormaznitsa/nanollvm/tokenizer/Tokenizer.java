@@ -286,6 +286,18 @@ public final class Tokenizer {
   }
 
   /**
+   * Raw vocabulary piece for {@code id}, before byte-level decoding.
+   *
+   * @param id vocabulary id
+   * @return the piece, or {@code ""} when {@code id} is absent
+   * @since 1.5.0
+   */
+  public String piece(final int id) {
+    String tok = this.vocab.token(id);
+    return tok == null ? "" : tok;
+  }
+
+  /**
    * Formats chat messages with the model’s template and appends an assistant generation prompt.
    *
    * @param messages            role/content maps ({@code "role"}, {@code "content"}); non-{@code null}

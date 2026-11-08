@@ -16,6 +16,9 @@ Development snapshot after the **1.4.0** public release.
 
 ### Changed
 - Wide image convolutions, including YOLO26, use the same matmul kernels as chat instead of a scalar filter loop. A layer with fewer than 128 outputs is split by image rows, so every processor takes a band of the picture. Position attention and SiLU use that same pool. A 3×3 window copies its interior without a bounds check on every pixel. Classification and semantic heads use the engine's CPU threads for that work. When TornadoVM is the kernel backend, each convolution runs on the device from the picture itself, keeps its weights there, and applies SiLU in that same task.
+- Whisper and Piper 1-D convolutions use the same matmul kernels as chat when the filter is one group, including the Whisper stem and the Piper vocoder. A depthwise filter runs SIMD along the waveform.
+- Whisper attention multiplies a whole sequence in one matmul per head, and those heads run together. Short sequences stay on the per-key path. A short clip is still padded to 30 s. Control tokens are suppressed from the vocabulary instead of decoding every id.
+- `TranscribeHelloWorld` and `SynthesizeHelloWorld` print how long the weights took to load and how long decode or synthesis took. Both use every processor. `KernelChatBench` also times Piper synthesis and Whisper transcription of `Hello, World.` on each kernel when those models are present.
 - Nucleus sampling keeps the smallest high-probability prefix without sorting the whole vocabulary.
 - `Bench` can record an async-profiler sample of the timed generate
   (`mvn22 -pl nano-vllm-java-samples -am -Pbench package exec:exec@bench`).

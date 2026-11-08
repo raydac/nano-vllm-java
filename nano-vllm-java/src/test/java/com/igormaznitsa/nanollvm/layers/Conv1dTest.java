@@ -62,4 +62,96 @@ final class Conv1dTest {
       assertArrayEquals(sequential.data(), parallel.data(), 1e-5f);
     }
   }
+
+  private static float[] direct(
+    final float[] weight,
+    final float[] bias,
+    final float[] samples,
+    final int inChannels,
+    final int inLength,
+    final int outChannels,
+    final int kernel,
+    final int stride,
+    final int padding,
+    final int dilation,
+    final int outLength
+  ) {
+    int groups = weight.length / (outChannels * kernel) == 1 ? inChannels : 1;
+    int inPerGroup = inChannels / groups;
+    int outPerGroup = outChannels / groups;
+    float[] dest = new float[outChannels * outLength];
+    for (int oc = 0; oc < outChannels; oc++) {
+      float shift = bias == null ? 0f : bias[oc];
+      int group = oc / outPerGroup;
+      int weightBase = oc * inPerGroup * kernel;
+      for (int time = 0; time < outLength; time++) {
+        float sum = shift;
+        int origin = time * stride - padding;
+        for (int channel = 0; channel < inPerGroup; channel++) {
+          int activationBase = (group * inPerGroup + channel) * inLength;
+          int weightRow = weightBase + channel * kernel;
+          for (int tap = 0; tap < kernel; tap++) {
+            int src = origin + tap * dilation;
+            if (src >= 0 && src < inLength) {
+              sum += weight[weightRow + tap] * samples[activationBase + src];
+            }
+          }
+        }
+        dest[oc * outLength + time] = sum;
+      }
+    }
+    return dest;
+  }
+
+  @Test
+  void packedMatmulMatchesTheDirectFilter() {
+    int inChannels = 8;
+    int outChannels = 8;
+    int kernel = 3;
+    int length = 20;
+    float[] weight = new float[outChannels * inChannels * kernel];
+    float[] bias = new float[outChannels];
+    float[] samples = new float[inChannels * length];
+    for (int i = 0; i < weight.length; i++) {
+      weight[i] = ((i % 7) - 3) * 0.05f;
+    }
+    for (int i = 0; i < bias.length; i++) {
+      bias[i] = i * 0.01f;
+    }
+    for (int i = 0; i < samples.length; i++) {
+      samples[i] = (i % 5) - 2f;
+    }
+    Conv1d conv = new Conv1d(
+      Tensor.of(weight, outChannels, inChannels, kernel), Tensor.of(bias, outChannels), 2, 1, 2, 1);
+    Tensor out = conv.forward(Tensor.of(samples, inChannels, length));
+    int outLength = out.size(1);
+
+    assertArrayEquals(
+      direct(weight, bias, samples, inChannels, length, outChannels, kernel, 2, 1, 2, outLength),
+      out.data(),
+      1e-4f);
+  }
+
+  @Test
+  void depthwiseVectorMatchesTheDirectFilter() {
+    int channels = 4;
+    int kernel = 3;
+    int length = 40;
+    float[] weight = new float[channels * kernel];
+    float[] samples = new float[channels * length];
+    for (int i = 0; i < weight.length; i++) {
+      weight[i] = ((i % 5) - 2) * 0.1f;
+    }
+    for (int i = 0; i < samples.length; i++) {
+      samples[i] = (i % 9) * 0.25f;
+    }
+    Conv1d conv = new Conv1d(
+      Tensor.of(weight, channels, 1, kernel), null, 1, 2, 2, channels);
+    Tensor out = conv.forward(Tensor.of(samples, channels, length));
+
+    assertArrayEquals(
+      direct(weight, null, samples, channels, length, channels, kernel, 1, 2, 2, out.size(1)),
+      out.data(),
+      1e-4f);
+  }
 }

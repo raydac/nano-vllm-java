@@ -10,9 +10,13 @@ import com.igormaznitsa.nanollvm.llm.LLM;
 import com.igormaznitsa.nanollvm.llm.SamplingParams;
 import com.igormaznitsa.nanollvm.models.ArgbImage;
 import com.igormaznitsa.nanollvm.models.LlmInImage;
+import com.igormaznitsa.nanollvm.models.LlmInSound;
+import com.igormaznitsa.nanollvm.models.LlmInText;
 import com.igormaznitsa.nanollvm.models.LlmModality;
 import com.igormaznitsa.nanollvm.models.LlmModel;
 import com.igormaznitsa.nanollvm.models.LlmModelFactory;
+import com.igormaznitsa.nanollvm.models.LlmOutSoundData;
+import com.igormaznitsa.nanollvm.models.LlmOutText;
 import com.igormaznitsa.nanollvm.samples.utils.BundledModels;
 import com.igormaznitsa.nanollvm.samples.utils.KernelChatBenchSvg;
 import com.igormaznitsa.nanollvm.utils.KernelBackend;
@@ -48,7 +52,10 @@ import javax.imageio.ImageIO;
  * Prints a tok/s table and writes {@code kernel-chat-bench.svg}. When
  * {@code models/YOLO26n/detect/yolo26n.onnx} is present, the same backends then recognize the
  * street photo and write {@code kernel-yolo-bench.svg} in images per second. {@code --skip-yolo}
- * keeps the chat comparison only. {@code --yolo <path>} selects another detection file.
+ * keeps the chat comparison only. {@code --yolo <path>} selects another detection file. When a
+ * Whisper checkpoint and a Piper voice are present, each backend synthesizes {@code Hello, World.}
+ * and transcribes that clip. {@code --skip-speech} omits that pass. {@code --whisper} and
+ * {@code --piper} select the folders.
  *
  * <p>From the repository root:
  * {@code mvn -pl nano-vllm-java-samples -q exec:java
@@ -56,19 +63,24 @@ import javax.imageio.ImageIO;
  *
  * <p>Args: optional model path; {@code --svg <path>} (default {@code kernel-chat-bench.svg};
  * {@code --svg -} skips the file); {@code --max-tokens N}; {@code --runs N}; {@code --skip-yolo};
- * {@code --yolo <onnx>}. Internal {@code --worker} and {@code --workload chat|yolo} are used by
- * child JVMs. Default checkpoint prefers Qwen3-0.6B / Gemma3-270M over compact ONNX demos so
- * TornadoVM is not judged only on launch overhead.
+ * {@code --yolo <onnx>}; {@code --skip-speech}; {@code --whisper <folder>}; {@code --piper <folder>}.
+ * Internal {@code --worker} and {@code --workload chat|yolo|speech} are used by child JVMs.
+ * Default checkpoint prefers Qwen3-0.6B / Gemma3-270M over compact ONNX demos so TornadoVM is not
+ * judged only on launch overhead.
  */
 public final class KernelChatBench {
 
   static final String RESULT_PREFIX = "KERNEL_RESULT";
   static final String YOLO_RESULT_PREFIX = "YOLO_RESULT";
+  static final String SPEECH_RESULT_PREFIX = "SPEECH_RESULT";
   static final String DEFAULT_SVG_NAME = "kernel-chat-bench.svg";
   static final String DEFAULT_YOLO_SVG_NAME = "kernel-yolo-bench.svg";
+  static final String DEFAULT_SPEECH_SVG_NAME = "kernel-speech-bench.svg";
   static final String DEFAULT_BENCH_SVG_NAME = "kernel-bench.svg";
   static final String WORKLOAD_CHAT = "chat";
   static final String WORKLOAD_YOLO = "yolo";
+  static final String WORKLOAD_SPEECH = "speech";
+  static final String SPEECH_TEXT = "Hello, World.";
   static final String SVG_PROPERTY = "nanollvm.bench.svg";
   static final String CHAT_PROMPT =
       "Explain why the sky is blue in three short sentences. Mention Rayleigh scattering, "
@@ -175,6 +187,40 @@ public final class KernelChatBench {
         Integer.parseInt(parts[3]),
         Integer.parseInt(parts[4]),
         Long.parseLong(parts[5]),
+        Double.parseDouble(parts[6])));
+    } catch (NumberFormatException ignored) {
+      return Optional.empty();
+    }
+  }
+
+  static String formatSpeechLine(final SpeechResult result) {
+    requireNonNull(result, "result");
+    return String.join(
+      "\t",
+      SPEECH_RESULT_PREFIX,
+      result.mode(),
+      result.label(),
+      Long.toString(result.synthNanos()),
+      Long.toString(result.decodeNanos()),
+      String.format(Locale.ROOT, "%.6f", result.synthPerSecond()),
+      String.format(Locale.ROOT, "%.6f", result.decodePerSecond()));
+  }
+
+  static Optional<SpeechResult> parseSpeechLine(final String line) {
+    if (line == null || !line.startsWith(SPEECH_RESULT_PREFIX + "\t")) {
+      return Optional.empty();
+    }
+    String[] parts = line.split("\t", -1);
+    if (parts.length != 7) {
+      return Optional.empty();
+    }
+    try {
+      return Optional.of(new SpeechResult(
+        parts[1],
+        parts[2],
+        Long.parseLong(parts[3]),
+        Long.parseLong(parts[4]),
+        Double.parseDouble(parts[5]),
         Double.parseDouble(parts[6])));
     } catch (NumberFormatException ignored) {
       return Optional.empty();
@@ -292,8 +338,18 @@ public final class KernelChatBench {
     final List<YoloResult> yolo,
     final int runs
   ) {
+    return formatSpeedSummary(chat, yolo, List.of(), runs);
+  }
+
+  static String formatSpeedSummary(
+    final List<Result> chat,
+    final List<YoloResult> yolo,
+    final List<SpeechResult> speech,
+    final int runs
+  ) {
     requireNonNull(chat, "chat");
     requireNonNull(yolo, "yolo");
+    requireNonNull(speech, "speech");
     if (chat.isEmpty()) {
       throw new IllegalArgumentException("chat results must not be empty");
     }
@@ -308,6 +364,9 @@ public final class KernelChatBench {
     table.append("  timed runs: ").append(runs).append('\n');
     if (yolo.isEmpty()) {
       table.append("  YOLO was not run\n");
+    }
+    if (speech.isEmpty()) {
+      table.append("  speech was not run\n");
     }
     table.append(String.format(
       Locale.ROOT,
@@ -351,6 +410,35 @@ public final class KernelChatBench {
           picture.imagesPerSecond(),
           yoloVersus));
       }
+    }
+    if (!speech.isEmpty()) {
+      table.append('\n');
+      table.append(formatSpeechSummary(speech));
+    }
+    return table.toString();
+  }
+
+  private static String formatSpeechSummary(final List<SpeechResult> speech) {
+    SpeechResult baseline = speech.getFirst();
+    StringBuilder table = new StringBuilder();
+    table.append("Speech · ").append(SPEECH_TEXT).append('\n');
+    table.append(String.format(
+      Locale.ROOT,
+      "%-22s %12s %12s %12s %12s%n",
+      "Kernel",
+      "Synth s",
+      "Synth vs",
+      "Decode s",
+      "Decode vs"));
+    for (SpeechResult result : speech) {
+      table.append(String.format(
+        Locale.ROOT,
+        "%-22s %12.2f %11.2fx %12.2f %11.2fx%n",
+        result.label(),
+        secondsPerClip(result.synthPerSecond()),
+        speechSpeedup(result.synthPerSecond(), baseline.synthPerSecond()),
+        secondsPerClip(result.decodePerSecond()),
+        speechSpeedup(result.decodePerSecond(), baseline.decodePerSecond())));
     }
     return table.toString();
   }
@@ -396,29 +484,21 @@ public final class KernelChatBench {
       System.out.println();
       System.out.println("Wrote " + svgFile);
     }
-    runYolo(options, available, skipped, modelPath, results);
-  }
-
-  private static void runYolo(
-    final Options options,
-    final List<String> available,
-    final List<String> skipped,
-    final Path chatModel,
-    final List<Result> chat
-  ) throws Exception {
-    List<YoloResult> yolo = List.of();
-    if (!options.skipYolo()) {
-      yolo = timeYolo(options, available, skipped);
-    }
+    List<YoloResult> yolo = options.skipYolo()
+      ? List.of()
+      : timeYolo(options, available, skipped);
+    List<SpeechResult> speech = options.skipSpeech()
+      ? List.of()
+      : timeSpeech(options, available, skipped);
     System.out.println();
-    System.out.print(formatSpeedSummary(chat, yolo, options.runs()));
+    System.out.print(formatSpeedSummary(results, yolo, speech, options.runs()));
     Path svgFile = benchSvg(options.svgPath());
     if (svgFile == null) {
       return;
     }
     Files.writeString(
       svgFile.toAbsolutePath().normalize(),
-      renderBenchSvg(chatModel, chat, yolo),
+      renderBenchSvg(modelPath, results, yolo, speech),
       UTF_8);
     System.out.println();
     System.out.println("Wrote " + svgFile.toAbsolutePath().normalize());
@@ -468,9 +548,61 @@ public final class KernelChatBench {
     return results;
   }
 
+  private static List<SpeechResult> timeSpeech(
+    final Options options,
+    final List<String> available,
+    final List<String> skipped
+  ) throws Exception {
+    Optional<Path> whisper = resolveWhisperModel(options.whisperPath());
+    Optional<Path> piper = resolvePiperVoice(options.piperPath());
+    if (whisper.isEmpty() || piper.isEmpty()) {
+      System.out.println();
+      System.out.println(
+        "Speech benchmark skipped: a Whisper checkpoint and a Piper voice are both required.");
+      System.out.println(
+        "  Run ./models/download-whisper-tiny.sh and ./models/download-piper-en-lessac-medium.sh.");
+      return List.of();
+    }
+
+    Options bound = options.withSpeech(whisper.get(), piper.get());
+    System.out.println();
+    System.out.println("Kernel speech benchmark");
+    System.out.println("  voice: " + piper.get());
+    System.out.println("  whisper: " + whisper.get());
+    System.out.println("  text: " + SPEECH_TEXT);
+    System.out.println("  modes: " + String.join(", ", available));
+    if (!skipped.isEmpty()) {
+      System.out.println("  skipped: " + describeSkipped(skipped));
+    }
+    System.out.println();
+
+    List<SpeechResult> results = new ArrayList<>();
+    for (String mode : available) {
+      results.add(parseSpeechLine(runChildLine(mode, whisper.get(), bound, WORKLOAD_SPEECH))
+        .orElseThrow(() -> new IllegalStateException(
+          "no " + SPEECH_RESULT_PREFIX + " from worker " + mode)));
+    }
+
+    System.out.println();
+    System.out.print(formatSpeechTable(piper.get(), whisper.get(), bound, skipped, results));
+    Path svgFile = speechSvg(options.svgPath());
+    if (svgFile != null) {
+      Files.writeString(
+        svgFile.toAbsolutePath().normalize(), renderSpeechSvg(piper.get(), whisper.get(), results),
+        UTF_8);
+      System.out.println();
+      System.out.println("Wrote " + svgFile.toAbsolutePath().normalize());
+    }
+    return results;
+  }
+
   private static void runWorker(final Options options) throws Exception {
     if (options.yolo()) {
       runYoloWorker(options);
+      return;
+    }
+    if (options.speech()) {
+      runSpeechWorker(options);
       return;
     }
     Path modelPath = resolveModel(options.modelPath());
@@ -574,7 +706,9 @@ public final class KernelChatBench {
   }
 
   private static boolean isResultLine(final String line) {
-    return line.startsWith(RESULT_PREFIX + "\t") || line.startsWith(YOLO_RESULT_PREFIX + "\t");
+    return line.startsWith(RESULT_PREFIX + "\t")
+      || line.startsWith(YOLO_RESULT_PREFIX + "\t")
+      || line.startsWith(SPEECH_RESULT_PREFIX + "\t");
   }
 
   private static List<String> childCommand(
@@ -589,6 +723,17 @@ public final class KernelChatBench {
     if ("tornado".equals(mode)) {
       Path tornado = tornadoExecutable(System.getenv("TORNADOVM_HOME"), System.getenv("PATH"));
       if (tornado != null) {
+        if (WORKLOAD_SPEECH.equals(workload)) {
+          return tornadoChildCommand(
+            tornado,
+            classpath,
+            modelPath.toString(),
+            options.maxTokens(),
+            options.runs(),
+            workload,
+            options.whisperPath().toString(),
+            options.piperPath().toString());
+        }
         return tornadoChildCommand(
           tornado, classpath, modelPath.toString(), options.maxTokens(), options.runs(), workload);
       }
@@ -607,6 +752,13 @@ public final class KernelChatBench {
     command.add(Integer.toString(options.maxTokens()));
     command.add("--runs");
     command.add(Integer.toString(options.runs()));
+    if (WORKLOAD_SPEECH.equals(workload)) {
+      command.add("--whisper");
+      command.add(options.whisperPath().toString());
+      command.add("--piper");
+      command.add(options.piperPath().toString());
+      return List.copyOf(command);
+    }
     command.add(modelPath.toString());
     return List.copyOf(command);
   }
@@ -629,6 +781,20 @@ public final class KernelChatBench {
     final int runs,
     final String workload
   ) {
+    return tornadoChildCommand(
+      tornado, classpath, modelPath, maxTokens, runs, workload, null, null);
+  }
+
+  static List<String> tornadoChildCommand(
+    final Path tornado,
+    final String classpath,
+    final String modelPath,
+    final int maxTokens,
+    final int runs,
+    final String workload,
+    final String whisper,
+    final String piper
+  ) {
     requireNonNull(tornado, "tornado");
     requireNonNull(classpath, "classpath");
     requireNonNull(modelPath, "modelPath");
@@ -640,7 +806,7 @@ public final class KernelChatBench {
         shellQuote(classpath),
       "--jvm=-D" + PROP_KERNELS + "=tornado -Dtornado.enabled.backends=OpenCL"
         + " --add-modules=jdk.incubator.vector",
-      "--params=" + workerArguments(modelPath, maxTokens, runs, workload),
+      "--params=" + workerArguments(modelPath, maxTokens, runs, workload, whisper, piper),
       KernelChatBench.class.getName());
   }
 
@@ -651,10 +817,27 @@ public final class KernelChatBench {
   static String workerArguments(
     final String modelPath, final int maxTokens, final int runs, final String workload
   ) {
+    return workerArguments(modelPath, maxTokens, runs, workload, null, null);
+  }
+
+  static String workerArguments(
+    final String modelPath,
+    final int maxTokens,
+    final int runs,
+    final String workload,
+    final String whisper,
+    final String piper
+  ) {
     requireNonNull(modelPath, "modelPath");
     requireNonNull(workload, "workload");
+    if (WORKLOAD_SPEECH.equals(workload)) {
+      requireNonNull(whisper, "whisper");
+      requireNonNull(piper, "piper");
+      return "--worker --workload %s --max-tokens %d --runs %d --whisper %s --piper %s".formatted(
+        workload, maxTokens, runs, shellQuote(whisper), shellQuote(piper));
+    }
     if (!WORKLOAD_CHAT.equals(workload) && !WORKLOAD_YOLO.equals(workload)) {
-      throw new IllegalArgumentException("workload must be chat or yolo");
+      throw new IllegalArgumentException("workload must be chat, yolo, or speech");
     }
     return "--worker --workload %s --max-tokens %d --runs %d %s".formatted(
       workload, maxTokens, runs, shellQuote(modelPath));
@@ -840,6 +1023,31 @@ public final class KernelChatBench {
     return result.imagesPerSecond() / baseline.imagesPerSecond();
   }
 
+  private static double clipsPerSecond(final long elapsedNanos, final int runs) {
+    if (elapsedNanos <= 0L) {
+      return 0d;
+    }
+    return runs / (elapsedNanos / 1e9d);
+  }
+
+  private static double secondsPerClip(final double clipsPerSecond) {
+    return clipsPerSecond <= 0d ? 0d : 1d / clipsPerSecond;
+  }
+
+  private static double speechSpeedup(final double rate, final double baseline) {
+    if (baseline <= 0d) {
+      return 0d;
+    }
+    return rate / baseline;
+  }
+
+  private static Path requireDirectory(final Path path, final String role) {
+    if (path == null || !Files.isDirectory(path)) {
+      throw new IllegalStateException(role + " not found: " + path);
+    }
+    return path;
+  }
+
   private static void runYoloWorker(final Options options) throws Exception {
     Path modelPath = options.modelPath();
     if (modelPath == null || !Files.isRegularFile(modelPath)) {
@@ -885,6 +1093,85 @@ public final class KernelChatBench {
     }
   }
 
+  private static void runSpeechWorker(final Options options) throws Exception {
+    Path piper = requireDirectory(options.piperPath(), "Piper voice");
+    Path whisper = requireDirectory(options.whisperPath(), "Whisper checkpoint");
+    TimedClip clip = synthesizeHello(piper, options);
+    long decodeNanos = transcribeHello(whisper, clip.wav(), options);
+    double synthPerSecond = clipsPerSecond(clip.nanos(), options.runs());
+    double decodePerSecond = clipsPerSecond(decodeNanos, options.runs());
+    System.out.println(formatSpeechLine(new SpeechResult(
+      normalizedMode(),
+      KernelBackend.label(),
+      clip.nanos(),
+      decodeNanos,
+      synthPerSecond,
+      decodePerSecond)));
+  }
+
+  private static TimedClip synthesizeHello(final Path piper, final Options options)
+    throws Exception {
+    System.out.println("Loading voice from " + piper);
+    System.out.println(KernelBackend.summaryLine());
+    LlmInText line = LlmInText.of(SPEECH_TEXT);
+    try (LlmModel model = LlmModelFactory.make(piper);
+         LLM llm = LLM.builder(model).allCpuThreads().build()) {
+      if ("tornado".equals(normalizedMode())) {
+        System.out.println(
+          "TornadoVM compiles speech kernels on first use. The warmup stays quiet, then synthesis continues.");
+      }
+      System.out.println("Warmup synthesize");
+      System.out.flush();
+      llm.generate(line, LlmModality.AUDIO);
+      System.out.println("Warmup finished");
+      System.out.flush();
+
+      long elapsedNanos = 0L;
+      byte[] wav = null;
+      for (int run = 0; run < options.runs(); run++) {
+        System.out.println("Synthesize " + (run + 1) + " of " + options.runs());
+        System.out.flush();
+        long started = System.nanoTime();
+        LlmOutSoundData sound = llm.generate(line, LlmModality.AUDIO);
+        elapsedNanos += System.nanoTime() - started;
+        wav = sound.wav();
+      }
+      if (wav == null) {
+        throw new IllegalStateException("synthesis produced no audio");
+      }
+      return new TimedClip(wav, elapsedNanos);
+    }
+  }
+
+  private static long transcribeHello(
+    final Path whisper, final byte[] wav, final Options options
+  ) throws Exception {
+    System.out.println("Loading speech model from " + whisper);
+    LlmInSound input = LlmInSound.ofWav(wav);
+    try (LlmModel model = LlmModelFactory.make(whisper);
+         LLM llm = LLM.builder(model).allCpuThreads().build()) {
+      if ("tornado".equals(normalizedMode())) {
+        System.out.println(
+          "TornadoVM compiles speech kernels on first use. The warmup stays quiet, then transcription continues.");
+      }
+      System.out.println("Warmup transcribe");
+      System.out.flush();
+      LlmOutText warmup = llm.generate(input, LlmModality.TEXT);
+      System.out.println("Warmup transcript: " + warmup.text());
+      System.out.flush();
+
+      long elapsedNanos = 0L;
+      for (int run = 0; run < options.runs(); run++) {
+        System.out.println("Transcribe " + (run + 1) + " of " + options.runs());
+        System.out.flush();
+        long started = System.nanoTime();
+        llm.generate(input, LlmModality.TEXT);
+        elapsedNanos += System.nanoTime() - started;
+      }
+      return elapsedNanos;
+    }
+  }
+
   static Optional<Path> resolveYoloModel(final Path cliPath) {
     if (cliPath != null) {
       Path path = cliPath.toAbsolutePath().normalize();
@@ -905,8 +1192,29 @@ public final class KernelChatBench {
     return Optional.empty();
   }
 
+  static Optional<Path> resolveWhisperModel(final Path cliPath) {
+    if (cliPath != null) {
+      return Optional.of(
+        requireDirectory(cliPath.toAbsolutePath().normalize(), "Whisper checkpoint"));
+    }
+    return BundledModels.find(BundledModels.WHISPER_TINY)
+      .or(() -> BundledModels.find(BundledModels.WHISPER_BASE));
+  }
+
+  static Optional<Path> resolvePiperVoice(final Path cliPath) {
+    if (cliPath != null) {
+      return Optional.of(requireDirectory(cliPath.toAbsolutePath().normalize(), "Piper voice"));
+    }
+    return BundledModels.find(BundledModels.PIPER_EN_LESSAC_MEDIUM)
+      .or(() -> BundledModels.find(BundledModels.PIPER_RU_IRINA_MEDIUM));
+  }
+
   static Path yoloSvg(final Path chatSvg) {
     return siblingSvg(chatSvg, DEFAULT_YOLO_SVG_NAME);
+  }
+
+  static Path speechSvg(final Path chatSvg) {
+    return siblingSvg(chatSvg, DEFAULT_SPEECH_SVG_NAME);
   }
 
   static Path benchSvg(final Path chatSvg) {
@@ -948,8 +1256,24 @@ public final class KernelChatBench {
       yoloBars(results));
   }
 
+  private static String renderSpeechSvg(
+    final Path piper, final Path whisper, final List<SpeechResult> results
+  ) {
+    return KernelChatBenchSvg.renderSections(
+      "Speech speed",
+      speechSubtitle(piper, whisper),
+      List.of(
+        new KernelChatBenchSvg.Section(
+          "Speech · synthesized clips per second", "clip/s", speechBars(results, false)),
+        new KernelChatBenchSvg.Section(
+          "Speech · transcribed clips per second", "clip/s", speechBars(results, true))));
+  }
+
   private static String renderBenchSvg(
-    final Path chatModel, final List<Result> chat, final List<YoloResult> yolo
+    final Path chatModel,
+    final List<Result> chat,
+    final List<YoloResult> yolo,
+    final List<SpeechResult> speech
   ) {
     Result baseline = chat.getFirst();
     List<KernelChatBenchSvg.Bar> chatBars = chat.stream()
@@ -965,13 +1289,120 @@ public final class KernelChatBench {
       sections.add(new KernelChatBenchSvg.Section(
         "YOLO · time per street photo", "img/s", yoloBars(yolo)));
     }
+    if (!speech.isEmpty()) {
+      sections.add(new KernelChatBenchSvg.Section(
+        "Speech · synthesized clips per second", "clip/s", speechBars(speech, false)));
+      sections.add(new KernelChatBenchSvg.Section(
+        "Speech · transcribed clips per second", "clip/s", speechBars(speech, true)));
+    }
     Path fileName = chatModel.getFileName();
     String modelName = fileName == null ? chatModel.toString() : fileName.toString();
-    String subtitle = yolo.isEmpty()
-      ? "%s · %s".formatted(modelName, UTC_STAMP.format(Instant.now()))
-      : "%s · YOLO %s · %s".formatted(
-      modelName, yoloSubtitle(null, yolo.getFirst()), UTC_STAMP.format(Instant.now()));
-    return KernelChatBenchSvg.renderSections("Chat and YOLO", subtitle, sections);
+    String subtitle = benchSubtitle(modelName, yolo, speech);
+    String title = speech.isEmpty() ? "Chat and YOLO" : "Chat, YOLO, and speech";
+    return KernelChatBenchSvg.renderSections(title, subtitle, sections);
+  }
+
+  private static String benchSubtitle(
+    final String modelName, final List<YoloResult> yolo, final List<SpeechResult> speech
+  ) {
+    String stamp = UTC_STAMP.format(Instant.now());
+    if (yolo.isEmpty() && speech.isEmpty()) {
+      return "%s · %s".formatted(modelName, stamp);
+    }
+    if (yolo.isEmpty()) {
+      return "%s · %s · %s".formatted(modelName, SPEECH_TEXT, stamp);
+    }
+    if (speech.isEmpty()) {
+      return "%s · YOLO %s · %s".formatted(modelName, yoloSubtitle(null, yolo.getFirst()), stamp);
+    }
+    return "%s · YOLO %s · %s · %s".formatted(
+      modelName, yoloSubtitle(null, yolo.getFirst()), SPEECH_TEXT, stamp);
+  }
+
+  private static List<KernelChatBenchSvg.Bar> speechBars(
+    final List<SpeechResult> results, final boolean decode
+  ) {
+    SpeechResult baseline = results.getFirst();
+    double baseRate = decode ? baseline.decodePerSecond() : baseline.synthPerSecond();
+    return results.stream()
+      .map(result -> {
+        double rate = decode ? result.decodePerSecond() : result.synthPerSecond();
+        double speedup = speechSpeedup(rate, baseRate);
+        String caption = String.format(
+          Locale.ROOT,
+          "%.2f s · %.2f clip/s (%.2fx)",
+          secondsPerClip(rate),
+          rate,
+          speedup);
+        return new KernelChatBenchSvg.Bar(result.mode(), result.label(), rate, speedup, caption);
+      })
+      .toList();
+  }
+
+  private static String speechSubtitle(final Path piper, final Path whisper) {
+    return "%s · %s · %s · %s".formatted(
+      folderName(piper), folderName(whisper), SPEECH_TEXT, UTC_STAMP.format(Instant.now()));
+  }
+
+  private static String folderName(final Path path) {
+    Path fileName = path.getFileName();
+    return fileName == null ? path.toString() : fileName.toString();
+  }
+
+  static String formatSpeechTable(
+    final Path piper,
+    final Path whisper,
+    final Options options,
+    final List<String> skipped,
+    final List<SpeechResult> results
+  ) {
+    requireNonNull(piper, "piper");
+    requireNonNull(whisper, "whisper");
+    requireNonNull(options, "options");
+    requireNonNull(skipped, "skipped");
+    requireNonNull(results, "results");
+    if (results.isEmpty()) {
+      throw new IllegalArgumentException("results must not be empty");
+    }
+
+    SpeechResult baseline = results.getFirst();
+    StringBuilder table = new StringBuilder();
+    table.append("Kernel speech benchmark\n");
+    table.append("  voice: ").append(piper).append('\n');
+    table.append("  whisper: ").append(whisper).append('\n');
+    table.append("  text: ").append(SPEECH_TEXT).append('\n');
+    table.append("  runs: ").append(options.runs()).append(" (plus 1 warmup)\n");
+    if (skipped.isEmpty()) {
+      table.append("  backends: ")
+        .append(results.stream().map(SpeechResult::mode).collect(joining(", ")))
+        .append('\n');
+    } else {
+      table.append("  skipped: ").append(describeSkipped(skipped)).append('\n');
+    }
+    table.append('\n');
+    table.append(String.format(
+      Locale.ROOT,
+      "%-22s %10s %10s %10s %10s %10s %10s%n",
+      "Kernel",
+      "Synth s",
+      "clip/s",
+      "vs scalar",
+      "Decode s",
+      "clip/s",
+      "vs scalar"));
+    for (SpeechResult result : results) {
+      table.append(String.format(
+        Locale.ROOT,
+        "%-22s %10.2f %10.2f %9.2fx %10.2f %10.2f %9.2fx%n",
+        result.label(),
+        secondsPerClip(result.synthPerSecond()),
+        result.synthPerSecond(),
+        speechSpeedup(result.synthPerSecond(), baseline.synthPerSecond()),
+        secondsPerClip(result.decodePerSecond()),
+        result.decodePerSecond(),
+        speechSpeedup(result.decodePerSecond(), baseline.decodePerSecond())));
+    }
+    return table.toString();
   }
 
   private static List<KernelChatBenchSvg.Bar> yoloBars(final List<YoloResult> results) {
@@ -1050,6 +1481,23 @@ public final class KernelChatBench {
     }
   }
 
+  record SpeechResult(
+    String mode,
+    String label,
+    long synthNanos,
+    long decodeNanos,
+    double synthPerSecond,
+    double decodePerSecond
+  ) {
+    SpeechResult {
+      requireNonNull(mode, "mode");
+      requireNonNull(label, "label");
+    }
+  }
+
+  private record TimedClip(byte[] wav, long nanos) {
+  }
+
   record Options(
     boolean worker,
     String workload,
@@ -1058,7 +1506,10 @@ public final class KernelChatBench {
     boolean skipYolo,
     Path svgPath,
     int maxTokens,
-    int runs
+    int runs,
+    boolean skipSpeech,
+    Path whisperPath,
+    Path piperPath
   ) {
     static Options parse(final String[] args) {
       boolean worker = false;
@@ -1066,6 +1517,9 @@ public final class KernelChatBench {
       Path modelPath = null;
       Path yoloPath = null;
       boolean skipYolo = false;
+      boolean skipSpeech = false;
+      Path whisperPath = null;
+      Path piperPath = null;
       Path svgPath = Path.of(DEFAULT_SVG_NAME);
       boolean svgFromCli = false;
       int maxTokens = DEFAULT_MAX_TOKENS;
@@ -1083,6 +1537,14 @@ public final class KernelChatBench {
           skipYolo = true;
         } else if ("--yolo".equals(arg)) {
           yoloPath = Path.of(requireValue(argv, index, "--yolo"));
+          index++;
+        } else if ("--skip-speech".equals(arg)) {
+          skipSpeech = true;
+        } else if ("--whisper".equals(arg)) {
+          whisperPath = Path.of(requireValue(argv, index, "--whisper"));
+          index++;
+        } else if ("--piper".equals(arg)) {
+          piperPath = Path.of(requireValue(argv, index, "--piper"));
           index++;
         } else if ("--svg".equals(arg)) {
           String value = requireValue(argv, index, "--svg");
@@ -1104,8 +1566,10 @@ public final class KernelChatBench {
         }
       }
 
-      if (!WORKLOAD_CHAT.equals(workload) && !WORKLOAD_YOLO.equals(workload)) {
-        throw new IllegalArgumentException("workload must be chat or yolo");
+      if (!WORKLOAD_CHAT.equals(workload)
+        && !WORKLOAD_YOLO.equals(workload)
+        && !WORKLOAD_SPEECH.equals(workload)) {
+        throw new IllegalArgumentException("workload must be chat, yolo, or speech");
       }
       if (!worker && !svgFromCli) {
         svgPath = svgFromPropertyOrDefault(svgPath);
@@ -1117,11 +1581,31 @@ public final class KernelChatBench {
         throw new IllegalArgumentException("runs must be >= 1");
       }
       return new Options(
-        worker, workload, modelPath, yoloPath, skipYolo, svgPath, maxTokens, runs);
+        worker, workload, modelPath, yoloPath, skipYolo, svgPath, maxTokens, runs,
+        skipSpeech, whisperPath, piperPath);
     }
 
     boolean yolo() {
       return WORKLOAD_YOLO.equals(this.workload);
+    }
+
+    boolean speech() {
+      return WORKLOAD_SPEECH.equals(this.workload);
+    }
+
+    Options withSpeech(final Path whisper, final Path piper) {
+      return new Options(
+        this.worker,
+        this.workload,
+        this.modelPath,
+        this.yoloPath,
+        this.skipYolo,
+        this.svgPath,
+        this.maxTokens,
+        this.runs,
+        this.skipSpeech,
+        whisper,
+        piper);
     }
 
     private static String requireValue(final String[] argv, final int index, final String flag) {

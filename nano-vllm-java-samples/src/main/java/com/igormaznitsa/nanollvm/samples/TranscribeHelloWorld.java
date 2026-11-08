@@ -43,20 +43,27 @@ public final class TranscribeHelloWorld {
       : LlmInSound.ofPcm(tonePcm(), SAMPLE_RATE);
 
     System.out.println("Loading speech model from " + modelDir);
-    long started = System.currentTimeMillis();
+    long started = System.nanoTime();
     try (LlmModel model = LlmModelFactory.make(modelDir);
          LLM llm = LLM.builder(model).allCpuThreads().build()) {
+      long loaded = System.nanoTime();
+      System.out.println("loaded in " + seconds(loaded - started)
+        + " (" + llm.config().cpuThreads() + " cpu)");
       System.out.println("architecture=" + model.architectureName()
         + " speech=" + model.isSpeechModel()
         + " modalities=" + model.modalities()
         + " usable=" + model.usableModalities());
       System.out.println(wav.map(path -> "WAV " + path).orElse("PCM " + SAMPLE_RATE + " Hz"));
       LlmOutText out = llm.generate(input, LlmModality.TEXT);
+      long decoded = System.nanoTime();
       String text = out.text();
+      System.out.println("decoded in " + seconds(decoded - loaded));
       System.out.printf(Locale.ROOT, "transcript: %s%n", text.isBlank() ? "(empty)" : text);
-    } finally {
-      System.out.println("Time taken: " + (System.currentTimeMillis() - started) + "ms");
     }
+  }
+
+  private static String seconds(final long nanos) {
+    return String.format(Locale.ROOT, "%.3f s", nanos / 1e9);
   }
 
   static Optional<Path> wavPath(final String[] args) {

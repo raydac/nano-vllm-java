@@ -21,11 +21,11 @@ final class WhisperLogMelTest {
   }
 
   @Test
-  void emptyPcmIsPaddedToThirtySeconds() {
+  void emptyPcmIsOneHop() {
     Tensor mel = WhisperLogMel.features(new float[0], WhisperLogMel.SAMPLE_RATE);
 
     assertEquals(WhisperLogMel.N_MELS, mel.size(0));
-    assertEquals(WhisperLogMel.N_FRAMES, mel.size(1));
+    assertEquals(1, mel.size(1));
   }
 
   @Test

@@ -7,7 +7,8 @@ import com.igormaznitsa.nanollvm.tensor.MatmulRuntime;
 import com.igormaznitsa.nanollvm.tensor.Tensor;
 
 /**
- * OpenAI Whisper log-mel features: 16 kHz, n_fft=400, hop=160, 80 Slaney mels, 30 s pad/trim.
+ * OpenAI Whisper log-mel features: 16 kHz, n_fft=400, hop=160, 80 Slaney mels.
+ * Audio is trimmed or zero-padded to 30 s chunks.
  *
  * <p>STFT uses Bluestein FFT (n_fft is not a power of two). Mel filters are stored sparsely.
  * Frame loops may run on a {@link MatmulRuntime} pool when one is supplied.
@@ -50,12 +51,13 @@ public final class WhisperLogMel {
   }
 
   /**
-   * Resamples mono PCM to 16 kHz when needed, then computes Whisper log-mel {@code [80, 3000]}.
-   * Audio longer than 30 s is trimmed; shorter audio is zero-padded.
+   * Resamples mono PCM to 16 kHz when needed, then computes Whisper log-mel.
+   * Audio longer than 30 s is trimmed to one chunk here; {@code WhisperForAsr} splits a longer
+   * recording into 30 s pieces. Shorter audio is zero-padded to 30 s.
    *
    * @param pcm        mono samples
    * @param sampleRate Hertz of {@code pcm}
-   * @return log-mel spectrogram {@code [numMelBins, 3000]}
+   * @return log-mel spectrogram {@code [numMelBins, frames]}
    */
   public static Tensor features(final float[] pcm, final int sampleRate) {
     return features(pcm, sampleRate, MatmulRuntime.sequential());
@@ -67,7 +69,7 @@ public final class WhisperLogMel {
    * @param pcm        mono samples
    * @param sampleRate Hertz of {@code pcm}
    * @param runtime    matmul / range pool; must not be {@code null}
-   * @return log-mel spectrogram {@code [numMelBins, 3000]}
+   * @return log-mel spectrogram {@code [numMelBins, frames]}
    * @since 1.3.0
    */
   public static Tensor features(
@@ -85,13 +87,14 @@ public final class WhisperLogMel {
   }
 
   /**
-   * Log-mel for a slice of already-16 kHz PCM without copying the slice first.
+   * Log-mel for a slice of already-16 kHz PCM. The slice is trimmed or zero-padded to 30 s.
+   * Empty audio is one hop of silence.
    *
    * @param pcm16k  mono 16 kHz samples
    * @param origin  start index
-   * @param length  slice length ({@code >= 0}); trimmed/padded to 30 s
+   * @param length  slice length ({@code >= 0})
    * @param runtime matmul / range pool; must not be {@code null}
-   * @return log-mel spectrogram {@code [numMelBins, 3000]}
+   * @return log-mel spectrogram {@code [numMelBins, frames]}
    * @since 1.3.0
    */
   public static Tensor featuresAt16k(
@@ -105,11 +108,21 @@ public final class WhisperLogMel {
     if (origin < 0 || length < 0 || (long) origin + length > pcm16k.length) {
       throw new IllegalArgumentException("pcm slice out of range");
     }
-    float[] chunk = padOrTrim(pcm16k, origin, length, CHUNK_SAMPLES);
-    float[] spec = stftPower(chunk, runtime);
-    float[] mel = applyMel(spec);
+    int samples = Math.min(length, CHUNK_SAMPLES);
+    int target = samples == 0 ? HOP_LENGTH : CHUNK_SAMPLES;
+    float[] chunk = padOrTrim(pcm16k, origin, samples, target);
+    int frames = frameCount(target);
+    float[] spec = stftPower(chunk, frames, runtime);
+    float[] mel = applyMel(spec, frames);
     normalizeLogMel(mel);
-    return Tensor.of(mel, N_MELS, N_FRAMES);
+    return Tensor.of(mel, N_MELS, frames);
+  }
+
+  static int frameCount(final int samples) {
+    if (samples >= CHUNK_SAMPLES) {
+      return N_FRAMES;
+    }
+    return Math.max(1, samples / HOP_LENGTH);
   }
 
   /**
@@ -156,17 +169,21 @@ public final class WhisperLogMel {
     return out;
   }
 
-  private static float[] stftPower(final float[] pcm, final MatmulRuntime runtime) {
+  private static float[] stftPower(
+    final float[] pcm, final int frames, final MatmulRuntime runtime
+  ) {
     int pad = N_FFT / 2;
     float[] padded = new float[pcm.length + 2 * pad];
-    System.arraycopy(pcm, 0, padded, pad, pcm.length);
-    for (int i = 0; i < pad; i++) {
-      padded[pad - 1 - i] = pcm[Math.min(i, pcm.length - 1)];
-      padded[pad + pcm.length + i] = pcm[Math.max(0, pcm.length - 1 - i)];
+    if (pcm.length > 0) {
+      System.arraycopy(pcm, 0, padded, pad, pcm.length);
+      for (int i = 0; i < pad; i++) {
+        padded[pad - 1 - i] = pcm[Math.min(i, pcm.length - 1)];
+        padded[pad + pcm.length + i] = pcm[Math.max(0, pcm.length - 1 - i)];
+      }
     }
-    float[] spec = new float[N_FRAMES * FREQ_BINS];
+    float[] spec = new float[frames * FREQ_BINS];
     int fftSize = DFT.fftSize();
-    runtime.parallelRanges(N_FRAMES, (start, end) -> {
+    runtime.parallelRanges(frames, (start, end) -> {
       float[] scratchRe = new float[fftSize];
       float[] scratchIm = new float[fftSize];
       float[] aRe = new float[fftSize];
@@ -187,9 +204,9 @@ public final class WhisperLogMel {
     return spec;
   }
 
-  private static float[] applyMel(final float[] spec) {
-    float[] mel = new float[N_MELS * N_FRAMES];
-    for (int frame = 0; frame < N_FRAMES; frame++) {
+  private static float[] applyMel(final float[] spec, final int frames) {
+    float[] mel = new float[N_MELS * frames];
+    for (int frame = 0; frame < frames; frame++) {
       int specOff = frame * FREQ_BINS;
       for (int m = 0; m < N_MELS; m++) {
         SparseMel filter = MEL_FILTERS[m];
@@ -199,7 +216,7 @@ public final class WhisperLogMel {
         for (int i = 0; i < weights.length; i++) {
           sum += weights[i] * spec[specOff + start + i];
         }
-        mel[m * N_FRAMES + frame] = sum;
+        mel[m * frames + frame] = sum;
       }
     }
     return mel;

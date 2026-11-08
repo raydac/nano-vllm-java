@@ -40,3 +40,4 @@ models/YOLO26n/
 /yolo-street-seg.png
 /kernel-bench.svg
 /kernel-yolo-bench.svg
+/kernel-speech-bench.svg

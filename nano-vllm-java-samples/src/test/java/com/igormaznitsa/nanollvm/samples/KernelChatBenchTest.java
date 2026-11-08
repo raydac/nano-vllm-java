@@ -140,6 +140,78 @@ class KernelChatBenchTest {
   }
 
   @Test
+  void speechResultLineRoundTrips() {
+    KernelChatBench.SpeechResult original = new KernelChatBench.SpeechResult(
+      "vector", "Vector API (SIMD)", 1_500_000_000L, 7_000_000_000L, 1.333333d, 0.285714d);
+    String line = KernelChatBench.formatSpeechLine(original);
+    KernelChatBench.SpeechResult result = KernelChatBench.parseSpeechLine(line).orElseThrow();
+    assertEquals(original.mode(), result.mode());
+    assertEquals(original.label(), result.label());
+    assertEquals(original.synthNanos(), result.synthNanos());
+    assertEquals(original.decodeNanos(), result.decodeNanos());
+    assertEquals(original.synthPerSecond(), result.synthPerSecond(), 1e-6d);
+    assertEquals(original.decodePerSecond(), result.decodePerSecond(), 1e-6d);
+  }
+
+  @Test
+  void speedSummaryShowsSpeechSecondsBesideChat() {
+    List<KernelChatBench.Result> chat = List.of(
+      new KernelChatBench.Result("scalar", "Scalar Java", 18, 64, 10_000_000_000L, 6.4d));
+    List<KernelChatBench.SpeechResult> speech = List.of(
+      new KernelChatBench.SpeechResult("scalar", "Scalar Java", 2_000_000_000L, 8_000_000_000L,
+        1.0d, 0.25d),
+      new KernelChatBench.SpeechResult("vector", "Vector API (SIMD)", 1_000_000_000L,
+        4_000_000_000L, 2.0d, 0.5d));
+    String table = KernelChatBench.formatSpeedSummary(chat, List.of(), speech, 2);
+
+    assertTrue(table.contains("Speech · Hello, World."));
+    assertTrue(table.contains("Synth s"));
+    assertTrue(table.contains("Decode s"));
+    assertTrue(table.contains("1.00"));
+    assertTrue(table.contains("4.00"));
+    assertTrue(table.contains("2.00x"));
+    assertEquals(
+      Path.of("out", "kernel-speech-bench.svg"),
+      KernelChatBench.speechSvg(Path.of("out", "kernel-chat-bench.svg")));
+    assertNull(KernelChatBench.speechSvg(null));
+  }
+
+  @Test
+  void tornadoSpeechChildNamesTheVoiceAndTheCheckpoint() {
+    List<String> command = KernelChatBench.tornadoChildCommand(
+      Path.of("/opt/tornado"),
+      "classes",
+      "/models/whisper-tiny",
+      8,
+      2,
+      KernelChatBench.WORKLOAD_SPEECH,
+      "/models/whisper-tiny",
+      "/models/piper-en-lessac-medium");
+    assertTrue(command.stream().anyMatch(arg ->
+      arg.contains("--workload speech")
+        && arg.contains("--whisper")
+        && arg.contains("--piper")
+        && arg.contains(KernelChatBench.shellQuote("/models/whisper-tiny"))
+        && arg.contains(KernelChatBench.shellQuote("/models/piper-en-lessac-medium"))));
+  }
+
+  @Test
+  void parseOptionsReadsSpeechFolders() {
+    KernelChatBench.Options options = KernelChatBench.Options.parse(new String[] {
+      "--skip-speech",
+      "--whisper", "models/whisper-base",
+      "--piper", "models/piper-en-lessac-medium"
+    });
+    assertTrue(options.skipSpeech());
+    assertEquals(Path.of("models/whisper-base"), options.whisperPath());
+    assertEquals(Path.of("models/piper-en-lessac-medium"), options.piperPath());
+    KernelChatBench.Options bound = options.withSpeech(Path.of("w"), Path.of("p"));
+    assertFalse(bound.speech());
+    assertEquals(Path.of("w"), bound.whisperPath());
+    assertEquals(Path.of("p"), bound.piperPath());
+  }
+
+  @Test
   void tornadoClasspathIsQuotedForCmdSeparator() {
     String windowsCp = "C:\\samples\\classes;C:\\nano-vllm-java\\classes";
     List<String> command = KernelChatBench.tornadoChildCommand(

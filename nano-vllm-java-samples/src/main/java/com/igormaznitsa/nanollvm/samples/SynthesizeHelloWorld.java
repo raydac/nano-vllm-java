@@ -45,18 +45,23 @@ public final class SynthesizeHelloWorld {
     Path espeak = modelDir.resolve("espeak-ng-data");
 
     System.out.println("Loading synthesis model from " + modelDir);
-    long started = System.currentTimeMillis();
+    long started = System.nanoTime();
     try (LlmModel model = LlmModelFactory.open(modelDir)
       .optionalData(LlmOptionalData.ESPEAK_DATA, espeak)
       .make();
          LLM llm = LLM.builder(model).allCpuThreads().build()) {
+      long loaded = System.nanoTime();
+      System.out.println("loaded in " + seconds(loaded - started)
+        + " (" + llm.config().cpuThreads() + " cpu)");
       System.out.println("architecture=" + model.architectureName()
         + " synthesis=" + model.isSynthesisModel()
         + " modalities=" + model.modalities()
         + " usable=" + model.usableModalities());
       LlmOutSoundData sound = llm.generate(LlmInText.of(text), LlmModality.AUDIO);
+      long synthesized = System.nanoTime();
       byte[] wav = sound.wav();
       Files.write(wavOut, wav);
+      System.out.println("synthesized in " + seconds(synthesized - loaded));
       System.out.printf(
         Locale.ROOT,
         "wrote %d bytes (%d PCM16 frames, %d Hz) to %s%n",
@@ -64,9 +69,11 @@ public final class SynthesizeHelloWorld {
         (wav.length - 44) / 2,
         sound.sampleRate(),
         wavOut);
-    } finally {
-      System.out.println("Time taken: " + (System.currentTimeMillis() - started) + "ms");
     }
+  }
+
+  private static String seconds(final long nanos) {
+    return String.format(Locale.ROOT, "%.3f s", nanos / 1e9);
   }
 
   static Path defaultWavPath() {

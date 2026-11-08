@@ -406,7 +406,7 @@ public final class WhisperForAsr implements SpeechToText {
       if (id == eot) {
         continue;
       }
-      String piece = tokenizer.decode(List.of(id), false);
+      String piece = tokenizer.piece(id);
       suppress[id] = piece.startsWith("<|") && piece.endsWith("|>");
     }
     this.suppressMask = suppress;

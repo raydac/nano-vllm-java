@@ -1776,14 +1776,13 @@ Whisper ONNX are refused.
 There is **no** chat template, chat `Transformer` KV arena, or next-token sampler on this path. The
 **decoder** still keeps a growing **self-attention KV cache** so each new token runs one decode step
 (not a full prefix replay). Decode is **greedy** (highest logit), multilingual, with optional language.
-Clips longer than 30 s are split into 30 s chunks (mel features read each slice in place — no per-chunk
-PCM copy).
+Clips longer than 30 s are split into 30 s chunks. A shorter clip is zero-padded to 30 s.
 
 ### How this project loads and runs it
 
 1. **Same factory:** `LlmModelFactory.make(pathToWhisperFolder)`.
 2. **Detect:** `model.isSpeechModel()` is true; `architectureName()` is `whisper`.
-3. **Open an engine:** `LLM.builder(model).build()` — same `cpuThreads` / matmul pool as chat (Linear, attention, stem Conv1d).
+3. **Open an engine:** `LLM.builder(model).build()` — same `cpuThreads` / matmul pool as chat. Encoder and decoder matrix multiplies, and the stem Conv1d, use those matmul kernels.
 4. **Transcribe:** `llm.generate(LlmInSound.ofWav(wavBytes), TEXT)` (or `ofPcm`); read files yourself before calling.
 5. **Language:** pass a `Locale` (`null` / `Locale.ROOT` = auto-detect; region is ignored — `Locale.US` is English).
 
@@ -1808,7 +1807,7 @@ chains STT → mood of the transcript → chat → TTS; `Example` opens a WAV se
 WAV bytes or PCM
   → mix to mono, resample to 16 kHz
   → log-mel (Bluestein FFT STFT, sparse Slaney mels; frames may run in parallel on the matmul pool)
-  → encoder (bidirectional transformer)
+  → encoder (bidirectional transformer; a long sequence is one matmul per attention head, and the heads run together)
   → greedy decoder with incremental self-attn KV (language token, then text tokens)
   → tokenizer decode → String
 ```
@@ -1857,7 +1856,7 @@ exist; `VoiceReplyHelloWorld` uses that voice for the spoken reply.
 1. **Same factory:** `LlmModelFactory.make(voiceFolder)` (detects `*.onnx` + `*.onnx.json`).
 2. **Optional espeak-ng-data:** `LlmModelFactory.open(path).optionalData(LlmOptionalData.ESPEAK_DATA, dataDir).make()`.
    Default directory is `{model}/espeak-ng-data`. A missing or incomplete folder is **ignored** — TTS still runs.
-3. **Open an engine:** `LLM.builder(model).build()` — same CPU pool; 1-D conv / conv-transpose split output channels.
+3. **Open an engine:** `LLM.builder(model).build()` — same CPU pool. Single-group 1-D conv and conv-transpose use the chat matmul kernels; a depthwise filter runs SIMD along the waveform; other filters split output channels.
    Non-chat engines skip KV paging (a large heap no longer overflows `int` when sizing chat KV for a voice with no
    transformer layers).
 4. **Speak:** `LlmOutSoundData sound = llm.generate(LlmInText.of("Hello world"), LlmModality.AUDIO);`
