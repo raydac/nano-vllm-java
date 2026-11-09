@@ -80,7 +80,7 @@ public final class Yolo26Model {
   }
 
   public List<String> classNames() {
-    return this.names;
+    return List.copyOf(this.names);
   }
 
   public LlmModality outputModality() {
@@ -138,7 +138,7 @@ public final class Yolo26Model {
 
   private void requireImageRequest(final LlmInImage request) {
     if (!this.emitsObjects()
-      && request.minProbability() != LlmInImage.DEFAULT_MIN_PROBABILITY) {
+      && Float.compare(request.minProbability(), LlmInImage.DEFAULT_MIN_PROBABILITY) != 0) {
       throw new IllegalArgumentException(
         "minProbability applies to detection, segmentation, pose, and oriented boxes");
     }
@@ -147,7 +147,8 @@ public final class Yolo26Model {
         "maxDetections applies to detection, segmentation, pose, and oriented boxes");
     }
     if (this.task != YoloTask.POSE
-      && request.keypointMinProbability() != LlmInImage.DEFAULT_KEYPOINT_MIN_PROBABILITY) {
+      && Float.compare(
+      request.keypointMinProbability(), LlmInImage.DEFAULT_KEYPOINT_MIN_PROBABILITY) != 0) {
       throw new IllegalArgumentException("keypointMinProbability applies to pose");
     }
     if (this.task != YoloTask.CLASSIFY && request.maxLabels() != LlmInImage.DEFAULT_MAX_LABELS) {
