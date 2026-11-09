@@ -412,8 +412,8 @@ public record Gemma4ForCausalLM(Gemma4Model model, ParallelLMHead lmHead, float 
       beginLayer();
       Tensor hidden = Ops.scale(this.embedTokens.forward(inputIds, context), this.embedScale);
       Tensor perLayer = this.combinePerLayerInputs(inputIds, hidden, context);
-      DeviceDecoders.openFrame();
       try {
+        DeviceDecoders.openFrame();
         for (int i = 0; i < this.layers.size(); i++) {
           Tensor next = this.layers.get(i).forward(
             positions, hidden, this.sliceLayer(perLayer, i), context);

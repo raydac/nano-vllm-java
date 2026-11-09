@@ -10,9 +10,10 @@ import java.util.Map;
 /**
  * Reuses large activation {@code float[]} buffers for one transformer step.
  *
- * <p>Bound on the generate thread for {@code Transformer} step / prefill. Each layer keeps the
- * tensors it still needs and returns the rest to a freelist keyed by length. Weights and any
- * tensor allocated while unbound stay on the ordinary heap.
+ * <p>Bound on the generate thread for {@code Transformer} step / prefill, and removed before that
+ * step returns, including when it throws. Each layer keeps the tensors it still needs and
+ * returns the rest to a freelist keyed by length. The freelist belongs to the transformer.
+ * Weights and any tensor allocated while unbound stay on the ordinary heap.
  */
 public final class ActivationWorkspace {
 

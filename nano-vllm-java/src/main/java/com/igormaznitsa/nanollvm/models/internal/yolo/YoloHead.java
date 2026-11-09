@@ -4,6 +4,7 @@ import com.igormaznitsa.nanollvm.layers.Conv2d;
 import com.igormaznitsa.nanollvm.layers.ConvTranspose2d;
 import com.igormaznitsa.nanollvm.models.ArgbImage;
 import com.igormaznitsa.nanollvm.models.Box;
+import com.igormaznitsa.nanollvm.models.Keypoint;
 import com.igormaznitsa.nanollvm.models.LlmLabelScore;
 import com.igormaznitsa.nanollvm.models.LlmOutImage;
 import com.igormaznitsa.nanollvm.models.LlmOutLabels;
@@ -25,7 +26,6 @@ import java.util.List;
  */
 final class YoloHead {
 
-  private static final int POSE_POINTS = 17;
   private static final int POSE_DIMS = 3;
   private final YoloTask task;
   private final Level[] levels;
@@ -90,16 +90,19 @@ final class YoloHead {
       letter.toSource(raw.cx - vx + ux, raw.cy - vy + uy)));
   }
 
-  private static List<Point2D> keypoints(final Raw raw, final YoloLetterbox letter) {
-    List<Point2D> points = new ArrayList<>();
-    for (int i = 0; i < raw.extra.length; i += 3) {
-      float visible = 1f / (1f + (float) Math.exp(-raw.extra[i + 2]));
+  private static List<Keypoint> keypoints(final Raw raw, final YoloLetterbox letter) {
+    int joints = Math.min(Keypoint.COUNT, raw.extra.length / POSE_DIMS);
+    List<Keypoint> points = new ArrayList<>();
+    for (int joint = 0; joint < joints; joint++) {
+      int value = joint * POSE_DIMS;
+      float visible = 1f / (1f + (float) Math.exp(-raw.extra[value + 2]));
       if (visible < 0.5f) {
         continue;
       }
-      float x = (raw.extra[i] + raw.anchorX) * raw.stride;
-      float y = (raw.extra[i + 1] + raw.anchorY) * raw.stride;
-      points.add(letter.toSource(x, y));
+      float x = (raw.extra[value] + raw.anchorX) * raw.stride;
+      float y = (raw.extra[value + 1] + raw.anchorY) * raw.stride;
+      Point2D source = letter.toSource(x, y);
+      points.add(new Keypoint(joint, source.x(), source.y()));
     }
     return List.copyOf(points);
   }
@@ -377,7 +380,7 @@ final class YoloHead {
   private static int extraChannels(final YoloTask task) {
     return switch (task) {
       case SEGMENT -> 32;
-      case POSE -> POSE_POINTS * POSE_DIMS;
+      case POSE -> Keypoint.COUNT * POSE_DIMS;
       case OBB -> 1;
       default -> 0;
     };
@@ -387,7 +390,7 @@ final class YoloHead {
     if (extra == 0) {
       return 0;
     }
-    int hidden = task == YoloTask.POSE ? POSE_POINTS * (POSE_DIMS + 2) : extra;
+    int hidden = task == YoloTask.POSE ? Keypoint.COUNT * (POSE_DIMS + 2) : extra;
     return Math.max(stem / 4, hidden);
   }
 
@@ -448,7 +451,7 @@ final class YoloHead {
       case SEGMENT -> outline(raw, proto, letter);
       default -> box(raw, letter);
     };
-    List<Point2D> keypoints = this.task == YoloTask.POSE ? keypoints(raw, letter) : List.of();
+    List<Keypoint> keypoints = this.task == YoloTask.POSE ? keypoints(raw, letter) : List.of();
     return new VisionHit(name, pick.score, shape, keypoints);
   }
 
@@ -629,6 +632,133 @@ final class YoloHead {
     }
   }
 
+  static DepthPicture depthPicture(
+    final float[] meters,
+    final int width,
+    final int height,
+    final YoloLetterbox letter
+  ) {
+    float scaleX = width / (float) letter.tensor.size(2);
+    float scaleY = height / (float) letter.tensor.size(1);
+    float originX = letter.padX * scaleX;
+    float originY = letter.padY * scaleY;
+    float spanX = Math.max(letter.sourceWidth * letter.scale * scaleX, 1f);
+    float spanY = Math.max(letter.sourceHeight * letter.scale * scaleY, 1f);
+    int left = Math.clamp((int) Math.floor(originX), 0, width - 1);
+    int top = Math.clamp((int) Math.floor(originY), 0, height - 1);
+    int right = Math.clamp((int) Math.ceil(originX + spanX), left + 1, width);
+    int bottom = Math.clamp((int) Math.ceil(originY + spanY), top + 1, height);
+    float min = Float.POSITIVE_INFINITY;
+    float max = Float.NEGATIVE_INFINITY;
+    for (int y = top; y < bottom; y++) {
+      for (int x = left; x < right; x++) {
+        float value = meters[y * width + x];
+        min = Math.min(min, value);
+        max = Math.max(max, value);
+      }
+    }
+    float span = Math.max(max - min, 1e-6f);
+    int[] pixels = new int[letter.sourceWidth * letter.sourceHeight];
+    for (int y = 0; y < letter.sourceHeight; y++) {
+      float depthY = originY + (y + 0.5f) * spanY / letter.sourceHeight;
+      for (int x = 0; x < letter.sourceWidth; x++) {
+        float depthX = originX + (x + 0.5f) * spanX / letter.sourceWidth;
+        float value = sample(meters, width, height, depthX, depthY);
+        int gray = Math.clamp(Math.round((value - min) / span * 255f), 0, 255);
+        pixels[y * letter.sourceWidth + x] = opaqueGray(gray);
+      }
+    }
+    return new DepthPicture(pixels, min, max);
+  }
+
+  private static float sample(
+    final float[] meters,
+    final int width,
+    final int height,
+    final float x,
+    final float y
+  ) {
+    float clampedX = Math.clamp(x, 0f, width - 1f);
+    float clampedY = Math.clamp(y, 0f, height - 1f);
+    int x0 = (int) Math.floor(clampedX);
+    int y0 = (int) Math.floor(clampedY);
+    int x1 = Math.min(x0 + 1, width - 1);
+    int y1 = Math.min(y0 + 1, height - 1);
+    float fx = clampedX - x0;
+    float fy = clampedY - y0;
+    return meters[y0 * width + x0] * (1f - fx) * (1f - fy)
+      + meters[y0 * width + x1] * fx * (1f - fy)
+      + meters[y1 * width + x0] * (1f - fx) * fy
+      + meters[y1 * width + x1] * fx * fy;
+  }
+
+  record DepthPicture(int[] pixels, float minimum, float maximum) {
+  }
+
+  static int[] semanticPicture(
+    final float[] logits,
+    final int offset,
+    final int classes,
+    final int width,
+    final int height,
+    final YoloLetterbox letter
+  ) {
+    int[] chosen = new int[width * height];
+    for (int y = 0; y < height; y++) {
+      for (int x = 0; x < width; x++) {
+        chosen[y * width + x] = winningClass(logits, offset, classes, width, height, x, y);
+      }
+    }
+
+    float scaleX = width / (float) letter.tensor.size(2);
+    float scaleY = height / (float) letter.tensor.size(1);
+    float originX = letter.padX * scaleX;
+    float originY = letter.padY * scaleY;
+    float spanX = Math.max(letter.sourceWidth * letter.scale * scaleX, 1e-6f);
+    float spanY = Math.max(letter.sourceHeight * letter.scale * scaleY, 1e-6f);
+    int[] pixels = new int[letter.sourceWidth * letter.sourceHeight];
+    for (int y = 0; y < letter.sourceHeight; y++) {
+      int srcY = classCell(originY, spanY, letter.sourceHeight, height, y);
+      for (int x = 0; x < letter.sourceWidth; x++) {
+        int srcX = classCell(originX, spanX, letter.sourceWidth, width, x);
+        pixels[y * letter.sourceWidth + x] = opaqueGray(chosen[srcY * width + srcX]);
+      }
+    }
+    return pixels;
+  }
+
+  private static int winningClass(
+    final float[] logits,
+    final int offset,
+    final int classes,
+    final int width,
+    final int height,
+    final int x,
+    final int y
+  ) {
+    int best = 0;
+    float bestValue = Float.NEGATIVE_INFINITY;
+    for (int c = 0; c < classes; c++) {
+      float value = logits[offset + (c * height + y) * width + x];
+      if (value > bestValue) {
+        bestValue = value;
+        best = c;
+      }
+    }
+    return best;
+  }
+
+  private static int classCell(
+    final float origin,
+    final float span,
+    final int sourceSize,
+    final int mapSize,
+    final int index
+  ) {
+    return Math.clamp(
+      (int) Math.floor(origin + (index + 0.5f) * span / sourceSize), 0, mapSize - 1);
+  }
+
   private static int opaqueGray(final int level) {
     int gray = Math.clamp(level, 0, 255);
     return (0xff << 24) | (gray << 16) | (gray << 8) | gray;
@@ -649,29 +779,17 @@ final class YoloHead {
       final MatmulRuntime runtime
     ) {
       Tensor logits = this.project.forward(this.conv.forward(feature, runtime));
-      int height = logits.size(1);
-      int width = logits.size(2);
-      float[] data = logits.data();
-      int off = logits.offset();
-      int[] pixels = new int[letter.sourceWidth * letter.sourceHeight];
-      for (int y = 0; y < letter.sourceHeight; y++) {
-        int srcY = Math.min(height - 1, y * height / letter.sourceHeight);
-        for (int x = 0; x < letter.sourceWidth; x++) {
-          int srcX = Math.min(width - 1, x * width / letter.sourceWidth);
-          int best = 0;
-          float bestValue = Float.NEGATIVE_INFINITY;
-          for (int c = 0; c < this.classes; c++) {
-            float value = data[off + (c * height + srcY) * width + srcX];
-            if (value > bestValue) {
-              bestValue = value;
-              best = c;
-            }
-          }
-          pixels[y * letter.sourceWidth + x] = opaqueGray(best);
-        }
-      }
       return new LlmOutImage(
-        new ArgbImage(letter.sourceWidth, letter.sourceHeight, pixels),
+        new ArgbImage(
+          letter.sourceWidth,
+          letter.sourceHeight,
+          semanticPicture(
+            logits.data(),
+            logits.offset(),
+            this.classes,
+            logits.size(2),
+            logits.size(1),
+            letter)),
         0f,
         Math.max(0, this.classes - 1));
     }
@@ -730,37 +848,16 @@ final class YoloHead {
       int width = logDepth.size(2);
       float[] data = logDepth.data();
       int off = logDepth.offset();
-      float min = Float.POSITIVE_INFINITY;
-      float max = Float.NEGATIVE_INFINITY;
       float[] meters = new float[height * width];
       for (int i = 0; i < meters.length; i++) {
         float clamped = Math.clamp(data[off + i], -4f, 5f);
         meters[i] = (float) Math.exp(this.scale * clamped + this.shift);
-        min = Math.min(min, meters[i]);
-        max = Math.max(max, meters[i]);
       }
-      int[] pixels = new int[letter.sourceWidth * letter.sourceHeight];
-      float span = Math.max(max - min, 1e-6f);
-      for (int y = 0; y < letter.sourceHeight; y++) {
-        float srcY = letter.sourceHeight == 1 ? 0f : y * (height - 1f) / (letter.sourceHeight - 1f);
-        int y0 = Math.clamp((int) Math.floor(srcY), 0, height - 1);
-        int y1 = Math.min(y0 + 1, height - 1);
-        float fy = srcY - y0;
-        for (int x = 0; x < letter.sourceWidth; x++) {
-          float srcX = letter.sourceWidth == 1 ? 0f : x * (width - 1f) / (letter.sourceWidth - 1f);
-          int x0 = Math.clamp((int) Math.floor(srcX), 0, width - 1);
-          int x1 = Math.min(x0 + 1, width - 1);
-          float fx = srcX - x0;
-          float value = meters[y0 * width + x0] * (1f - fx) * (1f - fy)
-            + meters[y0 * width + x1] * fx * (1f - fy)
-            + meters[y1 * width + x0] * (1f - fx) * fy
-            + meters[y1 * width + x1] * fx * fy;
-          int gray = Math.clamp(Math.round((value - min) / span * 255f), 0, 255);
-          pixels[y * letter.sourceWidth + x] = opaqueGray(gray);
-        }
-      }
-      return new LlmOutImage(new ArgbImage(letter.sourceWidth, letter.sourceHeight, pixels), min,
-        max);
+      DepthPicture picture = depthPicture(meters, width, height, letter);
+      return new LlmOutImage(
+        new ArgbImage(letter.sourceWidth, letter.sourceHeight, picture.pixels()),
+        picture.minimum(),
+        picture.maximum());
     }
   }
 

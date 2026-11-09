@@ -81,32 +81,21 @@ public final class Yolo26Loader {
       return List.of();
     }
     Path sidecar = folder == null ? null : folder.resolve("classes.txt");
-    if (sidecar != null && Files.isRegularFile(sidecar)) {
-      List<String> names = new ArrayList<>();
-      for (String line : Files.readString(sidecar, UTF_8).split("\\R")) {
-        if (!line.isBlank()) {
-          names.add(line.strip());
-        }
+    if (sidecar == null || !Files.isRegularFile(sidecar)) {
+      throw new ModelLoadException(
+        "YOLO26 " + task.wireName() + " needs classes.txt beside the ONNX file ("
+          + classes + " names, one per line).");
+    }
+    List<String> names = new ArrayList<>();
+    for (String line : Files.readString(sidecar, UTF_8).split("\\R")) {
+      if (!line.isBlank()) {
+        names.add(line.strip());
       }
-      if (names.isEmpty()) {
-        throw new ModelLoadException("classes.txt is empty: " + sidecar);
-      }
-      return List.copyOf(names);
     }
-    if (task == YoloTask.OBB && classes == YoloDota.NAMES.size()) {
-      return YoloDota.NAMES;
+    if (names.isEmpty()) {
+      throw new ModelLoadException("classes.txt is empty: " + sidecar);
     }
-    if (task == YoloTask.POSE && classes == 1) {
-      return List.of("person");
-    }
-    if (classes == YoloCoco.NAMES.size()
-      && task != YoloTask.CLASSIFY
-      && task != YoloTask.SEMANTIC) {
-      return YoloCoco.NAMES;
-    }
-    throw new ModelLoadException(
-      "YOLO26 " + task.wireName() + " needs classes.txt beside the ONNX file ("
-        + classes + " names, one per line).");
+    return List.copyOf(names);
   }
 
   private static int classCount(final YoloTensors tensors, final YoloTask task) {

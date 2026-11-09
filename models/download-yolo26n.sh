@@ -31,6 +31,6 @@ download obb yolo26n-obb.onnx
 
 echo "Installed to $DEST"
 find "$DEST" -type f -name '*.onnx' -exec ls -lh {} +
-echo "Detect, segment, pose, and oriented boxes use built-in COCO names."
-echo "Semantic and classification need classes.txt beside the ONNX (one name per line)."
+echo "Class names are classes.txt in the same folder as the ONNX file. Depth has none."
+echo "Replace classes.txt when the head was trained on another list."
 echo "Load: LlmModelFactory.make(Path.of(\"models/YOLO26n/detect/yolo26n.onnx\"))"

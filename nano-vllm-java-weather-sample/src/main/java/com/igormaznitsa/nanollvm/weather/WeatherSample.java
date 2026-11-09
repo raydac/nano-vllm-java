@@ -95,9 +95,7 @@ public final class WeatherSample {
       .enableThinking(false)
       .maxTokens(256)
       .deterministic();
-    say(voice, null, "start", "I am a weather station.");
-
-    say(voice, timer, "location", lookingForLocation());
+    say(voice, timer, "location", "I am a weather station and " + lookingForLocation());
 
     timer.measure("place turn", () -> System.out.println(session.send(ASK_PLACE).answer()));
     conditions.place().ifPresent(place ->

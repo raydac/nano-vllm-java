@@ -327,10 +327,9 @@ try (LlmModel model = LlmModelFactory.make(Path.of("models/YOLO26n/detect/yolo26
 }
 ```
 
-`pixels` are row-major `0xAARRGGBB`. `new LlmInImage(raster, 0.4f)` sets the lowest object score; omit it for `0.25`. A renamed file opens with `LlmModelFactory.open(path, LlmModelType.YOLO_DETECT)`. `open(path)` detects the kind and calls that same load. Put `classes.txt` (one name per line) beside semantic and classification
-files. Detect, segment, and pose use COCO names when that file is missing and the head has 80 classes.
-Oriented boxes use the 15 DOTA names. A one-class pose head is `person`.
-`YoloStreetHelloWorld` marks people, bicycles, and cars on a bundled street photo, uses a parking-lot
+`pixels` are row-major `0xAARRGGBB`. `new LlmInImage(raster, 0.4f)` sets the lowest object score; omit it for `0.25`. A renamed file opens with `LlmModelFactory.open(path, LlmModelType.YOLO_DETECT)`. `open(path)` detects the kind and calls that same load. Put `classes.txt` (one name per line) in the same folder as every ONNX file except depth. The library does not guess a dataset.
+The lists are already in `models/YOLO26n/<task>/`. Replace `classes.txt` when a head was trained on another list.
+`YoloStreetHelloWorld` marks people, bicycles, and cars on a bundled street photo, paints each semantic surface, writes the top classification labels, uses a parking-lot
 photo for oriented boxes, and writes each score onto a PNG.
 
 ## Selecting a model

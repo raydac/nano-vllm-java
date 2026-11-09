@@ -347,8 +347,8 @@ public record Lfm2ForCausalLM(Lfm2Model model, ParallelLMHead lmHead) implements
     Tensor forward(final Tensor inputIds, final Tensor positions, final Context context) {
       beginLayer();
       Tensor hidden = this.embedTokens.forward(inputIds, context);
-      DeviceDecoders.openFrame();
       try {
+        DeviceDecoders.openFrame();
         for (Lfm2DecoderLayer layer : this.layers) {
           Tensor next = layer.forward(positions, hidden, context);
           endLayer(next);

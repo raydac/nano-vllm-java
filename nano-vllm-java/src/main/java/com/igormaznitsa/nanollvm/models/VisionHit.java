@@ -10,14 +10,14 @@ import java.util.List;
  * @param className   label from the checkpoint's class list
  * @param probability score in {@code [0, 1]}
  * @param shape       box, mask outline, or rotated corners
- * @param keypoints   pose points; empty for every other task
+ * @param keypoints   visible pose joints in COCO order; empty for every other task
  * @since 1.5.0
  */
 public record VisionHit(
   String className,
   float probability,
   Shape2D shape,
-  List<Point2D> keypoints
+  List<Keypoint> keypoints
 ) {
 
   /**

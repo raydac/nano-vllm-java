@@ -301,8 +301,8 @@ public record Gemma3ForCausalLM(Gemma3Model model, ParallelLMHead lmHead) implem
     Tensor forward(final Tensor inputIds, final Tensor positions, final Context context) {
       beginLayer();
       Tensor hiddenStates = Ops.scale(this.embedTokens.forward(inputIds, context), this.embedScale);
-      DeviceDecoders.openFrame();
       try {
+        DeviceDecoders.openFrame();
         for (Gemma3DecoderLayer layer : this.layers) {
           Tensor next = layer.forward(positions, hiddenStates, context);
           endLayer(next);

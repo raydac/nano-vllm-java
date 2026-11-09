@@ -432,6 +432,38 @@ class TornadoQwen3DecodeTest {
     assertClose(expectedResidual, actual[1].data());
   }
 
+  private static Tensor[] runChain(
+    final boolean grouped,
+    final Tensor positions, final Tensor hiddenIn, final Tensor residualIn,
+    final Tensor[] qkv, final Tensor[] output, final Tensor[] gate, final Tensor[] down,
+    final Tensor inputNorm, final Tensor postNorm, final Tensor queryNorm, final Tensor keyNorm,
+    final float epsilon, final RotaryEmbedding rope,
+    final int heads, final int kvHeads, final int headDim, final float scale
+  ) {
+    int tokens = hiddenIn.size(0);
+    Context context = prefill(tokens);
+    Tensor hidden = hiddenIn;
+    Tensor residual = residualIn;
+    try {
+      if (grouped) {
+        TornadoDecoder.openFrame();
+      }
+      for (int layer = 0; layer < qkv.length; layer++) {
+        Tensor[] step = TornadoDecoder.forward(layer(
+          positions, hidden, residual, context, qkv[layer], output[layer], gate[layer], down[layer],
+          inputNorm, postNorm, queryNorm, keyNorm, epsilon, rope, heads, kvHeads, headDim, scale,
+          Tensor.zeros(1, 4, kvHeads, headDim), Tensor.zeros(1, 4, kvHeads, headDim)));
+        hidden = step[0];
+        residual = step[1];
+      }
+      return new Tensor[] {hidden, residual};
+    } finally {
+      if (grouped) {
+        TornadoDecoder.closeFrame();
+      }
+    }
+  }
+
   @Test
   void twoLayersMatchScalar() {
     assumeTrue(TornadoFloatKernelsProvider.isAvailable(), "TornadoVM device required");
@@ -483,9 +515,9 @@ class TornadoQwen3DecodeTest {
     context.set(
       true, new int[] {0, tokens}, new int[] {0, tokens}, tokens, tokens,
       new int[] {0, 1}, null, null, new int[] {1, 1});
-    TornadoDecoder.openFrame();
     Tensor[] actual;
     try {
+      TornadoDecoder.openFrame();
       Tensor[] mid = TornadoDecoder.forward(layer(
         positions, hiddenIn, residualIn, context, qkv1, out1, gate1, down1,
         inputNorm, postNorm, queryNorm, keyNorm, epsilon, rope, heads, kvHeads, headDim, scale,
@@ -499,38 +531,6 @@ class TornadoQwen3DecodeTest {
     }
     assertClose(secondHidden, actual[0].data());
     assertClose(secondResidual, actual[1].data());
-  }
-
-  private static Tensor[] runChain(
-    final boolean grouped,
-    final Tensor positions, final Tensor hiddenIn, final Tensor residualIn,
-    final Tensor[] qkv, final Tensor[] output, final Tensor[] gate, final Tensor[] down,
-    final Tensor inputNorm, final Tensor postNorm, final Tensor queryNorm, final Tensor keyNorm,
-    final float epsilon, final RotaryEmbedding rope,
-    final int heads, final int kvHeads, final int headDim, final float scale
-  ) {
-    int tokens = hiddenIn.size(0);
-    Context context = prefill(tokens);
-    Tensor hidden = hiddenIn;
-    Tensor residual = residualIn;
-    if (grouped) {
-      TornadoDecoder.openFrame();
-    }
-    try {
-      for (int layer = 0; layer < qkv.length; layer++) {
-        Tensor[] step = TornadoDecoder.forward(layer(
-          positions, hidden, residual, context, qkv[layer], output[layer], gate[layer], down[layer],
-          inputNorm, postNorm, queryNorm, keyNorm, epsilon, rope, heads, kvHeads, headDim, scale,
-          Tensor.zeros(1, 4, kvHeads, headDim), Tensor.zeros(1, 4, kvHeads, headDim)));
-        hidden = step[0];
-        residual = step[1];
-      }
-      return new Tensor[] {hidden, residual};
-    } finally {
-      if (grouped) {
-        TornadoDecoder.closeFrame();
-      }
-    }
   }
 
   @Test

@@ -24,7 +24,7 @@ models/piper-ru-irina-medium/
 models/piper-en-lessac-medium/
 models/fasttext-lid-176/
 models/Jeff-Qwen3.5-0.8B/
-models/YOLO26n/
+models/YOLO26n/**/*.onnx
 
 *.wav
 
@@ -41,3 +41,14 @@ models/YOLO26n/
 /kernel-bench.svg
 /kernel-yolo-bench.svg
 /kernel-speech-bench.svg
+/yolo-street-depth.png
+/yolo-street-obb.png
+/yolo-street-pose.png
+/yolo-street-cls.png
+/yolo-street-sem.png
+/models/YOLO26n/cls/classes.txt
+/models/YOLO26n/detect/classes.txt
+/models/YOLO26n/obb/classes.txt
+/models/YOLO26n/pose/classes.txt
+/models/YOLO26n/seg/classes.txt
+/models/YOLO26n/sem/classes.txt

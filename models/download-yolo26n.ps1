@@ -43,5 +43,5 @@ Download-Onnx 'obb' 'yolo26n-obb.onnx'
 
 Write-Host "Installed to $Dest"
 Get-ChildItem $Dest -Recurse -Filter *.onnx | Format-Table FullName, Length
-Write-Host 'Detect, segment, pose, and oriented boxes use built-in COCO names.'
-Write-Host 'Semantic and classification need classes.txt beside the ONNX (one name per line).'
+Write-Host 'Class names are classes.txt in the same folder as the ONNX file. Depth has none.'
+Write-Host 'Replace classes.txt when the head was trained on another list.'

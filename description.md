@@ -2122,9 +2122,8 @@ that cutoff. A minimum other than the default is rejected for a semantic map, de
 | `yolo26n-sem.onnx`, `yolo26n-depth.onnx` | `LlmOutImage` — class indexes, or grayscale depth with the min and max in meters |
 | `yolo26n-cls.onnx` | `LlmOutLabels` via `generate(image, LABELS)` |
 
-Class names are `classes.txt` beside the ONNX, one name per line. Detect, segment, pose, and oriented
-boxes fall back to the 80 COCO names when that file is missing and the head has 80 classes. Semantic
-and classification need the sidecar. Depth has no names.
+Class names are `classes.txt` in the same folder as the ONNX file, one name per line. The library does not guess a dataset.
+Depth has no names. Those lists are already in `models/YOLO26n/<task>/`. Replace `classes.txt` when a head was trained on another list.
 
 The file must be the end-to-end export (`nms=False`, image size 640). An anonymous or unfused export
 fails and the message includes:
@@ -2135,9 +2134,11 @@ yolo export model=yolo26n.pt format=onnx nms=False imgsz=640
 
 `./models/download-yolo26n.sh` (and the `.ps1` / `.cmd` twins) downloads the seven nano ONNX files
 into `models/YOLO26n/<task>/` from the Ultralytics assets release.
-`YoloStreetHelloWorld` asks for detect, seg, pose, or obb. Detect, segment, and pose use a street
-photo. Oriented boxes use an overhead parking lot and the DOTA vehicle names. Each run prints how
+`YoloStreetHelloWorld` asks for detect, seg, sem, pose, obb, depth, or cls. Detect, segment, semantic, pose, depth, and classification
+use a street photo. Semantic paints each Cityscapes surface in its own color, half transparent. Depth paints that photo from red (near) to green (far), half transparent, and prints the nearest and farthest meters. Classification writes the top five ImageNet labels on the photo.
+Oriented boxes use an overhead parking lot and the DOTA vehicle names. Each run prints how
 long the weights took to load and how long recognition took, then writes each score onto a PNG.
+Pose joins the body points with green lines. Segmentation fills each outline at half strength. A box covering at least two percent of the picture is kept down to a score of 0.01.
 
 **In the code:** `LlmModelFactory` → `Yolo26Loader` → `Yolo26Model`. Weights are ONNX initializers.
 The graph is the published YOLO26 layout (`Conv2d`, `C3k2`, `SPPF`, `C2PSA`, then the task head). Medium and larger scales use a `C3k` inner block on the early stages.
@@ -4388,16 +4389,19 @@ Narrative: **chapter 7h**. Demo: `samples.ToolsHelloWorld`. The weather sample u
 ### Sample G0h — YOLO26 street photo (**since 1.5.0**)
 
 ```text
-select detect | seg | pose | obb
-detect, seg, pose → images/yolo-street.jpg
+select detect | seg | sem | pose | obb | depth | cls
+detect, seg, sem, pose, depth, cls → images/yolo-street.jpg
 obb → images/yolo-obb.jpg
 LlmModelFactory.make(models/YOLO26n/<task>/…)   // prints loaded in
-    → generate(LlmInImage, IMAGE) → LlmOutObjects   // prints recognized in
-    → keep person, bicycle, car, small vehicle, large vehicle
-    → PNG with the shape and the score
+    → generate(LlmInImage, IMAGE)                  // prints recognized in
+    → objects: keep person, bicycle, car, small vehicle, large vehicle
+    → sem: photo tinted by Cityscapes surface color
+    → depth: photo tinted red (near) to green (far), nearest and farthest meters
+    → cls: generate(LlmInImage, LABELS), top five ImageNet labels on the photo
+    → object PNG with the shape and the score
 ```
 
-Narrative: **chapter 7i**. Demo: `samples.YoloStreetHelloWorld`. Detect, segment, and pose use `images/yolo-street.jpg`. Oriented boxes use `images/yolo-obb.jpg`.
+Narrative: **chapter 7i**. Demo: `samples.YoloStreetHelloWorld`. Detect, segment, semantic, pose, depth, and classification use `images/yolo-street.jpg`. Oriented boxes use `images/yolo-obb.jpg`.
 
 ### Sample G — text RAG (prepare once, ask many times)
 

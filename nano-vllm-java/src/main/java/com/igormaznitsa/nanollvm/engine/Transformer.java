@@ -213,8 +213,8 @@ public final class Transformer implements AutoCloseable {
    */
   public Tensor prefillLogits(final List<Sequence> seqs) {
     this.requireOpen();
-    this.bindStep();
     try {
+      this.bindStep();
       Tensor logits = this.computeLogits(
         this.forwardHidden(this.preparePrefill(requirePrefill(seqs))));
       ActivationWorkspace.detach(logits);
@@ -234,8 +234,8 @@ public final class Transformer implements AutoCloseable {
    */
   public void prefillCache(final List<Sequence> seqs) {
     this.requireOpen();
-    this.bindStep();
     try {
+      this.bindStep();
       this.forwardHidden(this.preparePrefill(requirePrefill(seqs)));
     } finally {
       this.finishStep();
@@ -403,8 +403,8 @@ public final class Transformer implements AutoCloseable {
    */
   public List<Integer> step(final List<Sequence> seqs, final boolean isPrefill) {
     this.requireOpen();
-    this.bindStep();
     try {
+      this.bindStep();
       PreparedInputs prepared = this.prepareInputs(seqs, isPrefill);
       SamplingControls sampling = this.collectSamplingControls(seqs);
       return this.sampleTokens(this.computeLogits(this.forwardHidden(prepared)), sampling);

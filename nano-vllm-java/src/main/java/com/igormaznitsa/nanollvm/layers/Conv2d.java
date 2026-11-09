@@ -4,6 +4,7 @@ import static java.util.Objects.requireNonNull;
 
 import com.igormaznitsa.nanollvm.tensor.MatmulRuntime;
 import com.igormaznitsa.nanollvm.tensor.Tensor;
+import java.util.function.Supplier;
 
 /**
  * 2-D convolution over a channel-major image {@code [inChannels, height, width]}. Weight layout is
@@ -12,6 +13,8 @@ import com.igormaznitsa.nanollvm.tensor.Tensor;
  * <p>A single-group filter with a patch of at least {@value #MIN_PACKED_PATCH} floats and at least
  * {@value #MIN_PACKED_OUTPUTS} outputs is packed once and multiplied with
  * {@link MatmulRuntime#linear}, so it uses the same vector GEMV as a chat layer.
+ * One picture shares a patch buffer and a row buffer across those layers
+ * ({@link #reusingPatches}); both are dropped when that picture returns.
  * When the process backend is TornadoVM, the filter runs on the device from the picture itself:
  * weights stay resident, and SiLU can be applied in that same task. Depthwise and smaller filters
  * on a CPU backend stay on the direct channel loop.
@@ -22,8 +25,7 @@ public final class Conv2d {
 
   private static final int MIN_PACKED_PATCH = 16;
   private static final int MIN_PACKED_OUTPUTS = 8;
-  private static final ThreadLocal<ImageMatmulScratch> SCRATCH =
-    ThreadLocal.withInitial(ImageMatmulScratch::new);
+  private static final ThreadLocal<ImageMatmulScratch> SCRATCH = new ThreadLocal<>();
 
   private final Tensor weight;
   private final Tensor bias;
@@ -129,6 +131,35 @@ public final class Conv2d {
     return output;
   }
 
+  /**
+   * Shares one patch buffer and one row buffer across packed convolutions on this thread
+   * for the duration of {@code work}. Nested calls use that same buffer. Both arrays are
+   * dropped when {@code work} returns, including when it throws, so a pooled thread does not
+   * keep the picture.
+   *
+   * @param work picture forward that calls {@link #forward(Tensor, MatmulRuntime, boolean)}
+   * @param <T>  value produced by {@code work}
+   * @return the value {@code work} returns
+   */
+  public static <T> T reusingPatches(final Supplier<T> work) {
+    requireNonNull(work, "work");
+    if (SCRATCH.get() != null) {
+      return work.get();
+    }
+
+    SCRATCH.set(new ImageMatmulScratch());
+    try {
+      return work.get();
+    } finally {
+      SCRATCH.remove();
+    }
+  }
+
+  static float[] currentPatches() {
+    ImageMatmulScratch scratch = SCRATCH.get();
+    return scratch == null ? null : scratch.patches;
+  }
+
   private boolean onDevice(
       final Tensor input, final Tensor output, final int height, final int width,
       final MatmulRuntime runtime, final boolean fuseSilu
@@ -176,8 +207,12 @@ public final class Conv2d {
     int spatial = outHeight * outWidth;
     int patch = this.inChannels * this.kernel * this.kernel;
     ImageMatmulScratch scratch = SCRATCH.get();
-    float[] patches = scratch.patches(spatial * patch);
-    float[] rows = scratch.rows(spatial * this.outChannels);
+    float[] patches = scratch == null
+      ? new float[spatial * patch]
+      : scratch.patches(spatial * patch);
+    float[] rows = scratch == null
+      ? new float[spatial * this.outChannels]
+      : scratch.rows(spatial * this.outChannels);
     runtime.parallelRanges(outHeight, (y0, y1) -> this.packRows(
       input.data(), input.offset(), height, width, outWidth, y0, y1, patches));
     runtime.linear(

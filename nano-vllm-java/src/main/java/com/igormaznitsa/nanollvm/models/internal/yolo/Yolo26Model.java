@@ -1,5 +1,6 @@
 package com.igormaznitsa.nanollvm.models.internal.yolo;
 
+import static com.igormaznitsa.nanollvm.layers.Conv2d.reusingPatches;
 import static java.util.Objects.requireNonNull;
 
 import com.igormaznitsa.nanollvm.models.ArgbImage;
@@ -54,12 +55,9 @@ public final class Yolo26Model {
   }
 
   public static Yolo26Model synthetic(final YoloTask task) {
-    List<String> names =
-      task == YoloTask.CLASSIFY || task == YoloTask.SEMANTIC || task == YoloTask.DEPTH
-        ? java.util.stream.IntStream.range(0, Math.max(task.classes(), 1))
-        .mapToObj(index -> "class-" + index)
-        .toList()
-        : YoloCoco.NAMES;
+    List<String> names = java.util.stream.IntStream.range(0, Math.max(task.classes(), 1))
+      .mapToObj(index -> "class-" + index)
+      .toList();
     return load(YoloTensors.synthetic(), task, names);
   }
 
@@ -99,12 +97,12 @@ public final class Yolo26Model {
   ) {
     this.requireObjectProbability(minProbability);
     MatmulRuntime kernels = runtime == null ? MatmulRuntime.sequential() : runtime;
-    return this.head.read(
+    return reusingPatches(() -> this.head.read(
       this.trunk.forward(letter.tensor, kernels),
       letter,
       this.names,
       minProbability,
-      kernels);
+      kernels));
   }
 
   private void requireObjectProbability(final float minProbability) {

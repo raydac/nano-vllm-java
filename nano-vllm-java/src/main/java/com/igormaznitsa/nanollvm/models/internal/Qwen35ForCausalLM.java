@@ -399,8 +399,8 @@ public record Qwen35ForCausalLM(Qwen35Model model, ParallelLMHead lmHead) implem
       beginLayer();
       Tensor hiddenStates = this.embedTokens.forward(inputIds, context);
       Tensor residual = null;
-      DeviceDecoders.openFrame();
       try {
+        DeviceDecoders.openFrame();
         for (Qwen35DecoderLayer layer : this.layers) {
           Tensor[] out = layer.forward(positions, hiddenStates, residual, context);
           Tensor previousHidden = hiddenStates;

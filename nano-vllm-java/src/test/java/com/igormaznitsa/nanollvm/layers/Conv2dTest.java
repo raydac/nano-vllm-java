@@ -2,6 +2,10 @@ package com.igormaznitsa.nanollvm.layers;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import com.igormaznitsa.nanollvm.tensor.MatmulRuntime;
 import com.igormaznitsa.nanollvm.tensor.Tensor;
@@ -264,5 +268,66 @@ final class Conv2dTest {
       expected,
       conv.forward(Tensor.of(new float[] {1f, 2f, 3f, 4f}, 1, 2, 2), null, true).data(),
       1e-5f);
+  }
+
+  private static Conv2d widePointwise() {
+    int in = 16;
+    int out = 8;
+    return new Conv2d(
+        Tensor.of(filled(out * in, 5, 0.1f, -0.2f), out, in, 1, 1),
+        Tensor.of(filled(out, 1, 0.01f, 0f), out),
+        1,
+        0,
+        1);
+  }
+
+  private static Tensor wideImage() {
+    int in = 16;
+    return Tensor.of(filled(in * 2 * 3, 7, 0.25f, 0f), in, 2, 3);
+  }
+
+  @Test
+  void packedForwardLeavesNoScratchOnTheThread() {
+    Conv2d conv = widePointwise();
+    conv.forward(wideImage());
+
+    assertNull(Conv2d.currentPatches());
+  }
+
+  @Test
+  void pictureReusesOnePatchBufferAndDropsIt() {
+    Conv2d conv = widePointwise();
+    Tensor image = wideImage();
+
+    float[] shared = Conv2d.reusingPatches(() -> {
+      conv.forward(image);
+      float[] patches = Conv2d.currentPatches();
+      conv.forward(image);
+      assertSame(patches, Conv2d.currentPatches());
+      Conv2d.reusingPatches(() -> {
+        conv.forward(image);
+        assertSame(patches, Conv2d.currentPatches());
+        return null;
+      });
+      assertSame(patches, Conv2d.currentPatches());
+      return patches;
+    });
+
+    assertNotNull(shared);
+    assertNull(Conv2d.currentPatches());
+  }
+
+  @Test
+  void pictureDropsThePatchBufferWhenTheForwardThrows() {
+    Conv2d conv = widePointwise();
+    Tensor image = wideImage();
+
+    assertThrows(IllegalStateException.class, () -> Conv2d.reusingPatches(() -> {
+      conv.forward(image);
+      assertNotNull(Conv2d.currentPatches());
+      throw new IllegalStateException("stop");
+    }));
+
+    assertNull(Conv2d.currentPatches());
   }
 }

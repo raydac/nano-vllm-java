@@ -8,6 +8,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.igormaznitsa.nanollvm.models.ArgbImage;
 import com.igormaznitsa.nanollvm.models.Box;
+import com.igormaznitsa.nanollvm.models.Keypoint;
+import com.igormaznitsa.nanollvm.models.LlmLabelScore;
 import com.igormaznitsa.nanollvm.models.Point2D;
 import com.igormaznitsa.nanollvm.models.Polygon;
 import com.igormaznitsa.nanollvm.models.VisionHit;
@@ -22,6 +24,7 @@ import java.io.PrintStream;
 import java.io.StringReader;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
+import java.util.Arrays;
 import java.util.List;
 import javax.imageio.ImageIO;
 import org.junit.jupiter.api.Test;
@@ -98,6 +101,30 @@ class YoloStreetHelloWorldTest {
         .stream().map(VisionHit::className).toList());
   }
 
+  private static int blend(final int channel) {
+    return (channel * 128 + 255 * 127 + 127) / 255;
+  }
+
+  private static int sceneOnWhite(final int red, final int green, final int blue) {
+    return 0xff000000
+      | (blend(red) << 16)
+      | (blend(green) << 8)
+      | blend(blue);
+  }
+
+  @Test
+  void depthTintPaintsNearRedAndFarGreenOverThePhoto() {
+    BufferedImage photo = new BufferedImage(2, 1, BufferedImage.TYPE_INT_RGB);
+    photo.setRGB(0, 0, 0xffffff);
+    photo.setRGB(1, 0, 0xffffff);
+    ArgbImage depth = new ArgbImage(2, 1, new int[] {0xff000000, 0xffffffff});
+
+    BufferedImage tinted = YoloStreetHelloWorld.tintDepth(photo, depth);
+
+    assertEquals(0xffFF7F7F, tinted.getRGB(0, 0));
+    assertEquals(0xff7FFF7F, tinted.getRGB(1, 0));
+  }
+
   @Test
   void obbUsesTheParkingLotAndDetectUsesTheStreet() throws IOException {
     BufferedImage parking = YoloStreetHelloWorld.photoFor(StreetHead.OBB);
@@ -107,6 +134,41 @@ class YoloStreetHelloWorldTest {
     assertEquals(780, parking.getHeight());
     assertEquals(800, street.getWidth());
     assertEquals(544, street.getHeight());
+    assertEquals(800, YoloStreetHelloWorld.photoFor(StreetHead.DEPTH).getWidth());
+    assertEquals(544, YoloStreetHelloWorld.photoFor(StreetHead.DEPTH).getHeight());
+    assertEquals(800, YoloStreetHelloWorld.photoFor(StreetHead.SEMANTIC).getWidth());
+    assertEquals(544, YoloStreetHelloWorld.photoFor(StreetHead.SEMANTIC).getHeight());
+    assertEquals(800, YoloStreetHelloWorld.photoFor(StreetHead.CLASSIFY).getWidth());
+    assertEquals(544, YoloStreetHelloWorld.photoFor(StreetHead.CLASSIFY).getHeight());
+  }
+
+  @Test
+  void sceneTintPaintsRoadAndSkyOverThePhoto() {
+    BufferedImage photo = new BufferedImage(2, 1, BufferedImage.TYPE_INT_RGB);
+    photo.setRGB(0, 0, 0xffffff);
+    photo.setRGB(1, 0, 0xffffff);
+    ArgbImage classes = new ArgbImage(2, 1, new int[] {0xff000000, 0xff0a0a0a});
+
+    BufferedImage tinted = YoloStreetHelloWorld.tintScene(photo, classes);
+
+    assertEquals(sceneOnWhite(128, 64, 128), tinted.getRGB(0, 0));
+    assertEquals(sceneOnWhite(70, 130, 180), tinted.getRGB(1, 0));
+    assertEquals("road, sky", YoloStreetHelloWorld.sceneClasses(classes));
+  }
+
+  @Test
+  void markLabelsWritesTheTopNameOnThePhoto() {
+    BufferedImage photo = new BufferedImage(220, 80, BufferedImage.TYPE_INT_RGB);
+    int[] white = new int[220 * 80];
+    Arrays.fill(white, 0xffffff);
+    photo.setRGB(0, 0, 220, 80, white, 0, 220);
+
+    BufferedImage marked = YoloStreetHelloWorld.markLabels(
+      photo, List.of(new LlmLabelScore("street sign", 0.906f)));
+
+    assertEquals("street sign 0.91",
+      YoloStreetHelloWorld.label(new LlmLabelScore("street sign", 0.906f)));
+    assertEquals(new Color(20, 20, 20).getRGB(), marked.getRGB(10, 10));
   }
 
   @Test
@@ -135,8 +197,29 @@ class YoloStreetHelloWorldTest {
       Path.of("models/YOLO26n/pose/yolo26n-pose.onnx"),
       StreetHead.POSE.model());
     assertEquals(StreetHead.OBB, YoloStreetHelloWorld.parseHead("oriented"));
+    assertEquals(StreetHead.SEMANTIC, select("", "3\n").head());
+    assertEquals(StreetHead.SEMANTIC, YoloStreetHelloWorld.parseHead("semantic"));
+    assertEquals(
+      Path.of("models/YOLO26n/sem/yolo26n-sem.onnx"),
+      StreetHead.SEMANTIC.model());
+    assertEquals(StreetHead.CLASSIFY, select("", "7\n").head());
+    assertEquals(StreetHead.CLASSIFY, YoloStreetHelloWorld.parseHead("classification"));
+    assertEquals(
+      Path.of("models/YOLO26n/cls/yolo26n-cls.onnx"),
+      StreetHead.CLASSIFY.model());
+    assertEquals(StreetHead.DEPTH, select("", "6\n").head());
+    assertEquals(StreetHead.DEPTH, YoloStreetHelloWorld.parseHead("depth"));
+    assertEquals(
+      Path.of("models/YOLO26n/depth/yolo26n-depth.onnx"),
+      StreetHead.DEPTH.model());
     assertEquals(Path.of("yolo-street-seg.png"),
       YoloStreetHelloWorld.outputFile(StreetHead.SEGMENT));
+    assertEquals(Path.of("yolo-street-depth.png"),
+      YoloStreetHelloWorld.outputFile(StreetHead.DEPTH));
+    assertEquals(Path.of("yolo-street-sem.png"),
+      YoloStreetHelloWorld.outputFile(StreetHead.SEMANTIC));
+    assertEquals(Path.of("yolo-street-cls.png"),
+      YoloStreetHelloWorld.outputFile(StreetHead.CLASSIFY));
   }
 
   @Test
@@ -151,13 +234,15 @@ class YoloStreetHelloWorldTest {
   }
 
   @Test
-  void semanticDepthAndUnknownHeadsAreRefused() {
-    assertThrows(IllegalArgumentException.class, () -> YoloStreetHelloWorld.parseHead("sem"));
-    assertThrows(IllegalArgumentException.class, () -> YoloStreetHelloWorld.parseHead("depth"));
-    assertThrows(IllegalArgumentException.class, () -> YoloStreetHelloWorld.parseHead("cls"));
+  void unknownHeadsAreRefused() {
+    assertEquals(StreetHead.SEMANTIC, YoloStreetHelloWorld.parseHead("sem"));
+    assertEquals(StreetHead.SEMANTIC, YoloStreetHelloWorld.parseHead("yolo26n-sem.onnx"));
+    assertEquals(StreetHead.CLASSIFY, YoloStreetHelloWorld.parseHead("cls"));
+    assertEquals(StreetHead.CLASSIFY, YoloStreetHelloWorld.parseHead("yolo26n-cls.onnx"));
     assertThrows(IllegalArgumentException.class, () -> YoloStreetHelloWorld.parseHead("house"));
     assertEquals(StreetHead.DETECT, YoloStreetHelloWorld.parseHead("yolo26m.onnx"));
     assertEquals(StreetHead.POSE, YoloStreetHelloWorld.parseHead("yolo26x-pose.onnx"));
+    assertEquals(StreetHead.DEPTH, YoloStreetHelloWorld.parseHead("yolo26n-depth.onnx"));
   }
 
   @Test
@@ -185,5 +270,52 @@ class YoloStreetHelloWorldTest {
       ImageIO.read(YoloStreetHelloWorld.writeMarked(source, hits, png).toFile());
     assertEquals(220, reread.getWidth());
     assertEquals(140, reread.getHeight());
+  }
+
+  @Test
+  void visibleHitsKeepALargeQuietCarAndDropASpeck() {
+    VisionHit strong = new VisionHit("car", 0.80f, new Box(0, 0, 30, 30));
+    VisionHit quiet = new VisionHit("car", 0.012f, new Box(50, 50, 99, 99));
+    VisionHit speck = new VisionHit("car", 0.02f, new Box(0, 80, 8, 88));
+    VisionHit covered = new VisionHit("car", 0.011f, new Box(52, 52, 97, 97));
+
+    assertEquals(
+      List.of(strong, quiet),
+      YoloStreetHelloWorld.visibleHits(List.of(speck, quiet, strong, hit("truck", 0.9f, 0)), 100,
+        100));
+    assertEquals(
+      List.of(quiet),
+      YoloStreetHelloWorld.visibleHits(List.of(quiet, covered), 100, 100));
+  }
+
+  @Test
+  void poseDrawsAGreenLimbBetweenVisibleJoints() {
+    BufferedImage source = new BufferedImage(80, 80, BufferedImage.TYPE_INT_RGB);
+    VisionHit person = new VisionHit(
+      "person",
+      0.9f,
+      new Box(8, 8, 70, 70),
+      List.of(new Keypoint(5, 20, 40), new Keypoint(7, 60, 40)));
+
+    BufferedImage marked = YoloStreetHelloWorld.mark(source, List.of(person));
+
+    assertEquals(new Color(0, 200, 70).getRGB(), marked.getRGB(40, 40));
+    assertEquals(new Color(220, 40, 40).getRGB(), marked.getRGB(20, 40));
+  }
+
+  @Test
+  void segmentationFillsTheOutlineAtHalfStrength() {
+    int[] white = new int[120 * 100];
+    Arrays.fill(white, 0xffffff);
+    BufferedImage source = new BufferedImage(120, 100, BufferedImage.TYPE_INT_RGB);
+    source.setRGB(0, 0, 120, 100, white, 0, 120);
+    VisionHit person = new VisionHit("person", 0.9f, new Polygon(List.of(
+      new Point2D(30, 20), new Point2D(90, 20), new Point2D(60, 80))));
+
+    BufferedImage filled = YoloStreetHelloWorld.mark(source, List.of(person), StreetHead.SEGMENT);
+    BufferedImage outlined = YoloStreetHelloWorld.mark(source, List.of(person), StreetHead.OBB);
+
+    assertEquals(new Color(blend(220), blend(40), blend(40)).getRGB(), filled.getRGB(60, 40));
+    assertEquals(0xffffffff, outlined.getRGB(60, 40));
   }
 }

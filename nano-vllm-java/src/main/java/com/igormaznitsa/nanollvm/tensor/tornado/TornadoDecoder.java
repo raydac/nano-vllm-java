@@ -41,7 +41,8 @@ import uk.ac.manchester.tornado.api.exceptions.TornadoExecutionPlanException;
  * Decoder layers on TornadoVM. A frame runs several layers in one task graph so a token waits for
  * the device once per group. Matmul, norm, RoPE, and attention stay on the device inside the
  * group, and the activation is copied back when the group ends. Prefill walks that graph once
- * per token.
+ * per token. The open group lives on the calling thread and {@link #closeFrame()} removes it
+ * before the flush, including when that flush fails.
  *
  * <p>The group length is {@link com.igormaznitsa.nanollvm.utils.NanoLlvmProps#PROP_TORNADO_LAYERS}
  * ({@code -Dnanollvm.tornado.layers}). The default is {@value #DEFAULT_LAYERS} and the accepted

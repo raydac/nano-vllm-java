@@ -308,7 +308,7 @@ The picture is letterboxed to 640×640. Boxes, mask outlines, rotated corners, a
 | `…-sem.onnx`, `…-depth.onnx` | `LlmOutImage` — class indexes, or grayscale depth with the min and max in meters |
 | `…-cls.onnx` | `LlmOutLabels` via `generate(image, LABELS)` |
 
-Class names are `classes.txt` beside the ONNX, one name per line. Detect, segment, and pose use the 80 COCO names when that file is missing and the head has 80 classes. Oriented boxes use the 15 DOTA names. A one-class pose head is `person`. Semantic and classification need the sidecar. Depth has no names.
+Class names are `classes.txt` in the same folder as the ONNX file, one name per line. The library does not guess a dataset. Depth has no names. Those lists are already in `models/YOLO26n/<task>/`. Replace `classes.txt` when a head was trained on another list.
 
 ```bash
 ./models/download-yolo26n.sh
@@ -316,7 +316,7 @@ mvn -pl nano-vllm-java-samples -q exec:java \
   -Dexec.mainClass=com.igormaznitsa.nanollvm.samples.YoloStreetHelloWorld
 ```
 
-With no argument the sample asks for a head. `detect`, `seg`, `pose`, or `obb` skips the menu. Detect, segment, and pose use a street photo. Oriented boxes use an overhead parking lot. The marked picture is `yolo-street-<head>.png`. The download script fetches nano. Point the same call at a `yolo26s`, `yolo26m`, `yolo26l`, or `yolo26x` ONNX you exported the same way.
+With no argument the sample asks for a head. `detect`, `seg`, `sem`, `pose`, `obb`, `depth`, or `cls` skips the menu. Detect, segment, semantic, pose, depth, and classification use a street photo. Semantic paints each Cityscapes surface in its own color, half transparent. Depth paints that photo from red (near) to green (far), half transparent, and prints the nearest and farthest meters. Classification writes the top five ImageNet labels on the photo. Oriented boxes use an overhead parking lot. The marked picture is `yolo-street-<head>.png`. Pose joins the body points with green lines. Segmentation fills each outline at half strength. A box covering at least two percent of the picture is kept down to a score of 0.01. The download script fetches nano. Point the same call at a `yolo26s`, `yolo26m`, `yolo26l`, or `yolo26x` ONNX you exported the same way.
 
 ## Run the samples
 
@@ -346,7 +346,7 @@ mvn -pl nano-vllm-java-samples -q exec:java
 | `SynthesizeHelloWorld` | Text → `piper-hello.wav` | piper-en-lessac-medium |
 | `VoiceReplyHelloWorld` | Transcribe, then chat, then speak | whisper + chat + piper |
 | `LanguageIdHelloWorld` | Language label | fasttext lid.176 |
-| `YoloStreetHelloWorld` | People, bicycles, and cars marked on a street photo, with scores | YOLO26n detect, seg, pose, or obb |
+| `YoloStreetHelloWorld` | People, bicycles, and cars marked on a street photo, with scores. Semantic paints each surface. Depth tints that street from red (near) to green (far). Classification writes the top labels | YOLO26n detect, seg, sem, pose, obb, depth, or cls |
 | `AdvisorRagHelloWorld` | Named advisors plus search over `rag/` | Gemma3-270M |
 | `RagTunerHelloWorld` | Read a bundled EPUB, then ask about the play | Qwen3-0.6B |
 | `JevHelloWorld` | Choice, yes/no, and a score (snapshot) | Gemma3-270M |

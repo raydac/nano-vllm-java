@@ -301,8 +301,8 @@ public record LlamaForCausalLM(LlamaModel model, ParallelLMHead lmHead) implemen
       beginLayer();
       Tensor hiddenStates = this.embedTokens.forward(inputIds, context);
       Tensor residual = null;
-      DeviceDecoders.openFrame();
       try {
+        DeviceDecoders.openFrame();
         for (LlamaDecoderLayer layer : this.layers) {
           Tensor[] out = layer.forward(positions, hiddenStates, residual, context);
           Tensor previousHidden = hiddenStates;

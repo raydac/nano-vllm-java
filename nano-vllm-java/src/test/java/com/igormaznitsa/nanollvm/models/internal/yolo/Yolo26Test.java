@@ -25,8 +25,10 @@ import com.igormaznitsa.nanollvm.models.VisionHit;
 import com.igormaznitsa.nanollvm.tensor.Tensor;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.IntStream;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIf;
 import org.junit.jupiter.api.io.TempDir;
@@ -164,6 +166,40 @@ final class Yolo26Test {
   }
 
   @Test
+  void depthPictureSkipsTheLetterboxPad() {
+    YoloLetterbox letter = YoloLetterbox.of(new ArgbImage(8, 2, new int[16]));
+    float[] meters = new float[16];
+    Arrays.fill(meters, 0f);
+    for (int x = 0; x < 4; x++) {
+      meters[4 + x] = 1f;
+      meters[8 + x] = 9f;
+    }
+
+    YoloHead.DepthPicture picture = YoloHead.depthPicture(meters, 4, 4, letter);
+
+    assertEquals(1f, picture.minimum(), 1e-4f);
+    assertEquals(9f, picture.maximum(), 1e-4f);
+    assertTrue((picture.pixels()[0] & 0xff) > 100);
+  }
+
+  @Test
+  void semanticPictureSkipsTheLetterboxPad() {
+    YoloLetterbox letter = YoloLetterbox.of(new ArgbImage(8, 2, new int[16]));
+    float[] logits = new float[2 * 4 * 4];
+    for (int y = 0; y < 4; y++) {
+      int winner = y == 0 || y == 3 ? 0 : 1;
+      for (int x = 0; x < 4; x++) {
+        logits[(winner * 4 + y) * 4 + x] = 5f;
+      }
+    }
+
+    int[] pixels = YoloHead.semanticPicture(logits, 0, 2, 4, 4, letter);
+
+    assertEquals(1, pixels[0] & 0xff);
+    assertEquals(1, pixels[7] & 0xff);
+  }
+
+  @Test
   void nearestTwiceDoublesSpatialSize() {
     Tensor scaled = YoloMath.nearestTwice(Tensor.of(new float[] {1f, 2f, 3f, 4f}, 1, 2, 2));
 
@@ -212,7 +248,7 @@ final class Yolo26Test {
 
     assertEquals(300, found.objects().size());
     VisionHit first = found.objects().getFirst();
-    assertEquals("person", first.className());
+    assertEquals("class-0", first.className());
     assertEquals(0.5f, first.probability(), 1e-5f);
     Box box = assertInstanceOf(Box.class, first.shape());
     assertTrue(box.left() >= 0f && box.right() <= 64f);
@@ -246,7 +282,9 @@ final class Yolo26Test {
       new Scale(64, true, "l"),
       new Scale(96, true, "x"))) {
       Yolo26Model model = Yolo26Model.load(
-        YoloTensors.synthetic(scale.stem(), scale.deeper()), YoloTask.DETECT, YoloCoco.NAMES);
+        YoloTensors.synthetic(scale.stem(), scale.deeper()),
+        YoloTask.DETECT,
+        IntStream.range(0, 80).mapToObj(index -> "class-" + index).toList());
       assertEquals("yolo26" + scale.suffix() + "-detect", model.architectureName());
       LlmOutObjects found = (LlmOutObjects) model.forwardLetter(letter, null);
       assertTrue(found.objects().size() <= 300);
@@ -292,16 +330,18 @@ final class Yolo26Test {
   }
 
   @Test
-  void obbAndPoseUseBuiltInNames() throws Exception {
-    assertEquals("small vehicle", Yolo26Loader.classNames(Path.of("."), YoloTask.OBB, 15).get(10));
-    assertEquals("large vehicle", Yolo26Loader.classNames(Path.of("."), YoloTask.OBB, 15).get(9));
-    assertEquals(List.of("person"), Yolo26Loader.classNames(Path.of("."), YoloTask.POSE, 1));
-  }
+  void classNamesComeFromTheSidecar(@TempDir final Path folder) throws Exception {
+    Files.writeString(folder.resolve("classes.txt"), "one\n\ntwo\n");
 
-  @Test
-  void semanticWithoutNamesFails() {
+    assertEquals(List.of("one", "two"), Yolo26Loader.classNames(folder, YoloTask.DETECT, 80));
+    assertEquals(List.of(), Yolo26Loader.classNames(folder, YoloTask.DEPTH, 0));
     assertThrows(ModelLoadException.class,
-      () -> Yolo26Loader.classNames(Path.of("."), YoloTask.SEMANTIC, 19));
+      () -> Yolo26Loader.classNames(folder.resolve("absent"), YoloTask.SEMANTIC, 19));
+
+    Path blank = Files.createDirectory(folder.resolve("blank"));
+    Files.writeString(blank.resolve("classes.txt"), "\n");
+    assertThrows(ModelLoadException.class,
+      () -> Yolo26Loader.classNames(blank, YoloTask.CLASSIFY, 1000));
   }
 
   @Test
