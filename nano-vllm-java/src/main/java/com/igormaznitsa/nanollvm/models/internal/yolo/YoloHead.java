@@ -5,6 +5,7 @@ import com.igormaznitsa.nanollvm.layers.ConvTranspose2d;
 import com.igormaznitsa.nanollvm.models.ArgbImage;
 import com.igormaznitsa.nanollvm.models.Box;
 import com.igormaznitsa.nanollvm.models.Keypoint;
+import com.igormaznitsa.nanollvm.models.LlmInImage;
 import com.igormaznitsa.nanollvm.models.LlmLabelScore;
 import com.igormaznitsa.nanollvm.models.LlmOutImage;
 import com.igormaznitsa.nanollvm.models.LlmOutLabels;
@@ -90,13 +91,17 @@ final class YoloHead {
       letter.toSource(raw.cx - vx + ux, raw.cy - vy + uy)));
   }
 
-  private static List<Keypoint> keypoints(final Raw raw, final YoloLetterbox letter) {
-    int joints = Math.min(Keypoint.COUNT, raw.extra.length / POSE_DIMS);
+  private static List<Keypoint> keypoints(
+    final Raw raw,
+    final YoloLetterbox letter,
+    final float minVisible
+  ) {
+    int joints = raw.extra.length / POSE_DIMS;
     List<Keypoint> points = new ArrayList<>();
     for (int joint = 0; joint < joints; joint++) {
       int value = joint * POSE_DIMS;
       float visible = 1f / (1f + (float) Math.exp(-raw.extra[value + 2]));
-      if (visible < 0.5f) {
+      if (visible < minVisible) {
         continue;
       }
       float x = (raw.extra[value] + raw.anchorX) * raw.stride;
@@ -323,13 +328,13 @@ final class YoloHead {
       new Point2D(box.left(), bottom)));
   }
 
-  private static List<Pick> topPicks(final List<Raw> raws) {
+  private static List<Pick> topPicks(final List<Raw> raws, final int maxDetections) {
     Integer[] order = new Integer[raws.size()];
     for (int i = 0; i < order.length; i++) {
       order[i] = i;
     }
     Arrays.sort(order, Comparator.comparingDouble((Integer i) -> raws.get(i).best).reversed());
-    int anchors = Math.min(Yolo26Model.MAX_DET, order.length);
+    int anchors = Math.min(maxDetections, order.length);
     List<Pick> ranked = new ArrayList<>();
     for (int i = 0; i < anchors; i++) {
       Raw raw = raws.get(order[i]);
@@ -338,7 +343,7 @@ final class YoloHead {
       }
     }
     ranked.sort(Comparator.comparingDouble(Pick::score).reversed());
-    return ranked.subList(0, Math.min(Yolo26Model.MAX_DET, ranked.size()));
+    return ranked.subList(0, Math.min(maxDetections, ranked.size()));
   }
 
   private static YoloHead pyramid(
@@ -349,10 +354,18 @@ final class YoloHead {
   ) {
     int[] channels = {width.c256(), width.c512(), width.c1024()};
     int[] strides = {8, 16, 32};
-    int c2 = Math.max(16, Math.max(channels[0] / 4, 4));
-    int c3 = Math.max(channels[0], Math.min(classes, 100));
-    int extra = extraChannels(task);
-    int c4 = sideChannels(channels[0], extra, task);
+    int extra = extraChannels(weights, task);
+    int c2 = weights.leading(
+      "model.23.one2one_cv2.0.0.conv.weight",
+      Math.max(16, Math.max(channels[0] / 4, 4)));
+    int c3 = weights.leading(
+      "model.23.one2one_cv3.0.0.1.conv.weight",
+      Math.max(channels[0], Math.min(classes, 100)));
+    int c4 = extra == 0
+      ? 0
+      : weights.leading(
+      "model.23.one2one_cv4.0.0.conv.weight",
+      sideChannels(channels[0], extra, task));
     Level[] levels = new Level[3];
     for (int i = 0; i < levels.length; i++) {
       levels[i] = Level.load(
@@ -366,22 +379,21 @@ final class YoloHead {
     return new YoloHead(task, levels, proto, null, null, null);
   }
 
-  private static int declaredClasses(final YoloTensors weights, final YoloTask task) {
-    if (task == YoloTask.CLASSIFY || task == YoloTask.SEMANTIC || task == YoloTask.DEPTH) {
-      return task.classes();
-    }
-    String classWeight = "model.23.one2one_cv3.0.2.weight";
-    if (!weights.has(classWeight)) {
-      return task.classes();
-    }
-    return weights.shape(classWeight)[0];
+  static int declaredClasses(final YoloTensors weights, final YoloTask task) {
+    return switch (task) {
+      case DEPTH -> 0;
+      case SEMANTIC -> weights.leading("model.17.classifier.1.weight", task.classes());
+      case CLASSIFY -> weights.leading("model.10.linear.weight", task.classes());
+      default -> weights.leading("model.23.one2one_cv3.0.2.weight", task.classes());
+    };
   }
 
-  private static int extraChannels(final YoloTask task) {
+  private static int extraChannels(final YoloTensors weights, final YoloTask task) {
     return switch (task) {
-      case SEGMENT -> 32;
-      case POSE -> Keypoint.COUNT * POSE_DIMS;
-      case OBB -> 1;
+      case SEGMENT -> weights.leading("model.23.one2one_cv4.0.2.weight", 32);
+      case POSE -> weights.leading(
+        "model.23.one2one_cv4_kpts.0.weight", Keypoint.COUNT * POSE_DIMS);
+      case OBB -> weights.leading("model.23.one2one_cv4.0.2.weight", 1);
       default -> 0;
     };
   }
@@ -398,11 +410,11 @@ final class YoloHead {
     final List<Tensor> layers,
     final YoloLetterbox letter,
     final List<String> names,
-    final float minProbability,
+    final LlmInImage request,
     final MatmulRuntime runtime
   ) {
     if (this.classify != null) {
-      return this.classify.read(layers.getLast(), names, runtime);
+      return this.classify.read(layers.getLast(), names, request.maxLabels(), runtime);
     }
     if (this.semantic != null) {
       return this.semantic.read(layers.get(16), letter, runtime);
@@ -411,14 +423,13 @@ final class YoloHead {
       return this.depth.read(List.of(layers.get(16), layers.get(19), layers.get(22)), letter,
         runtime);
     }
-    return this.objects(layers, letter, names, minProbability, runtime);
+    return this.objects(layers, letter, request, runtime);
   }
 
   private LlmOutput objects(
     final List<Tensor> layers,
     final YoloLetterbox letter,
-    final List<String> names,
-    final float minProbability,
+    final LlmInImage request,
     final MatmulRuntime runtime
   ) {
     Tensor[] feats = {layers.get(16), layers.get(19), layers.get(22)};
@@ -426,14 +437,15 @@ final class YoloHead {
     for (int level = 0; level < this.levels.length; level++) {
       this.levels[level].collect(feats[level], runtime, raws, this.task);
     }
-    List<Pick> picks = topPicks(raws);
+    List<Pick> picks = topPicks(raws, request.maxDetections());
     Tensor masks = this.proto == null ? null : this.proto.forward(feats, runtime);
     List<VisionHit> hits = new ArrayList<>();
     for (Pick pick : picks) {
-      if (pick.score < minProbability) {
+      if (pick.score < request.minProbability()) {
         continue;
       }
-      hits.add(this.hit(raws.get(pick.anchor), pick, masks, letter, names));
+      hits.add(this.hit(
+        raws.get(pick.anchor), pick, masks, letter, request.keypointMinProbability()));
     }
     return new LlmOutObjects(hits);
   }
@@ -443,16 +455,17 @@ final class YoloHead {
     final Pick pick,
     final Tensor proto,
     final YoloLetterbox letter,
-    final List<String> names
+    final float keypointMinProbability
   ) {
-    String name = pick.classId < names.size() ? names.get(pick.classId) : "class-" + pick.classId;
     Shape2D shape = switch (this.task) {
       case OBB -> oriented(raw, letter);
       case SEGMENT -> outline(raw, proto, letter);
       default -> box(raw, letter);
     };
-    List<Keypoint> keypoints = this.task == YoloTask.POSE ? keypoints(raw, letter) : List.of();
-    return new VisionHit(name, pick.score, shape, keypoints);
+    List<Keypoint> keypoints = this.task == YoloTask.POSE
+      ? keypoints(raw, letter, keypointMinProbability)
+      : List.of();
+    return new VisionHit(pick.classId, pick.score, shape, keypoints);
   }
 
   private record Pick(int anchor, int classId, float score) {
@@ -864,15 +877,18 @@ final class YoloHead {
   private record Classify(YoloConv conv, Tensor weight, Tensor bias) {
 
     static Classify load(final YoloTensors weights, final int channels, final int classes) {
+      int features = weights.axis("model.10.linear.weight", 1, 1280);
+      int rows = weights.axis("model.10.linear.weight", 0, classes);
       return new Classify(
-        YoloConv.load(weights, "model.10.conv", channels, 1280, 1, 1, 1, true),
-        weights.take("model.10.linear.weight", classes, 1280),
-        weights.take("model.10.linear.bias", classes));
+        YoloConv.load(weights, "model.10.conv", channels, features, 1, 1, 1, true),
+        weights.take("model.10.linear.weight", rows, features),
+        weights.take("model.10.linear.bias", rows));
     }
 
     LlmOutLabels read(
       final Tensor feature,
       final List<String> names,
+      final int maxLabels,
       final MatmulRuntime runtime
     ) {
       Tensor conv = this.conv.forward(feature, runtime);
@@ -915,7 +931,7 @@ final class YoloHead {
         order[i] = i;
       }
       Arrays.sort(order, Comparator.comparingDouble((Integer i) -> logits[i]).reversed());
-      int keep = Math.min(5, classes);
+      int keep = Math.min(maxLabels, classes);
       List<LlmLabelScore> labels = new ArrayList<>();
       for (int i = 0; i < keep; i++) {
         int id = order[i];

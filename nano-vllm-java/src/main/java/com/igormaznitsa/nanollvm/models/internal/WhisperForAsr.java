@@ -19,6 +19,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
+import java.util.regex.Pattern;
 import java.util.stream.IntStream;
 
 /**
@@ -36,15 +37,7 @@ public final class WhisperForAsr implements SpeechToText {
   private static final String EOT = "<|endoftext|>";
   private static final String TRANSCRIBE = "<|transcribe|>";
   private static final String NO_TIMESTAMPS = "<|notimestamps|>";
-  private static final String[] LANGUAGE_CODES = {
-    "en", "zh", "de", "es", "ru", "ko", "fr", "ja", "pt", "tr", "pl", "ca", "nl", "ar", "sv",
-    "it", "id", "hi", "fi", "vi", "he", "uk", "el", "ms", "cs", "ro", "da", "hu", "ta", "no",
-    "th", "ur", "hr", "bg", "lt", "la", "mi", "ml", "cy", "sk", "te", "fa", "lv", "bn", "sr",
-    "az", "sl", "kn", "et", "mk", "br", "eu", "is", "hy", "ne", "mn", "bs", "kk", "sq", "sw",
-    "gl", "mr", "pa", "si", "km", "sn", "yo", "so", "af", "oc", "ka", "be", "tg", "sd", "gu",
-    "am", "yi", "lo", "uz", "fo", "ht", "ps", "tk", "nn", "mt", "sa", "lb", "my", "bo", "tl",
-    "mg", "as", "tt", "haw", "ln", "ha", "ba", "jw", "su", "yue"
-  };
+  private static final Pattern LANGUAGE_TOKEN = Pattern.compile("<\\|[a-z]{2,3}\\|>");
 
   private final Config.WhisperSpec spec;
   private final Conv1d conv1;
@@ -301,7 +294,8 @@ public final class WhisperForAsr implements SpeechToText {
     Context context = new Context();
     context.bindMatmul(runtime);
     Tensor encoderHidden = this.encode(
-      WhisperLogMel.featuresAt16k(pcm16k, origin, length, runtime), context);
+      WhisperLogMel.featuresAt16k(pcm16k, origin, length, this.spec.numMelBins(), runtime),
+      context);
     List<CrossCache> memory = this.decoderBlocks.stream()
       .map(block -> block.crossCache(encoderHidden, context))
       .toList();
@@ -344,7 +338,8 @@ public final class WhisperForAsr implements SpeechToText {
   ) {
     boolean[] suppress = this.languageOnlyMask(tokenizer, eot);
     if (allSuppressed(suppress)) {
-      return requireToken(tokenizer, "<|en|>");
+      throw new IllegalArgumentException(
+        "tokenizer has no <|xx|> language token; pass a language");
     }
     List<SelfCache> selfCaches = this.newSelfCaches();
     return this.prefill(prefix, memory, selfCaches, context, suppress);
@@ -424,8 +419,11 @@ public final class WhisperForAsr implements SpeechToText {
     }
     boolean[] suppress = new boolean[vocab];
     Arrays.fill(suppress, true);
-    for (String code : LANGUAGE_CODES) {
-      tokenizer.tokenId("<|" + code + "|>").ifPresent(id -> suppress[id] = false);
+    for (int id = 0; id < vocab; id++) {
+      String piece = tokenizer.piece(id);
+      if (piece != null && LANGUAGE_TOKEN.matcher(piece).matches()) {
+        suppress[id] = false;
+      }
     }
     if (eot >= 0 && eot < suppress.length) {
       suppress[eot] = true;

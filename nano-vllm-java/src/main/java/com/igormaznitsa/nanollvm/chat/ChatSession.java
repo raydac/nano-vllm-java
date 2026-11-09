@@ -68,6 +68,7 @@ public final class ChatSession {
   private boolean recoverUnusableAnswers;
   private Predicate<String> unusableAnswer = body -> body == null || body.isBlank();
   private String unusableAnswerFallback = "Sorry — I couldn't form a reply. Please try again.";
+  private String unusableHistoryText = "";
 
   /**
    * Opens a session with {@link LLM#defaultSampling()} and a fresh conversation seeded from the
@@ -347,6 +348,19 @@ public final class ChatSession {
   }
 
   /**
+   * Text written over an unusable assistant turn before the retry. Empty by default, so the
+   * library does not insert a greeting. Set this when the checkpoint needs some assistant text
+   * in history.
+   *
+   * @param text replacement; must not be {@code null}
+   * @return {@code this}
+   */
+  public ChatSession unusableHistoryText(final String text) {
+    this.unusableHistoryText = requireNonNull(text, "text");
+    return this;
+  }
+
+  /**
    * Caps retained dialog turns (system + user + assistant). Oldest non-system messages are dropped
    * when the cap is exceeded. Default from {@link ResourceLimits#maxHistoryMessages()}.
    *
@@ -531,7 +545,8 @@ public final class ChatSession {
     if (this.llm.tools().isEmpty()
       && this.recoverUnusableAnswers
       && this.isUnusableMainAnswer(reply.answer())) {
-      ChatMessages.scrubMatchingAssistantTurns(this.history, this.unusableAnswer);
+      ChatMessages.scrubMatchingAssistantTurns(
+        this.history, this.unusableAnswer, this.unusableHistoryText);
       this.emitDiagnostics("(unusable main answer — retrying without filler history)");
       this.discardPrintedAnswer();
       turn = this.beginTurn();
@@ -707,7 +722,7 @@ public final class ChatSession {
         working, this.llm.tools(), tokenizer, enableThinking, tags);
       raw = this.generateRaw(turn, prompt, dialect, tags);
       List<ToolCall> calls = dialect.parseCalls(raw);
-      if (calls.isEmpty() || executed == ToolDialects.MAX_EXECUTIONS) {
+      if (calls.isEmpty() || executed == this.llm.maxToolExecutions()) {
         break;
       }
       working.addAll(

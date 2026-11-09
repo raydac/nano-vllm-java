@@ -5,6 +5,7 @@ import static java.util.Objects.requireNonNull;
 import com.igormaznitsa.nanollvm.internal.EmptyArrays;
 import com.igormaznitsa.nanollvm.tensor.MatmulRuntime;
 import com.igormaznitsa.nanollvm.tensor.Tensor;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * OpenAI Whisper log-mel features: 16 kHz, n_fft=400, hop=160, 80 Slaney mels.
@@ -44,7 +45,9 @@ public final class WhisperLogMel {
 
   private static final int FREQ_BINS = N_FFT / 2;
   private static final float[] HANN = hann();
-  private static final SparseMel[] MEL_FILTERS = slaneyMelFilters();
+  private static final SparseMel[] MEL_FILTERS = slaneyMelFilters(N_MELS);
+  private static final ConcurrentHashMap<Integer, SparseMel[]> MEL_BY_BINS =
+    new ConcurrentHashMap<>();
   private static final RealDft DFT = new RealDft(N_FFT);
 
   private WhisperLogMel() {
@@ -103,8 +106,28 @@ public final class WhisperLogMel {
     final int length,
     final MatmulRuntime runtime
   ) {
+    return featuresAt16k(pcm16k, origin, length, N_MELS, runtime);
+  }
+
+  /**
+   * Same slice as {@link #featuresAt16k(float[], int, int, MatmulRuntime)} with the checkpoint's
+   * mel-band count ({@code num_mel_bins}).
+   *
+   * @param numMelBins log-mel channels, at least 1
+   * @return log-mel spectrogram {@code [numMelBins, frames]}
+   */
+  public static Tensor featuresAt16k(
+    final float[] pcm16k,
+    final int origin,
+    final int length,
+    final int numMelBins,
+    final MatmulRuntime runtime
+  ) {
     requireNonNull(pcm16k, "pcm16k");
     requireNonNull(runtime, "runtime");
+    if (numMelBins < 1) {
+      throw new IllegalArgumentException("numMelBins must be >= 1");
+    }
     if (origin < 0 || length < 0 || (long) origin + length > pcm16k.length) {
       throw new IllegalArgumentException("pcm slice out of range");
     }
@@ -113,9 +136,9 @@ public final class WhisperLogMel {
     float[] chunk = padOrTrim(pcm16k, origin, samples, target);
     int frames = frameCount(target);
     float[] spec = stftPower(chunk, frames, runtime);
-    float[] mel = applyMel(spec, frames);
+    float[] mel = applyMel(spec, frames, melFilters(numMelBins));
     normalizeLogMel(mel);
-    return Tensor.of(mel, N_MELS, frames);
+    return Tensor.of(mel, numMelBins, frames);
   }
 
   static int frameCount(final int samples) {
@@ -204,12 +227,23 @@ public final class WhisperLogMel {
     return spec;
   }
 
-  private static float[] applyMel(final float[] spec, final int frames) {
-    float[] mel = new float[N_MELS * frames];
+  private static SparseMel[] melFilters(final int numMelBins) {
+    if (numMelBins == N_MELS) {
+      return MEL_FILTERS;
+    }
+    return MEL_BY_BINS.computeIfAbsent(numMelBins, WhisperLogMel::slaneyMelFilters);
+  }
+
+  private static float[] applyMel(
+    final float[] spec,
+    final int frames,
+    final SparseMel[] filters
+  ) {
+    float[] mel = new float[filters.length * frames];
     for (int frame = 0; frame < frames; frame++) {
       int specOff = frame * FREQ_BINS;
-      for (int m = 0; m < N_MELS; m++) {
-        SparseMel filter = MEL_FILTERS[m];
+      for (int m = 0; m < filters.length; m++) {
+        SparseMel filter = filters[m];
         float sum = 0f;
         float[] weights = filter.weights;
         int start = filter.start;
@@ -245,10 +279,9 @@ public final class WhisperLogMel {
     return w;
   }
 
-  private static SparseMel[] slaneyMelFilters() {
+  private static SparseMel[] slaneyMelFilters(final int nMels) {
     float fMin = 0f;
     float fMax = SAMPLE_RATE / 2f;
-    final int nMels = N_MELS;
     double minMel = hzToMel(fMin);
     double maxMel = hzToMel(fMax);
     double[] melPoints = new double[nMels + 2];

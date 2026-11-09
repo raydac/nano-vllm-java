@@ -234,7 +234,7 @@ final class Yolo26Test {
         }
         default -> {
           LlmOutObjects found = assertInstanceOf(LlmOutObjects.class, output);
-          assertTrue(found.objects().size() <= 300);
+          assertTrue(found.objects().size() <= LlmInImage.DEFAULT_MAX_DETECTIONS);
         }
       }
     }
@@ -248,7 +248,10 @@ final class Yolo26Test {
 
     assertEquals(300, found.objects().size());
     VisionHit first = found.objects().getFirst();
-    assertEquals("class-0", first.className());
+    assertEquals(0, first.classId());
+    assertEquals("class-0", model.classNames().get(first.classId()));
+    assertThrows(IllegalArgumentException.class,
+      () -> new VisionHit(-1, 0.5f, new Box(0, 0, 1, 1)));
     assertEquals(0.5f, first.probability(), 1e-5f);
     Box box = assertInstanceOf(Box.class, first.shape());
     assertTrue(box.left() >= 0f && box.right() <= 64f);
@@ -287,7 +290,7 @@ final class Yolo26Test {
         IntStream.range(0, 80).mapToObj(index -> "class-" + index).toList());
       assertEquals("yolo26" + scale.suffix() + "-detect", model.architectureName());
       LlmOutObjects found = (LlmOutObjects) model.forwardLetter(letter, null);
-      assertTrue(found.objects().size() <= 300);
+      assertTrue(found.objects().size() <= LlmInImage.DEFAULT_MAX_DETECTIONS);
     }
   }
 
@@ -299,14 +302,20 @@ final class Yolo26Test {
     LlmOutObjects kept = (LlmOutObjects) model.forwardLetter(letter, 0.4f, null);
     LlmOutObjects dropped = (LlmOutObjects) model.forwardLetter(letter, 0.6f, null);
 
-    assertEquals(300, kept.objects().size());
+    assertEquals(LlmInImage.DEFAULT_MAX_DETECTIONS, kept.objects().size());
     assertTrue(kept.objects().stream().allMatch(hit -> hit.probability() >= 0.4f));
     assertTrue(dropped.objects().isEmpty());
-    assertEquals(
-      LlmInImage.DEFAULT_MIN_PROBABILITY,
-      new LlmInImage(new ArgbImage(1, 1, new int[1])).minProbability());
+    LlmInImage defaults = new LlmInImage(new ArgbImage(1, 1, new int[1]));
+    assertEquals(LlmInImage.DEFAULT_MIN_PROBABILITY, defaults.minProbability());
+    assertEquals(LlmInImage.DEFAULT_IMAGE_SIZE, defaults.imageSize());
+    assertEquals(LlmInImage.DEFAULT_MAX_DETECTIONS, defaults.maxDetections());
+    assertEquals(LlmInImage.DEFAULT_KEYPOINT_MIN_PROBABILITY, defaults.keypointMinProbability());
+    assertEquals(LlmInImage.DEFAULT_MAX_LABELS, defaults.maxLabels());
+    assertEquals(17, new com.igormaznitsa.nanollvm.models.Keypoint(17, 0f, 0f).joint());
     assertThrows(IllegalArgumentException.class,
       () -> new LlmInImage(new ArgbImage(1, 1, new int[1]), 1.1f));
+    assertThrows(IllegalArgumentException.class,
+      () -> LlmInImage.builder(new ArgbImage(1, 1, new int[1])).imageSize(100).build());
     assertThrows(IllegalArgumentException.class,
       () -> Yolo26Model.synthetic(YoloTask.CLASSIFY).forwardLetter(letter, 0.9f, null));
   }
@@ -350,7 +359,7 @@ final class Yolo26Test {
     try (LlmModel model = LlmModelFactory.make(detectOnnx())) {
       ArgbImage image = new ArgbImage(64, 64, new int[64 * 64]);
       LlmOutObjects found = model.generate(new LlmInImage(image), LlmModality.IMAGE);
-      assertTrue(found.objects().size() <= 300);
+      assertTrue(found.objects().size() <= LlmInImage.DEFAULT_MAX_DETECTIONS);
     }
   }
 }

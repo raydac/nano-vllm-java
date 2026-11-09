@@ -2109,10 +2109,9 @@ try (LlmModel model = LlmModelFactory.make(Path.of("models/YOLO26n/detect/yolo26
 
 `pixels` are row-major `0xAARRGGBB` (`ArgbImage`). The library does not use `java.desktop`.
 `YoloStreetHelloWorld.fromBufferedImage` copies a `BufferedImage` into that layout, and
-`toBufferedImage` copies a result raster back. The picture is letterboxed to 640×640. When TornadoVM is the kernel backend, each convolution runs on the device from that picture and applies SiLU in the same task. Boxes, mask outlines, rotated
+`toBufferedImage` copies a result raster back. The picture is letterboxed to a square multiple of 32 (640 when the caller omits the size). When TornadoVM is the kernel backend, each convolution runs on the device from that picture and applies SiLU in the same task. Boxes, mask outlines, rotated
 corners, and pose points come back in the original picture's pixels. Object heads keep a hit whose score is at
-least `LlmInImage`'s minimum (`0.25` when the picture is passed alone). At most 300 candidates are ranked before
-that cutoff. A minimum other than the default is rejected for a semantic map, depth, or classification file.
+least `LlmInImage`'s minimum (`0.25` when the picture is passed alone) and within `maxDetections` (300 when omitted). Pose width and class count come from the file. A joint is kept when its confidence is at least `keypointMinProbability` (`0.5` when omitted). A minimum other than the default is rejected for a semantic map, depth, or classification file.
 
 | File | `generate` result |
 |--|--|
@@ -2122,7 +2121,7 @@ that cutoff. A minimum other than the default is rejected for a semantic map, de
 | `yolo26n-sem.onnx`, `yolo26n-depth.onnx` | `LlmOutImage` — class indexes, or grayscale depth with the min and max in meters |
 | `yolo26n-cls.onnx` | `LlmOutLabels` via `generate(image, LABELS)` |
 
-Class names are `classes.txt` in the same folder as the ONNX file, one name per line. The library does not guess a dataset.
+Each object carries the class index from the head. `LlmModel.classNames()` is `classes.txt` in the same folder as the ONNX file, one name per line, in that index order. Use the index as it is, or read the name from that list. The picture read does not look the name up. The library does not guess a dataset.
 Depth has no names. Those lists are already in `models/YOLO26n/<task>/`. Replace `classes.txt` when a head was trained on another list.
 
 The file must be the end-to-end export (`nms=False`, image size 640). An anonymous or unfused export

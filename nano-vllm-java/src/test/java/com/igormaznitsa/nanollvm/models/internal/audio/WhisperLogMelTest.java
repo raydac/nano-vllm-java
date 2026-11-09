@@ -21,6 +21,15 @@ final class WhisperLogMelTest {
   }
 
   @Test
+  void melBinCountFollowsTheCaller() {
+    Tensor mel = WhisperLogMel.featuresAt16k(
+      new float[0], 0, 0, 128, com.igormaznitsa.nanollvm.tensor.MatmulRuntime.sequential());
+
+    assertEquals(128, mel.size(0));
+    assertEquals(1, mel.size(1));
+  }
+
+  @Test
   void emptyPcmIsOneHop() {
     Tensor mel = WhisperLogMel.features(new float[0], WhisperLogMel.SAMPLE_RATE);
 

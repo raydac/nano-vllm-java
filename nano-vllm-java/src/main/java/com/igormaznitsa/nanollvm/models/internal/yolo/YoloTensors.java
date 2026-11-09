@@ -80,6 +80,27 @@ final class YoloTensors {
     return this.weights != null && this.find(name) != null;
   }
 
+  /**
+   * Leading axis of a real weight. A synthetic bag, which has no tensors, returns
+   * {@code whenSynthetic} so block tests can build the published nano shapes.
+   */
+  int leading(final String name, final int whenSynthetic) {
+    if (this.weights == null || !this.has(name)) {
+      return whenSynthetic;
+    }
+    return this.shape(name)[0];
+  }
+
+  /**
+   * One axis of a real weight. A synthetic bag returns {@code whenSynthetic}.
+   */
+  int axis(final String name, final int axis, final int whenSynthetic) {
+    if (this.weights == null || !this.has(name)) {
+      return whenSynthetic;
+    }
+    return this.shape(name)[axis];
+  }
+
   int[] shape(final String name) {
     Tensor found = this.weights == null ? null : this.find(name);
     if (found == null) {

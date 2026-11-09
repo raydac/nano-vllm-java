@@ -141,13 +141,14 @@ public final class YoloStreetHelloWorld {
     LlmOutObjects found = llm.generate(
       new LlmInImage(fromBufferedImage(photo), QUIET_SCORE), LlmModality.IMAGE);
     long recognized = System.nanoTime();
+    List<String> classNames = llm.model().classNames();
     List<VisionHit> street = visibleHits(
-      found.objects(), photo.getWidth(), photo.getHeight());
-    Path written = writeMarked(photo, street, outputFile(head), head);
+      found.objects(), classNames, photo.getWidth(), photo.getHeight());
+    Path written = writeMarked(photo, street, classNames, outputFile(head), head);
     System.out.println("recognized in " + seconds(recognized - loaded));
     System.out.println(street.size() + " objects, wrote " + written);
     for (VisionHit hit : street) {
-      System.out.println("  " + label(hit));
+      System.out.println("  " + label(hit, classNames));
     }
   }
 
@@ -391,24 +392,30 @@ public final class YoloStreetHelloWorld {
     }
   }
 
-  static List<VisionHit> streetObjects(final List<VisionHit> hits) {
+  static List<VisionHit> streetObjects(
+    final List<VisionHit> hits,
+    final List<String> classNames
+  ) {
     requireNonNull(hits, "hits");
+    requireNonNull(classNames, "classNames");
     return hits.stream()
-      .filter(hit -> STREET_CLASSES.contains(hit.className().toLowerCase(ROOT)))
+      .filter(hit -> isStreetClass(classNames, hit.classId()))
       .toList();
   }
 
   static List<VisionHit> visibleHits(
     final List<VisionHit> hits,
+    final List<String> classNames,
     final int width,
     final int height
   ) {
     requireNonNull(hits, "hits");
+    requireNonNull(classNames, "classNames");
     if (width < 1 || height < 1) {
       throw new IllegalArgumentException("picture must be non-empty");
     }
     float quietArea = width * (float) height * QUIET_AREA_FRACTION;
-    List<VisionHit> ranked = streetObjects(hits).stream()
+    List<VisionHit> ranked = streetObjects(hits, classNames).stream()
       .filter(hit -> isVisible(hit, quietArea))
       .sorted(Comparator.comparingDouble(VisionHit::probability).reversed())
       .toList();
@@ -429,11 +436,16 @@ public final class YoloStreetHelloWorld {
     return hit.probability() >= QUIET_SCORE && area(bounds(hit.shape())) >= quietArea;
   }
 
+  private static boolean isStreetClass(final List<String> classNames, final int classId) {
+    return classId < classNames.size()
+      && STREET_CLASSES.contains(classNames.get(classId).toLowerCase(ROOT));
+  }
+
   private static boolean coveredByStronger(final VisionHit hit, final List<VisionHit> kept) {
     Box box = bounds(hit.shape());
-    String name = hit.className().toLowerCase(ROOT);
+    int classId = hit.classId();
     return kept.stream().anyMatch(stronger ->
-      stronger.className().toLowerCase(ROOT).equals(name)
+      stronger.classId() == classId
         && overlapOfSmaller(box, bounds(stronger.shape())) > 0.5f);
   }
 
@@ -451,9 +463,17 @@ public final class YoloStreetHelloWorld {
     return Math.max(0f, box.right() - box.left()) * Math.max(0f, box.bottom() - box.top());
   }
 
-  static String label(final VisionHit hit) {
+  static String className(final List<String> classNames, final int classId) {
+    requireNonNull(classNames, "classNames");
+    return classId >= 0 && classId < classNames.size()
+      ? classNames.get(classId)
+      : "class-" + classId;
+  }
+
+  static String label(final VisionHit hit, final List<String> classNames) {
     requireNonNull(hit, "hit");
-    return "%s %s".formatted(hit.className(), String.format(ROOT, "%.2f", hit.probability()));
+    return "%s %s".formatted(
+      className(classNames, hit.classId()), String.format(ROOT, "%.2f", hit.probability()));
   }
 
   static String label(final LlmLabelScore score) {
@@ -461,17 +481,23 @@ public final class YoloStreetHelloWorld {
     return "%s %s".formatted(score.label(), String.format(ROOT, "%.2f", score.score()));
   }
 
-  static BufferedImage mark(final BufferedImage source, final List<VisionHit> hits) {
-    return mark(source, hits, StreetHead.DETECT);
+  static BufferedImage mark(
+    final BufferedImage source,
+    final List<VisionHit> hits,
+    final List<String> classNames
+  ) {
+    return mark(source, hits, classNames, StreetHead.DETECT);
   }
 
   static BufferedImage mark(
     final BufferedImage source,
     final List<VisionHit> hits,
+    final List<String> classNames,
     final StreetHead head
   ) {
     requireNonNull(source, "source");
     requireNonNull(hits, "hits");
+    requireNonNull(classNames, "classNames");
     requireNonNull(head, "head");
     BufferedImage canvas = new BufferedImage(
       source.getWidth(), source.getHeight(), BufferedImage.TYPE_INT_RGB);
@@ -487,11 +513,11 @@ public final class YoloStreetHelloWorld {
       .toList();
     boolean fillMask = head == StreetHead.SEGMENT;
     for (VisionHit hit : ranked) {
-      paintShape(pen, hit, fillMask);
+      paintShape(pen, hit, classNames, fillMask);
     }
     List<Rectangle> occupied = new ArrayList<>();
     for (VisionHit hit : ranked) {
-      paintLabel(pen, hit, canvas.getWidth(), canvas.getHeight(), occupied);
+      paintLabel(pen, hit, classNames, canvas.getWidth(), canvas.getHeight(), occupied);
     }
     pen.dispose();
     return canvas;
@@ -500,18 +526,20 @@ public final class YoloStreetHelloWorld {
   static Path writeMarked(
     final BufferedImage source,
     final List<VisionHit> hits,
+    final List<String> classNames,
     final Path out
   ) throws IOException {
-    return writeMarked(source, hits, out, StreetHead.DETECT);
+    return writeMarked(source, hits, classNames, out, StreetHead.DETECT);
   }
 
   static Path writeMarked(
     final BufferedImage source,
     final List<VisionHit> hits,
+    final List<String> classNames,
     final Path out,
     final StreetHead head
   ) throws IOException {
-    return writePng(mark(source, hits, head), out);
+    return writePng(mark(source, hits, classNames, head), out);
   }
 
   private static Path writePng(final BufferedImage image, final Path out) throws IOException {
@@ -614,12 +642,14 @@ public final class YoloStreetHelloWorld {
   private static void paintShape(
     final Graphics2D pen,
     final VisionHit hit,
+    final List<String> classNames,
     final boolean fillMask
   ) {
-    pen.setColor(ink(hit.className()));
+    Color color = ink(className(classNames, hit.classId()));
+    pen.setColor(color);
     drawShape(pen, hit.shape(), fillMask);
     paintLimbs(pen, hit.keypoints());
-    pen.setColor(ink(hit.className()));
+    pen.setColor(color);
     for (Keypoint joint : hit.keypoints()) {
       pen.fillOval(Math.round(joint.x()) - 3, Math.round(joint.y()) - 3, 6, 6);
     }
@@ -696,11 +726,12 @@ public final class YoloStreetHelloWorld {
   private static void paintLabel(
     final Graphics2D pen,
     final VisionHit hit,
+    final List<String> classNames,
     final int width,
     final int height,
     final List<Rectangle> occupied
   ) {
-    String text = label(hit);
+    String text = label(hit, classNames);
     FontMetrics metrics = pen.getFontMetrics();
     int textWidth = metrics.stringWidth(text);
     int textHeight = metrics.getHeight();
@@ -713,7 +744,7 @@ public final class YoloStreetHelloWorld {
     Rectangle spot = freeSpot(x, y, textWidth + 4, textHeight, height, occupied);
     occupied.add(spot);
 
-    pen.setColor(ink(hit.className()));
+    pen.setColor(ink(className(classNames, hit.classId())));
     pen.fillRect(spot.x, spot.y, spot.width, spot.height);
     pen.setColor(Color.WHITE);
     pen.drawString(text, spot.x + 2, spot.y + metrics.getAscent());

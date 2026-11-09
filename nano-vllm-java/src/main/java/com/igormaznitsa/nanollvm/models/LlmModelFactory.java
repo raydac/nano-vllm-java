@@ -765,7 +765,7 @@ public final class LlmModelFactory {
     LlmListeners.info(io, null, "CPU backend: " + MatmulRuntime.sequential().backendInfo());
     long tGraph = System.nanoTime();
     Yolo26Model yolo = Yolo26Loader.load(onnxFile, task, io);
-    Config.HfConfig config = Config.HfConfig.forYolo(Math.max(yolo.task().classes(), 1));
+    Config.HfConfig config = Config.HfConfig.forYolo(Math.max(yolo.classCount(), 1));
     Tokenizer tokenizer = Tokenizer.fromJsonDocuments(null, null, null, "{\"vocab_size\":1}");
     LlmListeners.infof(io, null, "Vision graph ready (%s) in %.1fs%n",
       yolo.architectureName(), (System.nanoTime() - tGraph) / 1e9);

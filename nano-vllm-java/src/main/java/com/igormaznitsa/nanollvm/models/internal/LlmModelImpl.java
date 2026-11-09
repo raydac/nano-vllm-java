@@ -450,6 +450,13 @@ public final class LlmModelImpl extends LlmModel {
     return this.vision.get() != null;
   }
 
+  @Override
+  public List<String> classNames() {
+    this.assertNotClosed();
+    com.igormaznitsa.nanollvm.models.internal.yolo.Yolo26Model vision = this.vision.get();
+    return vision == null ? List.of() : vision.classNames();
+  }
+
   private String kindLabel() {
     if (this.classificationModel) {
       return "classification";
@@ -651,7 +658,7 @@ public final class LlmModelImpl extends LlmModel {
         new LlmOutText(this.transcribeSound(sound, runtime));
       case LlmInImage image when this.vision.get() != null
         && outputModality == this.vision.get().outputModality() ->
-        this.requireVision().forward(image.image(), image.minProbability(), runtime);
+        this.requireVision().forward(image, runtime);
       default -> throw new IllegalArgumentException(
         "unsupported generate pair: %s → %s (usable %s)".formatted(
           input.getClass().getSimpleName(),

@@ -327,7 +327,7 @@ try (LlmModel model = LlmModelFactory.make(Path.of("models/YOLO26n/detect/yolo26
 }
 ```
 
-`pixels` are row-major `0xAARRGGBB`. `new LlmInImage(raster, 0.4f)` sets the lowest object score; omit it for `0.25`. A renamed file opens with `LlmModelFactory.open(path, LlmModelType.YOLO_DETECT)`. `open(path)` detects the kind and calls that same load. Put `classes.txt` (one name per line) in the same folder as every ONNX file except depth. The library does not guess a dataset.
+`pixels` are row-major `0xAARRGGBB`. `new LlmInImage(raster, 0.4f)` sets the lowest object score; omit it for `0.25`. A renamed file opens with `LlmModelFactory.open(path, LlmModelType.YOLO_DETECT)`. `open(path)` detects the kind and calls that same load. Put `classes.txt` (one name per line) in the same folder as every ONNX file except depth. Each object carries that list's index. `classNames()` returns the loaded lines, and the picture read does not look the name up. The library does not guess a dataset.
 The lists are already in `models/YOLO26n/<task>/`. Replace `classes.txt` when a head was trained on another list.
 `YoloStreetHelloWorld` marks people, bicycles, and cars on a bundled street photo, paints each semantic surface, writes the top classification labels, uses a parking-lot
 photo for oriented boxes, and writes each score onto a PNG.

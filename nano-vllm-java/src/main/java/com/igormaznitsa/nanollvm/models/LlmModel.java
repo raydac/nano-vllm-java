@@ -8,6 +8,7 @@ import com.igormaznitsa.nanollvm.llm.LLM;
 import com.igormaznitsa.nanollvm.models.internal.LlmModelImpl;
 import com.igormaznitsa.nanollvm.tokenizer.Tokenizer;
 import java.nio.file.Path;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
@@ -228,6 +229,15 @@ public abstract sealed class LlmModel implements AutoCloseable permits LlmModelI
    * @since 1.5.0
    */
   public abstract boolean isVisionModel();
+
+  /**
+   * Names from {@code classes.txt} beside a YOLO26 file, in class-index order.
+   * Empty when this model has no class list. {@link VisionHit#classId()} selects a line.
+   * Depth has none.
+   *
+   * @since 1.5.0
+   */
+  public abstract List<String> classNames();
 
   /**
    * {@code true} when GGUF/QAT weights are still packed (not widened to float32).

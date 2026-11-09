@@ -210,6 +210,7 @@ public final class LLM implements AutoCloseable {
   private final AtomicBoolean closed = new AtomicBoolean();
   private final List<LlmAdvisor> advisors;
   private final List<ModelTool> tools;
+  private final int maxToolExecutions;
   private final LlmAdvisorMixer advisorMixer;
   private final Predicate<String> advisorNoteFilter;
   private final SamplingParams defaultSampling;
@@ -240,6 +241,7 @@ public final class LLM implements AutoCloseable {
       this.systemPromptOverride = builder.systemPromptOverride;
       this.advisors = builder.advisors;
       this.tools = List.copyOf(builder.tools);
+      this.maxToolExecutions = builder.maxToolExecutions;
       this.advisorMixer = builder.advisorMixer;
       this.advisorNoteFilter = builder.advisorNoteFilter;
       this.defaultSampling = builder.resolveSampling();
@@ -1394,6 +1396,16 @@ public final class LLM implements AutoCloseable {
   }
 
   /**
+   * How many tool executions one user message may run. The next decode after this cap is the
+   * reply even if it still contains a call. Default is {@link ToolDialects#MAX_EXECUTIONS}.
+   *
+   * @return cap set on the builder; at least 1
+   */
+  public int maxToolExecutions() {
+    return this.maxToolExecutions;
+  }
+
+  /**
    * Mixer used by {@link #runAdvisors} after advisor generates. Defaults to
    * {@link LlmAdvisorMixer#defaults()} (insert notes into the facts block).
    *
@@ -1622,6 +1634,7 @@ public final class LLM implements AutoCloseable {
     private String systemPromptOverride = null;
     private List<LlmAdvisor> advisors = List.of();
     private final List<ModelTool> tools = new ArrayList<>();
+    private int maxToolExecutions = ToolExchange.MAX_EXECUTIONS;
     private LlmAdvisorMixer advisorMixer = LlmAdvisorMixer.defaults();
     private Predicate<String> advisorNoteFilter = note -> note != null && !note.isBlank();
     private SamplingParams samplingParams;
@@ -1692,7 +1705,8 @@ public final class LLM implements AutoCloseable {
      * Registers functions the chat model may call. Repeat to add more. Names must be unique.
      * Qwen3, Qwen3.5, LFM2, and Gemma 4 are accepted at {@link #build()}; other architectures fail
      * there. Chat reads the model's own tool tokens, runs the matching {@link ModelTool}, and
-     * injects the result before the next generate. At most four executions per user message.
+     * injects the result before the next generate. One message runs at most
+     * {@link #maxToolExecutions(int)} calls (four when that setter is omitted).
      *
      * @param tools one or more tools; must not be {@code null} and must not contain {@code null}
      * @return {@code this}
@@ -1714,6 +1728,21 @@ public final class LLM implements AutoCloseable {
         }
         this.tools.add(tool);
       }
+      return this;
+    }
+
+    /**
+     * Caps how many tool calls one user message may run. The default is four.
+     *
+     * @param maxToolExecutions at least 1
+     * @return {@code this}
+     * @throws IllegalArgumentException if {@code maxToolExecutions < 1}
+     */
+    public Builder maxToolExecutions(final int maxToolExecutions) {
+      if (maxToolExecutions < 1) {
+        throw new IllegalArgumentException("maxToolExecutions must be >= 1");
+      }
+      this.maxToolExecutions = maxToolExecutions;
       return this;
     }
 

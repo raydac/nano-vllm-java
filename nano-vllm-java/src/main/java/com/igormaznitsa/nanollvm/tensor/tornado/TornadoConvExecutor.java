@@ -146,43 +146,9 @@ final class TornadoConvExecutor {
     GENERAL
   }
 
-  private static final class ConvKey {
-    private final float[] weight;
-    private final int weightOffset;
-    private final float[] bias;
-    private final int biasOffset;
-    private final Kind kind;
-    private final int inChannels;
-    private final int height;
-    private final int width;
-    private final int outChannels;
-    private final int kernel;
-    private final int stride;
-    private final int padding;
-    private final int groups;
-    private final boolean silu;
-
-    private ConvKey(
-      final float[] weight, final int weightOffset, final float[] bias, final int biasOffset,
-      final Kind kind, final int inChannels, final int height, final int width,
-      final int outChannels, final int kernel, final int stride, final int padding,
-      final int groups, final boolean silu
-    ) {
-      this.weight = weight;
-      this.weightOffset = weightOffset;
-      this.bias = bias;
-      this.biasOffset = biasOffset;
-      this.kind = kind;
-      this.inChannels = inChannels;
-      this.height = height;
-      this.width = width;
-      this.outChannels = outChannels;
-      this.kernel = kernel;
-      this.stride = stride;
-      this.padding = padding;
-      this.groups = groups;
-      this.silu = silu;
-    }
+  private record ConvKey(float[] weight, int weightOffset, float[] bias, int biasOffset, Kind kind,
+                         int inChannels, int height, int width, int outChannels, int kernel,
+                         int stride, int padding, int groups, boolean silu) {
 
     @Override
     public boolean equals(final Object other) {

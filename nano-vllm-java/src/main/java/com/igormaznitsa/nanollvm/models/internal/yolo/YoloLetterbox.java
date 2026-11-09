@@ -39,15 +39,22 @@ final class YoloLetterbox {
   }
 
   static YoloLetterbox of(final ArgbImage image) {
+    return of(image, SIZE);
+  }
+
+  static YoloLetterbox of(final ArgbImage image, final int size) {
     requireNonNull(image, "image");
+    if (size < 32 || size % 32 != 0) {
+      throw new IllegalArgumentException("imageSize must be a multiple of 32 and at least 32");
+    }
     int sourceWidth = image.width();
     int sourceHeight = image.height();
-    float scale = Math.min(SIZE / (float) sourceWidth, SIZE / (float) sourceHeight);
+    float scale = Math.min(size / (float) sourceWidth, size / (float) sourceHeight);
     int resizedWidth = Math.max(1, Math.round(sourceWidth * scale));
     int resizedHeight = Math.max(1, Math.round(sourceHeight * scale));
-    float padX = (SIZE - resizedWidth) / 2f;
-    float padY = (SIZE - resizedHeight) / 2f;
-    float[] nchw = new float[3 * SIZE * SIZE];
+    float padX = (size - resizedWidth) / 2f;
+    float padY = (size - resizedHeight) / 2f;
+    float[] nchw = new float[3 * size * size];
     Arrays.fill(nchw, PAD);
     int[] rgb = image.pixels();
     for (int y = 0; y < resizedHeight; y++) {
@@ -70,12 +77,12 @@ final class YoloLetterbox {
           float v11 = ((rgb[y1 * sourceWidth + x1] >> shift) & 0xff) / 255f;
           float top = v00 + (v01 - v00) * fx;
           float bottom = v10 + (v11 - v10) * fx;
-          nchw[(channel * SIZE + destY) * SIZE + destX] = top + (bottom - top) * fy;
+          nchw[(channel * size + destY) * size + destX] = top + (bottom - top) * fy;
         }
       }
     }
     return new YoloLetterbox(
-      Tensor.of(nchw, 3, SIZE, SIZE), sourceWidth, sourceHeight, scale, padX, padY);
+      Tensor.of(nchw, 3, size, size), sourceWidth, sourceHeight, scale, padX, padY);
   }
 
   static YoloLetterbox direct(final Tensor tensor, final int sourceWidth, final int sourceHeight) {

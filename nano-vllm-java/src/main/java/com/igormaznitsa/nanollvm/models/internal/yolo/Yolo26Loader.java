@@ -99,8 +99,13 @@ public final class Yolo26Loader {
   }
 
   private static int classCount(final YoloTensors tensors, final YoloTask task) {
-    String classWeight = "model.23.one2one_cv3.0.2.weight";
-    if (!tensors.has(classWeight)) {
+    String classWeight = switch (task) {
+      case SEMANTIC -> "model.17.classifier.1.weight";
+      case CLASSIFY -> "model.10.linear.weight";
+      case DEPTH -> null;
+      default -> "model.23.one2one_cv3.0.2.weight";
+    };
+    if (classWeight == null || !tensors.has(classWeight)) {
       return task.classes();
     }
     return tensors.shape(classWeight)[0];

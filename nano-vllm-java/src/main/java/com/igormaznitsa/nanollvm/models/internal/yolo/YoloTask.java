@@ -95,7 +95,11 @@ public enum YoloTask {
     return this.wireName;
   }
 
-  public int classes() {
+  /**
+   * Width of the synthetic test graph. A real file's class count is the output axis of its class
+   * tensor, not this value.
+   */
+  int classes() {
     return switch (this) {
       case SEMANTIC -> 19;
       case CLASSIFY -> 1000;

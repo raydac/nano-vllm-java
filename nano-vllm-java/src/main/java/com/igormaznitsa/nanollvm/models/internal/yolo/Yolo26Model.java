@@ -15,26 +15,27 @@ import java.util.List;
  */
 public final class Yolo26Model {
 
-  static final int MAX_DET = 300;
-
   private final YoloTask task;
   private final YoloScale scale;
   private final YoloTrunk trunk;
   private final YoloHead head;
   private final List<String> names;
+  private final int classCount;
 
   private Yolo26Model(
     final YoloTask task,
     final YoloScale scale,
     final YoloTrunk trunk,
     final YoloHead head,
-    final List<String> names
+    final List<String> names,
+    final int classCount
   ) {
     this.task = task;
     this.scale = scale;
     this.trunk = trunk;
     this.head = head;
     this.names = names;
+    this.classCount = classCount;
   }
 
   static Yolo26Model load(
@@ -51,7 +52,8 @@ public final class Yolo26Model {
       scale,
       YoloTrunk.load(weights, width, task),
       YoloHead.load(weights, width, task),
-      List.copyOf(names));
+      List.copyOf(names),
+      YoloHead.declaredClasses(weights, task));
   }
 
   public static Yolo26Model synthetic(final YoloTask task) {
@@ -69,12 +71,24 @@ public final class Yolo26Model {
     return this.task;
   }
 
+  /**
+   * Class axis of the loaded head. Depth is {@code 0}. A real file reads this from the class
+   * tensor; the synthetic graph uses the published nano width.
+   */
+  public int classCount() {
+    return this.classCount;
+  }
+
+  public List<String> classNames() {
+    return this.names;
+  }
+
   public LlmModality outputModality() {
     return this.task == YoloTask.CLASSIFY ? LlmModality.LABELS : LlmModality.IMAGE;
   }
 
   public LlmOutput forward(final ArgbImage image, final MatmulRuntime runtime) {
-    return this.forward(image, LlmInImage.DEFAULT_MIN_PROBABILITY, runtime);
+    return this.forward(new LlmInImage(image), runtime);
   }
 
   public LlmOutput forward(
@@ -82,8 +96,13 @@ public final class Yolo26Model {
     final float minProbability,
     final MatmulRuntime runtime
   ) {
-    requireNonNull(image, "image");
-    return this.forwardLetter(YoloLetterbox.of(image), minProbability, runtime);
+    return this.forward(new LlmInImage(image, minProbability), runtime);
+  }
+
+  public LlmOutput forward(final LlmInImage input, final MatmulRuntime runtime) {
+    requireNonNull(input, "input");
+    return this.forwardLetter(
+      YoloLetterbox.of(input.image(), input.imageSize()), input, runtime);
   }
 
   LlmOutput forwardLetter(final YoloLetterbox letter, final MatmulRuntime runtime) {
@@ -95,23 +114,44 @@ public final class Yolo26Model {
     final float minProbability,
     final MatmulRuntime runtime
   ) {
-    this.requireObjectProbability(minProbability);
+    if (!Float.isFinite(minProbability) || minProbability < 0f || minProbability > 1f) {
+      throw new IllegalArgumentException("minProbability must be in [0, 1]");
+    }
+    return this.forwardLetter(
+      letter, new LlmInImage(new ArgbImage(1, 1, new int[] {0}), minProbability), runtime);
+  }
+
+  private LlmOutput forwardLetter(
+    final YoloLetterbox letter,
+    final LlmInImage request,
+    final MatmulRuntime runtime
+  ) {
+    this.requireImageRequest(request);
     MatmulRuntime kernels = runtime == null ? MatmulRuntime.sequential() : runtime;
     return reusingPatches(() -> this.head.read(
       this.trunk.forward(letter.tensor, kernels),
       letter,
       this.names,
-      minProbability,
+      request,
       kernels));
   }
 
-  private void requireObjectProbability(final float minProbability) {
-    if (!Float.isFinite(minProbability) || minProbability < 0f || minProbability > 1f) {
-      throw new IllegalArgumentException("minProbability must be in [0, 1]");
-    }
-    if (!this.emitsObjects() && minProbability != LlmInImage.DEFAULT_MIN_PROBABILITY) {
+  private void requireImageRequest(final LlmInImage request) {
+    if (!this.emitsObjects()
+      && request.minProbability() != LlmInImage.DEFAULT_MIN_PROBABILITY) {
       throw new IllegalArgumentException(
         "minProbability applies to detection, segmentation, pose, and oriented boxes");
+    }
+    if (!this.emitsObjects() && request.maxDetections() != LlmInImage.DEFAULT_MAX_DETECTIONS) {
+      throw new IllegalArgumentException(
+        "maxDetections applies to detection, segmentation, pose, and oriented boxes");
+    }
+    if (this.task != YoloTask.POSE
+      && request.keypointMinProbability() != LlmInImage.DEFAULT_KEYPOINT_MIN_PROBABILITY) {
+      throw new IllegalArgumentException("keypointMinProbability applies to pose");
+    }
+    if (this.task != YoloTask.CLASSIFY && request.maxLabels() != LlmInImage.DEFAULT_MAX_LABELS) {
+      throw new IllegalArgumentException("maxLabels applies to classification");
     }
   }
 

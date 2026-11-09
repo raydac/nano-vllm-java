@@ -242,6 +242,17 @@ public final class RagSession {
   }
 
   /**
+   * Text written over an unusable assistant turn before the retry. Empty unless the caller sets it.
+   *
+   * @param text replacement; must not be {@code null}
+   * @return {@code this}
+   */
+  public RagSession unusableHistoryText(final String text) {
+    this.chat.unusableHistoryText(text);
+    return this;
+  }
+
+  /**
    * Fallback visible reply when recovery still yields nothing usable.
    *
    * @param fallback non-blank text shown to the user

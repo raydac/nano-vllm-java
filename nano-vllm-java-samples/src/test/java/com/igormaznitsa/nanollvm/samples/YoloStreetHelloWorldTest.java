@@ -31,6 +31,9 @@ import org.junit.jupiter.api.Test;
 
 class YoloStreetHelloWorldTest {
 
+  private static final List<String> NAMES = List.of(
+    "person", "bicycle", "car", "truck", "traffic light", "small vehicle", "Bicycle");
+
   private static Selection select(final String argument, final String lines) throws IOException {
     String[] args = argument.isEmpty() ? new String[0] : new String[] {argument};
     return YoloStreetHelloWorld.select(
@@ -40,7 +43,15 @@ class YoloStreetHelloWorldTest {
   }
 
   private static VisionHit hit(final String className, final float probability, final int top) {
-    return new VisionHit(className, probability, new Box(16, top, 90, top + 40));
+    int classId = NAMES.indexOf(className);
+    if (classId < 0) {
+      throw new IllegalArgumentException(className);
+    }
+    return new VisionHit(classId, probability, new Box(16, top, 90, top + 40));
+  }
+
+  private static int classId(final String className) {
+    return NAMES.indexOf(className);
   }
 
   private static boolean contains(final BufferedImage image, final Color color) {
@@ -90,15 +101,15 @@ class YoloStreetHelloWorldTest {
       hit("truck", 0.80f, 20),
       hit("Bicycle", 0.70f, 30),
       hit("car", 0.66f, 40),
-      hit("traffic light", 0.50f, 50)));
+      hit("traffic light", 0.50f, 50)), NAMES);
 
     assertEquals(
       List.of("person", "Bicycle", "car"),
-      kept.stream().map(VisionHit::className).toList());
+      kept.stream().map(found -> YoloStreetHelloWorld.className(NAMES, found.classId())).toList());
     assertEquals(
       List.of("small vehicle"),
-      YoloStreetHelloWorld.streetObjects(List.of(hit("small vehicle", 0.8f, 10)))
-        .stream().map(VisionHit::className).toList());
+      YoloStreetHelloWorld.streetObjects(List.of(hit("small vehicle", 0.8f, 10)), NAMES)
+        .stream().map(found -> YoloStreetHelloWorld.className(NAMES, found.classId())).toList());
   }
 
   private static int blend(final int channel) {
@@ -178,7 +189,7 @@ class YoloStreetHelloWorldTest {
 
   @Test
   void labelPrintsTheScoreBesideTheName() {
-    assertEquals("person 0.91", YoloStreetHelloWorld.label(hit("person", 0.906f, 0)));
+    assertEquals("person 0.91", YoloStreetHelloWorld.label(hit("person", 0.906f, 0), NAMES));
   }
 
   @Test
@@ -250,54 +261,54 @@ class YoloStreetHelloWorldTest {
     BufferedImage source = new BufferedImage(220, 140, BufferedImage.TYPE_INT_RGB);
     List<VisionHit> hits = List.of(
       hit("person", 0.91f, 20),
-      new VisionHit("bicycle", 0.80f, new Polygon(List.of(
+      new VisionHit(classId("bicycle"), 0.80f, new Polygon(List.of(
         new Point2D(120, 40), new Point2D(180, 50), new Point2D(150, 110)))),
       hit("car", 0.77f, 70));
 
-    BufferedImage marked = YoloStreetHelloWorld.mark(source, hits);
+    BufferedImage marked = YoloStreetHelloWorld.mark(source, hits, NAMES);
     assertTrue(contains(marked, new Color(220, 40, 40)));
     assertTrue(contains(marked, new Color(30, 140, 220)));
     assertTrue(contains(marked, new Color(30, 160, 60)));
 
     BufferedImage crowded = YoloStreetHelloWorld.mark(source, List.of(
       hit("person", 0.90f, 30),
-      hit("person", 0.40f, 30)));
+      hit("person", 0.40f, 30)), NAMES);
     int oneCaption = count(marked, new Color(220, 40, 40));
     assertTrue(count(crowded, new Color(220, 40, 40)) > oneCaption);
 
     Path png = createTempDirectory("yolo-street-png").resolve("marked.png");
     BufferedImage reread =
-      ImageIO.read(YoloStreetHelloWorld.writeMarked(source, hits, png).toFile());
+      ImageIO.read(YoloStreetHelloWorld.writeMarked(source, hits, NAMES, png).toFile());
     assertEquals(220, reread.getWidth());
     assertEquals(140, reread.getHeight());
   }
 
   @Test
   void visibleHitsKeepALargeQuietCarAndDropASpeck() {
-    VisionHit strong = new VisionHit("car", 0.80f, new Box(0, 0, 30, 30));
-    VisionHit quiet = new VisionHit("car", 0.012f, new Box(50, 50, 99, 99));
-    VisionHit speck = new VisionHit("car", 0.02f, new Box(0, 80, 8, 88));
-    VisionHit covered = new VisionHit("car", 0.011f, new Box(52, 52, 97, 97));
+    VisionHit strong = new VisionHit(classId("car"), 0.80f, new Box(0, 0, 30, 30));
+    VisionHit quiet = new VisionHit(classId("car"), 0.012f, new Box(50, 50, 99, 99));
+    VisionHit speck = new VisionHit(classId("car"), 0.02f, new Box(0, 80, 8, 88));
+    VisionHit covered = new VisionHit(classId("car"), 0.011f, new Box(52, 52, 97, 97));
 
     assertEquals(
       List.of(strong, quiet),
-      YoloStreetHelloWorld.visibleHits(List.of(speck, quiet, strong, hit("truck", 0.9f, 0)), 100,
-        100));
+      YoloStreetHelloWorld.visibleHits(
+        List.of(speck, quiet, strong, hit("truck", 0.9f, 0)), NAMES, 100, 100));
     assertEquals(
       List.of(quiet),
-      YoloStreetHelloWorld.visibleHits(List.of(quiet, covered), 100, 100));
+      YoloStreetHelloWorld.visibleHits(List.of(quiet, covered), NAMES, 100, 100));
   }
 
   @Test
   void poseDrawsAGreenLimbBetweenVisibleJoints() {
     BufferedImage source = new BufferedImage(80, 80, BufferedImage.TYPE_INT_RGB);
     VisionHit person = new VisionHit(
-      "person",
+      classId("person"),
       0.9f,
       new Box(8, 8, 70, 70),
       List.of(new Keypoint(5, 20, 40), new Keypoint(7, 60, 40)));
 
-    BufferedImage marked = YoloStreetHelloWorld.mark(source, List.of(person));
+    BufferedImage marked = YoloStreetHelloWorld.mark(source, List.of(person), NAMES);
 
     assertEquals(new Color(0, 200, 70).getRGB(), marked.getRGB(40, 40));
     assertEquals(new Color(220, 40, 40).getRGB(), marked.getRGB(20, 40));
@@ -309,11 +320,13 @@ class YoloStreetHelloWorldTest {
     Arrays.fill(white, 0xffffff);
     BufferedImage source = new BufferedImage(120, 100, BufferedImage.TYPE_INT_RGB);
     source.setRGB(0, 0, 120, 100, white, 0, 120);
-    VisionHit person = new VisionHit("person", 0.9f, new Polygon(List.of(
+    VisionHit person = new VisionHit(classId("person"), 0.9f, new Polygon(List.of(
       new Point2D(30, 20), new Point2D(90, 20), new Point2D(60, 80))));
 
-    BufferedImage filled = YoloStreetHelloWorld.mark(source, List.of(person), StreetHead.SEGMENT);
-    BufferedImage outlined = YoloStreetHelloWorld.mark(source, List.of(person), StreetHead.OBB);
+    BufferedImage filled = YoloStreetHelloWorld.mark(
+      source, List.of(person), NAMES, StreetHead.SEGMENT);
+    BufferedImage outlined = YoloStreetHelloWorld.mark(
+      source, List.of(person), NAMES, StreetHead.OBB);
 
     assertEquals(new Color(blend(220), blend(40), blend(40)).getRGB(), filled.getRGB(60, 40));
     assertEquals(0xffffffff, outlined.getRGB(60, 40));

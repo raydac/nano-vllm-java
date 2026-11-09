@@ -121,21 +121,25 @@ public final class ChatMessages {
   }
 
   /**
-   * Replaces assistant turns matching {@code match} with a short greeting. Mutates {@code history}
-   * in place. Used by {@link ChatSession} when retrying after an unusable answer so the model does
-   * not latch onto filler history.
+   * Replaces assistant turns matching {@code match} with {@code replacement}. Mutates
+   * {@code history} in place. {@link ChatSession} uses this when retrying after an unusable
+   * answer so the model does not latch onto that text. The replacement is the caller's; this
+   * method does not invent one.
    *
-   * @param history live session history
-   * @param match   predicate on assistant {@link ChatMessage#content()}
+   * @param history     live session history
+   * @param match       predicate on assistant {@link ChatMessage#content()}
+   * @param replacement text stored in place of each match; must not be {@code null}
    * @since 1.1.0
    */
   public static void scrubMatchingAssistantTurns(
     final List<ChatMessage> history,
-    final Predicate<String> match
+    final Predicate<String> match,
+    final String replacement
   ) {
+    String text = requireNonNull(replacement, "replacement");
     IntStream.range(0, history.size())
       .filter(i -> history.get(i).role() == ChatRole.ASSISTANT
         && match.test(history.get(i).content()))
-      .forEach(i -> history.set(i, ChatMessage.assistant("Hello!")));
+        .forEach(i -> history.set(i, ChatMessage.assistant(text)));
   }
 }

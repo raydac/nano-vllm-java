@@ -40,7 +40,7 @@ public class Linear {
    * @param bias   length {@code out}, or {@code null}
    */
   public Linear(final Tensor weight, final Tensor bias) {
-    this(LinearKernel.of(requireNonNull(weight, "weight")), bias, 0f, 0f, weight, null);
+    this(LinearKernel.of(requireNonNull(weight, "weight")), bias, 0f, 0f, weight, null, null);
   }
 
   /**
@@ -57,7 +57,8 @@ public class Linear {
   private Linear(final Linear assembled) {
     this(
       assembled.kernel, assembled.bias, assembled.inputActivationScale,
-      assembled.outputActivationScale, assembled.weight, assembled.packedWeight);
+      assembled.outputActivationScale, assembled.weight, assembled.packedWeight,
+      assembled.resident);
   }
 
   /**
@@ -86,6 +87,7 @@ public class Linear {
       weight.inputActivationScale(),
       weight.outputActivationScale(),
       null,
+      null,
       null);
   }
 
@@ -96,7 +98,7 @@ public class Linear {
    * @param bias   length {@code outFeatures()}, or {@code null}
    */
   public Linear(final LinearKernel kernel, final Tensor bias) {
-    this(kernel, bias, 0f, 0f, null, null);
+    this(kernel, bias, 0f, 0f, null, null, null);
   }
 
   private Linear(
@@ -105,7 +107,8 @@ public class Linear {
     final float inputActivationScale,
     final float outputActivationScale,
     final Tensor weight,
-    final PackedWeight packedWeight
+    final PackedWeight packedWeight,
+    final Tensor resident
   ) {
     this.kernel = requireNonNull(kernel, "kernel");
     this.bias = bias;
@@ -113,15 +116,16 @@ public class Linear {
     this.outputActivationScale = outputActivationScale;
     this.weight = weight;
     this.packedWeight = packedWeight;
+    this.resident = resident;
   }
 
   private static Linear denseOrPacked(final PackedWeight weight, final Tensor bias) {
     if (weight.isFloat32()) {
       Tensor dense = weight.materialize();
       weight.releasePackedBytes();
-      return new Linear(LinearKernel.of(dense), bias, 0f, 0f, dense, null);
+      return new Linear(LinearKernel.of(dense), bias, 0f, 0f, dense, null, null);
     }
-    return new Linear(LinearKernel.of(weight), bias, 0f, 0f, null, weight);
+    return new Linear(LinearKernel.of(weight), bias, 0f, 0f, null, weight, null);
   }
 
   /**

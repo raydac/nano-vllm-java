@@ -172,7 +172,7 @@ try (LlmModel model = LlmModelFactory.make(modelDir);
 }
 ```
 
-The function receives a JSON object (`{}` when the call has no arguments) and returns text. The third argument is a JSON Schema object for those arguments. A name matches `[A-Za-z_][A-Za-z0-9_]*`. A space inside the name the model wrote is ignored, so `os_ name` still matches `os_name`. One user message runs at most four calls. The function runs on the chat thread. A thrown exception goes back to the model as `error: …` and the turn continues.
+The function receives a JSON object (`{}` when the call has no arguments) and returns text. The third argument is a JSON Schema object for those arguments. A name matches `[A-Za-z_][A-Za-z0-9_]*`. A space inside the name the model wrote is ignored, so `os_ name` still matches `os_name`. One user message runs at most the cap from `LLM.Builder.maxToolExecutions` (four when omitted). The function runs on the chat thread. A thrown exception goes back to the model as `error: …` and the turn continues.
 
 `ToolsHelloWorld` registers `os_name` and `list_files`, then asks Qwen3-0.6B for each in its own turn. One question that names both makes this checkpoint call only one of them.
 
@@ -281,6 +281,7 @@ import com.igormaznitsa.nanollvm.models.LlmOutObjects;
 import com.igormaznitsa.nanollvm.models.VisionHit;
 
 import java.nio.file.Path;
+import java.util.List;
 
 int[] pixels = /* row-major 0xAARRGGBB, index y * width + x */;
 
@@ -290,15 +291,16 @@ try (LlmModel model = LlmModelFactory.make(
   LlmOutObjects found = model.generate(
       new LlmInImage(new ArgbImage(width, height, pixels)), LlmModality.IMAGE);
 
+  List<String> names = model.classNames();
   for (VisionHit hit : found.objects()) {
     Box box = (Box) hit.shape();
-    System.out.println(hit.className() + " " + hit.probability()
+    System.out.println(hit.classId() + " " + names.get(hit.classId()) + " " + hit.probability()
         + " @ " + box.left() + "," + box.top());
   }
 }
 ```
 
-The picture is letterboxed to 640×640. Boxes, mask outlines, rotated corners, and pose points come back in the original picture's pixels. A detection ranks at most 300 objects, then drops any whose score is below the minimum on the input. Omit that argument and the minimum stays `0.25`. A lower minimum only adds hits that were already in those 300. `new LlmInImage(raster, 0.4f)` keeps scores of `0.4` and above. Semantic maps, depth, and classification have no object score, and a minimum other than `0.25` is rejected for those files. `YoloStreetHelloWorld.fromBufferedImage` copies a `BufferedImage` into the packed layout, and `toBufferedImage` copies a result raster back.
+The picture is letterboxed to a square whose edge is a multiple of 32. Omit the size and it stays 640. Boxes, mask outlines, rotated corners, and pose points come back in the original picture's pixels. A detection ranks at most `maxDetections` objects (300 when omitted), then drops any whose score is below `minProbability` (`0.25` when omitted). Pose drops a joint below `keypointMinProbability` (`0.5` when omitted). Classification returns at most `maxLabels` names (5 when omitted). `LlmInImage.builder(raster)` sets those by name. `new LlmInImage(raster, 0.4f)` keeps scores of `0.4` and above and leaves the other knobs at their defaults. A knob that does not apply to the loaded head is rejected when it is not the default. The class count and the pose width are read from the file. `YoloStreetHelloWorld.fromBufferedImage` copies a `BufferedImage` into the packed layout, and `toBufferedImage` copies a result raster back.
 
 | File | `generate` result |
 |------|-------------------|
@@ -308,7 +310,7 @@ The picture is letterboxed to 640×640. Boxes, mask outlines, rotated corners, a
 | `…-sem.onnx`, `…-depth.onnx` | `LlmOutImage` — class indexes, or grayscale depth with the min and max in meters |
 | `…-cls.onnx` | `LlmOutLabels` via `generate(image, LABELS)` |
 
-Class names are `classes.txt` in the same folder as the ONNX file, one name per line. The library does not guess a dataset. Depth has no names. Those lists are already in `models/YOLO26n/<task>/`. Replace `classes.txt` when a head was trained on another list.
+Each object carries the class index from the head. `classNames()` is `classes.txt` in the same folder as the ONNX file, one name per line, in that index order. Use the index as it is, or read the name from that list. The picture read does not look the name up. The library does not guess a dataset. Depth has no names. Those lists are already in `models/YOLO26n/<task>/`. Replace `classes.txt` when a head was trained on another list.
 
 ```bash
 ./models/download-yolo26n.sh
