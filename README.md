@@ -320,6 +320,10 @@ mvn -pl nano-vllm-java-samples -q exec:java \
 
 With no argument the sample asks for a head. `detect`, `seg`, `sem`, `pose`, `obb`, `depth`, or `cls` skips the menu. Detect, segment, semantic, pose, depth, and classification use a street photo. Semantic paints each Cityscapes surface in its own color, half transparent. Depth paints that photo from red (near) to green (far), half transparent, and prints the nearest and farthest meters. Classification writes the top five ImageNet labels on the photo. Oriented boxes use an overhead parking lot. The marked picture is `yolo-street-<head>.png`. Pose joins the body points with green lines. Segmentation fills each outline at half strength. A box covering at least two percent of the picture is kept down to a score of 0.01. The download script fetches nano. Point the same call at a `yolo26s`, `yolo26m`, `yolo26l`, or `yolo26x` ONNX you exported the same way.
 
+![YOLO26n: depth on the street, semantic surfaces, oriented boxes on a parking lot, and person detections](assets/yolo_samples.png)
+
+*Depth tints the street from red (near) to green (far). Semantic paints each surface. Oriented boxes mark the parking lot. Detect writes the person scores on the crossing.*
+
 ## Run the samples
 
 Run from the repository root after the matching download in [`models/README.md`](models/README.md). An optional first argument overrides the model path (`-Dexec.args=…`).
