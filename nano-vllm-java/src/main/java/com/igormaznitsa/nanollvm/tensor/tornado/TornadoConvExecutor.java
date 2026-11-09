@@ -146,38 +146,10 @@ final class TornadoConvExecutor {
     GENERAL
   }
 
+  @SuppressWarnings("ArrayRecordComponent")
   private record ConvKey(float[] weight, int weightOffset, float[] bias, int biasOffset, Kind kind,
                          int inChannels, int height, int width, int outChannels, int kernel,
                          int stride, int padding, int groups, boolean silu) {
-
-    @Override
-    public boolean equals(final Object other) {
-      if (!(other instanceof ConvKey key)) {
-        return false;
-      }
-      return this.weight == key.weight
-        && this.weightOffset == key.weightOffset
-        && this.bias == key.bias
-        && this.biasOffset == key.biasOffset
-        && this.kind == key.kind
-        && this.inChannels == key.inChannels
-        && this.height == key.height
-        && this.width == key.width
-        && this.outChannels == key.outChannels
-        && this.kernel == key.kernel
-        && this.stride == key.stride
-        && this.padding == key.padding
-        && this.groups == key.groups
-        && this.silu == key.silu;
-    }
-
-    @Override
-    public int hashCode() {
-      return Objects.hash(
-        this.weight, this.weightOffset, this.bias, this.biasOffset, this.kind,
-        this.inChannels, this.height, this.width, this.outChannels, this.kernel,
-        this.stride, this.padding, this.groups, this.silu);
-    }
   }
 
   private record ConvPlan(TornadoExecutionPlan plan, float[] input, float[] output) {

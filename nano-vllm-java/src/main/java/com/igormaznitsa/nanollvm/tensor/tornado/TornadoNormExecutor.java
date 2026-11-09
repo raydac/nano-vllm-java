@@ -117,27 +117,9 @@ final class TornadoNormExecutor {
     void apply(NormPlan plan) throws TornadoExecutionPlanException;
   }
 
+  @SuppressWarnings("ArrayRecordComponent")
   private record PlanKey(Kind kind, float[] weight, int weightOffset, int rows, int last, int mode,
                          int epsBits) {
-
-    @Override
-    @SuppressWarnings("ReferenceEquality")
-    public boolean equals(final Object other) {
-      if (!(other instanceof PlanKey(
-        Kind kind1, float[] weight1, int offset, int rows1, int last1, int mode1, int bits
-      ))) {
-        return false;
-      }
-      return this.kind == kind1 && this.weight == weight1
-        && this.weightOffset == offset && this.rows == rows1
-        && this.last == last1 && this.mode == mode1 && this.epsBits == bits;
-    }
-
-    @Override
-    public int hashCode() {
-      return Objects.hash(
-        this.kind, this.weight, this.weightOffset, this.rows, this.last, this.mode, this.epsBits);
-    }
   }
 
   private record NormPlan(TornadoExecutionPlan plan, float[] left, float[] right, float[] summed,

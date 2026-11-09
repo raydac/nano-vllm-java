@@ -286,17 +286,8 @@ public final class TornadoDecoder {
     return layer.down().data();
   }
 
+  @SuppressWarnings("ArrayRecordComponent")
   private record Key(float[] weight, float[] keyCache) {
-    @Override
-    public boolean equals(final Object other) {
-      return other instanceof Key(float[] weight1, float[] cache)
-        && this.weight == weight1 && this.keyCache == cache;
-    }
-
-    @Override
-    public int hashCode() {
-      return Objects.hash(this.weight, this.keyCache);
-    }
   }
 
   private static Tensor[] layerOutputs(final Layer layer) {

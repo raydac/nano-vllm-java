@@ -240,6 +240,7 @@ final class TornadoGemvExecutor {
     }
   }
 
+  @SuppressWarnings("ArrayRecordComponent")
   private record WeightKey(float[] weight, int weightOffset, float[] bias, int in, int out0,
                            int outCount, int rows) {
 
@@ -265,26 +266,6 @@ final class TornadoGemvExecutor {
 
     int hasBiasFlag() {
       return this.hasBias() ? 1 : 0;
-    }
-
-    @Override
-    @SuppressWarnings("ReferenceEquality")
-    public boolean equals(final Object other) {
-      if (!(other instanceof WeightKey(
-        float[] weight1, int offset, float[] bias1, int in1, int out1, int count, int rows1
-      ))) {
-        return false;
-      }
-      return this.weight == weight1 && this.weightOffset == offset
-        && this.bias == bias1
-        && this.in == in1 && this.out0 == out1
-        && this.outCount == count && this.rows == rows1;
-    }
-
-    @Override
-    public int hashCode() {
-      return Objects.hash(
-        this.weight, this.weightOffset, this.bias, this.in, this.out0, this.outCount, this.rows);
     }
   }
 
