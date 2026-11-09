@@ -135,8 +135,8 @@ final class TornadoNormExecutor {
 
     @Override
     public int hashCode() {
-      return Objects.hash(this.kind, System.identityHashCode(this.weight), this.weightOffset,
-        this.rows, this.last, this.mode, this.epsBits);
+      return Objects.hash(
+        this.kind, this.weight, this.weightOffset, this.rows, this.last, this.mode, this.epsBits);
     }
   }
 

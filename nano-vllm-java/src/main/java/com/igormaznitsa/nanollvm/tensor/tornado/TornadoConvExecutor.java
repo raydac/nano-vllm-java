@@ -173,21 +173,10 @@ final class TornadoConvExecutor {
 
     @Override
     public int hashCode() {
-      int hash = System.identityHashCode(this.weight);
-      hash = 31 * hash + this.weightOffset;
-      hash = 31 * hash + System.identityHashCode(this.bias);
-      hash = 31 * hash + this.biasOffset;
-      hash = 31 * hash + this.kind.ordinal();
-      hash = 31 * hash + this.inChannels;
-      hash = 31 * hash + this.height;
-      hash = 31 * hash + this.width;
-      hash = 31 * hash + this.outChannels;
-      hash = 31 * hash + this.kernel;
-      hash = 31 * hash + this.stride;
-      hash = 31 * hash + this.padding;
-      hash = 31 * hash + this.groups;
-      hash = 31 * hash + (this.silu ? 1 : 0);
-      return hash;
+      return Objects.hash(
+        this.weight, this.weightOffset, this.bias, this.biasOffset, this.kind,
+        this.inChannels, this.height, this.width, this.outChannels, this.kernel,
+        this.stride, this.padding, this.groups, this.silu);
     }
   }
 

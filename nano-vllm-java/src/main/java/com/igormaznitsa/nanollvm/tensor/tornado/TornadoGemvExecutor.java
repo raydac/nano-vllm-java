@@ -284,9 +284,7 @@ final class TornadoGemvExecutor {
     @Override
     public int hashCode() {
       return Objects.hash(
-        System.identityHashCode(this.weight), this.weightOffset,
-        System.identityHashCode(this.bias),
-        this.in, this.out0, this.outCount, this.rows);
+        this.weight, this.weightOffset, this.bias, this.in, this.out0, this.outCount, this.rows);
     }
   }
 

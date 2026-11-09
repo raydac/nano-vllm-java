@@ -29,6 +29,7 @@ import java.util.HashMap;
 import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import uk.ac.manchester.tornado.api.GridScheduler;
 import uk.ac.manchester.tornado.api.KernelContext;
@@ -294,7 +295,7 @@ public final class TornadoDecoder {
 
     @Override
     public int hashCode() {
-      return System.identityHashCode(this.weight) * 31 + System.identityHashCode(this.keyCache);
+      return Objects.hash(this.weight, this.keyCache);
     }
   }
 
@@ -360,12 +361,7 @@ public final class TornadoDecoder {
     private GroupKey(final float[][] weights, final float[][] caches) {
       this.weights = weights;
       this.caches = caches;
-      int mixed = weights.length;
-      for (int index = 0; index < weights.length; index++) {
-        mixed = mixed * 31 + System.identityHashCode(weights[index]);
-        mixed = mixed * 31 + System.identityHashCode(caches[index]);
-      }
-      this.hash = mixed;
+      this.hash = Objects.hash(Arrays.hashCode(weights), Arrays.hashCode(caches));
     }
 
     private static GroupKey of(final List<Pending> batch) {
