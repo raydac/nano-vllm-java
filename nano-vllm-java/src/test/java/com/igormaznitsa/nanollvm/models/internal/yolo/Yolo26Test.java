@@ -321,6 +321,54 @@ final class Yolo26Test {
   }
 
   @Test
+  void addClassReplacesTheFloorForThatNameOnly() {
+    Yolo26Model model = Yolo26Model.synthetic(YoloTask.DETECT);
+    YoloLetterbox letter = YoloLetterbox.direct(Tensor.zeros(3, 64, 64), 64, 64);
+    ArgbImage pixel = new ArgbImage(1, 1, new int[1]);
+
+    LlmInImage onlyNamed = LlmInImage.builder(pixel)
+      .minProbability(0.6f)
+      .addClass("class-0", 0.4f)
+      .build();
+    LlmOutObjects named = (LlmOutObjects) model.forwardLetter(letter, onlyNamed, null);
+    assertTrue(named.objects().size() > 20);
+    assertTrue(named.objects().size() < LlmInImage.DEFAULT_MAX_DETECTIONS);
+    assertTrue(named.objects().stream().allMatch(hit ->
+      hit.classId() == 0 && hit.probability() >= 0.4f));
+    assertEquals(Map.of("class-0", 0.4f), onlyNamed.classMinProbabilities());
+
+    LlmInImage others = LlmInImage.builder(pixel)
+      .minProbability(0.4f)
+      .addClass("  class-1  ", 0.6f)
+      .build();
+    LlmOutObjects rest = (LlmOutObjects) model.forwardLetter(letter, others, null);
+    assertEquals(LlmInImage.DEFAULT_MAX_DETECTIONS, rest.objects().size());
+    assertTrue(rest.objects().stream().noneMatch(hit -> hit.classId() == 1));
+    assertTrue(rest.objects().stream().allMatch(hit -> hit.probability() >= 0.4f));
+    assertEquals(Map.of("class-1", 0.6f), others.classMinProbabilities());
+
+    IllegalArgumentException duplicate = assertThrows(IllegalArgumentException.class,
+      () -> LlmInImage.builder(pixel).addClass("class-0", 0.2f).addClass(" class-0 ", 0.3f));
+    assertTrue(duplicate.getMessage().contains("class-0"));
+    assertThrows(IllegalArgumentException.class,
+      () -> LlmInImage.builder(pixel).addClass("  ", 0.2f));
+    assertThrows(IllegalArgumentException.class,
+      () -> LlmInImage.builder(pixel).addClass("class-0", 1.1f));
+    IllegalArgumentException unknown = assertThrows(IllegalArgumentException.class,
+      () -> model.forwardLetter(
+        letter,
+        LlmInImage.builder(pixel).addClass("no-such", 0.2f).build(),
+        null));
+    assertTrue(unknown.getMessage().contains("no-such"));
+    IllegalArgumentException classify = assertThrows(IllegalArgumentException.class,
+      () -> Yolo26Model.synthetic(YoloTask.CLASSIFY).forwardLetter(
+        letter,
+        LlmInImage.builder(pixel).addClass("class-0", 0.2f).build(),
+        null));
+    assertTrue(classify.getMessage().contains("addClass"));
+  }
+
+  @Test
   void maskOutlineWalksTheBorderAndIgnoresASmallerBlob() {
     boolean[] mask = new boolean[16 * 16];
     fill(mask, 16, 1, 1, 4, 4);

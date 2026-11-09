@@ -2111,7 +2111,7 @@ try (LlmModel model = LlmModelFactory.make(Path.of("models/YOLO26n/detect/yolo26
 `YoloStreetHelloWorld.fromBufferedImage` copies a `BufferedImage` into that layout, and
 `toBufferedImage` copies a result raster back. The picture is letterboxed to a square multiple of 32 (640 when the caller omits the size). When TornadoVM is the kernel backend, each convolution runs on the device from that picture and applies SiLU in the same task. Boxes, mask outlines, rotated
 corners, and pose points come back in the original picture's pixels. Object heads keep a hit whose score is at
-least `LlmInImage`'s minimum (`0.25` when the picture is passed alone) and within `maxDetections` (300 when omitted). Pose width and class count come from the file. A joint is kept when its confidence is at least `keypointMinProbability` (`0.5` when omitted). A minimum other than the default is rejected for a semantic map, depth, or classification file.
+least `LlmInImage`'s minimum (`0.25` when the picture is passed alone) and within `maxDetections` (300 when omitted). `addClass(name, score)` on the builder replaces that minimum for one `classes.txt` name; every other class keeps it. An unknown name is rejected. Pose width and class count come from the file. A joint is kept when its confidence is at least `keypointMinProbability` (`0.5` when omitted). A minimum other than the default is rejected for a semantic map, depth, or classification file.
 
 | File | `generate` result |
 |--|--|

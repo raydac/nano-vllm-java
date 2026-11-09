@@ -121,7 +121,7 @@ public final class Yolo26Model {
       letter, new LlmInImage(new ArgbImage(1, 1, new int[] {0}), minProbability), runtime);
   }
 
-  private LlmOutput forwardLetter(
+  LlmOutput forwardLetter(
     final YoloLetterbox letter,
     final LlmInImage request,
     final MatmulRuntime runtime
@@ -142,6 +142,13 @@ public final class Yolo26Model {
       throw new IllegalArgumentException(
         "minProbability applies to detection, segmentation, pose, and oriented boxes");
     }
+    if (!request.classMinProbabilities().isEmpty() && !this.emitsObjects()) {
+      throw new IllegalArgumentException(
+          "addClass applies to detection, segmentation, pose, and oriented boxes");
+    }
+    if (this.emitsObjects()) {
+      this.requireKnownClasses(request);
+    }
     if (!this.emitsObjects() && request.maxDetections() != LlmInImage.DEFAULT_MAX_DETECTIONS) {
       throw new IllegalArgumentException(
         "maxDetections applies to detection, segmentation, pose, and oriented boxes");
@@ -153,6 +160,15 @@ public final class Yolo26Model {
     }
     if (this.task != YoloTask.CLASSIFY && request.maxLabels() != LlmInImage.DEFAULT_MAX_LABELS) {
       throw new IllegalArgumentException("maxLabels applies to classification");
+    }
+  }
+
+  private void requireKnownClasses(final LlmInImage request) {
+    for (String name : request.classMinProbabilities().keySet()) {
+      int index = this.names.indexOf(name);
+      if (index < 0 || index >= this.classCount) {
+        throw new IllegalArgumentException("unknown class: " + name);
+      }
     }
   }
 

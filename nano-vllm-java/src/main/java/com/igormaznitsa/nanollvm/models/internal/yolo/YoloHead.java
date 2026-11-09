@@ -406,6 +406,55 @@ final class YoloHead {
     return Math.max(stem / 4, hidden);
   }
 
+  private static List<Pick> picksForClasses(
+    final List<Raw> raws,
+    final List<String> names,
+    final LlmInImage request
+  ) {
+    if (raws.isEmpty()) {
+      return List.of();
+    }
+    return topPicks(
+      raws,
+      request.maxDetections(),
+      classFloors(names, request, raws.getFirst().scores().length));
+  }
+
+  private static float[] classFloors(
+    final List<String> names,
+    final LlmInImage request,
+    final int classes
+  ) {
+    float[] floors = new float[classes];
+    Arrays.fill(floors, request.minProbability());
+    for (int index = 0; index < names.size() && index < classes; index++) {
+      Float floor = request.classMinProbabilities().get(names.get(index));
+      if (floor != null) {
+        floors[index] = floor;
+      }
+    }
+    return floors;
+  }
+
+  private static List<Pick> topPicks(
+    final List<Raw> raws,
+    final int maxDetections,
+    final float[] floors
+  ) {
+    List<Pick> ranked = new ArrayList<>();
+    for (int anchor = 0; anchor < raws.size(); anchor++) {
+      float[] scores = raws.get(anchor).scores();
+      int classes = Math.min(scores.length, floors.length);
+      for (int classIndex = 0; classIndex < classes; classIndex++) {
+        if (scores[classIndex] >= floors[classIndex]) {
+          ranked.add(new Pick(anchor, classIndex, scores[classIndex]));
+        }
+      }
+    }
+    ranked.sort(Comparator.comparingDouble(Pick::score).reversed());
+    return ranked.size() <= maxDetections ? ranked : ranked.subList(0, maxDetections);
+  }
+
   LlmOutput read(
     final List<Tensor> layers,
     final YoloLetterbox letter,
@@ -423,12 +472,13 @@ final class YoloHead {
       return this.depth.read(List.of(layers.get(16), layers.get(19), layers.get(22)), letter,
         runtime);
     }
-    return this.objects(layers, letter, request, runtime);
+    return this.objects(layers, letter, names, request, runtime);
   }
 
   private LlmOutput objects(
     final List<Tensor> layers,
     final YoloLetterbox letter,
+    final List<String> names,
     final LlmInImage request,
     final MatmulRuntime runtime
   ) {
@@ -437,11 +487,14 @@ final class YoloHead {
     for (int level = 0; level < this.levels.length; level++) {
       this.levels[level].collect(feats[level], runtime, raws, this.task);
     }
-    List<Pick> picks = topPicks(raws, request.maxDetections());
+    boolean namedFloors = !request.classMinProbabilities().isEmpty();
+    List<Pick> picks = namedFloors
+      ? picksForClasses(raws, names, request)
+      : topPicks(raws, request.maxDetections());
     Tensor masks = this.proto == null ? null : this.proto.forward(feats, runtime);
     List<VisionHit> hits = new ArrayList<>();
     for (Pick pick : picks) {
-      if (pick.score < request.minProbability()) {
+      if (!namedFloors && pick.score < request.minProbability()) {
         continue;
       }
       hits.add(this.hit(
