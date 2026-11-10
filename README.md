@@ -257,6 +257,10 @@ Download: `./models/download-jeff-qwen3.5-0.8b.sh`. Russian checkers uses this c
 
 This snapshot. A picture goes in as packed pixels and the file decides the job: objects, a mask, pose points, oriented boxes, a semantic map, depth, or image labels. Chat is unchanged. The library does not use `java.desktop`.
 
+![YOLO26n: depth on the street, semantic surfaces, oriented boxes on a parking lot, and person detections](assets/yolo_samples.png)
+
+*Depth tints the street from red (near) to green (far). Semantic paints each surface. Oriented boxes mark the parking lot. Detect writes the person scores on the crossing.*
+
 The call below is the same for `yolo26n.onnx` through `yolo26x.onnx`. The loader reads the first convolution: 16 channels is nano, 32 is small, 64 is medium or large, and 96 is extra-large. Medium and large share that 64-channel stem; a second copy of the first block selects large. Medium and larger use a `C3k` inner block and a channel cap of 512. Large and extra-large also repeat those blocks. The file is a fused end-to-end export (`nms=False`, image size 640). P2, P6, YOLOE, and a `.pt` file are refused.
 
 `open(path)` detects the kind and calls `open(path, LlmModelType)`. A renamed file such as `lalala.onnx` has nothing to detect, so pass the kind. A YOLO constant selects the head. The scale is still read from the weights, and a GGUF or Hugging Face file still reads its architecture from the file.
@@ -289,7 +293,11 @@ try (LlmModel model = LlmModelFactory.make(
     Path.of("models/YOLO26n/detect/yolo26n.onnx"))) {
 
   LlmOutObjects found = model.generate(
-      new LlmInImage(new ArgbImage(width, height, pixels)), LlmModality.IMAGE);
+      LlmInImage.builder(new ArgbImage(width, height, pixels))
+          .addClass("car", 0.4f)
+          .addClass("bicycle", 0.3f)
+          .build(),
+      LlmModality.IMAGE);
 
   List<String> names = model.classNames();
   for (VisionHit hit : found.objects()) {
@@ -300,7 +308,7 @@ try (LlmModel model = LlmModelFactory.make(
 }
 ```
 
-The picture is letterboxed to a square whose edge is a multiple of 32. Omit the size and it stays 640. Boxes, mask outlines, rotated corners, and pose points come back in the original picture's pixels. A detection ranks at most `maxDetections` objects (300 when omitted) whose score is at least `minProbability` (`0.25` when omitted). `addClass("person", 0.6f)` on the builder uses `0.6` for that class and leaves every other class on `minProbability`. The name is a line from `classes.txt`, matched exactly. An unknown name is rejected. Pose drops a joint below `keypointMinProbability` (`0.5` when omitted). Classification returns at most `maxLabels` names (5 when omitted). `LlmInImage.builder(raster)` sets those by name. `new LlmInImage(raster, 0.4f)` keeps scores of `0.4` and above and leaves the other knobs at their defaults. A knob that does not apply to the loaded head is rejected when it is not the default. The class count and the pose width are read from the file. `YoloStreetHelloWorld.fromBufferedImage` copies a `BufferedImage` into the packed layout, and `toBufferedImage` copies a result raster back.
+The picture is letterboxed to a square whose edge is a multiple of 32. Omit the size and it stays 640. Boxes, mask outlines, rotated corners, and pose points come back in the original picture's pixels. A detection ranks at most `maxDetections` objects (300 when omitted) whose score is at least `minProbability` (`0.25` when omitted). `addClass("car", 0.4f)` and `addClass("bicycle", 0.3f)` on the builder use those floors for those class names and leave every other class on `minProbability`. The name is a line from `classes.txt`, matched exactly. An unknown name is rejected. Pose drops a joint below `keypointMinProbability` (`0.5` when omitted). Classification returns at most `maxLabels` names (5 when omitted). `LlmInImage.builder(raster)` sets those by name. `new LlmInImage(raster, 0.4f)` keeps scores of `0.4` and above and leaves the other knobs at their defaults. A knob that does not apply to the loaded head is rejected when it is not the default. The class count and the pose width are read from the file. `YoloStreetHelloWorld.fromBufferedImage` copies a `BufferedImage` into the packed layout, and `toBufferedImage` copies a result raster back.
 
 | File | `generate` result |
 |------|-------------------|
@@ -319,10 +327,6 @@ mvn -pl nano-vllm-java-samples -q exec:java \
 ```
 
 With no argument the sample asks for a head. `detect`, `seg`, `sem`, `pose`, `obb`, `depth`, or `cls` skips the menu. Detect, segment, semantic, pose, depth, and classification use a street photo. Semantic paints each Cityscapes surface in its own color, half transparent. Depth paints that photo from red (near) to green (far), half transparent, and prints the nearest and farthest meters. Classification writes the top five ImageNet labels on the photo. Oriented boxes use an overhead parking lot. The marked picture is `yolo-street-<head>.png`. Pose joins the body points with green lines. Segmentation fills each outline at half strength. A box covering at least two percent of the picture is kept down to a score of 0.01. The download script fetches nano. Point the same call at a `yolo26s`, `yolo26m`, `yolo26l`, or `yolo26x` ONNX you exported the same way.
-
-![YOLO26n: depth on the street, semantic surfaces, oriented boxes on a parking lot, and person detections](assets/yolo_samples.png)
-
-*Depth tints the street from red (near) to green (far). Semantic paints each surface. Oriented boxes mark the parking lot. Detect writes the person scores on the crossing.*
 
 ## Run the samples
 
