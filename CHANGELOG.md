@@ -58,6 +58,7 @@ Development snapshot after the **1.4.0** public release.
   a separate mode. TileContext is CUDA-only and is not used.
 
 ### Fixed
+- Piper and Whisper load when the JDK Vector API is not enabled. Attention and depthwise convolution stay on the scalar path until `--add-modules=jdk.incubator.vector` is set.
 - A picture convolution releases its patch buffers when the picture returns, so a pooled thread does not keep that image's scratch memory.
 - Chat splits thinking from the answer using the special tokens that checkpoint defines. A `<think>` … `</think>` quoted inside the scratchpad stays in thinking; the answer is the text after the close that balances the opening tag. Those delimiters stay in the decode and do not stop generation.
 - Weight load fails on a duplicate or wrong-shaped tensor, and still accepts the same modules under common wrapper prefixes (`language_model`, `text_model`, `base_model`, repeated `model.`). A swapped `[in, out]` matrix is stored as `[out, in]`.

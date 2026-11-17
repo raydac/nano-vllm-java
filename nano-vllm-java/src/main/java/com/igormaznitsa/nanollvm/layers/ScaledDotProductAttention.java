@@ -3,27 +3,24 @@ package com.igormaznitsa.nanollvm.layers;
 import static java.util.Objects.requireNonNull;
 
 import com.igormaznitsa.nanollvm.internal.Context;
+import com.igormaznitsa.nanollvm.tensor.FloatKernelsFactory;
 import com.igormaznitsa.nanollvm.tensor.MatmulRuntime;
 import com.igormaznitsa.nanollvm.tensor.Tensor;
 import com.igormaznitsa.nanollvm.tensor.VectorMath;
+import com.igormaznitsa.nanollvm.tensor.vector.VectorSoftmax;
 import java.util.Arrays;
-import jdk.incubator.vector.FloatVector;
-import jdk.incubator.vector.VectorOperators;
-import jdk.incubator.vector.VectorSpecies;
 
 /**
  * Multi-head attention where query length and key/value length may differ (encoder self-attn,
  * decoder causal self-attn, and decoder-encoder cross-attn). A sequence of {@value #MATMUL_KEYS}
  * keys or more is one matmul per head, and the heads run together on the matmul pool. Shorter
- * sequences stay one dot per key.
+ * sequences stay one dot per key. A full score row uses the Vector API when that module is loaded.
  *
  * @since 1.3.0
  */
 public final class ScaledDotProductAttention {
 
   private static final int MATMUL_KEYS = 32;
-  private static final VectorSpecies<Float> SPECIES = FloatVector.SPECIES_PREFERRED;
-  private static final int LANE = SPECIES.length();
 
   private final int numHeads;
   private final int headDim;
@@ -203,7 +200,7 @@ public final class ScaledDotProductAttention {
       int lastKey = this.causal
         ? Math.min(queryStartPosition + row, kvLen - 1)
         : kvLen - 1;
-      if (lastKey == kvLen - 1 && kvLen >= LANE) {
+      if (this.usesVectorSoftmax(lastKey, kvLen)) {
         this.softmaxDense(scores, row * kvLen, kvLen);
       } else {
         this.softmaxRow(scores, row, kvLen, lastKey);
@@ -211,50 +208,18 @@ public final class ScaledDotProductAttention {
     }
   }
 
+  private boolean usesVectorSoftmax(final int lastKey, final int kvLen) {
+    return lastKey == kvLen - 1
+        && FloatKernelsFactory.isVectorApiAvailable()
+        && this.vectorRowFits(kvLen);
+  }
+
+  private boolean vectorRowFits(final int kvLen) {
+    return kvLen >= VectorSoftmax.lanes();
+  }
+
   private void softmaxDense(final float[] scores, final int base, final int kvLen) {
-    FloatVector scale = FloatVector.broadcast(SPECIES, this.scale);
-    FloatVector maxV = FloatVector.broadcast(SPECIES, Float.NEGATIVE_INFINITY);
-    int upper = SPECIES.loopBound(kvLen);
-    int i = 0;
-    for (; i < upper; i += LANE) {
-      FloatVector scaled = FloatVector.fromArray(SPECIES, scores, base + i).mul(scale);
-      scaled.intoArray(scores, base + i);
-      maxV = maxV.max(scaled);
-    }
-    float max = maxV.reduceLanes(VectorOperators.MAX);
-    for (; i < kvLen; i++) {
-      float score = scores[base + i] * this.scale;
-      scores[base + i] = score;
-      if (score > max) {
-        max = score;
-      }
-    }
-    FloatVector maxB = FloatVector.broadcast(SPECIES, max);
-    FloatVector sumV = FloatVector.zero(SPECIES);
-    float sum = 0f;
-    i = 0;
-    for (; i < upper; i += LANE) {
-      FloatVector weight = FloatVector.fromArray(SPECIES, scores, base + i)
-        .sub(maxB)
-        .lanewise(VectorOperators.EXP);
-      weight.intoArray(scores, base + i);
-      sumV = sumV.add(weight);
-    }
-    sum += sumV.reduceLanes(VectorOperators.ADD);
-    for (; i < kvLen; i++) {
-      float weight = (float) Math.exp(scores[base + i] - max);
-      scores[base + i] = weight;
-      sum += weight;
-    }
-    float inv = 1f / sum;
-    FloatVector invB = FloatVector.broadcast(SPECIES, inv);
-    i = 0;
-    for (; i < upper; i += LANE) {
-      FloatVector.fromArray(SPECIES, scores, base + i).mul(invB).intoArray(scores, base + i);
-    }
-    for (; i < kvLen; i++) {
-      scores[base + i] *= inv;
-    }
+    VectorSoftmax.softmax(scores, base, kvLen, this.scale);
   }
 
   private void softmaxRow(
