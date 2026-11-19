@@ -29,6 +29,22 @@ import org.junit.jupiter.api.Test;
 
 final class PiperLoadTest {
 
+  private static void assertAudibleWav(final LlmOutSoundData sound) throws Exception {
+    byte[] wav = sound.wav();
+    assertTrue(sound.sampleRate() >= 8_000);
+    assertTrue(wav.length > 44);
+    assertEquals("RIFF", new String(wav, 0, 4, StandardCharsets.US_ASCII));
+    assertEquals("WAVE", new String(wav, 8, 4, StandardCharsets.US_ASCII));
+
+    WavPcm.MonoPcm pcm = WavPcm.read(wav);
+    float peak = 0f;
+    for (float sample : pcm.samples()) {
+      peak = Math.max(peak, Math.abs(sample));
+    }
+    assertTrue(peak > 0.05f, "synthesized peak was too quiet: " + peak);
+    assertTrue(pcm.samples().length > 4000, "synthesized clip was too short");
+  }
+
   @Test
   void loadsPiperAndSynthesizesWav() throws Exception {
     Path modelPath = OptionalModelAssumptions.requirePiper();
@@ -60,20 +76,22 @@ final class PiperLoadTest {
         LlmOutSoundData sound = llm.generate(
           LlmInText.of(modelPath.getFileName().toString().contains("-en-") ? "Hello" : "Привет"),
           LlmModality.AUDIO);
-        byte[] wav = sound.wav();
-        assertTrue(sound.sampleRate() >= 8_000);
-        assertTrue(wav.length > 44);
-        assertEquals("RIFF", new String(wav, 0, 4, StandardCharsets.US_ASCII));
-        assertEquals("WAVE", new String(wav, 8, 4, StandardCharsets.US_ASCII));
-
-        WavPcm.MonoPcm pcm = WavPcm.read(wav);
-        float peak = 0f;
-        for (float sample : pcm.samples()) {
-          peak = Math.max(peak, Math.abs(sample));
-        }
-        assertTrue(peak > 0.05f, "synthesized peak was too quiet: " + peak);
-        assertTrue(pcm.samples().length > 4000, "synthesized clip was too short");
+        assertAudibleWav(sound);
       }
+    }
+  }
+
+  @Test
+  void loadsIrinaAndSynthesizesWav() throws Exception {
+    Path modelPath = OptionalModelAssumptions.requirePiperRussian();
+    Path espeak = modelPath.resolve("espeak-ng-data");
+
+    try (LlmModel model = LlmModelFactory.open(modelPath)
+      .optionalData(LlmOptionalData.ESPEAK_DATA, espeak)
+      .make();
+         LLM llm = LLM.builder(model).build()) {
+      assertEquals(WeightNames.ARCH_PIPER, model.architectureName());
+      assertAudibleWav(llm.generate(LlmInText.of("Привет"), LlmModality.AUDIO));
     }
   }
 

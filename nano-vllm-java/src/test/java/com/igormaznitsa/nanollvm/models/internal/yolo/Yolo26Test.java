@@ -1,5 +1,6 @@
 package com.igormaznitsa.nanollvm.models.internal.yolo;
 
+import static java.util.Objects.requireNonNull;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
@@ -23,20 +24,30 @@ import com.igormaznitsa.nanollvm.models.LlmOutput;
 import com.igormaznitsa.nanollvm.models.Point2D;
 import com.igormaznitsa.nanollvm.models.VisionHit;
 import com.igormaznitsa.nanollvm.tensor.Tensor;
+import com.igormaznitsa.nanollvm.testsupport.OptionalModelAssumptions;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.IntStream;
+import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.condition.EnabledIf;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.MethodSource;
 
 final class Yolo26Test {
 
-  static boolean detectOnnxPresent() {
-    return Files.isRegularFile(detectOnnx());
+  private static Stream<String> nanoOnnxFiles() {
+    return Stream.of(
+        "detect/yolo26n.onnx",
+        "seg/yolo26n-seg.onnx",
+        "sem/yolo26n-sem.onnx",
+        "depth/yolo26n-depth.onnx",
+        "cls/yolo26n-cls.onnx",
+        "pose/yolo26n-pose.onnx",
+        "obb/yolo26n-obb.onnx");
   }
 
   private static void fill(
@@ -71,14 +82,6 @@ final class Yolo26Test {
       }
     }
     return false;
-  }
-
-  private static Path detectOnnx() {
-    Path local = Path.of("models/YOLO26n/detect/yolo26n.onnx");
-    if (Files.isRegularFile(local)) {
-      return local;
-    }
-    return Path.of("..").resolve(local);
   }
 
   @Test
@@ -401,13 +404,44 @@ final class Yolo26Test {
       () -> Yolo26Loader.classNames(blank, YoloTask.CLASSIFY, 1000));
   }
 
-  @Test
-  @EnabledIf("detectOnnxPresent")
-  void detectOnnxRunsWhenPresent() throws Exception {
-    try (LlmModel model = LlmModelFactory.make(detectOnnx())) {
+  @ParameterizedTest
+  @MethodSource("nanoOnnxFiles")
+  void nanoOnnxLoadsAndForwards(final String relativePath) {
+    Path file = OptionalModelAssumptions.requireYoloNano(relativePath);
+    YoloTask task = requireNonNull(
+        YoloTask.fromFileName(file.getFileName().toString()),
+        relativePath);
+
+    try (LlmModel model = LlmModelFactory.make(file)) {
+      assertTrue(model.isVisionModel());
+      assertTrue(model.architectureName().startsWith("yolo26n-"));
+      if (task == YoloTask.DEPTH) {
+        assertTrue(model.classNames().isEmpty());
+      } else {
+        assertFalse(model.classNames().isEmpty());
+      }
+
       ArgbImage image = new ArgbImage(64, 64, new int[64 * 64]);
-      LlmOutObjects found = model.generate(new LlmInImage(image), LlmModality.IMAGE);
-      assertTrue(found.objects().size() <= LlmInImage.DEFAULT_MAX_DETECTIONS);
+      LlmInImage input = new LlmInImage(image);
+      LlmOutput output = model.generate(
+          input,
+          task == YoloTask.CLASSIFY ? LlmModality.LABELS : LlmModality.IMAGE);
+
+      switch (task) {
+        case CLASSIFY -> {
+          LlmOutLabels labels = assertInstanceOf(LlmOutLabels.class, output);
+          assertTrue(labels.labels().size() <= input.maxLabels());
+        }
+        case SEMANTIC, DEPTH -> {
+          LlmOutImage picture = assertInstanceOf(LlmOutImage.class, output);
+          assertEquals(image.width(), picture.image().width());
+          assertEquals(image.height(), picture.image().height());
+        }
+        default -> {
+          LlmOutObjects found = assertInstanceOf(LlmOutObjects.class, output);
+          assertTrue(found.objects().size() <= input.maxDetections());
+        }
+      }
     }
   }
 }

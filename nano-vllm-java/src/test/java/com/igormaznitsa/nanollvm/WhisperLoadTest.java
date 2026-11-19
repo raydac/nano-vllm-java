@@ -31,9 +31,7 @@ final class WhisperLoadTest {
     return text.toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9]+", " ").strip();
   }
 
-  @Test
-  void loadsWhisperAndTranscribesBundledCallWav() throws Exception {
-    Path modelPath = OptionalModelAssumptions.requireWhisper();
+  private static void transcribeBundledCall(final Path modelPath) throws Exception {
     Path wav = TestWavs.classpathFile("wav/call1.wav");
 
     try (LlmModel model = LlmModelFactory.make(modelPath)) {
@@ -61,5 +59,15 @@ final class WhisperLoadTest {
           () -> "transcript was: " + out.text());
       }
     }
+  }
+
+  @Test
+  void loadsWhisperBaseAndTranscribesBundledCallWav() throws Exception {
+    transcribeBundledCall(OptionalModelAssumptions.requireWhisperBase());
+  }
+
+  @Test
+  void loadsWhisperTinyAndTranscribesBundledCallWav() throws Exception {
+    transcribeBundledCall(OptionalModelAssumptions.requireWhisperTiny());
   }
 }

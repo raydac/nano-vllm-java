@@ -8,7 +8,10 @@ import static com.igormaznitsa.nanollvm.utils.NanoLlvmProps.PROP_RAG_DIR;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 import com.igormaznitsa.nanollvm.models.ModelSupport;
+import com.igormaznitsa.nanollvm.models.internal.WeightNames;
+import com.igormaznitsa.nanollvm.models.llmcontainer.GgufReader;
 import com.igormaznitsa.nanollvm.utils.NanoLlvmProps;
+import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Locale;
@@ -36,6 +39,10 @@ public final class OptionalModelAssumptions {
   private static final String PIPER_EN_LESSAC_MEDIUM = "piper-en-lessac-medium";
   private static final String FASTTEXT_LID_176 = "fasttext-lid-176";
   private static final String JEFF_QWEN35_0_8B = "Jeff-Qwen3.5-0.8B";
+  private static final String EMBEDDING_GEMMA_300M = "EmbeddingGemma-300M";
+  private static final String XLM_ROBERTA_BASE = "xlm-roberta-base";
+  private static final String TINY_LLM_ONNX = "Tiny-LLM-ONNX";
+  private static final String YOLO26N = "YOLO26n";
 
   private OptionalModelAssumptions() {
   }
@@ -107,6 +114,55 @@ public final class OptionalModelAssumptions {
       "models/download-whisper-base.sh or models/download-whisper-tiny.sh");
   }
 
+  public static Path requireWhisperBase() {
+    return require(
+      findModel(WHISPER_BASE),
+      "whisper-base",
+      "models/download-whisper-base.sh");
+  }
+
+  public static Path requireWhisperTiny() {
+    return require(
+      findModel(WHISPER_TINY),
+      "whisper-tiny",
+      "models/download-whisper-tiny.sh");
+  }
+
+  public static Path requireEmbeddingGemma() {
+    return require(
+      findModel(EMBEDDING_GEMMA_300M),
+      "EmbeddingGemma-300M",
+      "models/download-embeddinggemma-300m.sh (HF license + HF_TOKEN)");
+  }
+
+  public static Path requireXlmRobertaBase() {
+    return require(
+      findModel(XLM_ROBERTA_BASE),
+      "xlm-roberta-base ONNX",
+      "models/download-xlm-roberta-base.sh");
+  }
+
+  public static Path requireTinyLlmOnnx() {
+    return require(
+      findModel(TINY_LLM_ONNX),
+      "Tiny-LLM-ONNX",
+      "models/download-tiny-llm-onnx.sh");
+  }
+
+  public static Path requireQwen3Gguf() {
+    return require(
+      findGgufArchitecture(WeightNames.ARCH_QWEN3),
+      "Qwen3 GGUF",
+      "place a Qwen3 .gguf under models/ (see models/README.md; no download script)");
+  }
+
+  public static Path requireYoloNano(final String relativePath) {
+    return require(
+      findYoloNano(relativePath),
+      "YOLO26n " + relativePath,
+      "models/download-yolo26n.sh");
+  }
+
   public static Path requirePiper() {
     Optional<Path> english = findModel(PIPER_EN_LESSAC_MEDIUM);
     if (english.isPresent()) {
@@ -155,6 +211,45 @@ public final class OptionalModelAssumptions {
     System.err.println("[nanollvm] WARNING: " + message);
     assumeTrue(false, message);
     throw new IllegalStateException("unreachable");
+  }
+
+  private static Optional<Path> findYoloNano(final String relativePath) {
+    Path primary = modelsRoot().resolve(YOLO26N).resolve(relativePath);
+    if (Files.isRegularFile(primary)) {
+      return Optional.of(primary.toAbsolutePath().normalize());
+    }
+    Path sibling = Path.of("").toAbsolutePath().normalize()
+      .resolve("..")
+      .resolve(MODELS_DIR)
+      .resolve(YOLO26N)
+      .resolve(relativePath);
+    if (Files.isRegularFile(sibling)) {
+      return Optional.of(sibling.toAbsolutePath().normalize());
+    }
+    return Optional.empty();
+  }
+
+  private static Optional<Path> findGgufArchitecture(final String architecture) {
+    Path root = modelsRoot();
+    if (!Files.isDirectory(root)) {
+      return Optional.empty();
+    }
+    try (Stream<Path> stream = Files.list(root)) {
+      return stream
+        .filter(OptionalModelAssumptions::isGgufFile)
+        .filter(path -> architecture.equals(peekArchitecture(path)))
+        .findFirst();
+    } catch (IOException | RuntimeException ignored) {
+      return Optional.empty();
+    }
+  }
+
+  private static String peekArchitecture(final Path path) {
+    try {
+      return GgufReader.peekArchitecture(path);
+    } catch (IOException | RuntimeException ignored) {
+      return "";
+    }
   }
 
   private static Optional<Path> findModel(final String bareName) {
