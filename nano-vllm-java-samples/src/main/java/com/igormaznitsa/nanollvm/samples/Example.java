@@ -591,6 +591,10 @@ public final class Example {
       "Embedding model (" + llm.model().architectureName()
         + ", " + llm.model().modalities() + ") — each line → L2-normalized vector.");
     console.println("Type text and press Enter. Commands: /exit  /quit  /clear");
+    if ("gemma3_embedding".equals(llm.model().architectureName())) {
+      console.println("Retrieval query: task: search result | query: …");
+      console.println("Passage: title: none | text: …");
+    }
     console.println("For labels, restart and choose Classify after the model loads.");
     console.println();
 
@@ -691,6 +695,10 @@ public final class Example {
       "Classify with " + llm.model().architectureName()
         + " vectors (centered prototypes, not a Hub classification head).");
     printClassifyHelp(console);
+    if ("gemma3_embedding".equals(llm.model().architectureName())) {
+      console.println(
+        "Classification text for this model starts with \"task: classification | query: \".");
+    }
     console.println();
 
     EmbeddingClassifier.Trainer trainer = EmbeddingClassifier.trainer();
@@ -1542,6 +1550,10 @@ public final class Example {
         BundledModels.XLM_ROBERTA_BASE,
         "Run models/download-xlm-roberta-base.sh"),
       choice(
+        "EmbeddingGemma-300M (embeddings, safetensors, ~1.2GB)",
+        BundledModels.EMBEDDING_GEMMA_300M,
+        "Run models/download-embeddinggemma-300m.sh (HF license + HF_TOKEN)"),
+      choice(
         "whisper-base (speech, safetensors, ~290MB)",
         BundledModels.WHISPER_BASE,
         "Run models/download-whisper-base.sh"),
@@ -1630,6 +1642,8 @@ public final class Example {
     console.println("  ./models/download-gte-small-gguf.sh    (embeddings)");
     console.println("  ./models/download-multilingual-e5-small.sh  (multilingual embeddings)");
     console.println("  ./models/download-xlm-roberta-base.sh  (XLM-RoBERTa ONNX embeddings)");
+    console.println(
+      "  ./models/download-embeddinggemma-300m.sh  (EmbeddingGemma, HF license + HF_TOKEN)");
     console.println("  ./models/download-whisper-base.sh      (speech-to-text, ~290MB)");
     console.println("  ./models/download-whisper-tiny.sh      (smaller speech-to-text, ~150MB)");
     console.println(
@@ -1685,9 +1699,7 @@ public final class Example {
           + "weaker dialog than Qwen3 / Gemma3.");
     }
     if (ModelSupport.isEmbeddingCheckpoint(path)) {
-      console.printlnInfo(
-        "This checkpoint is a BERT-family embedding encoder — LLM.builder then "
-          + "generate(LlmInText, EMBEDDING).");
+      console.printlnInfo(embeddingLoadHint(path));
     }
     if (ModelSupport.isSpeechCheckpoint(path)) {
       console.printlnInfo(
@@ -1773,6 +1785,18 @@ public final class Example {
 
   private static boolean isSmolLm2Path(final Path path) {
     return path.toString().toLowerCase(Locale.ROOT).contains("smollm2");
+  }
+
+  private static String embeddingLoadHint(final Path path) {
+    Path fileName = path.getFileName();
+    String name = (fileName == null ? path : fileName).toString().toLowerCase(Locale.ROOT);
+    if (name.contains("embeddinggemma")) {
+      return "This checkpoint is EmbeddingGemma — LLM.builder then "
+        + "generate(LlmInText, EMBEDDING). "
+        + "A retrieval query starts with \"task: search result | query: \".";
+    }
+    return "This checkpoint is a BERT-family embedding encoder — LLM.builder then "
+      + "generate(LlmInText, EMBEDDING).";
   }
 
   private static Optional<Path> findRagEmbeddingModel() {

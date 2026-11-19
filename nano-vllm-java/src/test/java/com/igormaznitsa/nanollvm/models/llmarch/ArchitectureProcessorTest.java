@@ -20,6 +20,9 @@ final class ArchitectureProcessorTest {
     assertSame(Qwen3Processor.INSTANCE, ArchitectureProcessors.of(WeightNames.ARCH_QWEN3));
     assertSame(Qwen35Processor.INSTANCE, ArchitectureProcessors.of(WeightNames.ARCH_QWEN3_5));
     assertSame(Gemma3Processor.INSTANCE, ArchitectureProcessors.of(WeightNames.ARCH_GEMMA3));
+    assertSame(
+      Gemma3EmbeddingProcessor.INSTANCE,
+      ArchitectureProcessors.of(WeightNames.ARCH_GEMMA3_EMBEDDING));
     assertSame(Gemma4Processor.INSTANCE, ArchitectureProcessors.of(WeightNames.ARCH_GEMMA4));
     assertSame(LlamaProcessor.INSTANCE, ArchitectureProcessors.of(WeightNames.ARCH_LLAMA));
     assertSame(Lfm2Processor.INSTANCE, ArchitectureProcessors.of(WeightNames.ARCH_LFM2));
@@ -37,6 +40,7 @@ final class ArchitectureProcessorTest {
     assertFalse(ArchitectureProcessors.of(WeightNames.ARCH_LLAMA).isEmbedding());
     assertFalse(ArchitectureProcessors.of(WeightNames.ARCH_LFM2).isEmbedding());
     assertTrue(ArchitectureProcessors.of(WeightNames.ARCH_BERT).isEmbedding());
+    assertTrue(ArchitectureProcessors.of(WeightNames.ARCH_GEMMA3_EMBEDDING).isEmbedding());
     assertFalse(ArchitectureProcessors.of(WeightNames.ARCH_WHISPER).isEmbedding());
     assertTrue(ArchitectureProcessors.of(WeightNames.ARCH_WHISPER).isSpeech());
     assertFalse(ArchitectureProcessors.of(WeightNames.ARCH_QWEN3).isSpeech());

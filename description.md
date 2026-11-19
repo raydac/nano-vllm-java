@@ -12,7 +12,7 @@ term is defined on first use. Occasional metaphors remain only as scaffolding, n
 
 The subject is a small program that **loads a pretrained model** and runs **inference** on an ordinary CPU. CUDA is not
 required. It continues text or short chat with a **causal** language model; (**since 1.1.0**)
-encoding sentences to vectors with a **BERT-family embedding** GGUF or ONNX; (**since 1.3.0**) transcribing speech
+encoding sentences to vectors with a **BERT-family embedding** GGUF or ONNX, or (**since 1.5.0**) a bidirectional **Gemma 3** text folder such as EmbeddingGemma; (**since 1.3.0**) transcribing speech
 with **Whisper** safetensors and synthesizing speech with **Piper** ONNX voices; (**since 1.4.0**) classifying text
 with **Meta fastText** (`*.bin` / `*.ftz`); (**since 1.5.0**) reading a picture with **YOLO26**
 (detect, segment, pose, oriented boxes, semantic map, depth, or image labels). When **TornadoVM** is on the module path, dense GEMV can run on the device
@@ -144,7 +144,7 @@ of reading process): **Qwen3** and **Gemma3**. **Since 1.1.0** the same causal p
 (including small ONNX demos) and **Gemma 4 text** (QAT mobile) — vision and audio towers in that crate are skipped.
 **Since 1.5.0** it also loads **Qwen3.5 text** from Hugging Face safetensors (hybrid Gated DeltaNet; the vision tower is skipped).
 The same Qwen3 graph also loads from a **GGUF** file (**since 1.1.0**). A further GGUF path loads **LFM2**
-(hybrid short-convolution + GQA). Sentence embeddings use **BERT**-family GGUF or ONNX (**since 1.1.0**, chapter 7b).
+(hybrid short-convolution + GQA). Sentence embeddings use **BERT**-family GGUF or ONNX (**since 1.1.0**, chapter 7b) and, **since 1.5.0**, a bidirectional Gemma 3 text folder (EmbeddingGemma: mean pool, two dense maps, L2 norm).
 **Since 1.3.0**, the same factory also loads **Whisper** speech-to-text (Hugging Face safetensors, chapter **7d**) and
 **Piper** text-to-speech (ONNX voice folder, chapter **7e**). **Since 1.4.0**, it also loads **fastText**
 classifiers (`*.bin` / `*.ftz`, chapter **7f**). **Since 1.5.0**, it also loads **YOLO26** image
@@ -152,7 +152,7 @@ models from a fused ONNX file (chapter **7i**). You usually need not care which;
 which files you pointed it at.
 
 **In the code:** architecture pick is `ArchitectureProcessors.of` → `Qwen3ForCausalLM`,
-`Qwen35ForCausalLM`, `Gemma3ForCausalLM`, `Gemma4ForCausalLM`, `LlamaForCausalLM`, or `Lfm2ForCausalLM`; GGUF entry is `LlmModelFactory` →
+`Qwen35ForCausalLM`, `Gemma3ForCausalLM`, `Gemma3ForEmbedding`, `Gemma4ForCausalLM`, `LlamaForCausalLM`, or `Lfm2ForCausalLM`; GGUF entry is `LlmModelFactory` →
 `models.llmcontainer.GgufTransport` (container catalog) → `models.llmarch.ArchitectureProcessor.bind` / `fill` / `create`;
 ONNX folders use `models.llmcontainer.OnnxTransport` → the same architecture processor (chapter **7c**); Whisper uses
 `SpeechArchitecture` / `WhisperForAsr` (chapter **7d**); Piper uses `SynthesisArchitecture` / `PiperForTts`
@@ -222,7 +222,7 @@ You (or a download script in this project’s `models/` folder) fetch weights fr
 
 | Crate shape | What you point at | Typical cargo |
 |-------------|-------------------|---------------|
-| **Hugging Face folder** | A directory | `config.json` + tokenizer (`tokenizer.json`, else SentencePiece `tokenizer.model` **since 1.2.0**) + `*.safetensors` **or** supported `*.onnx` (Qwen3 / Gemma3 / **Gemma 4 text** / **Llama**; **Qwen3.5 text** safetensors **since 1.5.0**, vision tower skipped, not ONNX; BERT embeddings from ONNX; **Whisper** speech safetensors **since 1.3.0**) — **since 1.1.0** for ONNX and Gemma 4. **Piper** voices are a folder of `*.onnx` + `*.onnx.json` (**since 1.3.0**, chapter **7e**). |
+| **Hugging Face folder** | A directory | `config.json` + tokenizer (`tokenizer.json`, else SentencePiece `tokenizer.model` **since 1.2.0**) + `*.safetensors` **or** supported `*.onnx` (Qwen3 / Gemma3 / **Gemma 4 text** / **Llama**; **Qwen3.5 text** safetensors **since 1.5.0**, vision tower skipped, not ONNX; BERT embeddings from ONNX; **bidirectional Gemma 3 embeddings** safetensors **since 1.5.0**; **Whisper** speech safetensors **since 1.3.0**) — **since 1.1.0** for ONNX and Gemma 4. **Piper** voices are a folder of `*.onnx` + `*.onnx.json` (**since 1.3.0**, chapter **7e**). |
 | **Single GGUF file** | One `.gguf` | Metadata + embedded tokenizer + quantized weights (**Qwen3** or **LFM2** chat, or **BERT** embeddings — not Gemma/Llama GGUF) |
 | **fastText file / folder** (**since 1.4.0**) | `*.bin` / `*.ftz` or a directory containing one | Supervised classifier (e.g. lid.176); no `config.json` — chapter **7f** |
 | **YOLO26 ONNX** (**since 1.5.0**) | `yolo26n*.onnx` through `yolo26x*.onnx`, or a folder with one | Fused end-to-end export (`nms=False`, 640). Nano download; small through extra-large use the same call. Chapter **7i** |

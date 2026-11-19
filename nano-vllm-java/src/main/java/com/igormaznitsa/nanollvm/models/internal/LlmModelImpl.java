@@ -597,9 +597,31 @@ public final class LlmModelImpl extends LlmModel {
     float[][] out = new float[texts.size()][];
     for (int i = 0; i < texts.size(); i++) {
       CharSequence text = requireNonNull(texts.get(i), "texts[" + i + "]");
-      out[i] = active.encode(this.wrapClsSep(this.tokenizer.encode(text.toString())), runtime);
+      out[i] = active.encode(this.embeddingTokenIds(text.toString()), runtime);
     }
     return out;
+  }
+
+  private int[] embeddingTokenIds(final String text) {
+    List<Integer> pieces = this.tokenizer.encode(text);
+    if (WeightNames.ARCH_GEMMA3_EMBEDDING.equals(this.architectureName())) {
+      return this.wrapEnds(pieces, "<bos>", "<eos>");
+    }
+    return this.wrapClsSep(pieces);
+  }
+
+  private int[] wrapEnds(final List<Integer> pieces, final String open, final String close) {
+    int bos = this.tokenizer.tokenId(open).orElseThrow(() -> new IllegalStateException(
+      "embedding tokenizer missing " + open));
+    int eos = this.tokenizer.tokenId(close).orElseThrow(() -> new IllegalStateException(
+      "embedding tokenizer missing " + close));
+    int[] ids = new int[pieces.size() + 2];
+    ids[0] = bos;
+    for (int i = 0; i < pieces.size(); i++) {
+      ids[i + 1] = pieces.get(i);
+    }
+    ids[ids.length - 1] = eos;
+    return ids;
   }
 
   private int[] wrapClsSep(final List<Integer> pieces) {

@@ -54,6 +54,30 @@ Windows: `.\models\download-gemma3-270m.ps1` or `models\download-gemma3-270m.cmd
 
 Creates `models/Gemma3-270M/`.
 
+## EmbeddingGemma-300M (optional, embeddings)
+
+[google/embeddinggemma-300m](https://huggingface.co/google/embeddinggemma-300m) — bidirectional Gemma 3 text encoder (300M) with mean pooling and two dense maps. The result is one L2-normalized vector (768 values). **License-gated** on Hugging Face — accept terms at that page, then authenticate (`huggingface-cli login` or `HF_TOKEN`). About **1.2 GB**.
+
+```bash
+export HF_TOKEN=hf_...   # if needed
+./models/download-embeddinggemma-300m.sh
+```
+
+Windows: `.\models\download-embeddinggemma-300m.ps1` or `models\download-embeddinggemma-300m.cmd`.
+
+Creates `models/EmbeddingGemma-300M/`.
+
+```java
+try (LlmModel model = LlmModelFactory.make(Path.of("models/EmbeddingGemma-300M"))) {
+  LlmOutEmbedding query = model.generate(
+    LlmInText.of("task: search result | query: hello world"), LlmModality.EMBEDDING);
+  LlmOutEmbedding passage = model.generate(
+    LlmInText.of("title: none | text: hello world"), LlmModality.EMBEDDING);
+}
+```
+
+The library does not add those prefixes. Retrieval, clustering, and classification each have their own prefix in `config_sentence_transformers.json`. The first 512, 256, or 128 values can be kept and normalized again when a shorter vector is enough. Pass the folder to `EmbeddingsHelloWorld` to print a vector; that sample adds the search-query prefix when the folder name contains `embeddinggemma`.
+
 ## Gemma4-E2B-IT-QAT-Mobile (optional)
 
 [google/gemma-4-E2B-it-qat-mobile-transformers](https://huggingface.co/google/gemma-4-E2B-it-qat-mobile-transformers)

@@ -3,6 +3,7 @@ package com.igormaznitsa.nanollvm.models;
 import static com.igormaznitsa.nanollvm.models.internal.WeightNames.ARCH_BERT;
 import static com.igormaznitsa.nanollvm.models.internal.WeightNames.ARCH_FASTTEXT;
 import static com.igormaznitsa.nanollvm.models.internal.WeightNames.ARCH_GEMMA3;
+import static com.igormaznitsa.nanollvm.models.internal.WeightNames.ARCH_GEMMA3_EMBEDDING;
 import static com.igormaznitsa.nanollvm.models.internal.WeightNames.ARCH_GEMMA4;
 import static com.igormaznitsa.nanollvm.models.internal.WeightNames.ARCH_LFM2;
 import static com.igormaznitsa.nanollvm.models.internal.WeightNames.ARCH_LLAMA;
@@ -47,6 +48,7 @@ public final class ModelSupport {
       Chat from a Hugging Face folder (config.json + *.safetensors or *.onnx): qwen3, qwen3_5 (text; vision tower skipped), gemma3 / gemma3_text, \
     gemma4 (text / QAT mobile), llama
       Chat from a GGUF file: qwen3, lfm2
+      Embeddings from a Hugging Face folder: bidirectional gemma3 text (EmbeddingGemma; safetensors plus 2_Dense and 3_Dense)
       Embeddings from GGUF or ONNX: bert encoder (bert / roberta / xlm-roberta)
       Speech from a Hugging Face folder (config.json + *.safetensors): whisper (openai/whisper-*)
       Speech synthesis from a Piper voice folder (*.onnx + *.onnx.json): piper
@@ -467,6 +469,13 @@ public final class ModelSupport {
   }
 
   private static Verdict inspect(final Config.HfConfig config) {
+    if (config.bidirectionalAttention() && isGemma3Text(normalize(config.modelType()))) {
+      if (config.visionConfigPresent() || config.audioConfigPresent() ||
+        config.nestedTextConfig()) {
+        return Verdict.rejected(multimodalReason(config.modelType()));
+      }
+      return Verdict.ok(ARCH_GEMMA3_EMBEDDING, Kind.EMBEDDING);
+    }
     Verdict fromType = classifyToken(normalize(config.modelType()));
     if (fromType != null && !fromType.supported()) {
       return fromType;
@@ -612,6 +621,13 @@ public final class ModelSupport {
     if (ARCH_LFM2.equals(id) && source != Source.GGUF) {
       throw unsupported(
         "LFM2 loads from a .gguf file only, not from Hugging Face safetensors or ONNX.",
+        modelType,
+        architectures);
+    }
+    if (ARCH_GEMMA3_EMBEDDING.equals(id) && source != Source.HF_SAFETENSORS) {
+      throw unsupported(
+        "Bidirectional Gemma 3 embeddings load from a Hugging Face folder (config.json + "
+          + "*.safetensors, including 2_Dense and 3_Dense). GGUF and ONNX are not supported.",
         modelType,
         architectures);
     }
@@ -792,6 +808,10 @@ public final class ModelSupport {
       .formatted(blank(label));
   }
 
+  private static boolean isGemma3Text(final String token) {
+    return token.equals("gemma3") || token.equals("gemma3_text");
+  }
+
   private static boolean isQwen3Text(final String token) {
     return token.equals("qwen3") || token.equals("qwen3_text");
   }
@@ -865,6 +885,7 @@ public final class ModelSupport {
       case ARCH_QWEN3 -> ARCH_QWEN3;
       case ARCH_QWEN3_5, "qwen3_5_text" -> ARCH_QWEN3_5;
       case ARCH_GEMMA3, "gemma3_text" -> ARCH_GEMMA3;
+      case ARCH_GEMMA3_EMBEDDING -> ARCH_GEMMA3_EMBEDDING;
       case ARCH_GEMMA4, "gemma4_text" -> ARCH_GEMMA4;
       case ARCH_LLAMA, "llama2", "llama3" -> ARCH_LLAMA;
       case ARCH_LFM2, "lfm2.5", "lfm2_5" -> ARCH_LFM2;

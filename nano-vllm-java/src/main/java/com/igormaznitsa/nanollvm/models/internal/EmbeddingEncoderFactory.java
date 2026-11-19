@@ -39,7 +39,7 @@ public final class EmbeddingEncoderFactory {
 
   /**
    * Architecture id for an embedding checkpoint ({@code bert} / {@code roberta} /
-   * {@code xlm-roberta}).
+   * {@code xlm-roberta}, or bidirectional {@code gemma3_embedding}).
    *
    * @throws IllegalArgumentException if {@code config} is not a supported embedding family
    */

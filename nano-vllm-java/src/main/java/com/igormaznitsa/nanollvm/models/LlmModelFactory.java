@@ -52,7 +52,8 @@ import java.util.Optional;
  *
  * <p>One {@link LlmModel} may be reused by any number of {@link LLM} instances until
  * {@link LlmModel#close()}. Load is blocking I/O on the calling thread; the returned model is safe
- * to share across threads while open. BERT embedding GGUFs load through the same entry points;
+ * to share across threads while open. BERT embedding GGUFs and bidirectional Gemma 3 text
+ * folders (EmbeddingGemma) load through the same entry points;
  * use {@link LlmModel#generate(LlmInput, LlmModality)} with {@link LlmModality#EMBEDDING}. Whisper
  * speech checkpoints use {@link LlmInSound} → {@link LlmModality#TEXT} (Hugging Face safetensors
  * only; not CTranslate2 {@code model.bin}). fastText classifiers use {@link LlmInText} →

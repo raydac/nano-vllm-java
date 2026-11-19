@@ -2,6 +2,7 @@ package com.igormaznitsa.nanollvm.models.internal;
 
 import static com.igormaznitsa.nanollvm.models.internal.WeightNames.ARCH_BERT;
 import static com.igormaznitsa.nanollvm.models.internal.WeightNames.ARCH_GEMMA3;
+import static com.igormaznitsa.nanollvm.models.internal.WeightNames.ARCH_GEMMA3_EMBEDDING;
 import static com.igormaznitsa.nanollvm.models.internal.WeightNames.ARCH_GEMMA4;
 import static com.igormaznitsa.nanollvm.models.internal.WeightNames.ARCH_LFM2;
 import static com.igormaznitsa.nanollvm.models.internal.WeightNames.ARCH_LLAMA;
@@ -10,6 +11,8 @@ import static com.igormaznitsa.nanollvm.models.internal.WeightNames.ARCH_QWEN3;
 import static com.igormaznitsa.nanollvm.models.internal.WeightNames.ARCH_QWEN3_5;
 import static com.igormaznitsa.nanollvm.models.internal.WeightNames.ARCH_WHISPER;
 import static com.igormaznitsa.nanollvm.models.internal.WeightNames.DOWN_PROJ_WEIGHT;
+import static com.igormaznitsa.nanollvm.models.internal.WeightNames.EMBEDDING_DOWN_PROJ;
+import static com.igormaznitsa.nanollvm.models.internal.WeightNames.EMBEDDING_UP_PROJ;
 import static com.igormaznitsa.nanollvm.models.internal.WeightNames.EMBED_TOKENS;
 import static com.igormaznitsa.nanollvm.models.internal.WeightNames.GATE_UP_PROJ;
 import static com.igormaznitsa.nanollvm.models.internal.WeightNames.GATE_UP_PROJ_WEIGHT;
@@ -69,6 +72,7 @@ public final class WeightSchema {
   public static WeightSchema forArchitecture(final String arch, final Config.HfConfig config) {
     return switch (arch) {
       case ARCH_GEMMA3 -> gemma3(config);
+      case ARCH_GEMMA3_EMBEDDING -> gemma3Embedding(config);
       case ARCH_GEMMA4 -> gemma4(config);
       case ARCH_QWEN3 -> qwen3(config);
       case ARCH_QWEN3_5 -> qwen35(config);
@@ -244,6 +248,20 @@ public final class WeightSchema {
     expected.add(MODEL_NORM);
     optional.add(LM_HEAD);
     return new WeightSchema(PACKED_MODULES_MAPPING, expected, optional);
+  }
+
+  /**
+   * Gemma 3 text encoder plus the two sentence-transformer dense maps.
+   *
+   * @since 1.5.0
+   */
+  public static WeightSchema gemma3Embedding(final Config.HfConfig config) {
+    WeightSchema trunk = gemma3(config);
+    Set<String> expected = new LinkedHashSet<>(trunk.expectedParameters());
+    expected.add(EMBEDDING_UP_PROJ);
+    expected.add(EMBEDDING_DOWN_PROJ);
+    return new WeightSchema(
+      trunk.packedModulesMapping(), expected, trunk.optionalParameters());
   }
 
   public static WeightSchema gemma4(final Config.HfConfig config) {

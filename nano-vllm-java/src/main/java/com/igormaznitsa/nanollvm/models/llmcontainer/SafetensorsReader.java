@@ -16,6 +16,7 @@ import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Stream;
 
 /**
  * Hugging Face {@code .safetensors} reader: JSON header plus float payloads. Files ≤ 2 GiB are
@@ -176,10 +177,21 @@ public final class SafetensorsReader implements AutoCloseable {
   public static List<Path> listSafetensors(final Path modelDir) throws IOException {
     try (var stream = Files.list(modelDir)) {
       return stream
-        .filter(p -> PathNames.of(p).endsWith(".safetensors"))
+        .flatMap(SafetensorsReader::safetensorsAt)
         .sorted()
         .toList();
     }
+  }
+
+  private static Stream<Path> safetensorsAt(final Path child) {
+    if (Files.isRegularFile(child) && PathNames.of(child).endsWith(".safetensors")) {
+      return Stream.of(child);
+    }
+    if (!Files.isDirectory(child)) {
+      return Stream.empty();
+    }
+    Path nested = child.resolve("model.safetensors");
+    return Files.isRegularFile(nested) ? Stream.of(nested) : Stream.empty();
   }
 
   public String label() {

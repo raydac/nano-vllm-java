@@ -2,6 +2,7 @@ package com.igormaznitsa.nanollvm.models.llmarch;
 
 import static com.igormaznitsa.nanollvm.models.internal.WeightNames.ARCH_BERT;
 import static com.igormaznitsa.nanollvm.models.internal.WeightNames.ARCH_GEMMA3;
+import static com.igormaznitsa.nanollvm.models.internal.WeightNames.ARCH_GEMMA3_EMBEDDING;
 import static com.igormaznitsa.nanollvm.models.internal.WeightNames.ARCH_GEMMA4;
 import static com.igormaznitsa.nanollvm.models.internal.WeightNames.ARCH_LFM2;
 import static com.igormaznitsa.nanollvm.models.internal.WeightNames.ARCH_LLAMA;
@@ -36,6 +37,7 @@ public final class ArchitectureProcessors {
       case ARCH_QWEN3 -> Qwen3Processor.INSTANCE;
       case ARCH_QWEN3_5 -> Qwen35Processor.INSTANCE;
       case ARCH_GEMMA3 -> Gemma3Processor.INSTANCE;
+      case ARCH_GEMMA3_EMBEDDING -> Gemma3EmbeddingProcessor.INSTANCE;
       case ARCH_GEMMA4 -> Gemma4Processor.INSTANCE;
       case ARCH_LLAMA -> LlamaProcessor.INSTANCE;
       case ARCH_LFM2 -> Lfm2Processor.INSTANCE;

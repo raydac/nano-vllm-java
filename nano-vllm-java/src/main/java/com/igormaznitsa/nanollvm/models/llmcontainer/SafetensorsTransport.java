@@ -84,7 +84,7 @@ public final class SafetensorsTransport implements ContainerTransport {
       throw new IllegalArgumentException("no .safetensors files in " + dir);
     }
     List<Shard> shards = files.stream()
-      .map(file -> new Shard(PathNames.of(file), () -> SafetensorsReader.open(file)))
+      .map(file -> new Shard(shardLabel(dir, file), () -> SafetensorsReader.open(file)))
       .toList();
     return new SafetensorsTransport(dir.toString(), configJson, shards, probe(shards));
   }
@@ -112,6 +112,19 @@ public final class SafetensorsTransport implements ContainerTransport {
       requireNonNull(label, "label"), configJson, shards, probe(shards));
   }
 
+  private static String shardLabel(final Path root, final Path file) {
+    String relative = root.relativize(file).toString().replace('\\', '/');
+    return relative.isBlank() ? PathNames.of(file) : relative;
+  }
+
+  static String qualifiedName(final String shardLabel, final String tensorName) {
+    int slash = shardLabel.indexOf('/');
+    if (slash < 0) {
+      return tensorName;
+    }
+    return shardLabel.substring(0, slash) + "/" + tensorName;
+  }
+
   private static String readConfigJson(final Path modelDir) throws IOException {
     Path configPath = modelDir.resolve(CONFIG_JSON);
     if (!Files.isRegularFile(configPath)) {
@@ -127,7 +140,7 @@ public final class SafetensorsTransport implements ContainerTransport {
         for (String name : reader.keys()) {
           index.add(new TensorRef(
             shard.label(),
-            name,
+            qualifiedName(shard.label(), name),
             reader.dtype(name),
             reader.shape(name),
             reader.byteSize(name)));
@@ -205,6 +218,22 @@ public final class SafetensorsTransport implements ContainerTransport {
       requireNonNull(name, "name");
       requireNonNull(dtype, "dtype");
       requireNonNull(shape, "shape");
+    }
+
+    /**
+     * Key inside the safetensors file. Nested module files prefix {@link #name()} with the
+     * folder so two {@code linear.weight} tensors stay distinct.
+     *
+     * @return tensor key passed to {@link SafetensorsReader#getTensor(String)}
+     * @since 1.5.0
+     */
+    public String storageName() {
+      int slash = this.shardLabel.indexOf('/');
+      if (slash < 0) {
+        return this.name;
+      }
+      String prefix = this.shardLabel.substring(0, slash) + "/";
+      return this.name.startsWith(prefix) ? this.name.substring(prefix.length()) : this.name;
     }
   }
 }

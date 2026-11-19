@@ -9,7 +9,8 @@ import com.igormaznitsa.nanollvm.models.internal.WeightBag;
  *
  * @since 1.1.0
  */
-abstract sealed class EmbeddingArchitecture implements ArchitectureProcessor permits BertProcessor {
+abstract sealed class EmbeddingArchitecture implements ArchitectureProcessor
+  permits BertProcessor, Gemma3EmbeddingProcessor {
 
   /**
    * Embedding families are never causal chat graphs.

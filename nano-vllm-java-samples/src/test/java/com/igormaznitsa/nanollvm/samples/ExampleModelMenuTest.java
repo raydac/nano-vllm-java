@@ -99,6 +99,12 @@ class ExampleModelMenuTest {
   }
 
   @Test
+  void catalogIncludesEmbeddingGemma() {
+    assertTrue(Example.catalog().stream()
+      .anyMatch(choice -> choice.label().contains("EmbeddingGemma-300M")));
+  }
+
+  @Test
   void catalogIncludesJeffQwen35() {
     assertTrue(Example.catalog().stream()
       .anyMatch(choice -> choice.label().contains("Jeff-Qwen3.5-0.8B")));

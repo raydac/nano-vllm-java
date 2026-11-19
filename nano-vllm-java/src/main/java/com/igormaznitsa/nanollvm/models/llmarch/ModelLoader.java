@@ -112,7 +112,7 @@ public final class ModelLoader {
           currentShard = shardLabel;
           reader = transport.openShard(currentShard);
         }
-        Tensor tensor = reader.getTensor(item.ref().name());
+        Tensor tensor = reader.getTensor(item.ref().storageName());
         assembler.accept(item.paramName(), item.shardId(), tensor);
         loadedBytes += item.ref().byteSize();
         progress.step("%s | %s (%.0f MiB)".formatted(

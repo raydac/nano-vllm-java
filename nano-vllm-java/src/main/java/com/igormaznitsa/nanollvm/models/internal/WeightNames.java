@@ -9,6 +9,12 @@ public final class WeightNames {
 
   public static final String ARCH_GEMMA3 = "gemma3";
   /**
+   * Bidirectional Gemma 3 text encoder used as a sentence embedding model.
+   *
+   * @since 1.5.0
+   */
+  public static final String ARCH_GEMMA3_EMBEDDING = "gemma3_embedding";
+  /**
    * Hugging Face {@code model_type} for Gemma 4 text.
    *
    * @since 1.1.0
@@ -54,6 +60,18 @@ public final class WeightNames {
   public static final String ARCH_FASTTEXT = "fasttext";
 
   public static final String EMBED_TOKENS = "model.embed_tokens.weight";
+  /**
+   * Sentence-transformers up projection ({@code 2_Dense/model.safetensors} {@code linear.weight}).
+   *
+   * @since 1.5.0
+   */
+  public static final String EMBEDDING_UP_PROJ = "2_Dense.linear.weight";
+  /**
+   * Sentence-transformers down projection ({@code 3_Dense/model.safetensors} {@code linear.weight}).
+   *
+   * @since 1.5.0
+   */
+  public static final String EMBEDDING_DOWN_PROJ = "3_Dense.linear.weight";
   public static final String MODEL_NORM = "model.norm.weight";
   public static final String LM_HEAD = "lm_head.weight";
 

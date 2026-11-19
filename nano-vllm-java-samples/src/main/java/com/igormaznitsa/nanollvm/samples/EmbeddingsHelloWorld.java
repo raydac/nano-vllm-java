@@ -9,7 +9,6 @@ import com.igormaznitsa.nanollvm.models.LlmModel;
 import com.igormaznitsa.nanollvm.models.LlmModelFactory;
 import com.igormaznitsa.nanollvm.models.LlmOutEmbedding;
 import com.igormaznitsa.nanollvm.samples.utils.BundledModels;
-
 import java.nio.file.Path;
 import java.util.Arrays;
 import java.util.Locale;
@@ -24,6 +23,7 @@ import java.util.stream.IntStream;
  * <p>This is a BERT embedding checkpoint — {@link LLM#builder} then
  * {@link LLM#generate} with {@link LlmInText} → {@link LlmModality#EMBEDDING}. Do not use a
  * chat/completion model here. Non-retrieval E5 inputs use the {@code query: } prefix.
+ * EmbeddingGemma retrieval text uses {@code task: search result | query: }.
  *
  * <p>Args: optional model folder (default {@code models/multilingual-e5-small}), optional text
  * (default {@code The capital of France is Paris.}). From the repository root:
@@ -35,6 +35,7 @@ public final class EmbeddingsHelloWorld {
 
   private static final int PREVIEW = 8;
   private static final String QUERY_PREFIX = "query: ";
+  private static final String EMBEDDING_GEMMA_QUERY = "task: search result | query: ";
   private static final String DEFAULT_TEXT = "The capital of France is Paris.";
   private static final String RELATED_TEXT = "Paris is the capital city of France.";
   private static final String UNRELATED_TEXT = "A completely different sentence about astronomy.";
@@ -50,7 +51,7 @@ public final class EmbeddingsHelloWorld {
     long started = System.currentTimeMillis();
     try (LlmModel model = LlmModelFactory.make(path);
          LLM llm = LLM.builder(model).build()) {
-      embedTexts(llm, text, usesE5Prefix(path));
+      embedTexts(llm, text, embedPrefix(path));
     } finally {
       System.out.println("Time taken: " + (System.currentTimeMillis() - started) + "ms");
     }
@@ -59,22 +60,22 @@ public final class EmbeddingsHelloWorld {
   private static void embedTexts(
     final LLM llm,
     final String text,
-    final boolean e5Prefix
+    final String prefix
   ) {
     LlmModel model = llm.model();
     System.out.println("architecture=" + model.architectureName()
       + " embedding=" + model.isEmbeddingModel()
       + " modalities=" + model.modalities());
 
-    float[] vector = encode(llm, embedInput(text, e5Prefix));
-    float[] same = encode(llm, embedInput(text, e5Prefix));
-    float[] other = encode(llm, embedInput(UNRELATED_TEXT, e5Prefix));
+    float[] vector = encode(llm, embedInput(text, prefix));
+    float[] same = encode(llm, embedInput(text, prefix));
+    float[] other = encode(llm, embedInput(UNRELATED_TEXT, prefix));
 
     printVector(text, vector);
     System.out.printf(Locale.ROOT, "cos(same)=%.4f%n", cosine(vector, same));
 
     if (DEFAULT_TEXT.equals(text)) {
-      float[] related = encode(llm, embedInput(RELATED_TEXT, e5Prefix));
+      float[] related = encode(llm, embedInput(RELATED_TEXT, prefix));
       System.out.printf(Locale.ROOT, "cos(related)=%.4f  %s%n", cosine(vector, related),
         RELATED_TEXT);
     }
@@ -119,8 +120,12 @@ public final class EmbeddingsHelloWorld {
       .orElseGet(() -> BundledModels.require(BundledModels.MULTILINGUAL_E5_SMALL));
   }
 
-  private static boolean usesE5Prefix(final Path path) {
-    return path.getFileName().toString().toLowerCase(Locale.ROOT).contains("e5");
+  private static String embedPrefix(final Path path) {
+    String name = path.getFileName().toString().toLowerCase(Locale.ROOT);
+    if (name.contains("embeddinggemma")) {
+      return EMBEDDING_GEMMA_QUERY;
+    }
+    return name.contains("e5") ? QUERY_PREFIX : "";
   }
 
   private static float[] encode(final LLM llm, final String text) {
@@ -128,8 +133,8 @@ public final class EmbeddingsHelloWorld {
     return embedding.vector();
   }
 
-  private static String embedInput(final String text, final boolean e5Prefix) {
-    return e5Prefix ? QUERY_PREFIX + text : text;
+  private static String embedInput(final String text, final String prefix) {
+    return prefix + text;
   }
 
   private static String seedText(final String[] args) {

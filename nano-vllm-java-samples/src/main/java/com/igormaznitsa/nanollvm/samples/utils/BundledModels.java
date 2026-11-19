@@ -62,6 +62,13 @@ public final class BundledModels {
   public static final String XLM_ROBERTA_BASE =
     DEFAULT_MODELS_DIR + "/xlm-roberta-base";
   /**
+   * Bundled EmbeddingGemma-300M safetensors folder under {@link #DEFAULT_MODELS_DIR}.
+   *
+   * @since 1.5.0
+   */
+  public static final String EMBEDDING_GEMMA_300M =
+    DEFAULT_MODELS_DIR + "/EmbeddingGemma-300M";
+  /**
    * Bundled OpenAI Whisper-base safetensors folder under {@link #DEFAULT_MODELS_DIR}.
    *
    * @since 1.3.0
@@ -276,6 +283,7 @@ public final class BundledModels {
    *                        {@code Gemma4-E2B-IT-QAT-Mobile}, {@code Tiny-LLM-ONNX},
    *                        {@code SmolLM2-135M-Instruct-ONNX}, {@code LFM2.5-2.6B-Q4_K_M.gguf},
    *                        {@code multilingual-e5-small}, {@code xlm-roberta-base},
+   *                        {@code EmbeddingGemma-300M},
    *                        {@code whisper-base}, {@code whisper-tiny},
    *                        {@code piper-en-lessac-medium}, {@code piper-ru-irina-medium},
    *                        or {@code models/…}
@@ -322,6 +330,8 @@ public final class BundledModels {
       case "gte-small.Q2_K.gguf" -> "models/download-gte-small-gguf.sh";
       case "multilingual-e5-small" -> "models/download-multilingual-e5-small.sh";
       case "xlm-roberta-base" -> "models/download-xlm-roberta-base.sh";
+      case "EmbeddingGemma-300M" ->
+        "models/download-embeddinggemma-300m.sh (HF license + HF_TOKEN)";
       case "whisper-base" -> "models/download-whisper-base.sh";
       case "whisper-tiny" -> "models/download-whisper-tiny.sh";
       case "piper-en-lessac-medium" -> "models/download-piper-en-lessac-medium.sh";

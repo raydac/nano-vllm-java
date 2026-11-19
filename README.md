@@ -14,7 +14,7 @@ It does not train models. It loads files you already have and runs inference.
 
 **For** a Java application that needs a small local model: a short chat reply, a sentence vector, a transcript, a spoken WAV, a language label, or a choice with a probability.
 
-**Supports** Qwen3, Qwen3.5 text, Gemma 3, Gemma 4 text, Llama, LFM2, BERT embeddings, Whisper, Piper, fastText, and YOLO26 images. The full list is [below](#supported-models).
+**Supports** Qwen3, Qwen3.5 text, Gemma 3, Gemma 4 text, Llama, LFM2, BERT embeddings, EmbeddingGemma, Whisper, Piper, fastText, and YOLO26 images. The full list is [below](#supported-models).
 
 **Attach** `com.igormaznitsa:nano-vllm-java:1.4.0` on JDK 21+. Coordinates and a first call are under [Add it to an application](#add-it-to-an-application).
 
@@ -74,6 +74,7 @@ One `LLM` runs one call at a time. Share the loaded `LlmModel` across engines wh
 | Gemma 4 text (QAT mobile) | Safetensors only | Chat |
 | LFM2 | `.gguf` only | Chat |
 | BERT (gte, E5, XLM-RoBERTa, …) | `.gguf` or ONNX | Embeddings |
+| EmbeddingGemma | Safetensors folder (`2_Dense` and `3_Dense` included) | Embeddings |
 | Whisper | Safetensors folder | Speech to text |
 | Piper | `*.onnx` + `*.onnx.json` | Text to speech |
 | fastText | `*.bin` or `*.ftz` | Labels |
@@ -504,7 +505,7 @@ With `cpuThreads` above 1, engines share a process-wide pool named `nanollvm-mat
 - **Text in, and the jobs in the table above.** YOLO26 nano through extra-large reads a picture (objects, a map, depth, or labels). P2, P6, and YOLOE are refused. No other image understanding, and no image generation. Qwen3.5 vision, LoRA adapters, mixture-of-experts, and Qwen3-Next are refused.
 - **Whisper** reads uncompressed WAV or PCM. No MP3, no timestamps, no voice-activity detection.
 - **Piper** returns one WAV per call. No streaming audio and no SSML.
-- **GGUF chat** is Qwen3 and LFM2. **GGUF embeddings** are BERT. Other GGUF architectures are out.
+- **GGUF chat** is Qwen3 and LFM2. **GGUF embeddings** are BERT. EmbeddingGemma is a Hugging Face folder, not a GGUF. Other GGUF architectures are out.
 - **ONNX** contributes weights to the Java engine. Quantized community exports and graphs that need ONNX Runtime are skipped.
 - **Documents for search** are UTF-8 text. PDF and EPUB need a small extractor you register (`RagTunerHelloWorld` shows an EPUB).
 - **One call at a time per `LLM`.** Overlap needs one engine per caller on a shared `LlmModel`. See [Threads](#threads).

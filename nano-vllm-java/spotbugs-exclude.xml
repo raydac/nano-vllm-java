@@ -31,6 +31,12 @@
         </Or>
         <Bug pattern="EI_EXPOSE_REP,EI_EXPOSE_REP2"/>
     </Match>
+    <!-- Tokenizer is immutable after load and is the same instance the model already publishes. -->
+    <Match>
+        <Class name="com.igormaznitsa.nanollvm.llm.LLM"/>
+        <Method name="tokenizer"/>
+        <Bug pattern="EI_EXPOSE_REP"/>
+    </Match>
 
     <!-- Java 21: no finalize; requireNonNull in constructors is not a finalizer attack. -->
     <Match>

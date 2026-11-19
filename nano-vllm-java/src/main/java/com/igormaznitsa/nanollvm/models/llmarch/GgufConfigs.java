@@ -79,7 +79,8 @@ final class GgufConfigs {
       null,
       null,
       null,
-      null
+      null,
+      false
     );
   }
 
@@ -141,7 +142,8 @@ final class GgufConfigs {
       null,
       null,
       null,
-      null
+      null,
+      false
     );
   }
 
@@ -201,7 +203,8 @@ final class GgufConfigs {
       null,
       null,
       null,
-      null
+      null,
+      false
     );
   }
 

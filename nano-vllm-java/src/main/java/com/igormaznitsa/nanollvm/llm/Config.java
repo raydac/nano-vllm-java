@@ -526,6 +526,8 @@ public final class Config {
    * @param whisper               Whisper encoder/decoder extras; {@code null} for other families
    * @param piper                 Piper VITS extras; {@code null} for other families
    * @param qwen35                Qwen3.5 linear-attention extras; {@code null} for other families
+   * @param bidirectionalAttention {@code use_bidirectional_attention}; Gemma 3 text embeddings
+   *                              attend both ways. Causal checkpoints leave this {@code false}
    */
   public record HfConfig(
     int vocabSize,
@@ -559,7 +561,8 @@ public final class Config {
     Gemma4Text gemma4,
     WhisperSpec whisper,
     PiperSpec piper,
-    Qwen35Text qwen35
+    Qwen35Text qwen35,
+    boolean bidirectionalAttention
   ) {
     public HfConfig {
       ropeScaling = freezeStringKeyedMap(ropeScaling);
@@ -746,7 +749,8 @@ public final class Config {
         isGemma4Family(modelType) ? parseGemma4Text(m, rope.partialRotaryFactor()) : null,
         whisper,
         piper,
-        qwen35
+          qwen35,
+          Json.asBoolean(m.get("use_bidirectional_attention"), false)
       );
     }
 
@@ -887,7 +891,8 @@ public final class Config {
         null,
         null,
         spec,
-        null);
+          null,
+          false);
     }
 
     /**
@@ -937,7 +942,8 @@ public final class Config {
         null,
         null,
         null,
-        null);
+          null,
+          false);
     }
 
     /**
@@ -983,7 +989,8 @@ public final class Config {
         null,
         null,
         null,
-        null);
+          null,
+          false);
     }
 
     private static PiperSpec parsePiper(final Map<String, Object> root, final String modelType) {
@@ -1288,6 +1295,21 @@ public final class Config {
         return (layerIndex + 1) % 6 != 0;
       }
       return false;
+    }
+
+    /**
+     * Exclusive key distance for a bidirectional sliding layer. A published
+     * {@code sliding_window} of 512 attends when {@code |q - k| < 257}. Causal layers keep
+     * {@code 0} here and use {@link #slidingWindow()} instead.
+     *
+     * @return exclusive distance, or {@code 0} when this blueprint is not bidirectional
+     * @since 1.5.0
+     */
+    public int bidirectionalWindow() {
+      if (!this.bidirectionalAttention || this.slidingWindow <= 0) {
+        return 0;
+      }
+      return (this.slidingWindow / 2) + 1;
     }
 
     /**

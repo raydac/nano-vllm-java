@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Development snapshot after the **1.4.0** public release.
 
 ### Added
+- EmbeddingGemma (`google/embeddinggemma-300m`) loads as a sentence embedding. `./models/download-embeddinggemma-300m.sh` fetches the folder, and the interactive example lists it with the other embedding models. The vector is L2-normalized. Put the checkpoint's query or document prefix on the text yourself. A causal Gemma 3 checkpoint still chats.
 - `llm.chat(session)` continues a dialog you already opened on that engine. `llm.chat()` still starts a new one. A session from another engine is rejected.
 - A later chat turn reuses the token ids of earlier rendered turns. A turn is tokenized again only when its text changed. The reply is the same as encoding the whole prompt at once.
 - The weather sample looks up this computer's city and the weather there, prints a 64-column world map with that position marked, prints the temperature and sky, and logs how long each step took. Piper, the English Lessac voice, says it is looking for the location, then that it is getting the weather in that city, and then speaks the forecast. Each spoken line finishes before the next step starts. If the chat model or a Piper voice is missing, it stops before loading and prints the download command for each one.
@@ -60,6 +61,7 @@ Development snapshot after the **1.4.0** public release.
   a separate mode. TileContext is CUDA-only and is not used.
 
 ### Fixed
+- A model download that first saves Hugging Face’s “access is restricted” page downloads that file again. The next run no longer appends the real bytes after the error text.
 - Piper and Whisper load when the JDK Vector API is not enabled. Attention and depthwise convolution stay on the scalar path until `--add-modules=jdk.incubator.vector` is set.
 - A picture convolution releases its patch buffers when the picture returns, so a pooled thread does not keep that image's scratch memory.
 - Chat splits thinking from the answer using the special tokens that checkpoint defines. A `<think>` … `</think>` quoted inside the scratchpad stays in thinking; the answer is the text after the close that balances the opening tag. Those delimiters stay in the decode and do not stop generation.
