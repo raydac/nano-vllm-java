@@ -339,42 +339,81 @@ public final class Tokenizer {
                                   final boolean enableThinking,
                                   final String thinkOpen,
                                   final String thinkClose) {
-    requireNonNull(thinkOpen, "thinkOpen");
-    requireNonNull(thinkClose, "thinkClose");
-    if (this.chatFormat == ChatFormat.TURN_BASED) {
-      return this.applyTurnBasedChat(messages, addGenerationPrompt, enableThinking);
-    }
-    if (this.chatFormat == ChatFormat.CHATML) {
-      StringBuilder sb = new StringBuilder();
-      for (Map<String, String> msg : messages) {
-        String role = msg.getOrDefault("role", "user");
-        String content = msg.getOrDefault("content", "");
-        sb.append("<|im_start|>").append(role).append('\n').append(content).append("<|im_end|>\n");
-      }
-      if (addGenerationPrompt) {
-        sb.append("<|im_start|>assistant\n");
-        if (!enableThinking && this.invitesThinking(thinkOpen, thinkClose)) {
-          sb.append(thinkOpen).append("\n\n").append(thinkClose).append("\n\n");
-        }
-      }
-      return sb.toString();
-    }
-    StringBuilder sb = new StringBuilder();
-    for (Map<String, String> msg : messages) {
-      sb.append(msg.getOrDefault("role", "user")).append(": ")
-        .append(msg.getOrDefault("content", "")).append('\n');
-    }
-    if (addGenerationPrompt) {
-      sb.append("assistant: ");
-    }
-    return sb.toString();
+    return String.join("", this.chatBlocks(
+      messages, addGenerationPrompt, enableThinking, thinkOpen, thinkClose));
   }
 
-  private String applyTurnBasedChat(final List<Map<String, String>> messages,
-                                    final boolean addGenerationPrompt,
-                                    final boolean enableThinking) {
+  /**
+   * Pieces of {@link #applyChatTemplate(List, boolean, boolean, String, String)}.
+   * Joining them rebuilds that prompt. Each piece is one rendered turn, or the generation
+   * suffix, so a caller can keep token ids for a piece whose text did not change.
+   *
+   * @param messages            role/content maps; non-{@code null}
+   * @param addGenerationPrompt when {@code true}, the last piece is the assistant turn opener
+   * @param enableThinking      ChatML skip-seed and Gemma 4 system scratchpad
+   * @param thinkOpen           start marker; must not be {@code null}
+   * @param thinkClose          end marker; must not be {@code null}
+   * @return unmodifiable pieces in prompt order; never {@code null}
+   * @since 1.5.0
+   */
+  public List<String> chatBlocks(final List<Map<String, String>> messages,
+                                 final boolean addGenerationPrompt,
+                                 final boolean enableThinking,
+                                 final String thinkOpen,
+                                 final String thinkClose) {
+    requireNonNull(thinkOpen, "thinkOpen");
+    requireNonNull(thinkClose, "thinkClose");
+    List<String> blocks = new ArrayList<>();
+    if (this.chatFormat == ChatFormat.TURN_BASED) {
+      this.appendTurnBasedBlocks(blocks, messages, addGenerationPrompt, enableThinking);
+    } else if (this.chatFormat == ChatFormat.CHATML) {
+      this.appendChatMlBlocks(blocks, messages, addGenerationPrompt, enableThinking, thinkOpen,
+        thinkClose);
+    } else {
+      this.appendPlainBlocks(blocks, messages, addGenerationPrompt);
+    }
+    return List.copyOf(blocks);
+  }
+
+  private void appendChatMlBlocks(final List<String> blocks,
+                                  final List<Map<String, String>> messages,
+                                  final boolean addGenerationPrompt,
+                                  final boolean enableThinking,
+                                  final String thinkOpen,
+                                  final String thinkClose) {
+    for (Map<String, String> msg : messages) {
+      blocks.add("<|im_start|>" + msg.getOrDefault("role", "user") + "\n"
+        + msg.getOrDefault("content", "") + "<|im_end|>\n");
+    }
+    if (!addGenerationPrompt) {
+      return;
+    }
+    String suffix = "<|im_start|>assistant\n";
+    if (!enableThinking && this.invitesThinking(thinkOpen, thinkClose)) {
+      suffix = suffix + thinkOpen + "\n\n" + thinkClose + "\n\n";
+    }
+    blocks.add(suffix);
+  }
+
+  private void appendPlainBlocks(final List<String> blocks,
+                                 final List<Map<String, String>> messages,
+                                 final boolean addGenerationPrompt) {
+    for (Map<String, String> msg : messages) {
+      blocks.add(msg.getOrDefault("role", "user") + ": "
+        + msg.getOrDefault("content", "") + "\n");
+    }
+    if (addGenerationPrompt) {
+      blocks.add("assistant: ");
+    }
+  }
+
+  private void appendTurnBasedBlocks(final List<String> blocks,
+                                     final List<Map<String, String>> messages,
+                                     final boolean addGenerationPrompt,
+                                     final boolean enableThinking) {
     if (this.vocab.contains("<|turn>")) {
-      return this.applyAngleTurnChat(messages, addGenerationPrompt, enableThinking);
+      this.appendAngleTurnBlocks(blocks, messages, addGenerationPrompt, enableThinking);
+      return;
     }
     String system = null;
     List<Map<String, String>> turns = new ArrayList<>();
@@ -386,10 +425,8 @@ public final class Tokenizer {
       }
       turns.add(msg);
     }
-
-    StringBuilder sb = new StringBuilder();
     if (this.vocab.contains("<bos>")) {
-      sb.append("<bos>");
+      blocks.add("<bos>");
     }
     boolean firstUser = true;
     for (Map<String, String> msg : turns) {
@@ -402,18 +439,17 @@ public final class Tokenizer {
         content = ChatPrompts.foldSystemIntoFirstUser(system, content, firstUser);
         firstUser = false;
       }
-      sb.append("<start_of_turn>").append(role).append('\n')
-        .append(content).append("<end_of_turn>\n");
+      blocks.add("<start_of_turn>" + role + "\n" + content + "<end_of_turn>\n");
     }
     if (addGenerationPrompt) {
-      sb.append("<start_of_turn>model\n");
+      blocks.add("<start_of_turn>model\n");
     }
-    return sb.toString();
   }
 
-  private String applyAngleTurnChat(final List<Map<String, String>> messages,
-                                    final boolean addGenerationPrompt,
-                                    final boolean enableThinking) {
+  private void appendAngleTurnBlocks(final List<String> blocks,
+                                     final List<Map<String, String>> messages,
+                                     final boolean addGenerationPrompt,
+                                     final boolean enableThinking) {
     String system = null;
     List<Map<String, String>> turns = new ArrayList<>();
     for (Map<String, String> msg : messages) {
@@ -424,34 +460,29 @@ public final class Tokenizer {
       }
       turns.add(msg);
     }
-
-    StringBuilder sb = new StringBuilder();
     if (this.vocab.contains("<bos>")) {
-      sb.append("<bos>");
+      blocks.add("<bos>");
     }
     if (enableThinking || (system != null && !system.isBlank())) {
-      sb.append("<|turn>system\n");
+      String body = "<|turn>system\n";
       if (enableThinking) {
-        sb.append("<|think|>\n");
+        body = body + "<|think|>\n";
       }
       if (system != null && !system.isBlank()) {
-        sb.append(system.strip());
+        body = body + system.strip();
       }
-      sb.append("<turn|>\n");
+      blocks.add(body + "<turn|>\n");
     }
     for (Map<String, String> msg : turns) {
       String role = msg.getOrDefault("role", "user");
       if ("assistant".equals(role)) {
         role = "model";
       }
-      sb.append("<|turn>").append(role).append('\n')
-        .append(msg.getOrDefault("content", "").strip())
-        .append("<turn|>\n");
+      blocks.add("<|turn>" + role + "\n" + msg.getOrDefault("content", "").strip() + "<turn|>\n");
     }
     if (addGenerationPrompt) {
-      sb.append("<|turn>model\n");
+      blocks.add("<|turn>model\n");
     }
-    return sb.toString();
   }
 
   /**

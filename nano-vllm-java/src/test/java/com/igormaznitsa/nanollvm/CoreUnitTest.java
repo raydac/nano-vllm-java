@@ -883,6 +883,14 @@ class CoreUnitTest {
     var tok = com.igormaznitsa.nanollvm.tokenizer.Tokenizer.fromPretrained(path);
     List<Integer> ids = tok.encode(
         "<|im_start|>user\nhello<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n");
+    List<Map<String, String>> turns = List.of(
+      Map.of("role", "user", "content", "hello"),
+      Map.of("role", "assistant", "content", "hi"));
+    List<String> blocks = tok.chatBlocks(turns, true, true, "<think>", "</think>");
+    assertEquals(tok.applyChatTemplate(turns, true, true, "<think>", "</think>"),
+      String.join("", blocks));
+    assertEquals(tok.encode(String.join("", blocks)),
+      blocks.stream().flatMap(block -> tok.encode(block).stream()).toList());
     assertTrue(ids.contains(151644)); // im_start
     assertTrue(ids.contains(151645)); // im_end
     assertTrue(ids.contains(151667)); // <think>
@@ -1148,6 +1156,30 @@ class CoreUnitTest {
   }
 
   @Test
+  void chatContinuesSavedSessionOnTheSameEngineWhenWeightsPresent() {
+    Path path = OptionalModelAssumptions.requireQwen3();
+    LlmModel model = LlmModelFactory.make(path);
+    try (model;
+         LLM llm = LLM.builder(model).maxModelLen(256).numKvcacheBlocks(32).build();
+         LLM other = LLM.builder(model).maxModelLen(256).numKvcacheBlocks(32).build()) {
+      ChatSession work = llm.chat()
+        .seed(ChatMessage.user("draft"), ChatMessage.assistant("note"));
+      ChatSession notes = llm.chat().seed(ChatMessage.user("friday"));
+
+      assertSame(work, llm.chat(work));
+      assertEquals(
+        List.of(ChatMessage.user("draft"), ChatMessage.assistant("note")),
+        llm.chat(work).history());
+      assertEquals(List.of(ChatMessage.user("friday")), notes.history());
+      assertThrows(IllegalArgumentException.class, () -> other.chat(work));
+      assertThrows(NullPointerException.class, () -> llm.chat((ChatSession) null));
+
+      llm.close();
+      assertThrows(IllegalStateException.class, () -> llm.chat(work));
+    }
+  }
+
+  @Test
   void engineSamplingSurvivesChatMaxTokensWhenWeightsPresent() {
     Path path = OptionalModelAssumptions.requireQwen3();
     SamplingParams policy = SamplingParams.builder()
@@ -1300,8 +1332,10 @@ class CoreUnitTest {
       assertFalse(tok.isTurnBasedChat());
       assertFalse(tok.invitesThinking());
       assertEquals("", ChatPrompts.systemFor(tok));
-      String chat = tok.applyChatTemplate(
-        List.of(Map.of("role", "user", "content", "hi")), true, false);
+      List<Map<String, String>> turns = List.of(Map.of("role", "user", "content", "hi"));
+      String chat = tok.applyChatTemplate(turns, true, false);
+      assertEquals(chat,
+        String.join("", tok.chatBlocks(turns, true, false, "<think>", "</think>")));
       assertTrue(chat.contains("<|im_start|>assistant"));
       assertFalse(chat.contains("<think>"));
     } finally {

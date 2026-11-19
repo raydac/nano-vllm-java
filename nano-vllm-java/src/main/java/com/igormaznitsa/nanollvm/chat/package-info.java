@@ -13,7 +13,9 @@
  * checkpoint's own special tokens are not the scratchpad pair you want; {@link ChatSession#thinkTags(ThinkTags)}
  * overrides the scratchpad pair for one conversation.
  *
- * <p><b>Which call.</b> {@link ChatSession#send(String)} is a normal turn (history and generate
+ * <p><b>Which call.</b> {@link com.igormaznitsa.nanollvm.llm.LLM#chat()} starts a new transcript.
+ * {@link com.igormaznitsa.nanollvm.llm.LLM#chat(ChatSession)} continues a session already opened
+ * on that engine. {@link ChatSession#send(String)} is a normal turn (history and generate
  * share the user text). {@link ChatSession#sendPrepared} records one string in history and
  * generates from another (RAG). {@link ChatMessages} trims / scrubs the live history list.
  *

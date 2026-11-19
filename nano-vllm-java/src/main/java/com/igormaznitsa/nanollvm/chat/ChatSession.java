@@ -16,6 +16,8 @@ import java.io.PrintStream;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.Optional;
 import java.util.function.Consumer;
 import java.util.function.Predicate;
 
@@ -23,9 +25,12 @@ import java.util.function.Predicate;
  * Multi-turn chat over an {@link LLM}: history, chat template, truncation, reply parsing, and
  * {@link LlmListener} events.
  *
- * <p>Open with {@link LLM#chat()} (or {@link LLM#chat(int)} to cap reply length). Not thread-safe;
- * one session per conversation thread. {@link #send(String)} is the usual turn. Show
- * {@link ChatReply#answer()} to the user.
+ * <p>Open with {@link LLM#chat()} (or {@link LLM#chat(int)} to cap reply length). Pass that
+ * session back to {@link LLM#chat(ChatSession)} to keep using its transcript;
+ * {@link LLM#chat()} with no session still starts a new one. Not thread-safe;
+ * one session per conversation thread. Each rendered turn keeps its text and the token ids
+ * of that text; a later {@link #send(String)} tokenizes only a turn whose text changed.
+ * {@link #send(String)} is the usual turn. Show {@link ChatReply#answer()} to the user.
  *
  * <h2>If you want…</h2>
  * <ul>
@@ -69,6 +74,9 @@ public final class ChatSession {
   private Predicate<String> unusableAnswer = body -> body == null || body.isBlank();
   private String unusableAnswerFallback = "Sorry — I couldn't form a reply. Please try again.";
   private String unusableHistoryText = "";
+  private boolean stitchKnown;
+  private boolean blockStitch;
+  private List<TokenizedText> tokenizedBlocks = List.of();
 
   /**
    * Opens a session with {@link LLM#defaultSampling()} and a fresh conversation seeded from the
@@ -433,6 +441,7 @@ public final class ChatSession {
   public void clear() {
     this.history.clear();
     this.history.addAll(this.llm.newConversation());
+    this.tokenizedBlocks = List.of();
   }
 
   /**
@@ -520,13 +529,7 @@ public final class ChatSession {
     this.history.add(ChatMessage.user(historyUser));
     this.trimHistoryToCap();
     Tokenizer tokenizer = this.llm.tokenizer();
-    ChatMessages.truncateHistory(
-      this.history,
-      tokenizer,
-      this.llm.config().maxModelLen(),
-      this.samplingParams.maxTokens(),
-      this.thinkingEnabled(tokenizer),
-      this.thinkTags());
+    this.truncateToTokenBudget(tokenizer, this.thinkingEnabled(tokenizer), this.thinkTags());
 
     TurnStream turn = this.beginTurn();
 
@@ -664,16 +667,11 @@ public final class ChatSession {
     List<ChatMessage> forTemplate = isolateGeneration
       ? this.isolatedTurn(lastUserOverride)
       : this.historyForTemplate(lastUserOverride);
-    String prompt = tokenizer.applyChatTemplate(
-      ChatMessages.toTemplateMaps(forTemplate),
-      true,
-      enableThinking,
-      tags.open(),
-      tags.close());
+    List<Integer> promptIds = this.promptTokenIds(forTemplate, enableThinking, tags);
 
     List<Integer> streamedIds = new ArrayList<>();
-    List<LLM.GenerationOutput> outputs = this.llm.generate(
-      List.of(prompt),
+    List<LLM.GenerationOutput> outputs = this.llm.generateTokenIds(
+      List.of(promptIds),
       this.samplingParams,
       false,
       this.timeout,
@@ -850,6 +848,139 @@ public final class ChatSession {
   }
 
   /**
+   * Drops oldest turns until the rendered prompt fits the token budget. Unchanged blocks reuse
+   * token ids already stored for that exact text.
+   */
+  private void truncateToTokenBudget(final Tokenizer tokenizer,
+                                     final boolean enableThinking,
+                                     final ThinkTags tags) {
+    if (!this.blockTokensReusable(tokenizer, enableThinking, tags)) {
+      ChatMessages.truncateHistory(
+        this.history,
+        tokenizer,
+        this.llm.config().maxModelLen(),
+        this.samplingParams.maxTokens(),
+        enableThinking,
+        tags);
+      return;
+    }
+    int budget = ChatMessages.promptTokenBudget(
+      this.llm.config().maxModelLen(), this.samplingParams.maxTokens());
+    int minKeep =
+      !this.history.isEmpty() && this.history.getFirst().role() == ChatRole.SYSTEM ? 2 : 1;
+    while (this.history.size() > minKeep
+      && this.promptTokenIds(this.history, enableThinking, tags).size() > budget) {
+      int sizeBeforeDrop = this.history.size();
+      ChatMessages.dropOldestTurn(this.history);
+      if (this.history.size() == sizeBeforeDrop) {
+        return;
+      }
+    }
+  }
+
+  /**
+   * Token ids of the chat template. A block whose text is already stored is not encoded again.
+   * Blocks are stitched only when encoding them separately matches one encode of the joined prompt.
+   */
+  private List<Integer> promptTokenIds(final List<ChatMessage> messages,
+                                       final boolean enableThinking,
+                                       final ThinkTags tags) {
+    List<String> blocks = this.renderBlocks(messages, enableThinking, tags);
+    if (!this.blockTokensReusable(this.llm.tokenizer(), enableThinking, tags)) {
+      return this.llm.tokenizer().encode(String.join("", blocks));
+    }
+    List<TokenizedText> used = new ArrayList<>(blocks.size());
+    List<Integer> ids = new ArrayList<>();
+    for (String block : blocks) {
+      int[] tokens = this.cachedTokens(block).orElseGet(() -> this.encodeBlock(block));
+      used.add(new TokenizedText(block, tokens));
+      for (int id : tokens) {
+        ids.add(id);
+      }
+    }
+    this.rememberBlocks(used, messages, enableThinking, tags);
+    return ids;
+  }
+
+  private boolean blockTokensReusable(final Tokenizer tokenizer,
+                                      final boolean enableThinking,
+                                      final ThinkTags tags) {
+    if (this.stitchKnown) {
+      return this.blockStitch;
+    }
+    List<String> probe = tokenizer.chatBlocks(
+      List.of(
+        Map.of("role", "user", "content", "a b"),
+        Map.of("role", "assistant", "content", "c d")),
+      true,
+      enableThinking,
+      tags.open(),
+      tags.close());
+    List<Integer> joined = tokenizer.encode(String.join("", probe));
+    List<Integer> stitched = new ArrayList<>();
+    for (String block : probe) {
+      stitched.addAll(tokenizer.encode(block));
+    }
+    this.blockStitch = joined.equals(stitched);
+    this.stitchKnown = true;
+    return this.blockStitch;
+  }
+
+  private List<String> renderBlocks(final List<ChatMessage> messages,
+                                    final boolean enableThinking,
+                                    final ThinkTags tags) {
+    return this.llm.tokenizer().chatBlocks(
+      ChatMessages.toTemplateMaps(messages),
+      true,
+      enableThinking,
+      tags.open(),
+      tags.close());
+  }
+
+  private Optional<int[]> cachedTokens(final String block) {
+    return this.tokenizedBlocks.stream()
+      .filter(cached -> cached.text().equals(block))
+      .map(TokenizedText::tokenIds)
+      .findFirst();
+  }
+
+  private int[] encodeBlock(final String block) {
+    List<Integer> ids = this.llm.tokenizer().encode(block);
+    int[] tokens = new int[ids.size()];
+    for (int i = 0; i < ids.size(); i++) {
+      tokens[i] = ids.get(i);
+    }
+    return tokens;
+  }
+
+  /**
+   * Keeps token ids for the blocks just used. A prompt that is not the stored history also keeps
+   * ids for the history blocks, so one isolated turn does not force the next turn to re-encode.
+   */
+  private void rememberBlocks(final List<TokenizedText> used,
+                              final List<ChatMessage> messages,
+                              final boolean enableThinking,
+                              final ThinkTags tags) {
+    if (messages == this.history) {
+      this.tokenizedBlocks = List.copyOf(used);
+      return;
+    }
+    List<String> historyBlocks = this.renderBlocks(this.history, enableThinking, tags);
+    List<TokenizedText> kept = new ArrayList<>(used);
+    for (TokenizedText cached : this.tokenizedBlocks) {
+      if (this.containsText(used, cached.text()) || !historyBlocks.contains(cached.text())) {
+        continue;
+      }
+      kept.add(cached);
+    }
+    this.tokenizedBlocks = List.copyOf(kept);
+  }
+
+  private boolean containsText(final List<TokenizedText> items, final String text) {
+    return items.stream().anyMatch(item -> item.text().equals(text));
+  }
+
+  /**
    * Drops oldest non-system turns until {@link #maxHistoryMessages} is honored.
    */
   private void trimHistoryToCap() {
@@ -886,6 +1017,15 @@ public final class ChatSession {
       return true;
     }
     return answer.length() <= 12 && thinking.length() >= 120;
+  }
+
+  /**
+   * One rendered prompt piece: the exact template text and the token ids of that text.
+   */
+  private record TokenizedText(String text, int[] tokenIds) {
+    private TokenizedText {
+      tokenIds = tokenIds.clone();
+    }
   }
 
   /**

@@ -97,7 +97,7 @@ public final class ChatMessages {
     final ThinkTags thinkTags
   ) {
     requireNonNull(thinkTags, "thinkTags");
-    int budget = Math.max(64, maxModelLen - maxTokens - PROMPT_MARGIN);
+    int budget = promptTokenBudget(maxModelLen, maxTokens);
     int minKeep = !history.isEmpty() && history.getFirst().role() == ChatRole.SYSTEM ? 2 : 1;
     while (history.size() > minKeep) {
       String prompt = tokenizer.applyChatTemplate(
@@ -109,14 +109,29 @@ public final class ChatMessages {
       if (tokenizer.encode(prompt).size() <= budget) {
         return;
       }
-      int dropAt = history.getFirst().role() == ChatRole.SYSTEM ? 1 : 0;
-      if (dropAt >= history.size()) {
+      int sizeBeforeDrop = history.size();
+      dropOldestTurn(history);
+      if (history.size() == sizeBeforeDrop) {
         return;
       }
+    }
+  }
+
+  static int promptTokenBudget(final int maxModelLen, final int maxTokens) {
+    return Math.max(64, maxModelLen - maxTokens - PROMPT_MARGIN);
+  }
+
+  /**
+   * Drops the oldest non-system turn. A following assistant turn is dropped with it.
+   */
+  static void dropOldestTurn(final List<ChatMessage> history) {
+    int dropAt = !history.isEmpty() && history.getFirst().role() == ChatRole.SYSTEM ? 1 : 0;
+    if (dropAt >= history.size()) {
+      return;
+    }
+    history.remove(dropAt);
+    if (dropAt < history.size() && history.get(dropAt).role() == ChatRole.ASSISTANT) {
       history.remove(dropAt);
-      if (dropAt < history.size() && history.get(dropAt).role() == ChatRole.ASSISTANT) {
-        history.remove(dropAt);
-      }
     }
   }
 

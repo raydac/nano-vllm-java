@@ -3453,6 +3453,8 @@ token list in the `Sequence`). It does **not** magically recall turns you never 
   finishTurn → history.add(assistant(answer only))
 ```
 
+Each rendered turn is kept as its text plus the token ids of that exact text. The next `send` encodes a turn again only when that text changed, and only when stitching those ids still matches one encode of the whole prompt. A template that is not safe to stitch (plain `role: text`, or a normalizer that joins across turns) keeps encoding the full prompt.
+
 Budget for the templated prompt (before generating new tokens):
 
 > `budget ≈ max(64, maxModelLen − maxTokens − 16)`  
@@ -3970,7 +3972,7 @@ packages. Demos live in `nano-vllm-java-samples`. The weather desk is `nano-vllm
 | Typed decision (Jev)             | `Jev`, `JevQuestion`, `JevDecision`, `JevLevel`                                    | `LLM.builder(model).toJev()` → `decide(state, question)`; `jevLevel(JevLevel.RAW)` before `toJev()` (**since 1.5.0**, chapter **7g**) |
 | Chat tool call                   | `ModelTool`, `ToolDialects`, `ChatSession`                                         | `LLM.builder(model).tool(ModelTool.of(…)).build()` then `chat` / `chatOnce` (**since 1.5.0**, chapter **7h**). Raw `generate` does not run tools |
 | Named advisors                   | `LlmAdvisor`, `LlmAdvisorMixer`, `AdvisorEnrichment`, `ChatHistory`        | `Builder.advisors(mixer, …)` — unique non-blank names; `LLM#runAdvisors` → `AdvisorEnrichment`; one batched `generate` |
-| Chat turn                        | `ChatSession`                                                        | `llm.chat(maxTokens)`, `.listen(…)`, `.streamTo(…)` (`TEXT_THINKING` / `TEXT_ASSISTANT`; ignores `TEXT_RAW`), `.send(user)`, `.clear()`; `emitDebugPrompts(true)` opts in `TEXT_DEBUG` (off by default); `recoverUnusableAnswers` / `unusableAnswer` opt-in |
+| Chat turn                        | `ChatSession`                                                        | `llm.chat()` starts a transcript; `llm.chat(session)` continues one already opened on that engine; `llm.chat(maxTokens)`, `.listen(…)`, `.streamTo(…)` (`TEXT_THINKING` / `TEXT_ASSISTANT`; ignores `TEXT_RAW`), `.send(user)`, `.clear()`; `emitDebugPrompts(true)` opts in `TEXT_DEBUG` (off by default); `recoverUnusableAnswers` / `unusableAnswer` opt-in |
 | Stream unparsed decode           | `LlmTextKind.TEXT_RAW`, `LlmListener`                                  | `ChatSession.listen`; deltas of tokenizer decode with think tags / chat specials kept (**since 1.1.0**) |
 | One-shot / raw text              | `LLM`                                                                | `chatOnce(…)`, typed `generate(LlmInText, TEXT)`, batch `generate(…)`, `generateTokenIds(…)` → `GenerationOutput` (`tokenIds`, `text`, `stats`) |
 | Token / timing stats             | `GenerationStats` / `ChatReply`                                      | `promptTokens`, `completionTokens`, `elapsedNanos`, `completionTokensPerSecond()`                             |

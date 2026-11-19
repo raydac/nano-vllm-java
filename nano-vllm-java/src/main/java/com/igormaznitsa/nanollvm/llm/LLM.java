@@ -84,7 +84,9 @@ import java.util.stream.IntStream;
  * and memory limits are in tokens, not characters.
  * <ul>
  *   <li><b>A conversation that remembers earlier turns</b> — {@link #chat()} then
- *       {@link ChatSession#send(String)}; show {@link ChatReply#answer()} to the user.</li>
+ *       {@link ChatSession#send(String)}; show {@link ChatReply#answer()} to the user.
+ *       Keep the {@link ChatSession} and pass it to {@link #chat(ChatSession)} to continue
+ *       that dialog later. {@link #chat()} with no session still starts a new one.</li>
  *   <li><b>Let the model call a Java function</b> — {@link Builder#tool(ModelTool...)} on a
  *       Qwen3, Qwen3.5, LFM2, or Gemma 4 chat model. The engine reads that model's tool tokens,
  *       runs the function, and writes the result back in the form the checkpoint expects.</li>
@@ -1112,6 +1114,29 @@ public final class LLM implements AutoCloseable {
     this.assertNotClosed();
     this.requireCausal();
     return ChatSession.open(this, maxTokens);
+  }
+
+  /**
+   * Continues a dialog already opened on this engine. {@link #chat()} with no arguments still
+   * starts a new transcript. The returned session is {@code session} itself, so later
+   * {@link ChatSession#send} calls see the turns already stored there.
+   *
+   * @param session a session from {@link #chat()}, {@link #chat(int)}, or
+   *                {@link #chat(SamplingParams)} on this engine; must not be {@code null}
+   * @return {@code session}
+   * @throws NullPointerException     if {@code session} is {@code null}
+   * @throws IllegalArgumentException if {@code session} was opened on another engine
+   * @throws IllegalStateException    if this engine is closed or is not a causal chat model
+   * @since 1.5.0
+   */
+  public ChatSession chat(final ChatSession session) {
+    requireNonNull(session, "session");
+    this.assertNotClosed();
+    this.requireCausal();
+    if (session.llm() != this) {
+      throw new IllegalArgumentException("session belongs to another engine");
+    }
+    return session;
   }
 
   /**
