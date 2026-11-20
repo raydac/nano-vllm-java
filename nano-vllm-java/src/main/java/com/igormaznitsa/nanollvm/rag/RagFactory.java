@@ -33,7 +33,9 @@ import java.util.function.IntConsumer;
  * Optional embedding models produce a {@link HybridRagIndex} via {@link #withEmbeddings}.
  * Classpath documents use {@link Builder#addResource(String)} / {@link #makeResource(String)}.
  * Optional {@link Builder#addProcessor(RagTuner...)} hooks filter files, override text extraction,
- * and rewrite loaded text before chunking.
+ * and rewrite loaded text before chunking. Optional {@link Builder#splitter(RagSplitter)} replaces
+ * the built-in cutter for documents added afterwards. {@link #make(Path)} and
+ * {@link #of(String...)} keep that cutter.
  *
  * <p>Empty corpora throw {@link ModelLoadException}. Lexical indexes are immutable and safe to
  * share across threads; hybrid indexes additionally need a live embedding {@link LlmModel}.
@@ -485,6 +487,25 @@ public final class RagFactory {
      */
     public Builder addProcessor(final RagTuner... tuners) {
       this.corpus.addProcessor(tuners);
+      return this;
+    }
+
+    /**
+     * Replaces the built-in cutter. Called once per document after {@link RagTuner} extract and
+     * preprocess. Chunk-size knobs on {@link RagLoadOptions} are not applied to the returned
+     * pieces. Must run before adding documents. A later call replaces the previous splitter.
+     *
+     * @param splitter must not be {@code null}
+     * @return {@code this}
+     * @throws IllegalStateException if documents were already added
+     * @throws NullPointerException  if {@code splitter} is {@code null}
+     * @since 1.5.0
+     */
+    public Builder splitter(final RagSplitter splitter) {
+      if (this.hasContent) {
+        throw new IllegalStateException("splitter must be set before adding documents");
+      }
+      this.corpus.splitter(splitter);
       return this;
     }
 

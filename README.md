@@ -449,7 +449,7 @@ System.out.println(labels.topLabel());
 
 **A choice with probabilities** — [Jev](#jev) (this snapshot). A chat checkpoint and the Jeff checkpoint use the same `toJev()` call.
 
-**Notes beside the model.** UTF-8 `.txt` / `.md` files. The model still writes the answer; retrieval only puts passages into the prompt.
+**Notes beside the model.** UTF-8 `.txt` / `.md` files. The model still writes the answer; retrieval only puts passages into the prompt. Call `splitter` on the builder before adding documents when those files should be cut by your own code. `RagFactory.make` keeps the built-in cutter.
 
 ```java
 PreparedRag notes = RagFactory.builder()

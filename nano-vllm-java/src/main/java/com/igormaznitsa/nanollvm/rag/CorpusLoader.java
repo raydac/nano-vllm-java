@@ -15,6 +15,7 @@ import java.nio.file.Path;
 import java.nio.file.SimpleFileVisitor;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -25,8 +26,8 @@ import java.util.regex.Pattern;
 
 /**
  * Loads strings, files, classpath resources, and folder trees into {@link TextChunk}s
- * (optional {@link RagTuner} filter / extract / preprocess, then chunk). Used only from
- * {@link RagFactory}.
+ * (optional {@link RagTuner} filter / extract / preprocess, then the built-in cutter or a
+ * {@link RagSplitter}). Used only from {@link RagFactory}.
  */
 final class CorpusLoader {
 
@@ -44,6 +45,26 @@ final class CorpusLoader {
    */
   static Builder builder() {
     return new Builder();
+  }
+
+  /**
+   * Built-in cut of one document. {@link RagSplitter#standard(RagLoadOptions)} delegates here.
+   *
+   * @param document body after preprocess; must not be {@code null}
+   * @param options  ceiling, overlap, and sentence knobs; must not be {@code null}
+   * @return chunks; empty when {@code document} has no text
+   */
+  static List<TextChunk> split(final RagDocument document, final RagLoadOptions options) {
+    requireNonNull(document, "document");
+    requireNonNull(options, "options");
+    return Chunking.split(
+        document.id(),
+        document.source(),
+        document.text(),
+        options.maxChunkChars(),
+        options.chunkOverlap(),
+        options.preprocess(),
+        options.atomicSentences());
   }
 
   private static ClassLoader defaultClassLoader() {
@@ -83,7 +104,9 @@ final class CorpusLoader {
   static final class Builder {
 
     private final List<TextChunk> pending = new ArrayList<>();
+    private final Set<String> chunkIds = new HashSet<>();
     private int anon;
+    private RagSplitter splitter;
     private int maxChunkChars = 1200;
     private int chunkOverlap = 150;
     private boolean preprocess = true;
@@ -180,6 +203,17 @@ final class CorpusLoader {
      */
     Builder addProcessor(final RagTuner... tuners) {
       this.tuners = this.tuners.plus(tuners);
+      return this;
+    }
+
+    /**
+     * Replaces the built-in cutter for documents added after this call.
+     *
+     * @param splitter must not be {@code null}
+     * @return {@code this}
+     */
+    Builder splitter(final RagSplitter splitter) {
+      this.splitter = requireNonNull(splitter, "splitter");
       return this;
     }
 
@@ -344,7 +378,8 @@ final class CorpusLoader {
     }
 
     /**
-     * Runs the tuner preprocess chain, then packs {@code text} into {@link TextChunk}s.
+     * Runs the tuner preprocess chain, then cuts {@code text} with the registered splitter or the
+     * built-in cutter.
      *
      * @param id      chunk id base
      * @param source  chunk source label
@@ -358,18 +393,38 @@ final class CorpusLoader {
       final String display
     ) {
       String body = this.tuners.preprocess(text == null ? "" : text);
-      List<TextChunk> chunks = Chunking.split(
-        id,
-        source,
-        body,
-        this.maxChunkChars,
-        this.chunkOverlap,
-        this.preprocess,
-        this.atomicSentences);
+      List<TextChunk> chunks = this.cut(id, source, body);
       this.pending.addAll(chunks);
       if (display != null) {
         this.reportLoaded(display, body, chunks.size());
       }
+    }
+
+    private List<TextChunk> cut(final String id, final String source, final String body) {
+      if (this.splitter == null) {
+        return Chunking.split(
+            id, source, body, this.maxChunkChars, this.chunkOverlap,
+            this.preprocess, this.atomicSentences);
+      }
+      return this.accept(this.splitter.split(new RagDocument(id, source, body)));
+    }
+
+    private List<TextChunk> accept(final List<TextChunk> chunks) {
+      requireNonNull(chunks, "chunks");
+      List<TextChunk> accepted = new ArrayList<>();
+      Set<String> fresh = new HashSet<>();
+      for (TextChunk chunk : chunks) {
+        requireNonNull(chunk, "chunk");
+        if (chunk.isBlank()) {
+          continue;
+        }
+        if (!fresh.add(chunk.id()) || this.chunkIds.contains(chunk.id())) {
+          throw new IllegalArgumentException("duplicate chunk id: " + chunk.id());
+        }
+        accepted.add(chunk);
+      }
+      this.chunkIds.addAll(fresh);
+      return accepted;
     }
 
     private void requireBudget(final String label, final long size) {

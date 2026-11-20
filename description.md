@@ -4411,7 +4411,8 @@ RagFactory.make(docs|file) / .of(…) / .builder()… / makeResource(…)   // c
     → CorpusLoader
          optional RagTuner (since 1.2.0; Builder.addProcessor):
            filter AND → first extract Optional → preprocess pipeline
-         then Markdown cleanup, sentence packing
+         optional RagSplitter (Builder.splitter): replaces the built-in cut
+         else Markdown cleanup, sentence packing
     → PreparedRag.fromChunks          // passage prep + inverted BM25 + IDF
     → PreparedRag                     // shareable like LlmModel
 
@@ -4610,6 +4611,12 @@ The character ceiling is `RagLoadOptions.maxChunkChars` (defaults **500**, tiny 
 `RagFactory.make(path, options)` / `RagFactory.Builder.options`. Units are Java `char`s, not tokens; packing may
 emit shorter chunks. Prompt concatenation is a separate cap (`RagSession.maxContextChars`, default 3500).
 
+`RagFactory.Builder.splitter(RagSplitter)` replaces that cut. It runs once per document after tuner extract and
+preprocess, and the pieces it returns are indexed as they are (`maxChunkChars` is not applied again). Blank pieces
+are dropped. Chunk ids must be unique in the corpus. Dedupe still follows `RagLoadOptions`. Set the splitter before
+adding documents. `RagSplitter.standard(options)` is the built-in cutter, so one document can delegate and another
+can be cut by the caller. `RagFactory.make` / `of` keep the built-in cutter.
+
 #### Preparsing and BM25 (inside `PreparedRag`)
 
 At load, each passage gets:
@@ -4623,7 +4630,8 @@ At load, each passage gets:
 **In the code (load):** `RagFactory.make` / `of` / `builder` → `CorpusLoader` (UTF-8 text/markup;
 **since 1.1.0** also `makeResource` / `Builder.addResource` for classpath paths,
 source label `classpath:…`; **since 1.2.0** `Builder.addFolders` for several disk trees and
-`Builder.addProcessor(RagTuner…)` for filter / extract / preprocess) → `PreparedRag.fromChunks`.
+`Builder.addProcessor(RagTuner…)` for filter / extract / preprocess;
+`Builder.splitter(RagSplitter)` replaces the built-in cut) → `PreparedRag.fromChunks`.
 Options live in `RagLoadOptions`.
 
 ```java
