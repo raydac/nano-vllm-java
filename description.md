@@ -42,7 +42,7 @@ file paths.
     **who chooses sizes; embedding width vs context window**
 6. [`tokenizer.json` — the dictionary file field by field](#6-tokenizerjson--the-dictionary-file-field-by-field)
 7. [Tensors and `*.safetensors` — parameters on disk](#7-tensors-and-safetensors--parameters-on-disk)
-7a. [GGUF — quantized single-file models (Qwen3 and LFM2)](#7a-gguf--quantized-single-file-models-qwen3-and-lfm2)
+7a. [GGUF — quantized single-file models (Qwen3, Qwen3.5 text, and LFM2)](#7a-gguf--quantized-single-file-models-qwen3-and-lfm2)
 7b. [BERT embedding GGUFs — sentence vectors (**since 1.1.0**)](#7b-bert-embedding-ggufs--sentence-vectors-since-110)
 7c. [ONNX weight folders and Llama (**since 1.1.0**)](#7c-onnx-weight-folders-and-llama-since-110)
 7d. [Whisper speech-to-text (**since 1.3.0**)](#7d-whisper-speech-to-text-since-130)
@@ -455,7 +455,7 @@ number is “intelligence” by itself; both bound what silent inner work (chapt
 
 | Field           | Means                                                                                 | Used for                                              | If missing                                         |
 |-----------------|---------------------------------------------------------------------------------------|-------------------------------------------------------|----------------------------------------------------|
-| `model_type`    | Short family name (`qwen3`, `qwen3_5`, `gemma3_text`, `gemma4`, `llama`, …)                    | Exact match via `ModelSupport` (Qwen3 / Qwen3.5 text / Gemma3 text / Gemma 4 text / Llama; GGUF `qwen3` / `lfm2`; embeddings BERT encoder: `bert` / `roberta` / `xlm-roberta`) | Unsupported families fail with `UnsupportedModelException` and a support catalog. Optional `-Dnanollvm.arch=…` only when it **matches** the checkpoint. |
+| `model_type`    | Short family name (`qwen3`, `qwen3_5`, `gemma3_text`, `gemma4`, `llama`, …)                    | Exact match via `ModelSupport` (Qwen3 / Qwen3.5 text / Gemma3 text / Gemma 4 text / Llama; GGUF `qwen3` / `qwen35` / `lfm2`; embeddings BERT encoder: `bert` / `roberta` / `xlm-roberta`) | Unsupported families fail with `UnsupportedModelException` and a support catalog. Optional `-Dnanollvm.arch=…` only when it **matches** the checkpoint. |
 | `architectures` | List of class-style names from Hugging Face (`Qwen3ForCausalLM`, `Qwen3_5ForConditionalGeneration`, `LlamaForCausalLM`, …) | Same detection if `model_type` is unclear. Qwen3.5 text keeps the language tower and skips the vision tower. Other `*ForConditionalGeneration` / vision classes are rejected | Optional                                           |
 
 You can override causal detection with `-Dnanollvm.arch=qwen3`, `qwen3_5`, `gemma3`, `gemma4`, `llama`, or `lfm2` **only when that id matches the checkpoint**. A forced id cannot turn Qwen2, Qwen3-Next, or a vision tower into a supported graph. Look-alike names stay distinct (`qwen3_5` is its own text graph, not `qwen3`; `gemma2` is not `gemma3`; `gemma4` is its own text graph, not Gemma 3). BERT-encoder families (`bert`, `roberta`, `xlm-roberta`) load as embeddings from GGUF or ONNX (**since 1.3.0** for RoBERTa / XLM-R); DistilBERT / ALBERT / DeBERTa / ELECTRA are still rejected. Whisper is `whisper` from Hugging Face safetensors (**since 1.3.0**). Piper is detected from `*.onnx` + `*.onnx.json`. fastText is detected from `*.bin` / `*.ftz` (**since 1.4.0**). The error lists what this library actually loads (`ModelSupport.CATALOG`).
@@ -1303,7 +1303,7 @@ the graph (chapter 16). Conceptual tensor definitions: chapter 10.
 
 <a id="7a-gguf--quantized-single-file-models-qwen3-and-lfm2"></a>
 <a id="7a-gguf-and-lfm2--quantized-single-file-models"></a>
-## 7a. GGUF — quantized single-file models (Qwen3 and LFM2)
+## 7a. GGUF — quantized single-file models (Qwen3, Qwen3.5 text, and LFM2)
 
 Chapter 7 described **safetensors**: a JSON catalog plus a raw float/BF16 payload. **GGUF** is the other on-disk
 container this project can open (popular with llama.cpp). One file holds **typed metadata**, an embedded **tokenizer**,
@@ -1311,16 +1311,18 @@ and **GGML-typed weight blocks** (often quantized). This engine supports **GGUF 
 
 - architecture **`qwen3`** — dense Qwen3 text **chat** (**since 1.1.0**; same graph as the Hugging Face folder; GGUF
   keeps unfused `blk.N.attn_*` / `ffn_*` tensors so packed quants stay packed);
+- architecture **`qwen35`** — Qwen3.5 text **chat** (**since 1.5.0**; same graph as the safetensors folder; the vision
+  projector is not loaded). A file larger than 2 GiB is read tensor by tensor;
 - architecture **`lfm2`** — hybrid short-convolution + GQA **chat** models (this section);
 - architecture **`bert`** — sentence-embedding encoders (**chapter 7b**, **since 1.1.0**).
 
-Load is three layers for every container: **transport** opens the file or folder (`GgufTransport`, `SafetensorsTransport`, `OnnxTransport`) and reports a catalog (metadata + tensor names). **Architecture processing** (`ArchitectureProcessor`) then decodes the family (`qwen3` / `qwen3_5` / `gemma3` / `gemma4` / `llama` / `lfm2` / `bert`). Chat families share a causal template (`CausalArchitecture`: Hugging Face bind by default, required `createCausal`); BERT uses `EmbeddingArchitecture`. Processors bind config + schema, fill weights, and build the graph. Gemma 4 still overrides fill (QAT safetensors only) and LFM2 overrides bind/fill (GGUF only) — they are not subclasses of Gemma 3 or of each other. `qwen3_5` is Hugging Face safetensors text only. Unsupported families (Qwen2, Qwen3-Next, Qwen3.5 MoE, Gemma/Llama GGUF, other MoE, VL) still fail before weights are copied, with
+Load is three layers for every container: **transport** opens the file or folder (`GgufTransport`, `SafetensorsTransport`, `OnnxTransport`) and reports a catalog (metadata + tensor names). **Architecture processing** (`ArchitectureProcessor`) then decodes the family (`qwen3` / `qwen3_5` / `gemma3` / `gemma4` / `llama` / `lfm2` / `bert`). Chat families share a causal template (`CausalArchitecture`: Hugging Face bind by default, required `createCausal`); BERT uses `EmbeddingArchitecture`. Processors bind config + schema, fill weights, and build the graph. Gemma 4 still overrides fill (QAT safetensors only) and LFM2 overrides bind/fill (GGUF only) — they are not subclasses of Gemma 3 or of each other. `qwen3_5` text loads from Hugging Face safetensors or a GGUF file whose architecture is `qwen35`. ONNX is refused. Unsupported families (Qwen2, Qwen3-Next, Qwen3.5 MoE, Gemma/Llama GGUF, other MoE, VL) still fail before weights are copied, with
 `ModelSupport.CATALOG`.
 
 `models/download-qwen3-0.6b-gguf.sh` fetches `Qwen3-0.6B-Q8_0.gguf` from
 [Qwen/Qwen3-0.6B-GGUF](https://huggingface.co/Qwen/Qwen3-0.6B-GGUF) (`general.architecture=qwen3`, ~570MB, not gated).
 `models/download-qwen3-0.6b.sh` still fetches the Hugging Face **safetensors folder**. LFM2 GGUF is
-`models/download-lfm2.5-2.6b-gguf.sh`.
+`models/download-lfm2.5-2.6b-gguf.sh`. Qwen3.5 text GGUF is `models/download-ornith-1.5-9b-gguf.sh`.
 
 For causal GGUF chat it keeps weights **packed** in RAM by default and **dequantizes rows/tiles during matmul and embedding**.
 Each `Linear` / LM-head binds a `LinearKernel` at construction (`dense-f32` with decode-1, or packed with a
@@ -1341,6 +1343,12 @@ only when a range starts mid-block).
 Path qwen3Gguf = Path.of("models/Qwen3-0.6B-Q8_0.gguf");
 try (LlmModel model = LlmModelFactory.make(qwen3Gguf);
      LLM llm = LLM.builder(model).build()) {
+  String answer = llm.chat(256).send("Hello").answer();
+}
+
+Path ornith = Path.of("models/Ornith-1.5-9B-AD-IQ2_XXS-IQ1_M.gguf");
+try (LlmModel model = LlmModelFactory.make(ornith);
+     LLM llm = LLM.builder(model).maxModelLen(2048).build()) {
   String answer = llm.chat(256).send("Hello").answer();
 }
 
@@ -1423,8 +1431,8 @@ Weights stay packed; activations use float32 after per-row dequant inside the bo
 
 | Allowed | Not in this port |
 |---------|------------------|
-| GGUF **v2 / v3**; heap payload **≤ ~2 GiB** | Larger files / other GGUF major versions |
-| Architectures **`qwen3`** / **`lfm2`** (chat) and **`bert`** (embeddings **since 1.1.0**) | **Qwen2**, **Gemma / Llama** GGUF, MoE / VL, or other exports |
+| GGUF **v2 / v3**; one tensor fits in a heap array. A file past 2 GiB is read from the channel | Other GGUF major versions |
+| Architectures **`qwen3`** / **`qwen35`** / **`lfm2`** (chat) and **`bert`** (embeddings **since 1.1.0**) | **Qwen2**, **Gemma / Llama** GGUF, MoE / VL, or other exports |
 | GGML weight types in the table above | Removed ggml layouts (`Q4_2`/`Q4_3`, SIMD-repack `Q4_0_4_4` / `IQ4_NL_4_4`, …) |
 | Packed default; optional unpack at load / late unpack | ONNX or safetensors wrapped *inside* a `.gguf` |
 
@@ -1434,8 +1442,8 @@ Useful keys this loader / tokenizer read (names vary slightly by export):
 
 | Key pattern | Role |
 |-------------|------|
-| `general.architecture` | Must be `qwen3` or `lfm2` for chat (`bert` → chapter 7b) |
-| `lfm2.*` / `qwen3.*` / `*.block_count`, `*.embedding_length`, … | Sizes → `Config.HfConfig` |
+| `general.architecture` | Must be `qwen3`, `qwen35`, or `lfm2` for chat (`bert` → chapter 7b) |
+| `lfm2.*` / `qwen3.*` / `qwen35.*` / `*.block_count`, `*.embedding_length`, … | Sizes → `Config.HfConfig` |
 | `qwen3.attention.key_length` (or `value_length`) | Qwen3 `head_dim` — **not** `hidden / heads` (0.6B is 128, not 64) |
 | `lfm2.attention.head_count_kv` | Often a **per-layer array** (0 on conv layers) — use max > 0 as GQA kv heads |
 | `tokenizer.ggml.tokens` / `.merges` | Embedded vocab |
@@ -1495,7 +1503,7 @@ activations are still float32).
 > **A `.gguf` file is a little-endian catalog of metadata + named GGML tensors, followed by an aligned payload of
 > float or block-quantized bytes. This port maps the file, keeps supported types packed (reversing 2D dims to HF
 > layout), and dequantizes rows in place during matmul / embedding into the same float32 activation path as
-> safetensors. Chat graphs are `qwen3` and `lfm2`; the same container also loads BERT embedding graphs (chapter 7b).**
+> safetensors. Chat graphs are `qwen3`, `qwen35`, and `lfm2`; the same container also loads BERT embedding graphs (chapter 7b).**
 
 **In the code (application entry):** `LlmModelFactory.make` / `make(…, true)` / `LLM.Builder.allowUnpackParameters()`;
 tokenizer via the sealed `LlmModel`. **Internal map:** `models.llmcontainer.GgufTransport` (catalog) → `ArchitectureProcessor.bind`
@@ -1678,7 +1686,7 @@ This is **weight import**, not an ONNX Runtime session:
 | Float initializers: **FLOAT**, **FLOAT16**, **BFLOAT16**, **DOUBLE** → float32 | Filename contains `_q4`, `_int8`, `_uint8`, `_bnb4`, `_quantized`, or `with_past` (community quant / KV-past exports) |
 | `make(Path)` may follow **external_data** sidecars next to the `.onnx` | **`ModelFileSource` / classpath** loads: `external_data` → `ModelLoadException` (use `make(Path)`) |
 | File size up to **8 GiB** on disk; in-memory buffer path capped at **~2 GiB** | Empty initializer list; float8 / nibble / unknown TensorProto weight types (fail loud) |
-| Architectures that map to Qwen3 / Gemma3 / **Llama** / BERT embedding schemas | **LFM2-from-ONNX**; **Gemma 4** (safetensors QAT only); **Qwen3.5** (safetensors text only, **since 1.5.0**); QDQ / int8 weight graphs; running the ONNX op graph. **Piper** voices are a separate synthesis path (ch. **7e**), not this chat/BERT remap. |
+| Architectures that map to Qwen3 / Gemma3 / **Llama** / BERT embedding schemas | **LFM2-from-ONNX**; **Gemma 4** (safetensors QAT only); **Qwen3.5** (safetensors or `qwen35` GGUF text, not ONNX, **since 1.5.0**); QDQ / int8 weight graphs; running the ONNX op graph. **Piper** voices are a separate synthesis path (ch. **7e**), not this chat/BERT remap. |
 
 INT/UINT/BOOL/STRING/COMPLEX initializers and float **scalars** are **skipped** as graph constants (not weight
 tensors). See the TensorProto table below.
@@ -1742,7 +1750,7 @@ try (LlmModel model = LlmModelFactory.make(Path.of("models/SmolLM2-135M-Instruct
 > **Since 1.1.0, an HF folder may use ONNX initializers instead of safetensors. The engine extracts weights only (no
 > ORT), applies file-name and TensorProto filters, builds Qwen3 / Gemma3 / Llama / BERT graphs as usual, and rejects
 > float8/nibble weight types, unsupported community quant exports, LFM2-from-ONNX, Gemma 4 (safetensors QAT only),
-> and Qwen3.5 (safetensors text only) explicitly.**
+> and Qwen3.5 (safetensors or `qwen35` GGUF text, not ONNX) explicitly.**
 
 **In the code:** `models.llmcontainer.OnnxTransport` reads graph initializers (no ORT); `models.llmcontainer.LoadProgress` reports decode
 with the same percent/ETA bar as safetensors and GGUF; `ModelLoader.assembleFromNamedTensors` matches names into

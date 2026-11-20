@@ -117,6 +117,24 @@ Windows: `.\models\download-lfm2.5-2.6b-gguf.ps1` or `models\download-lfm2.5-2.6
 
 Creates `models/LFM2.5-2.6B-Q4_K_M.gguf`.
 
+## Ornith-1.5-9B GGUF (optional, smallest quant)
+
+[AtomicChat/Ornith-1.5-9B-GGUF](https://huggingface.co/AtomicChat/Ornith-1.5-9B-GGUF) — Qwen3.5 text
+(`general.architecture=qwen35`) plus a separate vision projector. MIT, not gated. The scripts fetch the
+**smallest** file, `Ornith-1.5-9B-AD-IQ2_XXS-IQ1_M.gguf` (~2.8 GB). The model card measures about 54%
+top-1 agreement with BF16 for that file; larger quants are in the same repository. The vision projector
+(`mmproj-*.gguf`) is not downloaded.
+
+```bash
+./models/download-ornith-1.5-9b-gguf.sh
+```
+
+Windows: `.\models\download-ornith-1.5-9b-gguf.ps1` or `models\download-ornith-1.5-9b-gguf.cmd`.
+
+Creates `models/Ornith-1.5-9B-AD-IQ2_XXS-IQ1_M.gguf`. `LlmModelFactory.make` loads that file as
+Qwen3.5 text chat. The vision projector is not part of this file. Weights stay packed; the default
+16 GB heap is the headroom used for this size.
+
 ## Tiny-LLM-ONNX (optional, Llama ONNX demo)
 
 [onnx-community/Tiny-LLM-ONNX](https://huggingface.co/onnx-community/Tiny-LLM-ONNX) — ~10M Llama, ONNX weights under
@@ -368,12 +386,12 @@ photo for oriented boxes, and writes each score onto a PNG.
 
 | Mechanism          | Example                                                                                           |
 |--------------------|---------------------------------------------------------------------------------------------------|
-| CLI arg            | `… Example models/Gemma3-270M` or `… Example models/LFM2.5-2.6B-Q4_K_M.gguf`                      |
+| CLI arg            | `… Example models/Gemma3-270M`, `… Example models/LFM2.5-2.6B-Q4_K_M.gguf`, or `… Example models/Ornith-1.5-9B-AD-IQ2_XXS-IQ1_M.gguf` |
 | System property    | `-Dnanollvm.model=models/Gemma3-270M`                                                             |
 | Force architecture | `-Dnanollvm.arch=gemma3` or `gemma4` (must match the checkpoint)                              |
 | Env                | `NANOLLVM_MODEL=models/Gemma3-270M`                                                               |
 | Models root        | `-Dnanollvm.models.dir=/other/models` or `NANOLLVM_MODELS_DIR` (default loads `<dir>/Qwen3-0.6B`) |
 
 Architecture is detected exactly from `config.json` / GGUF `general.architecture` (`ModelSupport`).
-`-Dnanollvm.arch` may only confirm a matching family (`qwen3`, `gemma3`, `gemma4`, `llama`, `lfm2`, `bert`, `whisper`, `piper`);
+`-Dnanollvm.arch` may only confirm a matching family (`qwen3`, `qwen3_5`, `gemma3`, `gemma4`, `llama`, `lfm2`, `bert`, `whisper`, `piper`);
 look-alike checkpoints fail with `UnsupportedModelException`.

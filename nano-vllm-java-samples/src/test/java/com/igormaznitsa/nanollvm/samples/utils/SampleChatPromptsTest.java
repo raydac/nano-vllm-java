@@ -16,6 +16,12 @@ class SampleChatPromptsTest {
   }
 
   @Test
+  void heavyDemoSkipsTheLongThinkPolicy() {
+    assertFalse(SampleChatPrompts.PLAIN_ASSISTANT_SYSTEM.contains("<think>"));
+    assertEquals("", SampleChatPrompts.forHeavyDemo("qwen3_5", null));
+  }
+
+  @Test
   void forDemoFallsBackToEmptyWithoutTokenizer() {
     assertEquals("", SampleChatPrompts.forDemo("llama", null));
     assertEquals("", SampleChatPrompts.forDemo("lfm2", null));

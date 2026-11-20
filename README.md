@@ -70,7 +70,7 @@ One `LLM` runs one call at a time. Share the loaded `LlmModel` across engines wh
 |--------|----------------|-----|
 | Qwen3, Gemma 3, Llama | Safetensors folder, or ONNX weights in that folder | Chat |
 | Qwen3 | Also a `.gguf` file | Chat |
-| Qwen3.5 text | Safetensors only (snapshot). The vision tower is skipped | Chat, and Jev |
+| Qwen3.5 text | Safetensors folder, or a `.gguf` file (`qwen35`). The vision tower is skipped | Chat, and Jev |
 | Gemma 4 text (QAT mobile) | Safetensors only | Chat |
 | LFM2 | `.gguf` only | Chat |
 | BERT (gte, E5, XLM-RoBERTa, …) | `.gguf` or ONNX | Embeddings |
@@ -367,7 +367,13 @@ mvn -pl nano-vllm-java-samples -q exec:java
 
 ### Interactive menu
 
-`Example` lists the models it finds, then chats. `/exit` leaves. `/clear` drops the conversation and keeps the document index. `NO_COLOR=1` turns ANSI colors off.
+`Example` lists the models it finds, then chats. Ornith-1.5-9B is the Qwen3.5 GGUF row (`models/Ornith-1.5-9B-AD-IQ2_XXS-IQ1_M.gguf`). `/exit` leaves. `/clear` drops the conversation and keeps the document index. `NO_COLOR=1` turns ANSI colors off.
+
+```bash
+./models/download-ornith-1.5-9b-gguf.sh
+mvn -pl nano-vllm-java-samples -q exec:java \
+  -Dexec.args=models/Ornith-1.5-9B-AD-IQ2_XXS-IQ1_M.gguf
+```
 
 ![Example: pick Qwen3 or Gemma 3, then a Gemma 3 chat about the Grimm brothers](assets/java_nano_llvm_session_1.gif)
 
@@ -505,7 +511,7 @@ With `cpuThreads` above 1, engines share a process-wide pool named `nanollvm-mat
 - **Text in, and the jobs in the table above.** YOLO26 nano through extra-large reads a picture (objects, a map, depth, or labels). P2, P6, and YOLOE are refused. No other image understanding, and no image generation. Qwen3.5 vision, LoRA adapters, mixture-of-experts, and Qwen3-Next are refused.
 - **Whisper** reads uncompressed WAV or PCM. No MP3, no timestamps, no voice-activity detection.
 - **Piper** returns one WAV per call. No streaming audio and no SSML.
-- **GGUF chat** is Qwen3 and LFM2. **GGUF embeddings** are BERT. EmbeddingGemma is a Hugging Face folder, not a GGUF. Other GGUF architectures are out.
+- **GGUF chat** is Qwen3, Qwen3.5 text (`qwen35`), and LFM2. **GGUF embeddings** are BERT. EmbeddingGemma is a Hugging Face folder, not a GGUF. Other GGUF architectures are out.
 - **ONNX** contributes weights to the Java engine. Quantized community exports and graphs that need ONNX Runtime are skipped.
 - **Documents for search** are UTF-8 text. PDF and EPUB need a small extractor you register (`RagTunerHelloWorld` shows an EPUB).
 - **One call at a time per `LLM`.** Overlap needs one engine per caller on a shared `LlmModel`. See [Threads](#threads).

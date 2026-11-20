@@ -109,6 +109,11 @@ final class CheckpointLoadSmokeTest {
   }
 
   @Test
+  void loadsOrnithQwen35GgufAndSamplesOneToken() {
+    assertOneToken(OptionalModelAssumptions.requireOrnithQwen35Gguf(), WeightNames.ARCH_QWEN3_5);
+  }
+
+  @Test
   void tinyLlmCompletesOneToken() {
     assertOneToken(OptionalModelAssumptions.requireTinyLlmOnnx(), WeightNames.ARCH_LLAMA);
   }

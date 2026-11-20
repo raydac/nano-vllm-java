@@ -1,9 +1,15 @@
 package com.igormaznitsa.nanollvm.models.internal;
 
+import static com.igormaznitsa.nanollvm.models.internal.WeightLayers.embedding;
+import static com.igormaznitsa.nanollvm.models.internal.WeightLayers.linearRow;
+import static com.igormaznitsa.nanollvm.models.internal.WeightLayers.tiedLmHead;
 import static com.igormaznitsa.nanollvm.models.internal.WeightNames.ARCH_QWEN3_5;
 import static com.igormaznitsa.nanollvm.models.internal.WeightNames.DOWN_PROJ_WEIGHT;
 import static com.igormaznitsa.nanollvm.models.internal.WeightNames.EMBED_TOKENS;
 import static com.igormaznitsa.nanollvm.models.internal.WeightNames.GATE_UP_PROJ_WEIGHT;
+import static com.igormaznitsa.nanollvm.models.internal.WeightNames.GGUF_OUTPUT;
+import static com.igormaznitsa.nanollvm.models.internal.WeightNames.GGUF_OUTPUT_NORM;
+import static com.igormaznitsa.nanollvm.models.internal.WeightNames.GGUF_TOKEN_EMBD;
 import static com.igormaznitsa.nanollvm.models.internal.WeightNames.INPUT_LAYERNORM;
 import static com.igormaznitsa.nanollvm.models.internal.WeightNames.K_NORM_WEIGHT;
 import static com.igormaznitsa.nanollvm.models.internal.WeightNames.LM_HEAD;
@@ -11,6 +17,7 @@ import static com.igormaznitsa.nanollvm.models.internal.WeightNames.MODEL_NORM;
 import static com.igormaznitsa.nanollvm.models.internal.WeightNames.O_PROJ_WEIGHT;
 import static com.igormaznitsa.nanollvm.models.internal.WeightNames.POST_ATTENTION_LAYERNORM;
 import static com.igormaznitsa.nanollvm.models.internal.WeightNames.Q_NORM_WEIGHT;
+import static com.igormaznitsa.nanollvm.models.internal.WeightNames.ggufBlk;
 import static com.igormaznitsa.nanollvm.models.internal.WeightNames.layer;
 import static com.igormaznitsa.nanollvm.models.internal.WeightNames.linearAttn;
 import static com.igormaznitsa.nanollvm.models.internal.WeightNames.mlp;
@@ -58,8 +65,19 @@ public record Qwen35ForCausalLM(Qwen35Model model, ParallelLMHead lmHead) implem
 
   private static Qwen35ForCausalLM assemble(final Config.HfConfig config, final WeightBag weights) {
     Qwen35Model model = new Qwen35Model(config, weights);
+    if (isGgufLayout(weights)) {
+      ParallelLMHead lmHead = weights.findPacked(GGUF_OUTPUT)
+        .map(ParallelLMHead::new)
+        .or(() -> weights.find(GGUF_OUTPUT).map(ParallelLMHead::new))
+        .orElseGet(() -> tiedLmHead(model.embedTokens()));
+      return new Qwen35ForCausalLM(model, lmHead);
+    }
     Tensor lmWeight = weights.find(LM_HEAD).orElseGet(() -> model.embedTokens().weight());
     return new Qwen35ForCausalLM(model, new ParallelLMHead(lmWeight));
+  }
+
+  private static boolean isGgufLayout(final WeightBag weights) {
+    return weights.has(GGUF_TOKEN_EMBD);
   }
 
   private static Qwen35DecoderLayer layerAt(
@@ -69,24 +87,35 @@ public record Qwen35ForCausalLM(Qwen35Model model, ParallelLMHead lmHead) implem
     final int layerIndex,
     final RotaryEmbedding rotary
   ) {
-    String prefix = layer(layerIndex);
-    Qwen35Mlp feedForward = new Qwen35Mlp(
+    boolean gguf = isGgufLayout(weights);
+    String prefix = gguf ? ggufBlk(layerIndex) : layer(layerIndex);
+    Qwen35Mlp feedForward = gguf
+      ? new Qwen35Mlp(
+      null,
+      linearRow(weights, prefix + "ffn_down.weight"),
+      linearRow(weights, prefix + "ffn_gate.weight"),
+      linearRow(weights, prefix + "ffn_up.weight"))
+      : new Qwen35Mlp(
       new Linear.Merged(weights.require(mlp(layerIndex) + GATE_UP_PROJ_WEIGHT)),
-      new Linear.Row(weights.require(mlp(layerIndex) + DOWN_PROJ_WEIGHT)));
-    RMSNorm input =
-      new RMSNorm(weights.require(prefix + INPUT_LAYERNORM), config.rmsNormEps(), true);
-    RMSNorm post = new RMSNorm(
-      weights.require(prefix + POST_ATTENTION_LAYERNORM), config.rmsNormEps(), true);
-    if (config.isLinearAttentionLayer(layerIndex)) {
-      return new Qwen35DecoderLayer(
-        deltaNet(spec, weights, layerIndex, config.rmsNormEps()),
+      new Linear.Row(weights.require(mlp(layerIndex) + DOWN_PROJ_WEIGHT)),
         null,
-        feedForward,
-        input,
-        post);
+      null);
+    boolean onePlusWeight = !gguf;
+    String inputName = gguf ? prefix + "attn_norm.weight" : prefix + INPUT_LAYERNORM;
+    String postName =
+      gguf ? prefix + "post_attention_norm.weight" : prefix + POST_ATTENTION_LAYERNORM;
+    RMSNorm input = new RMSNorm(weights.require(inputName), config.rmsNormEps(), onePlusWeight);
+    RMSNorm post = new RMSNorm(weights.require(postName), config.rmsNormEps(), onePlusWeight);
+    if (config.isLinearAttentionLayer(layerIndex)) {
+      GatedDeltaNet mixer = gguf
+        ? ggufDeltaNet(spec, weights, layerIndex, config.rmsNormEps())
+        : deltaNet(spec, weights, layerIndex, config.rmsNormEps());
+      return new Qwen35DecoderLayer(mixer, null, feedForward, input, post);
     }
-    return new Qwen35DecoderLayer(null, attention(config, weights, layerIndex, rotary), feedForward,
-      input, post);
+    Qwen35Attention attn = gguf
+      ? ggufAttention(config, weights, layerIndex, rotary)
+      : attention(config, weights, layerIndex, rotary);
+    return new Qwen35DecoderLayer(null, attn, feedForward, input, post);
   }
 
   private static GatedDeltaNet deltaNet(
@@ -114,6 +143,45 @@ public record Qwen35ForCausalLM(Qwen35Model model, ParallelLMHead lmHead) implem
       layerIndex);
   }
 
+  private static GatedDeltaNet ggufDeltaNet(
+    final Config.Qwen35Text spec,
+    final WeightBag weights,
+    final int layerIndex,
+    final float eps
+  ) {
+    String blk = ggufBlk(layerIndex);
+    return new GatedDeltaNet(
+      linearRow(weights, blk + "attn_qkv.weight"),
+      linearRow(weights, blk + "attn_gate.weight"),
+      linearRow(weights, blk + "ssm_beta.weight"),
+      linearRow(weights, blk + "ssm_alpha.weight"),
+      weights.require(blk + "ssm_conv1d.weight"),
+      recoveredALog(weights.require(blk + "ssm_a")),
+      weights.require(blk + "ssm_dt.bias"),
+      weights.require(blk + "ssm_norm.weight"),
+      linearRow(weights, blk + "ssm_out.weight"),
+      spec.linearNumKeyHeads(),
+      spec.linearKeyHeadDim(),
+      spec.linearNumValueHeads(),
+      spec.linearValueHeadDim(),
+      eps,
+      layerIndex,
+      true);
+  }
+
+  private static Tensor recoveredALog(final Tensor packedDecay) {
+    float[] src = packedDecay.toFloatArray();
+    float[] aLog = new float[src.length];
+    for (int i = 0; i < src.length; i++) {
+      float magnitude = -src[i];
+      if (!(magnitude > 0f) || !Float.isFinite(src[i])) {
+        throw new IllegalArgumentException("GGUF ssm_a must be finite and negative");
+      }
+      aLog[i] = (float) Math.log(magnitude);
+    }
+    return Tensor.of(aLog, packedDecay.shape());
+  }
+
   private static Qwen35Attention attention(
     final Config.HfConfig config,
     final WeightBag weights,
@@ -135,7 +203,33 @@ public record Qwen35ForCausalLM(Qwen35Model model, ParallelLMHead lmHead) implem
       new Attention(numHeads, headDim, config.attentionScale(), numKvHeads, layerIndex),
       numHeads,
       numKvHeads,
-      headDim);
+      headDim,
+      false);
+  }
+
+  private static Qwen35Attention ggufAttention(
+    final Config.HfConfig config,
+    final WeightBag weights,
+    final int layerIndex,
+    final RotaryEmbedding rotary
+  ) {
+    String blk = ggufBlk(layerIndex);
+    int numHeads = config.numAttentionHeads();
+    int numKvHeads = config.numKeyValueHeads();
+    int headDim = config.headDim();
+    return new Qwen35Attention(
+      linearRow(weights, blk + "attn_q.weight"),
+      linearRow(weights, blk + "attn_k.weight"),
+      linearRow(weights, blk + "attn_v.weight"),
+      linearRow(weights, blk + "attn_output.weight"),
+      new RMSNorm(weights.require(blk + "attn_q_norm.weight"), config.rmsNormEps()),
+      new RMSNorm(weights.require(blk + "attn_k_norm.weight"), config.rmsNormEps()),
+      rotary,
+      new Attention(numHeads, headDim, config.attentionScale(), numKvHeads, layerIndex),
+      numHeads,
+      numKvHeads,
+      headDim,
+      true);
   }
 
   private static Config.Qwen35Text requireSpec(final Config.HfConfig config) {
@@ -202,7 +296,8 @@ public record Qwen35ForCausalLM(Qwen35Model model, ParallelLMHead lmHead) implem
     Attention attn,
     int numHeads,
     int numKvHeads,
-    int headDim
+    int headDim,
+    boolean interleavedQueryGate
   ) {
     Tensor forward(final Tensor positions, final Tensor hiddenStates, final Context context) {
       int tokens = hiddenStates.size(0);
@@ -233,6 +328,18 @@ public record Qwen35ForCausalLM(Qwen35Model model, ParallelLMHead lmHead) implem
       float[] data = projected.data();
       int off = projected.offset();
       int row = width * 2;
+      if (this.interleavedQueryGate) {
+        int pair = this.headDim * 2;
+        for (int t = 0; t < tokens; t++) {
+          for (int h = 0; h < this.numHeads; h++) {
+            int src = off + t * row + h * pair;
+            int dst = (t * this.numHeads + h) * this.headDim;
+            System.arraycopy(data, src, query, dst, this.headDim);
+            System.arraycopy(data, src + this.headDim, gate, dst, this.headDim);
+          }
+        }
+        return;
+      }
       for (int t = 0; t < tokens; t++) {
         System.arraycopy(data, off + t * row, query, t * width, width);
         System.arraycopy(data, off + t * row + width, gate, t * width, width);
@@ -249,9 +356,17 @@ public record Qwen35ForCausalLM(Qwen35Model model, ParallelLMHead lmHead) implem
     }
   }
 
-  record Qwen35Mlp(Linear.Merged gateUpProj, Linear.Row downProj) {
+  record Qwen35Mlp(
+    Linear.Merged gateUpProj,
+    Linear.Row downProj,
+    Linear.Row gateProj,
+    Linear.Row upProj
+  ) {
     Tensor forward(final Tensor x, final Context context) {
-      return this.downProj.forward(Ops.siluAndMul(this.gateUpProj.forward(x, context)), context);
+      Tensor activated = this.gateUpProj != null
+        ? Ops.siluAndMul(this.gateUpProj.forward(x, context))
+        : Ops.siluAndMul(this.gateProj.forward(x, context), this.upProj.forward(x, context));
+      return this.downProj.forward(activated, context);
     }
   }
 
@@ -307,7 +422,8 @@ public record Qwen35ForCausalLM(Qwen35Model model, ParallelLMHead lmHead) implem
       final Context context
     ) {
       DeviceDecoders.Step step = DeviceDecoders.decoder();
-      if (step == null || context == null || context.kvCache() == null || this.attention == null) {
+      if (step == null || context == null || context.kvCache() == null || this.attention == null
+        || this.attention.interleavedQueryGate() || this.mlp.gateUpProj() == null) {
         return null;
       }
       int kvLayer = this.attention.attn().getKvLayerIndex();
@@ -344,7 +460,7 @@ public record Qwen35ForCausalLM(Qwen35Model model, ParallelLMHead lmHead) implem
       final Tensor hiddenStates, final Tensor residual, final Context context
     ) {
       DeviceDecoders.Step step = DeviceDecoders.decoder();
-      if (step == null || residual == null) {
+      if (step == null || residual == null || this.mlp.gateUpProj() == null) {
         return null;
       }
       return step.forward(DeviceDecoders.layer()
@@ -389,6 +505,12 @@ public record Qwen35ForCausalLM(Qwen35Model model, ParallelLMHead lmHead) implem
       List<Qwen35DecoderLayer> built = IntStream.range(0, config.numHiddenLayers())
         .mapToObj(i -> layerAt(config, spec, weights, i, rotary))
         .toList();
+      if (isGgufLayout(weights)) {
+        return new Qwen35Model(
+          embedding(weights, GGUF_TOKEN_EMBD),
+          built,
+          new RMSNorm(weights.require(GGUF_OUTPUT_NORM), config.rmsNormEps()));
+      }
       return new Qwen35Model(
         new VocabParallelEmbedding(weights.require(EMBED_TOKENS)),
         built,

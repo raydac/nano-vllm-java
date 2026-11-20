@@ -111,6 +111,12 @@ class ExampleModelMenuTest {
   }
 
   @Test
+  void catalogIncludesOrnithQwen35Gguf() {
+    assertTrue(Example.catalog().stream()
+      .anyMatch(choice -> choice.label().contains("Ornith-1.5-9B")));
+  }
+
+  @Test
   void modelMenuSelectsXlmRobertaWhenPresent() throws Exception {
     Path xlm = SampleModelAssumptions.requireXlmRobertaBase();
     Path chosen = Example.resolveModel(

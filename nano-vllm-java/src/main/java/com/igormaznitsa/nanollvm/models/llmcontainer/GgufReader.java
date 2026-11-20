@@ -9,6 +9,7 @@ import com.igormaznitsa.nanollvm.tensor.Tensor;
 import com.igormaznitsa.nanollvm.tokenizer.GgufTokenizerSource;
 import com.igormaznitsa.nanollvm.utils.ResourceLimits;
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.channels.FileChannel;
@@ -38,6 +39,7 @@ public final class GgufReader implements AutoCloseable, GgufTokenizerSource {
   private final Map<String, TensorInfo> tensors;
   private final long tensorDataBase;
   private final ResourceLimits limits;
+  private final FileChannel channel;
   private ByteBuffer map;
   private boolean closed;
 
@@ -46,14 +48,26 @@ public final class GgufReader implements AutoCloseable, GgufTokenizerSource {
     this.limits = ResourceLimits.current();
     this.metadata = new LinkedHashMap<>();
     this.tensors = new LinkedHashMap<>();
-    try (FileChannel channel = FileChannel.open(this.path)) {
-      long size = channel.size();
-      if (size > Integer.MAX_VALUE) {
-        throw new IOException("GGUF larger than 2GiB heap read limit: " + this.path);
+    FileChannel opened = FileChannel.open(this.path);
+    try {
+      long size = opened.size();
+      if (size <= Integer.MAX_VALUE) {
+        this.map = ChannelBytes.readHeap(opened, size);
+        this.channel = null;
+        opened.close();
+      } else {
+        this.map = readHeader(opened, size);
+        this.channel = opened;
       }
-      this.map = ChannelBytes.readHeap(channel, size);
+      this.tensorDataBase = this.parseContainer(this.map, this.map.capacity());
+    } catch (IOException | RuntimeException e) {
+      try {
+        opened.close();
+      } catch (IOException closeError) {
+        e.addSuppressed(closeError);
+      }
+      throw e;
     }
-    this.tensorDataBase = this.parseContainer(this.map, this.map.capacity());
   }
 
   private GgufReader(final Path virtualPath, final ByteBuffer data) throws IOException {
@@ -62,6 +76,7 @@ public final class GgufReader implements AutoCloseable, GgufTokenizerSource {
     ByteBuffer map = data.duplicate().order(ByteOrder.LITTLE_ENDIAN);
     map.clear();
     this.map = map;
+    this.channel = null;
     this.metadata = new LinkedHashMap<>();
     this.tensors = new LinkedHashMap<>();
     this.tensorDataBase = this.parseContainer(this.map, map.remaining());
@@ -301,6 +316,45 @@ public final class GgufReader implements AutoCloseable, GgufTokenizerSource {
     return info;
   }
 
+  private static ByteBuffer readHeader(final FileChannel channel, final long fileSize)
+    throws IOException {
+    long prefix = Math.min(fileSize, 64L * 1024 * 1024);
+    ByteBuffer header = readPrefix(channel, prefix);
+    while (headerEnd(header) > header.capacity()) {
+      if (prefix >= fileSize || prefix >= 256L * 1024 * 1024) {
+        throw new IOException("GGUF header exceeds " + prefix + " bytes");
+      }
+      prefix = Math.min(fileSize, prefix * 2);
+      header = readPrefix(channel, prefix);
+    }
+    return header;
+  }
+
+  private static long headerEnd(final ByteBuffer header) throws IOException {
+    try {
+      return new GgufReader(Path.of("header"),
+        header.slice().order(ByteOrder.LITTLE_ENDIAN)).tensorDataBase;
+    } catch (IllegalStateException truncated) {
+      return header.capacity() + 1L;
+    } catch (IOException exceeds) {
+      if (exceeds.getMessage() != null && exceeds.getMessage().contains("exceeds file size")) {
+        return header.capacity() + 1L;
+      }
+      throw exceeds;
+    }
+  }
+
+  private static ByteBuffer readPrefix(final FileChannel channel, final long size)
+    throws IOException {
+    if (size > Integer.MAX_VALUE) {
+      throw new IOException("GGUF header larger than 2GiB");
+    }
+    ByteBuffer buf = ByteBuffer.allocate((int) size).order(ByteOrder.LITTLE_ENDIAN);
+    ChannelBytes.readFully(channel, 0L, buf);
+    buf.clear();
+    return buf;
+  }
+
   /**
    * Loads and dequantizes a tensor to float32 from the file buffer (no owned packed {@code byte[]}
    * copy). 2D shapes are reversed to HF {@code [out, in]} / embedding {@code [vocab, dim]} layout.
@@ -308,18 +362,10 @@ public final class GgufReader implements AutoCloseable, GgufTokenizerSource {
   public Tensor getTensor(final String name) {
     this.requireOpen();
     TensorInfo info = this.info(name);
-    long abs = this.tensorDataBase + info.relativeOffset;
-    if (abs > Integer.MAX_VALUE) {
-      throw new IllegalStateException("tensor offset exceeds payload range: " + name);
-    }
-    long byteLen = GgufDequant.packedByteLength(info.ggmlType, info.numel);
-    if (byteLen > Integer.MAX_VALUE) {
-      throw new IllegalStateException("tensor bytes exceed int: " + name);
-    }
     if (info.numel > Integer.MAX_VALUE) {
       throw new IllegalStateException("tensor numel exceeds int: " + name);
     }
-    ByteBuffer payload = GgufDequant.littleEndianSlice(this.map, (int) abs, (int) byteLen);
+    ByteBuffer payload = this.payload(name, info);
     float[] data = GgufDequant.dequantize(payload, info.ggmlType, info.numel);
     return Tensor.of(data, toJavaShape(info.dims()));
   }
@@ -330,16 +376,8 @@ public final class GgufReader implements AutoCloseable, GgufTokenizerSource {
   public PackedWeight getPackedWeight(final String name) {
     this.requireOpen();
     TensorInfo info = this.info(name);
-    long abs = this.tensorDataBase + info.relativeOffset;
-    if (abs > Integer.MAX_VALUE) {
-      throw new IllegalStateException("tensor offset exceeds payload range: " + name);
-    }
-    long byteLen = GgufDequant.packedByteLength(info.ggmlType, info.numel);
-    if (byteLen > Integer.MAX_VALUE) {
-      throw new IllegalStateException("tensor bytes exceed int: " + name);
-    }
-    ByteBuffer payload = GgufDequant.littleEndianSlice(this.map, (int) abs, (int) byteLen);
-    byte[] packed = new byte[(int) byteLen];
+    ByteBuffer payload = this.payload(name, info);
+    byte[] packed = new byte[payload.remaining()];
     payload.get(packed);
     return new PackedWeight(packed, info.ggmlType, toJavaShape(info.dims()), info.numel);
   }
@@ -348,6 +386,36 @@ public final class GgufReader implements AutoCloseable, GgufTokenizerSource {
   public void close() {
     this.closed = true;
     this.map = CLOSED_MAP;
+    FileChannel open = this.channel;
+    if (open != null) {
+      try {
+        open.close();
+      } catch (IOException e) {
+        throw new UncheckedIOException("failed to close GGUF " + this.path, e);
+      }
+    }
+  }
+
+  private ByteBuffer payload(final String name, final TensorInfo info) {
+    long byteLen = GgufDequant.packedByteLength(info.ggmlType, info.numel);
+    if (byteLen > Integer.MAX_VALUE) {
+      throw new IllegalStateException("tensor bytes exceed int: " + name);
+    }
+    long abs = this.tensorDataBase + info.relativeOffset;
+    if (this.channel == null) {
+      if (abs > Integer.MAX_VALUE) {
+        throw new IllegalStateException("tensor offset exceeds payload range: " + name);
+      }
+      return GgufDequant.littleEndianSlice(this.map, (int) abs, (int) byteLen);
+    }
+    ByteBuffer dest = ByteBuffer.allocate((int) byteLen).order(ByteOrder.LITTLE_ENDIAN);
+    try {
+      ChannelBytes.readFully(this.channel, abs, dest);
+    } catch (IOException e) {
+      throw new UncheckedIOException("failed to read GGUF tensor " + name, e);
+    }
+    dest.flip();
+    return dest;
   }
 
   private void requireOpen() {

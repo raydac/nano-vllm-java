@@ -30,6 +30,7 @@ public final class OptionalModelAssumptions {
   private static final String GEMMA3_270M = "Gemma3-270M";
   private static final String GEMMA4_E2B_IT_QAT_MOBILE = "Gemma4-E2B-IT-QAT-Mobile";
   private static final String LFM2_5_2_6B_GGUF = "LFM2.5-2.6B-Q4_K_M.gguf";
+  private static final String ORNITH_1_5_9B_GGUF = "Ornith-1.5-9B-AD-IQ2_XXS-IQ1_M.gguf";
   private static final String GTE_SMALL_GGUF = "gte-small.Q2_K.gguf";
   private static final String MULTILINGUAL_E5_SMALL = "multilingual-e5-small";
   private static final String SMOLLM2_135M_INSTRUCT_ONNX = "SmolLM2-135M-Instruct-ONNX";
@@ -73,6 +74,13 @@ public final class OptionalModelAssumptions {
       findModel(GEMMA4_E2B_IT_QAT_MOBILE),
       "Gemma4-E2B-IT-QAT-Mobile",
       "models/download-gemma4-e2b-qat-mobile.sh");
+  }
+
+  public static Path requireOrnithQwen35Gguf() {
+    return require(
+      findModel(ORNITH_1_5_9B_GGUF),
+      "Ornith-1.5-9B GGUF",
+      "models/download-ornith-1.5-9b-gguf.sh");
   }
 
   public static Path requireLfm2Gguf() {

@@ -56,6 +56,59 @@ final class ModelBindingTest {
     return new ContainerCatalog(ModelSupport.Source.GGUF, "qwen3.gguf", "qwen3", meta, tensors);
   }
 
+  private static ContainerCatalog qwen35Catalog() {
+    Map<String, Object> meta = new LinkedHashMap<>();
+    meta.put("general.architecture", "qwen35");
+    meta.put("qwen35.embedding_length", 4096);
+    meta.put("qwen35.block_count", 2);
+    meta.put("qwen35.feed_forward_length", 12288);
+    meta.put("qwen35.attention.head_count", 16);
+    meta.put("qwen35.attention.head_count_kv", 4);
+    meta.put("qwen35.attention.key_length", 256);
+    meta.put("qwen35.context_length", 262144);
+    meta.put("qwen35.rope.freq_base", 10_000_000f);
+    meta.put("qwen35.rope.dimension_count", 64);
+    meta.put("qwen35.attention.layer_norm_rms_epsilon", 1e-6f);
+    meta.put("qwen35.ssm.conv_kernel", 4);
+    meta.put("qwen35.ssm.state_size", 128);
+    meta.put("qwen35.ssm.group_count", 16);
+    meta.put("qwen35.ssm.time_step_rank", 32);
+    meta.put("qwen35.ssm.inner_size", 4096);
+    meta.put("tokenizer.ggml.tokens", IntStream.range(0, 32).mapToObj(i -> "t" + i).toList());
+
+    Set<String> tensors = new LinkedHashSet<>();
+    tensors.add("token_embd.weight");
+    tensors.add("output_norm.weight");
+    tensors.add("output.weight");
+    tensors.addAll(List.of(
+      "blk.0.attn_norm.weight",
+      "blk.0.post_attention_norm.weight",
+      "blk.0.ffn_gate.weight",
+      "blk.0.ffn_up.weight",
+      "blk.0.ffn_down.weight",
+      "blk.0.attn_qkv.weight",
+      "blk.0.attn_gate.weight",
+      "blk.0.ssm_beta.weight",
+      "blk.0.ssm_alpha.weight",
+      "blk.0.ssm_conv1d.weight",
+      "blk.0.ssm_a",
+      "blk.0.ssm_dt.bias",
+      "blk.0.ssm_norm.weight",
+      "blk.0.ssm_out.weight",
+      "blk.1.attn_norm.weight",
+      "blk.1.post_attention_norm.weight",
+      "blk.1.ffn_gate.weight",
+      "blk.1.ffn_up.weight",
+      "blk.1.ffn_down.weight",
+      "blk.1.attn_q.weight",
+      "blk.1.attn_k.weight",
+      "blk.1.attn_v.weight",
+      "blk.1.attn_output.weight",
+      "blk.1.attn_q_norm.weight",
+      "blk.1.attn_k_norm.weight"));
+    return new ContainerCatalog(ModelSupport.Source.GGUF, "qwen35.gguf", "qwen35", meta, tensors);
+  }
+
   @Test
   void bindsQwen3GgufFromCatalogWithoutLoadingPayloads() {
     ContainerCatalog catalog = qwen3Catalog(2, true);
@@ -71,6 +124,30 @@ final class ModelBindingTest {
     assertTrue(bound.schema().expects("blk.0.attn_q_norm.weight"));
     assertEquals(WeightNames.ARCH_QWEN3, bound.processor().architectureId());
     assertFalse(bound.processor().isEmbedding());
+  }
+
+  @Test
+  void bindsQwen35GgufFromCatalogWithoutLoadingPayloads() {
+    ContainerCatalog catalog = qwen35Catalog();
+    ModelBinding.BoundModel bound = ModelBinding.bind(catalog);
+    assertEquals(WeightNames.ARCH_QWEN3_5, bound.selection().architectureId());
+    assertEquals(256, bound.config().headDim());
+    assertEquals(4096, bound.config().hiddenSize());
+    assertEquals(16, bound.config().numAttentionHeads());
+    assertEquals(4, bound.config().numKeyValueHeads());
+    assertFalse(bound.config().tieWordEmbeddings());
+    assertTrue(bound.config().isLinearAttentionLayer(0));
+    assertFalse(bound.config().isLinearAttentionLayer(1));
+    assertEquals(16, bound.config().qwen35().linearNumKeyHeads());
+    assertEquals(32, bound.config().qwen35().linearNumValueHeads());
+    assertEquals(128, bound.config().qwen35().linearKeyHeadDim());
+    assertEquals(128, bound.config().qwen35().linearValueHeadDim());
+    assertEquals(0.25f, bound.config().qwen35().partialRotaryFactor());
+    assertTrue(bound.schema().expects("blk.0.attn_qkv.weight"));
+    assertTrue(bound.schema().expects("blk.0.ssm_a"));
+    assertTrue(bound.schema().expects("blk.1.attn_q.weight"));
+    assertFalse(bound.schema().expects("blk.0.attn_q.weight"));
+    assertEquals(WeightNames.ARCH_QWEN3_5, bound.processor().architectureId());
   }
 
   @Test

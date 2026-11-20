@@ -42,6 +42,7 @@ public final class GatedDeltaNet {
   private final float queryScale;
   private final float normEps;
   private final int layerIndex;
+  private final boolean tiledValueHeads;
 
   /**
    * @param qkvWeight     {@code [2 * keyDim + valueDim, hidden]}
@@ -77,11 +78,53 @@ public final class GatedDeltaNet {
     final float normEps,
     final int layerIndex
   ) {
-    this.qkvProj = new Linear.Row(requireNonNull(qkvWeight, "qkvWeight"));
-    this.zProj = new Linear.Row(requireNonNull(zWeight, "zWeight"));
-    this.betaProj = new Linear.Row(requireNonNull(betaWeight, "betaWeight"));
-    this.alphaProj = new Linear.Row(requireNonNull(alphaWeight, "alphaWeight"));
-    this.outProj = new Linear.Row(requireNonNull(outWeight, "outWeight"));
+    this(
+      new Linear.Row(requireNonNull(qkvWeight, "qkvWeight")),
+      new Linear.Row(requireNonNull(zWeight, "zWeight")),
+      new Linear.Row(requireNonNull(betaWeight, "betaWeight")),
+      new Linear.Row(requireNonNull(alphaWeight, "alphaWeight")),
+      convWeight,
+      aLog,
+      dtBias,
+      normWeight,
+      new Linear.Row(requireNonNull(outWeight, "outWeight")),
+      numKeyHeads,
+      keyHeadDim,
+      numValueHeads,
+      valueHeadDim,
+      normEps,
+      layerIndex,
+      false);
+  }
+
+  /**
+   * @param tiledValueHeads GGUF stores value heads tiled, so head {@code h} reads key head
+   *                        {@code h % numKeyHeads}. Hugging Face grouping uses {@code h / headGroup}.
+   */
+  public GatedDeltaNet(
+    final Linear.Row qkvProj,
+    final Linear.Row zProj,
+    final Linear.Row betaProj,
+    final Linear.Row alphaProj,
+    final Tensor convWeight,
+    final Tensor aLog,
+    final Tensor dtBias,
+    final Tensor normWeight,
+    final Linear.Row outProj,
+    final int numKeyHeads,
+    final int keyHeadDim,
+    final int numValueHeads,
+    final int valueHeadDim,
+    final float normEps,
+    final int layerIndex,
+    final boolean tiledValueHeads
+  ) {
+    this.qkvProj = requireNonNull(qkvProj, "qkvProj");
+    this.zProj = requireNonNull(zProj, "zProj");
+    this.betaProj = requireNonNull(betaProj, "betaProj");
+    this.alphaProj = requireNonNull(alphaProj, "alphaProj");
+    this.outProj = requireNonNull(outProj, "outProj");
+    this.tiledValueHeads = tiledValueHeads;
     this.convKernel = kernelOf(requireNonNull(convWeight, "convWeight"));
     this.kernelSize = convWeight.ndim() == 3 ? convWeight.size(2) : convWeight.size(1);
     this.convDim = convWeight.size(0);
@@ -355,7 +398,7 @@ public final class GatedDeltaNet {
     int vDim = this.valueHeadDim;
     for (int t = start; t < end; t++) {
       for (int h = 0; h < this.numValueHeads; h++) {
-        int keyHead = h / this.headGroup;
+        int keyHead = this.tiledValueHeads ? h % this.numKeyHeads : h / this.headGroup;
         int qBase = (t * this.numKeyHeads + keyHead) * kDim;
         int vBase = (t * this.numValueHeads + h) * vDim;
         int sBase = (h * kDim) * vDim;

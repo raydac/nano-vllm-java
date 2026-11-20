@@ -47,7 +47,7 @@ public final class ModelSupport {
     Supported by this library:
       Chat from a Hugging Face folder (config.json + *.safetensors or *.onnx): qwen3, qwen3_5 (text; vision tower skipped), gemma3 / gemma3_text, \
     gemma4 (text / QAT mobile), llama
-      Chat from a GGUF file: qwen3, lfm2
+      Chat from a GGUF file: qwen3, qwen3_5 (text; architecture qwen35), lfm2
       Embeddings from a Hugging Face folder: bidirectional gemma3 text (EmbeddingGemma; safetensors plus 2_Dense and 3_Dense)
       Embeddings from GGUF or ONNX: bert encoder (bert / roberta / xlm-roberta)
       Speech from a Hugging Face folder (config.json + *.safetensors): whisper (openai/whisper-*)
@@ -594,10 +594,11 @@ public final class ModelSupport {
     String modelType = config == null ? id : config.modelType();
     List<String> architectures = config == null ? List.of() : config.architectures();
     boolean hfFolderOnlyChat = ARCH_GEMMA3.equals(id) || ARCH_LLAMA.equals(id);
-    if (ARCH_QWEN3_5.equals(id) && source != Source.HF_SAFETENSORS) {
+    if (ARCH_QWEN3_5.equals(id) && source == Source.ONNX) {
       throw unsupported(
-        ("Architecture '%s' loads from a Hugging Face folder (config.json + *.safetensors). "
-          + "The text decoder runs; the vision tower is skipped. GGUF and ONNX are not supported.")
+        ("Architecture '%s' loads from a Hugging Face folder (config.json + *.safetensors) or a "
+          + "GGUF file (general.architecture qwen35). The text decoder runs; the vision tower is "
+          + "skipped. ONNX is not supported.")
           .formatted(id),
         modelType,
         architectures);
@@ -613,7 +614,8 @@ public final class ModelSupport {
     if (hfFolderOnlyChat && source == Source.GGUF) {
       throw unsupported(
         ("Architecture '%s' loads from a Hugging Face folder (config.json + *.safetensors or "
-          + "*.onnx), not from GGUF. GGUF chat is qwen3 and lfm2; embeddings are the BERT encoder.")
+          +
+          "*.onnx), not from GGUF. GGUF chat is qwen3, qwen3_5, and lfm2; embeddings are the BERT encoder.")
           .formatted(id),
         modelType,
         architectures);
@@ -668,11 +670,11 @@ public final class ModelSupport {
     if (isQwen3Text(token)) {
       return Verdict.ok(ARCH_QWEN3, Kind.CHAT);
     }
-    if (token.equals("qwen3_5") || token.equals("qwen3_5_text")) {
+    if (token.equals("qwen3_5") || token.equals("qwen3_5_text") || token.equals("qwen35")) {
       return Verdict.ok(ARCH_QWEN3_5, Kind.CHAT);
     }
-    if (token.startsWith("qwen3_5") || token.startsWith("qwen3_next") ||
-      token.equals("qwen3next")) {
+    if (token.startsWith("qwen35") || token.startsWith("qwen3_5") || token.startsWith("qwen3_next")
+      || token.equals("qwen3next")) {
       return Verdict.rejected(
         "Qwen3.5 MoE / Qwen3-Next are not implemented. This library runs dense Qwen3.5 text "
           + "(model_type qwen3_5) and Qwen3.");

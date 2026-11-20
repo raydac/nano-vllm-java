@@ -3,6 +3,7 @@ package com.igormaznitsa.nanollvm.models.llmarch;
 import static com.igormaznitsa.nanollvm.models.internal.WeightNames.ARCH_BERT;
 import static com.igormaznitsa.nanollvm.models.internal.WeightNames.ARCH_LFM2;
 import static com.igormaznitsa.nanollvm.models.internal.WeightNames.ARCH_QWEN3;
+import static com.igormaznitsa.nanollvm.models.internal.WeightNames.ARCH_QWEN3_5;
 import static com.igormaznitsa.nanollvm.models.internal.WeightNames.GGUF_OUTPUT;
 import static java.util.Objects.requireNonNull;
 
@@ -80,6 +81,86 @@ final class GgufConfigs {
       null,
       null,
       null,
+      false
+    );
+  }
+
+  /**
+   * Qwen3.5 text GGUF {@code general.architecture=qwen35} → Hugging Face-shaped config.
+   * A layer with {@code attn_q.weight} is full attention; the rest are linear attention.
+   *
+   * @since 1.5.0
+   */
+  static Config.HfConfig qwen35(final ContainerCatalog catalog) {
+    requireNonNull(catalog, "catalog");
+    String prefix = metadataPrefix(catalog, "qwen35");
+    int hidden = catalog.metaInt(prefix + ".embedding_length", 0);
+    int layers = catalog.metaInt(prefix + ".block_count", 0);
+    int intermediate = catalog.metaInt(prefix + ".feed_forward_length", 0);
+    int heads = catalog.metaInt(prefix + ".attention.head_count", 0);
+    int kvHeads = catalog.metaInt(prefix + ".attention.head_count_kv", heads);
+    int headDim = resolveQwen3HeadDim(catalog, prefix);
+    int rotaryDim = catalog.metaInt(prefix + ".rope.dimension_count", 0);
+    int keyHeads = catalog.metaInt(prefix + ".ssm.group_count", 0);
+    int keyHeadDim = catalog.metaInt(prefix + ".ssm.state_size", 0);
+    int valueHeads = catalog.metaInt(prefix + ".ssm.time_step_rank", 0);
+    int valueInner = catalog.metaInt(prefix + ".ssm.inner_size", 0);
+    int convKernel = catalog.metaInt(prefix + ".ssm.conv_kernel", 4);
+    float rmsEps = resolveRmsEps(catalog, prefix);
+    float ropeTheta = catalog.metaFloat(prefix + ".rope.freq_base", 10_000_000f);
+    int context = catalog.metaInt(prefix + ".context_length", 262_144);
+    int vocab = resolveVocab(catalog, prefix);
+    int valueHeadDim = valueHeads > 0 && valueInner % valueHeads == 0 ? valueInner / valueHeads : 0;
+    if (hidden <= 0 || layers <= 0 || heads <= 0 || intermediate <= 0 || vocab <= 0
+      || headDim <= 0 || keyHeads <= 0 || keyHeadDim <= 0 || valueHeads <= 0 || valueHeadDim <= 0
+      || convKernel < 2 || rotaryDim <= 0 || rotaryDim > headDim || (rotaryDim & 1) != 0) {
+      throw new IllegalStateException(
+        "incomplete qwen35 GGUF metadata (hidden/layers/heads/ff/vocab/head_dim/ssm/rope)");
+    }
+    List<String> layerTypes = IntStream.range(0, layers)
+      .mapToObj(i -> catalog.hasTensor("blk." + i + ".attn_q.weight")
+        ? "full_attention"
+        : "linear_attention")
+      .toList();
+    return new Config.HfConfig(
+      vocab,
+      hidden,
+      intermediate,
+      layers,
+      heads,
+      kvHeads > 0 ? kvHeads : heads,
+      headDim,
+      context,
+      rmsEps,
+      "silu",
+      !catalog.hasTensor(GGUF_OUTPUT),
+      false,
+      ropeTheta,
+      null,
+      "float32",
+      ARCH_QWEN3_5,
+      List.of("Qwen3_5ForCausalLM"),
+      "silu",
+      0,
+      layerTypes,
+      10_000f,
+      0f,
+      0,
+      false,
+      false,
+      false,
+      false,
+      false,
+      null,
+      null,
+      null,
+      new Config.Qwen35Text(
+        convKernel,
+        keyHeadDim,
+        keyHeads,
+        valueHeads,
+        valueHeadDim,
+        (float) rotaryDim / headDim),
       false
     );
   }

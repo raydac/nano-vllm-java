@@ -88,6 +88,7 @@ public final class WeightSchema {
   public static WeightSchema forGguf(final String arch, final Config.HfConfig config) {
     return switch (arch) {
       case ARCH_QWEN3 -> qwen3Gguf(config);
+      case ARCH_QWEN3_5 -> qwen35Gguf(config);
       case ARCH_LFM2 -> lfm2(config);
       case ARCH_BERT -> bert(config);
       default -> throw new IllegalArgumentException("unsupported GGUF architecture '" + arch + "'");
@@ -217,6 +218,45 @@ public final class WeightSchema {
       expected.add(blk + "ffn_gate.weight");
       expected.add(blk + "ffn_up.weight");
       expected.add(blk + "ffn_down.weight");
+    }
+    if (config.tieWordEmbeddings()) {
+      optional.add(GGUF_OUTPUT);
+    } else {
+      expected.add(GGUF_OUTPUT);
+    }
+    return new WeightSchema(Map.of(), expected, optional);
+  }
+
+  public static WeightSchema qwen35Gguf(final Config.HfConfig config) {
+    Set<String> expected = new LinkedHashSet<>();
+    Set<String> optional = new LinkedHashSet<>();
+    expected.add(GGUF_TOKEN_EMBD);
+    expected.add(GGUF_OUTPUT_NORM);
+    for (int i = 0; i < config.numHiddenLayers(); i++) {
+      String blk = ggufBlk(i);
+      expected.add(blk + "attn_norm.weight");
+      expected.add(blk + "post_attention_norm.weight");
+      expected.add(blk + "ffn_gate.weight");
+      expected.add(blk + "ffn_up.weight");
+      expected.add(blk + "ffn_down.weight");
+      if (config.isLinearAttentionLayer(i)) {
+        expected.add(blk + "attn_qkv.weight");
+        expected.add(blk + "attn_gate.weight");
+        expected.add(blk + "ssm_beta.weight");
+        expected.add(blk + "ssm_alpha.weight");
+        expected.add(blk + "ssm_conv1d.weight");
+        expected.add(blk + "ssm_a");
+        expected.add(blk + "ssm_dt.bias");
+        expected.add(blk + "ssm_norm.weight");
+        expected.add(blk + "ssm_out.weight");
+      } else {
+        expected.add(blk + "attn_q.weight");
+        expected.add(blk + "attn_k.weight");
+        expected.add(blk + "attn_v.weight");
+        expected.add(blk + "attn_output.weight");
+        expected.add(blk + "attn_q_norm.weight");
+        expected.add(blk + "attn_k_norm.weight");
+      }
     }
     if (config.tieWordEmbeddings()) {
       optional.add(GGUF_OUTPUT);

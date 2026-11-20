@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Development snapshot after the **1.4.0** public release.
 
 ### Added
+- `./models/download-ornith-1.5-9b-gguf.sh` downloads the smallest Ornith-1.5-9B GGUF (`Ornith-1.5-9B-AD-IQ2_XXS-IQ1_M.gguf`, about 2.8 GB) into `models/`. That file loads as Qwen3.5 text chat, and the interactive example lists it with the thinking scratchpad on stderr, a short system cue that does not include a blank think block, and a short reply cap. The vision projector is not included. A Qwen3.5 ONNX folder is still refused.
 - `./models/download-qwen3-0.6b-gguf.sh` downloads the Qwen3-0.6B Q8_0 GGUF into `models/Qwen3-0.6B-Q8_0.gguf`. The safetensors folder script is unchanged.
 - RAG can cut each document with a splitter you supply. `RagFactory.builder().splitter(...)` replaces the built-in chunker after extract and preprocess. Omit it and documents are cut as before. `RagSplitter.standard` is that built-in cutter.
 - EmbeddingGemma (`google/embeddinggemma-300m`) loads as a sentence embedding. `./models/download-embeddinggemma-300m.sh` fetches the folder, and the interactive example lists it with the other embedding models. The vector is L2-normalized. Put the checkpoint's query or document prefix on the text yourself. A causal Gemma 3 checkpoint still chats.

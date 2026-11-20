@@ -80,6 +80,8 @@ public final class Example {
 
   private static final int MAX_NEW_TOKENS = 768;
   private static final int COMPACT_DEMO_MAX_NEW_TOKENS = 256;
+  private static final int HEAVY_DEMO_MAX_NEW_TOKENS = 128;
+  private static final int HEAVY_DEMO_HIDDEN = 3072;
   private static final int RAG_MAX_TOKENS_DEFAULT = 768;
   private static final int RAG_MAX_TOKENS_TURN_BASED = 128;
   private static final int RAG_TOP_K_DEFAULT = 4;
@@ -1165,7 +1167,7 @@ public final class Example {
         in,
         console,
         "?> ",
-        chat::send,
+        user -> thisTurn(llm, console, chat::send, user),
         chat::clear,
         "(conversation cleared)",
         null);
@@ -1288,7 +1290,9 @@ public final class Example {
       .maxModelLen(2048)
       .listen(status);
 
-    String system = SampleChatPrompts.forDemo(model.architectureName(), model.tokenizer());
+    String system = isHeavyDemoModel(model)
+      ? SampleChatPrompts.forHeavyDemo(model.architectureName(), model.tokenizer())
+      : SampleChatPrompts.forDemo(model.architectureName(), model.tokenizer());
     List<LlmAdvisor> advisors = advisorsForCount(advisorCount);
     if (!advisors.isEmpty()) {
       builder.advisors(LlmAdvisorMixer.defaults(), advisors);
@@ -1298,6 +1302,13 @@ public final class Example {
         "Advisors: " + advisors.stream().map(LlmAdvisor::name).collect(joining(", ")) + ".");
     } else {
       console.printlnInfo("Advisors: off.");
+    }
+    if (isHeavyDemoModel(model)) {
+      console.printlnInfo(
+        "Large CPU model: thinking is on. The scratchpad prints as thinking> on stderr, "
+          + "then the answer on stdout. Each reply is capped at "
+          + HEAVY_DEMO_MAX_NEW_TOKENS
+          + " tokens. The first token is the slow part.");
     }
 
     return builder.systemPrompt(system).build();
@@ -1315,6 +1326,9 @@ public final class Example {
       SampleChatPrompts.samplingForDemo(llm.tokenizer(), maxNewTokens(llm)));
     chat.emitDebugPrompts(debug);
     applyTurnBasedRecovery(chat, llm.tokenizer().isTurnBasedChat());
+    if (isHeavyDemoModel(llm) && llm.tokenizer().invitesThinking()) {
+      chat.enableThinking(true);
+    }
     return chat;
   }
 
@@ -1362,7 +1376,7 @@ public final class Example {
       in,
       console,
       "rag?> ",
-      rag::send,
+      user -> thisTurn(llm, console, rag::send, user),
       rag::clear,
       "(conversation cleared; RAG index kept)",
       rag::lastHits);
@@ -1530,6 +1544,10 @@ public final class Example {
         BundledModels.LFM2_5_2_6B_GGUF,
         "Run models/download-lfm2.5-2.6b-gguf.sh"),
       choice(
+        "Ornith-1.5-9B IQ2 (chat, gguf, ~16g heap)",
+        BundledModels.ORNITH_1_5_9B_GGUF,
+        "Run models/download-ornith-1.5-9b-gguf.sh"),
+      choice(
         "SmolLM2-135M-Instruct-ONNX (compact onnx demo)",
         BundledModels.SMOLLM2_135M_INSTRUCT_ONNX,
         "Run models/download-smollm2-135m-instruct-onnx.sh"),
@@ -1637,6 +1655,7 @@ public final class Example {
     console.println("  ./models/download-gemma3-270m.sh      (HF license + HF_TOKEN)");
     console.println("  ./models/download-gemma4-e2b-qat-mobile.sh  (~2.3GB, Apache 2.0)");
     console.println("  ./models/download-lfm2.5-2.6b-gguf.sh");
+    console.println("  ./models/download-ornith-1.5-9b-gguf.sh  (Qwen3.5 text, ~2.8GB)");
     console.println("  ./models/download-smollm2-135m-instruct-onnx.sh  (compact onnx demo)");
     console.println("  ./models/download-tiny-llm-onnx.sh");
     console.println("  ./models/download-gte-small-gguf.sh    (embeddings)");
@@ -1682,7 +1701,7 @@ public final class Example {
     console.printlnInfo("Loading model from " + path);
     console.printlnInfo(
       "Architecture auto-detects from config.json / GGUF metadata "
-        + "(override: -Dnanollvm.arch=qwen3|gemma3|llama|lfm2|bert|whisper|piper).");
+        + "(override: -Dnanollvm.arch=qwen3|qwen3_5|gemma3|llama|lfm2|bert|whisper|piper).");
     console.printlnInfo(KernelBackend.summaryLine());
     console.printlnInfo(
       "CPU matmul threads: " + Runtime.getRuntime().availableProcessors()
@@ -1697,6 +1716,13 @@ public final class Example {
       console.printlnInfo(
         "SmolLM2 Instruct is a compact ONNX demo (~135M) — useful to smoke-test ONNX chat, "
           + "weaker dialog than Qwen3 / Gemma3.");
+    }
+    if (isOrnithPath(path)) {
+      console.printlnInfo(
+        "Ornith-1.5-9B is Qwen3.5 text in one GGUF file (~2.8GB, packed). "
+          + "The vision projector is not in this file. Chat uses the 16 GB heap. "
+          + "Thinking prints as thinking> on stderr before the answer. "
+          + "Each reply is capped so a turn can finish on CPU.");
     }
     if (ModelSupport.isEmbeddingCheckpoint(path)) {
       console.printlnInfo(embeddingLoadHint(path));
@@ -1731,12 +1757,32 @@ public final class Example {
     };
   }
 
+  private static ChatReply thisTurn(
+    final LLM llm,
+    final OrderedConsole console,
+    final Function<String, ChatReply> send,
+    final String user
+  ) {
+    if (isHeavyDemoModel(llm)) {
+      console.printlnInfo(
+        "Generating a reply with thinking on… scratchpad prints as thinking> on stderr. "
+          + "The first token is the slow part on this model.");
+    }
+    return send.apply(user);
+  }
+
   private static int maxNewTokens(final LLM llm) {
+    if (isHeavyDemoModel(llm)) {
+      return HEAVY_DEMO_MAX_NEW_TOKENS;
+    }
     int maxNew = Math.clamp(llm.config().maxModelLen() / 2, 32, MAX_NEW_TOKENS);
     return isCompactDemoModel(llm) ? Math.min(maxNew, COMPACT_DEMO_MAX_NEW_TOKENS) : maxNew;
   }
 
   private static int ragAnswerTokens(final LLM llm, final boolean turnBased) {
+    if (isHeavyDemoModel(llm)) {
+      return HEAVY_DEMO_MAX_NEW_TOKENS;
+    }
     int cap = turnBased ? RAG_MAX_TOKENS_TURN_BASED : RAG_MAX_TOKENS_DEFAULT;
     int maxTokens = Math.clamp(llm.config().maxModelLen() / 4, 32, cap);
     return isCompactDemoModel(llm) ? Math.min(maxTokens, COMPACT_DEMO_MAX_NEW_TOKENS) : maxTokens;
@@ -1775,6 +1821,18 @@ public final class Example {
     return layers <= 32 && hiddenSize <= 768;
   }
 
+  private static boolean isHeavyDemoModel(final LLM llm) {
+    return isHeavyDemoModel(llm.config().hfConfig().hiddenSize());
+  }
+
+  private static boolean isHeavyDemoModel(final LlmModel model) {
+    return isHeavyDemoModel(model.hfConfig().hiddenSize());
+  }
+
+  private static boolean isHeavyDemoModel(final int hiddenSize) {
+    return hiddenSize >= HEAVY_DEMO_HIDDEN;
+  }
+
   private static boolean isGgufPath(final Path path) {
     return path.toString().toLowerCase(Locale.ROOT).endsWith(".gguf");
   }
@@ -1785,6 +1843,10 @@ public final class Example {
 
   private static boolean isSmolLm2Path(final Path path) {
     return path.toString().toLowerCase(Locale.ROOT).contains("smollm2");
+  }
+
+  private static boolean isOrnithPath(final Path path) {
+    return path.toString().toLowerCase(Locale.ROOT).contains("ornith");
   }
 
   private static String embeddingLoadHint(final Path path) {

@@ -195,6 +195,7 @@ class ModelSupportTest {
   @Test
   void acceptsGgufQwen3AndStillRejectsLlamaGguf() {
     assertEquals(WeightNames.ARCH_QWEN3, ModelSupport.requireGguf("qwen3").architectureId());
+    assertEquals(WeightNames.ARCH_QWEN3_5, ModelSupport.requireGguf("qwen35").architectureId());
 
     UnsupportedModelException llama = assertThrows(
       UnsupportedModelException.class, () -> ModelSupport.requireGguf("llama"));

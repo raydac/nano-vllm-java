@@ -40,6 +40,8 @@ public final class BundledModels {
     DEFAULT_MODELS_DIR + "/Gemma4-E2B-IT-QAT-Mobile";
   public static final String LFM2_5_2_6B_GGUF =
     DEFAULT_MODELS_DIR + "/LFM2.5-2.6B-Q4_K_M.gguf";
+  public static final String ORNITH_1_5_9B_GGUF =
+    DEFAULT_MODELS_DIR + "/Ornith-1.5-9B-AD-IQ2_XXS-IQ1_M.gguf";
   /**
    * Bundled gte-small GGUF embedding checkpoint under {@link #DEFAULT_MODELS_DIR}.
    *
@@ -327,6 +329,7 @@ public final class BundledModels {
       case "Gemma3-270M" -> "models/download-gemma3-270m.sh (HF license + HF_TOKEN)";
       case "Gemma4-E2B-IT-QAT-Mobile" -> "models/download-gemma4-e2b-qat-mobile.sh";
       case "LFM2.5-2.6B-Q4_K_M.gguf" -> "models/download-lfm2.5-2.6b-gguf.sh";
+      case "Ornith-1.5-9B-AD-IQ2_XXS-IQ1_M.gguf" -> "models/download-ornith-1.5-9b-gguf.sh";
       case "gte-small.Q2_K.gguf" -> "models/download-gte-small-gguf.sh";
       case "multilingual-e5-small" -> "models/download-multilingual-e5-small.sh";
       case "xlm-roberta-base" -> "models/download-xlm-roberta-base.sh";

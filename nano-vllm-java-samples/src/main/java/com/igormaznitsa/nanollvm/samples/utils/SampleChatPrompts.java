@@ -83,6 +83,18 @@ public final class SampleChatPrompts {
   }
 
   /**
+   * System text for a large CPU chat model. Think-vocab models get {@link #PLAIN_ASSISTANT_SYSTEM}
+   * so the prompt does not contain a blank {@code <think></think>} example. Others get
+   * {@link #forDemo(String, Tokenizer)}.
+   */
+  public static String forHeavyDemo(final String architectureName, final Tokenizer tokenizer) {
+    if (tokenizer != null && tokenizer.invitesThinking()) {
+      return PLAIN_ASSISTANT_SYSTEM;
+    }
+    return forDemo(architectureName, tokenizer);
+  }
+
+  /**
    * Sampling knobs for demos: turn-based chat uses top-k {@link #TURN_BASED_TOP_K}; others leave
    * top-k off.
    */
