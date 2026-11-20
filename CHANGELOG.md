@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Development snapshot after the **1.4.0** public release.
 
 ### Added
+- `./models/download-qwen3-0.6b-gguf.sh` downloads the Qwen3-0.6B Q8_0 GGUF into `models/Qwen3-0.6B-Q8_0.gguf`. The safetensors folder script is unchanged.
 - RAG can cut each document with a splitter you supply. `RagFactory.builder().splitter(...)` replaces the built-in chunker after extract and preprocess. Omit it and documents are cut as before. `RagSplitter.standard` is that built-in cutter.
 - EmbeddingGemma (`google/embeddinggemma-300m`) loads as a sentence embedding. `./models/download-embeddinggemma-300m.sh` fetches the folder, and the interactive example lists it with the other embedding models. The vector is L2-normalized. Put the checkpoint's query or document prefix on the text yourself. A causal Gemma 3 checkpoint still chats.
 - `llm.chat(session)` continues a dialog you already opened on that engine. `llm.chat()` still starts a new one. A session from another engine is rejected.

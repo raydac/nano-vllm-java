@@ -20,9 +20,17 @@ models\download-qwen3-0.6b.cmd
 
 Creates `models/Qwen3-0.6B/` (~1.5GB). Used by default when no model path is set.
 
-Qwen3 also loads from a **single `.gguf`** (`general.architecture=qwen3`, **since 1.1.0**). There is no download
-script for that crate — place a file yourself (for example
-[Qwen/Qwen3-0.6B-GGUF](https://huggingface.co/Qwen/Qwen3-0.6B-GGUF)) and pass its path to `LlmModelFactory.make`.
+Qwen3 also loads from a **single `.gguf`** (`general.architecture=qwen3`). The script fetches the Q8_0 file from
+[Qwen/Qwen3-0.6B-GGUF](https://huggingface.co/Qwen/Qwen3-0.6B-GGUF) (Apache 2.0, not gated, ~570MB):
+
+```bash
+./models/download-qwen3-0.6b-gguf.sh
+```
+
+Windows: `.\models\download-qwen3-0.6b-gguf.ps1` or `models\download-qwen3-0.6b-gguf.cmd`.
+
+Creates `models/Qwen3-0.6B-Q8_0.gguf`. Pass that path to `LlmModelFactory.make`. Weights stay packed until a matmul
+dequantizes a row.
 
 ## Jeff-Qwen3.5-0.8B (optional)
 

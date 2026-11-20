@@ -121,7 +121,7 @@ public record LlmInImage(
     Map<String, Float> copied = new LinkedHashMap<>();
     for (Map.Entry<String, Float> entry : floors.entrySet()) {
       String name = requireNonNull(entry.getKey(), "class name").strip();
-      Float floor = requireNonNull(entry.getValue(), "minProbability");
+      float floor = requireNonNull(entry.getValue(), "minProbability");
       if (name.isEmpty()) {
         throw new IllegalArgumentException("class name must not be blank");
       }

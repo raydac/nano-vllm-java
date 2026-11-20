@@ -1317,10 +1317,10 @@ and **GGML-typed weight blocks** (often quantized). This engine supports **GGUF 
 Load is three layers for every container: **transport** opens the file or folder (`GgufTransport`, `SafetensorsTransport`, `OnnxTransport`) and reports a catalog (metadata + tensor names). **Architecture processing** (`ArchitectureProcessor`) then decodes the family (`qwen3` / `qwen3_5` / `gemma3` / `gemma4` / `llama` / `lfm2` / `bert`). Chat families share a causal template (`CausalArchitecture`: Hugging Face bind by default, required `createCausal`); BERT uses `EmbeddingArchitecture`. Processors bind config + schema, fill weights, and build the graph. Gemma 4 still overrides fill (QAT safetensors only) and LFM2 overrides bind/fill (GGUF only) — they are not subclasses of Gemma 3 or of each other. `qwen3_5` is Hugging Face safetensors text only. Unsupported families (Qwen2, Qwen3-Next, Qwen3.5 MoE, Gemma/Llama GGUF, other MoE, VL) still fail before weights are copied, with
 `ModelSupport.CATALOG`.
 
-There is **no** in-repo download for a Qwen3 GGUF. Place any `general.architecture=qwen3` file yourself (for example
-from [Qwen/Qwen3-0.6B-GGUF](https://huggingface.co/Qwen/Qwen3-0.6B-GGUF)). The script
-`models/download-qwen3-0.6b.sh` still fetches the Hugging Face **safetensors folder**. LFM2 GGUF does have a script
-(`models/download-lfm2.5-2.6b-gguf.sh`).
+`models/download-qwen3-0.6b-gguf.sh` fetches `Qwen3-0.6B-Q8_0.gguf` from
+[Qwen/Qwen3-0.6B-GGUF](https://huggingface.co/Qwen/Qwen3-0.6B-GGUF) (`general.architecture=qwen3`, ~570MB, not gated).
+`models/download-qwen3-0.6b.sh` still fetches the Hugging Face **safetensors folder**. LFM2 GGUF is
+`models/download-lfm2.5-2.6b-gguf.sh`.
 
 For causal GGUF chat it keeps weights **packed** in RAM by default and **dequantizes rows/tiles during matmul and embedding**.
 Each `Linear` / LM-head binds a `LinearKernel` at construction (`dense-f32` with decode-1, or packed with a
@@ -1337,8 +1337,8 @@ only when a range starts mid-block).
 | **Late unpack** | `LLM.Builder.allowUnpackParameters()` on a packed model | Materializes float32; **releases packed payloads** when no other engine still holds them |
 
 ```java
-// Qwen3 chat GGUF (since 1.1.0) — bring your own file; no models/download-qwen3-*.gguf script
-Path qwen3Gguf = Path.of("/opt/models/qwen3.gguf");
+// Qwen3 chat GGUF — models/download-qwen3-0.6b-gguf.sh
+Path qwen3Gguf = Path.of("models/Qwen3-0.6B-Q8_0.gguf");
 try (LlmModel model = LlmModelFactory.make(qwen3Gguf);
      LLM llm = LLM.builder(model).build()) {
   String answer = llm.chat(256).send("Hello").answer();
@@ -5023,7 +5023,7 @@ You do not need every item. Prefer the path that matches what felt foggy while r
 | [Safetensors documentation](https://huggingface.co/docs/safetensors) · [format notes](https://github.com/safetensors/safetensors) | Named tensors + dtype payload without pickle — HF folder path in this port. | ch. 7 |
 | [ONNX](https://onnx.ai/) · [SmolLM2-135M-Instruct-ONNX](https://huggingface.co/onnx-community/SmolLM2-135M-Instruct-ONNX) | Tier A initializer import (no ORT) — Llama / ChatML demos **since 1.1.0**. | ch. **7c** |
 | [GGUF format notes (ggml)](https://github.com/ggml-org/ggml/blob/master/docs/gguf.md) | Single-file metadata + GGML quants — Qwen3 / LFM2 chat and BERT embedding loads. | ch. 7a, 7b |
-| [Qwen3-0.6B-GGUF](https://huggingface.co/Qwen/Qwen3-0.6B-GGUF) | Example Qwen3 GGUF crate (`general.architecture=qwen3`); not downloaded by this repo’s scripts. | ch. 7a |
+| [Qwen3-0.6B-GGUF](https://huggingface.co/Qwen/Qwen3-0.6B-GGUF) | Qwen3 GGUF (`general.architecture=qwen3`). `models/download-qwen3-0.6b-gguf.sh` fetches `Qwen3-0.6B-Q8_0.gguf`. | ch. 7a |
 | [Liquid LFM2 overview](https://www.liquid.ai/blog/liquid-foundation-models-v2-our-second-series-of-generative-ai-models) · [LFM2.5-2.6B-GGUF](https://huggingface.co/LiquidAI/LFM2.5-2.6B-GGUF) | Hybrid short-conv + GQA architecture this GGUF chat path also targets. | ch. 7a |
 
 ### D. Attention variants and positional math used here

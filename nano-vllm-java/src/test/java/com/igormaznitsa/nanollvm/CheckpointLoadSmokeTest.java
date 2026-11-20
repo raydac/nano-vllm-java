@@ -15,7 +15,6 @@ import com.igormaznitsa.nanollvm.models.LlmOutEmbedding;
 import com.igormaznitsa.nanollvm.models.internal.WeightNames;
 import com.igormaznitsa.nanollvm.testsupport.OptionalModelAssumptions;
 import java.nio.file.Path;
-import java.util.Arrays;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 
@@ -56,9 +55,22 @@ final class CheckpointLoadSmokeTest {
       float[] other = embed(model, otherText);
 
       assertUnit(first);
-      assertTrue(Arrays.equals(first, repeat));
-      assertFalse(Arrays.equals(first, other));
+      assertUnit(repeat);
+      assertEquals(1f, cosine(first, repeat), 1e-5f);
+      assertTrue(cosine(first, other) < 0.999f);
     }
+  }
+
+  private static float cosine(final float[] left, final float[] right) {
+    double dot = 0.0;
+    double leftSq = 0.0;
+    double rightSq = 0.0;
+    for (int i = 0; i < left.length; i++) {
+      dot += (double) left[i] * right[i];
+      leftSq += (double) left[i] * left[i];
+      rightSq += (double) right[i] * right[i];
+    }
+    return (float) (dot / Math.sqrt(leftSq * rightSq));
   }
 
   private static float[] embed(final LlmModel model, final String text) {

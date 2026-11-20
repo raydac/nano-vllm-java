@@ -153,7 +153,7 @@ public final class OptionalModelAssumptions {
     return require(
       findGgufArchitecture(WeightNames.ARCH_QWEN3),
       "Qwen3 GGUF",
-      "place a Qwen3 .gguf under models/ (see models/README.md; no download script)");
+      "models/download-qwen3-0.6b-gguf.sh");
   }
 
   public static Path requireYoloNano(final String relativePath) {
