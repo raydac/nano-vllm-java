@@ -35,6 +35,11 @@ public record LlmInTokenIds(int[] tokenIds) implements LlmInput {
     return new LlmInTokenIds(tokenIds);
   }
 
+  /**
+   * Copy of the token ids. Changing the returned array does not change this input.
+   *
+   * @return non-empty ids
+   */
   @Override
   public int[] tokenIds() {
     return this.tokenIds.clone();

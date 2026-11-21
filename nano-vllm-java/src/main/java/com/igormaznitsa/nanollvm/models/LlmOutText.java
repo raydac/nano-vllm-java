@@ -17,6 +17,11 @@ public record LlmOutText(String text) implements LlmOutput {
     requireNonNull(text, "text");
   }
 
+  /**
+   * {@inheritDoc}
+   *
+   * @return {@link LlmModality#TEXT}
+   */
   @Override
   public LlmModality modality() {
     return LlmModality.TEXT;

@@ -23,11 +23,21 @@ public record LlmOutEmbedding(float[] vector) implements LlmOutput {
     vector = vector.clone();
   }
 
+  /**
+   * Copy of the embedding. Changing the returned array does not change this result.
+   *
+   * @return dense floats; never {@code null} or empty
+   */
   @Override
   public float[] vector() {
     return this.vector.clone();
   }
 
+  /**
+   * {@inheritDoc}
+   *
+   * @return {@link LlmModality#EMBEDDING}
+   */
   @Override
   public LlmModality modality() {
     return LlmModality.EMBEDDING;

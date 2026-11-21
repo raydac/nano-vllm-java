@@ -8,6 +8,13 @@ import java.util.List;
  * {@link HybridRagIndex}. Implement this interface for another ranking and pass that
  * object to {@link com.igormaznitsa.nanollvm.llm.LLM#rag(RagIndex)}.
  *
+ * <pre>{@code
+ * RagIndex mine = new MyIndex(passages);
+ * List<RagHit> hits = mine.retrieve("capital of France", 3);
+ * String answer = llm.rag(mine).topK(3).ask("What is the capital of France?");
+ * RagIndex fused = HybridRagIndex.of(mine, preparedRag);
+ * }</pre>
+ *
  * <p>Implementations used with library sessions should be safe to share across threads.
  * {@link #retrieve} must not return {@code null}; prefer an unmodifiable list (empty when no hits).
  * Dense/hybrid indexes that call an embedding {@link com.igormaznitsa.nanollvm.models.LlmModel}

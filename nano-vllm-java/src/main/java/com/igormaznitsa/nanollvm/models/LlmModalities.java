@@ -227,11 +227,21 @@ public record LlmModalities(Set<LlmModality> input, Set<LlmModality> output) {
     return side.isEmpty() ? "none" : side.stream().map(LlmModality::wireName).collect(joining("+"));
   }
 
+  /**
+   * Content types the checkpoint consumes. The returned set is a copy.
+   *
+   * @return never {@code null}
+   */
   @Override
   public Set<LlmModality> input() {
     return Set.copyOf(this.input);
   }
 
+  /**
+   * Content types the checkpoint produces. The returned set is a copy.
+   *
+   * @return never {@code null}; empty when the checkpoint declares none
+   */
   @Override
   public Set<LlmModality> output() {
     return Set.copyOf(this.output);

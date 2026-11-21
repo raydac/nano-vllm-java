@@ -46,6 +46,9 @@ import java.util.function.Predicate;
  *       message, then shows the reply that follows the last result.</li>
  *   <li><b>Fewer remembered turns</b> — {@link #maxHistoryMessages(int)} (process default:
  *       {@link ResourceLimits#maxHistoryMessages()})</li>
+ *   <li><b>Leave some turns out of the transcript or out of the model prompt</b> —
+ *       {@link #filter(ChatMessageFilter...)}; each filter returns a {@link ChatAdmission},
+ *       and every filter must allow a destination</li>
  *   <li><b>Retry blank / garbage answers</b> — {@link #recoverUnusableAnswers(boolean)} (off by default)</li>
  *   <li><b>See the exact prompt sent to the model</b> — {@link #emitDebugPrompts(boolean)} (off by default)</li>
  * </ul>
@@ -58,7 +61,7 @@ import java.util.function.Predicate;
 public final class ChatSession {
 
   private final LLM llm;
-  private final List<ChatMessage> history;
+  private final ChatTranscript transcript = new ChatTranscript();
   private SamplingParams samplingParams;
   private Duration timeout = Duration.ZERO;
   private LlmListener sessionListener = LlmListeners.silent();
@@ -100,7 +103,7 @@ public final class ChatSession {
   public ChatSession(final LLM llm, final SamplingParams samplingParams) {
     this.llm = requireNonNull(llm, "llm");
     this.samplingParams = requireNonNull(samplingParams, "samplingParams");
-    this.history = new ArrayList<>(llm.newConversation());
+    this.transcript.addUnfiltered(llm.newConversation());
     this.bindListener();
   }
 
@@ -153,6 +156,8 @@ public final class ChatSession {
 
   /**
    * Appends few-shot turns after the engine system seed, then trims to the history cap.
+   * Registered {@link #filter}s admit each message. A message both destinations reject is not
+   * stored.
    *
    * @param messages seed turns; must not be {@code null} (elements must be non-null and non-blank)
    * @return {@code this} for fluent configuration
@@ -166,6 +171,8 @@ public final class ChatSession {
 
   /**
    * Appends few-shot turns after the engine system seed, then trims to the history cap.
+   * Registered {@link #filter}s admit each message. A message both destinations reject is not
+   * stored.
    *
    * @param messages seed turns; must not be {@code null} (elements must be non-null and non-blank)
    * @return {@code this} for fluent configuration
@@ -179,9 +186,44 @@ public final class ChatSession {
       if (message.content().isBlank()) {
         throw new IllegalArgumentException("seed message content must not be blank");
       }
-      this.history.add(message);
+      this.transcript.add(message);
     }
     this.trimHistoryToCap();
+    return this;
+  }
+
+  /**
+   * Registers filters consulted when a message is added and again at the start of the next
+   * {@link #send}. A message stays in {@link #history()} only when every filter keeps it, and
+   * it is sent to the model only when every filter sends it. With no filter, both stay open.
+   * Calling this again adds filters; it does not replace the ones already registered.
+   *
+   * <pre>{@code
+   * ChatSession session = llm.chat().filter(
+   *     message -> message.content().contains("secret")
+   *         ? ChatAdmission.neither()
+   *         : ChatAdmission.both(),
+   *     message -> message.role() == ChatRole.SYSTEM
+   *         ? ChatAdmission.historyOnly()
+   *         : ChatAdmission.both());
+   * session.send("What is 2+2?");
+   * }</pre>
+   *
+   * @param filters one or more admissions; must not be {@code null} or empty, and no element
+   *                may be {@code null}
+   * @return {@code this} for fluent configuration
+   * @throws NullPointerException     if {@code filters} or an element is {@code null}
+   * @throws IllegalArgumentException if {@code filters} is empty
+   * @since 1.5.0
+   */
+  public ChatSession filter(final ChatMessageFilter... filters) {
+    requireNonNull(filters, "filters");
+    if (filters.length == 0) {
+      throw new IllegalArgumentException("filters must not be empty");
+    }
+    for (ChatMessageFilter filter : filters) {
+      this.transcript.addFilter(requireNonNull(filter, "filter"));
+    }
     return this;
   }
 
@@ -426,33 +468,40 @@ public final class ChatSession {
   }
 
   /**
-   * Snapshot of the conversation so far (system seed plus user / assistant turns).
+   * Messages the filters still keep in the transcript, in conversation order. A message admitted
+   * as {@link ChatAdmission#modelOnly()} is absent here and can still be sent to the model.
+   * Messages already stored are reconsidered at the start of the next {@link #send}.
    *
    * @return an unmodifiable copy; mutations require {@link #send} / {@link #clear}
    */
   public List<ChatMessage> history() {
-    return List.copyOf(this.history);
+    return this.transcript.history();
   }
 
   /**
-   * Drops user/assistant turns and reseeds from {@link LLM#newConversation()} (keeps sampling,
-   * timeout, and listeners).
+   * Drops the transcript and reseeds the engine system prompt. Registered {@link #filter}s admit
+   * that seed. Sampling, timeout, listeners, and filters stay.
    */
   public void clear() {
-    this.history.clear();
-    this.history.addAll(this.llm.newConversation());
+    this.transcript.clear();
+    for (ChatMessage message : this.llm.newConversation()) {
+      this.transcript.add(message);
+    }
     this.tokenizedBlocks = List.of();
   }
 
   /**
    * Appends {@code userText} to history, runs advisors when configured, generates a reply, and
-   * appends the assistant answer to history.
+   * appends the assistant answer to history. Registered {@link #filter}s admit the user phrase,
+   * the assistant answer, and messages already stored. The visible {@link ChatReply#answer()} is
+   * still returned when the assistant message itself is left out of the transcript.
    *
    * @param userText non-blank user turn
    * @return finished {@link ChatReply}: {@code answer} for the user, optional {@code thinking},
    * {@code thinkOpen == false}, and measured {@code stats}
    * @throws IllegalArgumentException                                          if {@code userText} is blank after strip
    * @throws NullPointerException                                              if {@code userText} is {@code null}
+   * @throws IllegalStateException                                             if filters leave the model prompt empty
    * @throws com.igormaznitsa.nanollvm.exceptions.GenerationCancelledException if {@link LLM#cancel()} fires
    * @throws com.igormaznitsa.nanollvm.exceptions.GenerationTimeoutException   if the session timeout elapses
    */
@@ -482,13 +531,15 @@ public final class ChatSession {
 
   /**
    * Stores {@code historyUserText} in history while generating from {@code modelUserText}
-   * (RAG: short visible history, context-augmented model turn).
+   * (RAG: short visible history, context-augmented model turn). {@link #filter}s admit the stored
+   * text. When they also send it to the model, the template uses {@code modelUserText}.
    *
    * @param historyUserText text recorded in {@link #history()}
    * @param modelUserText   text used in the chat template for this generate
    * @return finished {@link ChatReply}: {@code answer} for the user, optional {@code thinking},
    * {@code thinkOpen == false}, and measured {@code stats}
    * @throws IllegalArgumentException                                          if either text is blank after strip
+   * @throws IllegalStateException                                             if filters leave the model prompt empty
    * @throws com.igormaznitsa.nanollvm.exceptions.GenerationCancelledException if {@link LLM#cancel()} fires
    * @throws com.igormaznitsa.nanollvm.exceptions.GenerationTimeoutException   if the session timeout elapses
    */
@@ -498,6 +549,8 @@ public final class ChatSession {
 
   /**
    * Stores one user text in history but may generate from a different prepared user string.
+   * {@link #filter}s admit that stored text. When they also send it to the model, the template
+   * uses {@code modelUserText} for that one turn.
    *
    * @param historyUserText   text recorded in {@link #history()}; must not be blank
    * @param modelUserText     text used for advisors and the chat template; must not be blank
@@ -507,6 +560,7 @@ public final class ChatSession {
    * @return finished {@link ChatReply}: {@code answer} for the user, optional {@code thinking},
    * {@code thinkOpen == false}, and measured {@code stats}
    * @throws IllegalArgumentException                                          if either text is blank after strip
+   * @throws IllegalStateException                                             if filters leave the model prompt empty
    * @throws com.igormaznitsa.nanollvm.exceptions.GenerationCancelledException if {@link LLM#cancel()} fires
    * @throws com.igormaznitsa.nanollvm.exceptions.GenerationTimeoutException   if the session timeout elapses
    */
@@ -526,34 +580,40 @@ public final class ChatSession {
       throw new IllegalArgumentException("modelUserText must not be blank");
     }
 
-    this.history.add(ChatMessage.user(historyUser));
+    if (this.transcript.reapply()) {
+      this.tokenizedBlocks = List.of();
+    }
+    ChatTranscript.Entry current = this.transcript.add(ChatMessage.user(historyUser));
     this.trimHistoryToCap();
     Tokenizer tokenizer = this.llm.tokenizer();
-    this.truncateToTokenBudget(tokenizer, this.thinkingEnabled(tokenizer), this.thinkTags());
+    this.truncateToTokenBudget(
+        this.thinkingEnabled(tokenizer), this.thinkTags(), current, modelUser);
 
     TurnStream turn = this.beginTurn();
 
     long advisorStarted = System.nanoTime();
     AdvisorEnrichment enrichment =
-      this.llm.runAdvisors(modelUser, this.priorDialogForAdvisors(), this.samplingParams);
+        this.llm.runAdvisors(modelUser, this.priorDialogForAdvisors(current), this.samplingParams);
     this.emitAdvisorNotes(enrichment.responses());
     this.emitPreparedUserDebug(enrichment);
     this.lastAdvisorNanos = System.nanoTime() - advisorStarted;
 
     this.lastGenerateStats = GenerationStats.NONE;
+    List<ChatMessage> prompt = this.promptForTurn(
+        current, enrichment.modelUserText(), isolateGeneration);
     ChatReply reply = this.llm.tools().isEmpty()
-      ? this.generateTurn(turn, enrichment.modelUserText(), isolateGeneration)
-      : this.generateWithTools(turn, enrichment.modelUserText(), isolateGeneration);
+        ? this.generateTurn(turn, prompt)
+        : this.generateWithTools(turn, prompt);
 
     if (this.llm.tools().isEmpty()
       && this.recoverUnusableAnswers
       && this.isUnusableMainAnswer(reply.answer())) {
-      ChatMessages.scrubMatchingAssistantTurns(
-        this.history, this.unusableAnswer, this.unusableHistoryText);
+      this.transcript.scrub(this.unusableAnswer, this.unusableHistoryText);
       this.emitDiagnostics("(unusable main answer — retrying without filler history)");
       this.discardPrintedAnswer();
       turn = this.beginTurn();
-      reply = this.generateTurn(turn, enrichment.modelUserText(), isolateGeneration);
+      prompt = this.promptForTurn(current, enrichment.modelUserText(), isolateGeneration);
+      reply = this.generateTurn(turn, prompt);
       if (this.isUnusableMainAnswer(reply.answer())) {
         this.discardPrintedAnswer();
         reply = this.advisorSalvageFallback(enrichment);
@@ -564,16 +624,35 @@ public final class ChatSession {
   }
 
   /**
-   * User turns already in history, excluding the turn just appended (advisor context).
+   * Model prompt for this turn. Isolated turns keep the engine system seed (when the model flag
+   * allows it) and the current user text. Otherwise every stored message whose model flag is open
+   * is included, with {@code modelText} in place of the current user message.
    */
-  private List<ChatMessage> priorDialogForAdvisors() {
-    List<ChatMessage> users = this.history.stream()
+  private List<ChatMessage> promptForTurn(
+      final ChatTranscript.Entry current,
+      final String modelText,
+      final boolean isolateGeneration
+  ) {
+    List<ChatMessage> prompt = isolateGeneration
+        ? this.isolatedTurn(modelText, current)
+        : this.transcript.modelMessages(current, modelText);
+    if (prompt.isEmpty()) {
+      throw new IllegalStateException("chat filters left no message for the model");
+    }
+    return prompt;
+  }
+
+  /**
+   * User turns already in history, excluding the turn just appended when it was stored.
+   */
+  private List<ChatMessage> priorDialogForAdvisors(final ChatTranscript.Entry current) {
+    List<ChatMessage> users = this.transcript.history().stream()
       .filter(message -> message.role() == ChatRole.USER)
       .toList();
-    if (users.size() <= 1) {
-      return List.of();
+    if (current != null && current.inHistory() && this.transcript.contains(current)) {
+      return users.isEmpty() ? List.of() : users.subList(0, users.size() - 1);
     }
-    return users.subList(0, users.size() - 1);
+    return users;
   }
 
   /**
@@ -653,20 +732,12 @@ public final class ChatSession {
 
   /**
    * One {@link LLM#generate}: chat template, token stream parse, measured stats.
-   * {@code isolateGeneration} feeds only system seed + prepared user text.
    */
-  private ChatReply generateTurn(
-    final TurnStream turn,
-    final String lastUserOverride,
-    final boolean isolateGeneration
-  ) {
+  private ChatReply generateTurn(final TurnStream turn, final List<ChatMessage> forTemplate) {
     Tokenizer tokenizer = this.llm.tokenizer();
     boolean skipSpecials = tokenizer.skipSpecialTokensOnChatDecode();
     boolean enableThinking = this.thinkingEnabled(tokenizer);
     ThinkTags tags = this.thinkTags();
-    List<ChatMessage> forTemplate = isolateGeneration
-      ? this.isolatedTurn(lastUserOverride)
-      : this.historyForTemplate(lastUserOverride);
     List<Integer> promptIds = this.promptTokenIds(forTemplate, enableThinking, tags);
 
     List<Integer> streamedIds = new ArrayList<>();
@@ -700,18 +771,12 @@ public final class ChatSession {
    * One user turn that may call tools. Each execution is a fresh generate. The session history
    * still stores only the final visible answer; tool markup stays in the working copy.
    */
-  private ChatReply generateWithTools(
-    final TurnStream turn,
-    final String lastUserOverride,
-    final boolean isolateGeneration
-  ) {
+  private ChatReply generateWithTools(final TurnStream turn, final List<ChatMessage> forTemplate) {
     Tokenizer tokenizer = this.llm.tokenizer();
     ThinkTags tags = this.thinkTags();
     boolean enableThinking = this.thinkingEnabled(tokenizer);
     ToolDialect dialect = ToolDialects.of(this.llm.model().architectureName());
-    List<ChatMessage> working = new ArrayList<>(isolateGeneration
-      ? this.isolatedTurn(lastUserOverride)
-      : this.historyForTemplate(lastUserOverride));
+    List<ChatMessage> working = new ArrayList<>(forTemplate);
 
     String raw;
     int executed = 0;
@@ -794,29 +859,25 @@ public final class ChatSession {
   }
 
   /**
-   * System seed (if any) plus one user turn — prior dialog is omitted from the template.
+   * Engine system seed, when the model flag allows it, plus the current user text when that
+   * message is still stored and its model flag is open.
    */
-  private List<ChatMessage> isolatedTurn(final String modelUserText) {
-    List<ChatMessage> turn = new ArrayList<>(this.llm.newConversation());
-    turn.add(ChatMessage.user(modelUserText));
+  private List<ChatMessage> isolatedTurn(
+      final String modelUserText,
+      final ChatTranscript.Entry current
+  ) {
+    List<ChatMessage> turn = new ArrayList<>();
+    for (ChatMessage message : this.llm.newConversation()) {
+      if (this.transcript.admit(message).sendToModel()) {
+        turn.add(message);
+      }
+    }
+    if (current != null
+        && this.transcript.contains(current)
+        && this.transcript.admit(current.message()).sendToModel()) {
+      turn.add(ChatMessage.user(modelUserText));
+    }
     return turn;
-  }
-
-  /**
-   * History for the chat template, swapping the last user turn to {@code lastUserOverride} when it
-   * differs from what was stored (RAG prepared text).
-   */
-  private List<ChatMessage> historyForTemplate(final String lastUserOverride) {
-    if (this.history.isEmpty()) {
-      return List.of();
-    }
-    ChatMessage last = this.history.getLast();
-    if (last.role() != ChatRole.USER || last.content().equals(lastUserOverride)) {
-      return this.history;
-    }
-    List<ChatMessage> copy = new ArrayList<>(this.history);
-    copy.set(copy.size() - 1, ChatMessage.user(lastUserOverride));
-    return copy;
   }
 
   /**
@@ -842,7 +903,7 @@ public final class ChatSession {
     ChatReply finished = new ChatReply(thinking, answer, false, this.lastGenerateStats);
     turn.push(this.llm, this.listener, turn.shownRaw, finished);
     this.closePrintTurn();
-    this.history.add(ChatMessage.assistant(finished.answer()));
+    this.transcript.add(ChatMessage.assistant(finished.answer()));
     this.trimHistoryToCap();
     return finished;
   }
@@ -851,28 +912,21 @@ public final class ChatSession {
    * Drops oldest turns until the rendered prompt fits the token budget. Unchanged blocks reuse
    * token ids already stored for that exact text.
    */
-  private void truncateToTokenBudget(final Tokenizer tokenizer,
-                                     final boolean enableThinking,
-                                     final ThinkTags tags) {
-    if (!this.blockTokensReusable(tokenizer, enableThinking, tags)) {
-      ChatMessages.truncateHistory(
-        this.history,
-        tokenizer,
-        this.llm.config().maxModelLen(),
-        this.samplingParams.maxTokens(),
-        enableThinking,
-        tags);
-      return;
-    }
+  private void truncateToTokenBudget(
+      final boolean enableThinking,
+      final ThinkTags tags,
+      final ChatTranscript.Entry current,
+      final String modelText
+  ) {
     int budget = ChatMessages.promptTokenBudget(
       this.llm.config().maxModelLen(), this.samplingParams.maxTokens());
-    int minKeep =
-      !this.history.isEmpty() && this.history.getFirst().role() == ChatRole.SYSTEM ? 2 : 1;
-    while (this.history.size() > minKeep
-      && this.promptTokenIds(this.history, enableThinking, tags).size() > budget) {
-      int sizeBeforeDrop = this.history.size();
-      ChatMessages.dropOldestTurn(this.history);
-      if (this.history.size() == sizeBeforeDrop) {
+    int minKeep = this.transcript.firstRole() == ChatRole.SYSTEM ? 2 : 1;
+    while (this.transcript.size() > minKeep
+        && this.promptTokenIds(
+        this.transcript.modelMessages(current, modelText), enableThinking, tags).size() > budget) {
+      int sizeBeforeDrop = this.transcript.size();
+      this.transcript.dropOldest();
+      if (this.transcript.size() == sizeBeforeDrop) {
         return;
       }
     }
@@ -898,7 +952,7 @@ public final class ChatSession {
         ids.add(id);
       }
     }
-    this.rememberBlocks(used, messages, enableThinking, tags);
+    this.rememberBlocks(used, enableThinking, tags);
     return ids;
   }
 
@@ -958,14 +1012,9 @@ public final class ChatSession {
    * ids for the history blocks, so one isolated turn does not force the next turn to re-encode.
    */
   private void rememberBlocks(final List<TokenizedText> used,
-                              final List<ChatMessage> messages,
                               final boolean enableThinking,
                               final ThinkTags tags) {
-    if (messages == this.history) {
-      this.tokenizedBlocks = List.copyOf(used);
-      return;
-    }
-    List<String> historyBlocks = this.renderBlocks(this.history, enableThinking, tags);
+    List<String> historyBlocks = this.renderBlocks(this.transcript.history(), enableThinking, tags);
     List<TokenizedText> kept = new ArrayList<>(used);
     for (TokenizedText cached : this.tokenizedBlocks) {
       if (this.containsText(used, cached.text()) || !historyBlocks.contains(cached.text())) {
@@ -984,16 +1033,7 @@ public final class ChatSession {
    * Drops oldest non-system turns until {@link #maxHistoryMessages} is honored.
    */
   private void trimHistoryToCap() {
-    while (this.history.size() > this.maxHistoryMessages) {
-      int dropAt = 0;
-      if (!this.history.isEmpty() && this.history.getFirst().role() == ChatRole.SYSTEM) {
-        if (this.history.size() == 1) {
-          break;
-        }
-        dropAt = 1;
-      }
-      this.history.remove(dropAt);
-    }
+    this.transcript.trimHistory(this.maxHistoryMessages);
   }
 
   /**

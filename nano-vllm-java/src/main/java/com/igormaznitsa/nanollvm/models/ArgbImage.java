@@ -33,6 +33,11 @@ public record ArgbImage(int width, int height, int[] pixels) {
     pixels = pixels.clone();
   }
 
+  /**
+   * Copy of the packed pixels. Changing the returned array does not change this image.
+   *
+   * @return length {@code width * height}
+   */
   @Override
   public int[] pixels() {
     return this.pixels.clone();

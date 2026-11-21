@@ -24,11 +24,21 @@ public record LlmOutSoundData(byte[] wav, int sampleRate) implements LlmOutput {
     wav = wav.clone();
   }
 
+  /**
+   * Copy of the RIFF/WAVE bytes. Changing the returned array does not change this result.
+   *
+   * @return file bytes; never {@code null}
+   */
   @Override
   public byte[] wav() {
     return this.wav.clone();
   }
 
+  /**
+   * {@inheritDoc}
+   *
+   * @return {@link LlmModality#AUDIO}
+   */
   @Override
   public LlmModality modality() {
     return LlmModality.AUDIO;

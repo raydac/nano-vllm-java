@@ -100,11 +100,21 @@ public record LlmInSound(byte[] wav, float[] pcm, int sampleRate, Locale languag
     return this.pcm != null;
   }
 
+  /**
+   * Copy of the RIFF/WAVE bytes, or {@code null} when this input is PCM.
+   *
+   * @return file bytes, or {@code null}
+   */
   @Override
   public byte[] wav() {
     return this.wav == null ? null : this.wav.clone();
   }
 
+  /**
+   * Copy of the mono PCM samples, or {@code null} when this input is a WAVE file.
+   *
+   * @return samples, or {@code null}
+   */
   @Override
   public float[] pcm() {
     return this.pcm == null ? null : this.pcm.clone();

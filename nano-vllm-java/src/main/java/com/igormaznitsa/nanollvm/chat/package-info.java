@@ -17,7 +17,8 @@
  * {@link com.igormaznitsa.nanollvm.llm.LLM#chat(ChatSession)} continues a session already opened
  * on that engine. {@link ChatSession#send(String)} is a normal turn (history and generate
  * share the user text). {@link ChatSession#sendPrepared} records one string in history and
- * generates from another (RAG). {@link ChatMessages} trims / scrubs the live history list.
+ * generates from another (RAG). {@link ChatSession#filter} admits each message into the
+ * transcript, the model prompt, or both. {@link ChatMessages} trims / scrubs the live history list.
  *
  * <p><b>Events.</b> {@link LlmListener#onText} receives {@link LlmTextEvent}s. Compose sinks with
  * {@link LlmListeners}. CLI tools use {@link LlmListeners#toPrintStreams} ({@link StreamPrinter}).

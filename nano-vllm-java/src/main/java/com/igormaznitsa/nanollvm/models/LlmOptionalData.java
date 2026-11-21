@@ -130,16 +130,32 @@ public final class LlmOptionalData {
       return this.type;
     }
 
+    /**
+     * Equal when both keys have the same id. The value type is not compared.
+     *
+     * @param other other key, or any other object
+     * @return {@code true} when {@code other} is a key with this id
+     */
     @Override
     public boolean equals(final Object other) {
       return other instanceof Key<?> key && this.id.equals(key.id);
     }
 
+    /**
+     * Hash of the key id.
+     *
+     * @return id hash
+     */
     @Override
     public int hashCode() {
       return Objects.hash(this.id);
     }
 
+    /**
+     * The key id.
+     *
+     * @return {@link #id()}
+     */
     @Override
     public String toString() {
       return this.id;

@@ -27,6 +27,11 @@ public record LlmOutImage(ArgbImage image, float minimum, float maximum)
     }
   }
 
+  /**
+   * {@inheritDoc}
+   *
+   * @return {@link LlmModality#IMAGE}
+   */
   @Override
   public LlmModality modality() {
     return LlmModality.IMAGE;

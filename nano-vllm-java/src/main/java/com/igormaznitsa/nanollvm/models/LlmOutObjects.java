@@ -20,6 +20,11 @@ public record LlmOutObjects(List<VisionHit> objects) implements LlmOutVision {
     objects = List.copyOf(objects);
   }
 
+  /**
+   * {@inheritDoc}
+   *
+   * @return {@link LlmModality#IMAGE}
+   */
   @Override
   public LlmModality modality() {
     return LlmModality.IMAGE;

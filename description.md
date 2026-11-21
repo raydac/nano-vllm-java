@@ -3699,6 +3699,8 @@ Those ids are just a line of dictionary numbers. No attention has run yet.
 | Stage directions | `Tokenizer#applyChatTemplate(…, enableThinking)`                        | Role markers via `ChatFormat`; think seed when ChatML + `invitesThinking` |
 | To ids           | inside `LLM#generate` → encode → `Scheduler#add` (new `Sequence`) | Prompt string → token ids → `Sequence`           |
 
+`ChatSession.filter` takes one or more filters. Each filter says whether that message stays in the transcript and whether it is placed in the model prompt. Every filter must allow a destination. Messages already stored are checked again at the start of the next send.
+
 `ChatSession#generateTurn` is the private brick that calls `applyChatTemplate` then `LLM#generate`.
 
 ### Prefill — Sense A on the whole prompt (attention’s first big job)

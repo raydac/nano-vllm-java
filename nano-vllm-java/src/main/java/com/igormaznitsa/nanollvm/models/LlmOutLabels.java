@@ -43,6 +43,11 @@ public record LlmOutLabels(List<LlmLabelScore> labels) implements LlmOutput {
     return this.labels.getFirst();
   }
 
+  /**
+   * {@inheritDoc}
+   *
+   * @return {@link LlmModality#LABELS}
+   */
   @Override
   public LlmModality modality() {
     return LlmModality.LABELS;
