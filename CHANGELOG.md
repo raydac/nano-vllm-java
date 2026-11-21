@@ -4,6 +4,10 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.1-SNAPSHOT] — Unreleased
+
+Development snapshot after the **1.5.0** public release.
+
 ## [1.5.0] — 2026-11-21
 
 Public release of **nano-vllm-java** `1.5.0` (Maven coordinates `com.igormaznitsa:nano-vllm-java:1.5.0`). Qwen3.5 text chat, YOLO26 images, typed Jev decisions, local tool calls, EmbeddingGemma, and the weather and Russian checkers samples.
