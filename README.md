@@ -4,28 +4,27 @@
 [![Java 21+](https://img.shields.io/badge/java-21.0%2b-green.svg)](https://bell-sw.com/pages/downloads/)
 [![Maven 3.8+](https://img.shields.io/badge/maven-3.8%2b-green.svg)](https://maven.apache.org/)
 [![Maven central](https://img.shields.io/badge/Maven%20central-1.5.0-green.svg)](http://search.maven.org/#artifactdetails|com.igormaznitsa|nano-vllm-java|1.5.0|jar)
-[![Arthur's acres sanctuary donation](assets/arthur_sanctuary_banner.png)](https://www.arthursacresanimalsanctuary.org/donate)
 
 # Nano-vLLM Java
 
-**1.5.0** is a Java library that loads a model you already have and runs it on the CPU. The call stays in the JVM: no Python process, no CUDA, and no PyTorch. It does not train models.
+A Java library that loads a model you already have and runs it on the CPU. The call stays in the JVM: no Python process, no CUDA, and no PyTorch. It does not train models.
 
-Use it when a Java application needs a short chat reply, a sentence vector, a transcript, a spoken WAV, a language label, a picture read, a choice with a probability, or a reply that can call your own Java function.
+It chats, calls your Java methods, embeds a sentence, transcribes and speaks, labels a language, reads a picture, and returns a choice with a probability. Families: Qwen3, Qwen3.5 text, Gemma 3, Gemma 4 text, Llama, LFM2, BERT, EmbeddingGemma, Whisper, Piper, fastText, and YOLO26. Each file type is under [Supported models](#supported-models).
 
-**Supports** Qwen3, Qwen3.5 text, Gemma 3, Gemma 4 text, Llama, LFM2, BERT embeddings, EmbeddingGemma, Whisper, Piper, fastText, and YOLO26 images. The full list is [below](#supported-models).
+| Chat in the terminal | Depth, surfaces, parked cars, people |
+| --- | --- |
+| ![Example: pick Qwen3 or Gemma 3, then a Gemma 3 chat about the Grimm brothers](assets/java_nano_llvm_session_1.gif) | ![YOLO26n: depth on the street, semantic surfaces, oriented boxes on a parking lot, and person detections](assets/yolo_samples.png) |
+| **It finds this computer's city and speaks the forecast** | **Russian draughts. You play White. Jeff plays the other colour.** |
+| ![Weather sample: Qwen3 locates this computer, prints the map and the forecast, then Piper speaks the line](assets/weatherstation_03nov2027.gif) | ![Russian checkers: you play White, Jeff answers with Qwen3.5, and the game ends when your king is taken](assets/russian_checkers_03nov26.gif) |
 
-**Attach** `com.igormaznitsa:nano-vllm-java:1.5.0` on JDK 21+. Coordinates and a first call are under [Add it](#add-it).
-
-**Try a sample** after one download. Qwen3-0.6B needs no Hugging Face gate:
+One download, no Hugging Face gate, then the menu:
 
 ```bash
 ./models/download-qwen3-0.6b.sh
 mvn -pl nano-vllm-java-samples -q exec:java
 ```
 
-That opens the interactive menu. Every other sample is under [Samples](#samples). The longer design tour is [`description.md`](description.md).
-
-Ideas here were inspired by the Python [nano-vllm](https://github.com/GeeeekExplorer/nano-vllm) educational engine.
+Attach `com.igormaznitsa:nano-vllm-java:1.5.0` on JDK 21+. The calls start at [Calls](#calls). Every other sample is under [Samples](#samples). The design tour is [`description.md`](description.md). Ideas here were inspired by the Python [nano-vllm](https://github.com/GeeeekExplorer/nano-vllm) educational engine.
 
 ## Contents
 
@@ -396,8 +395,6 @@ mvn -pl nano-vllm-java-samples -q exec:java \
   -Dexec.args=models/Ornith-1.5-9B-AD-IQ2_XXS-IQ1_M.gguf
 ```
 
-![Example: pick Qwen3 or Gemma 3, then a Gemma 3 chat about the Grimm brothers](assets/java_nano_llvm_session_1.gif)
-
 ### Weather
 
 `nano-vllm-java-weather-sample` asks Qwen3-0.6B where this computer is, then what the weather is there. Piper says it is looking for the location, then that it is getting the weather in that city, then speaks the forecast. When the coordinates arrive it prints a 64-column Kavrayskiy VII map with that position marked. If the chat model or a Piper voice is missing, it stops before loading and prints each download command.
@@ -410,8 +407,6 @@ The place is this computer's public network address (ipwho.is, then geojs, then 
 mvn -pl nano-vllm-java-weather-sample -am -q exec:java
 ```
 
-![Weather sample: Qwen3 locates this computer, prints the map and the forecast, then Piper speaks the line](assets/weatherstation_03nov2027.gif)
-
 ### Russian checkers
 
 You pick a colour. Enter selects White. Jeff plays the other colour. A move is `a3 b4` or `A 3 B 4`. `q` quits.
@@ -421,8 +416,6 @@ You pick a colour. Enter selects White. Jeff plays the other colour. A move is `
 mvn -pl nano-vllm-java-samples -q exec:java \
   -Dexec.mainClass=com.igormaznitsa.nanollvm.samples.RussianCheckersHelloWorld
 ```
-
-![Russian checkers: you play White, Jeff answers with Qwen3.5, and the game ends when your king is taken](assets/russian_checkers_03nov26.gif)
 
 ## Threads
 
@@ -485,3 +478,5 @@ The library jar is `nano-vllm-java/target/nano-vllm-java-1.5.0.jar` (module `com
 ## License
 
 Apache License 2.0 — see [LICENSE](LICENSE).
+
+[![Arthur's acres sanctuary donation](assets/arthur_sanctuary_banner.png)](https://www.arthursacresanimalsanctuary.org/donate)
