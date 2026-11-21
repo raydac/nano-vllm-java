@@ -3,8 +3,10 @@ package com.igormaznitsa.nanollvm.rag;
 import java.util.List;
 
 /**
- * Retrieves passages for a natural-language query (BM25, dense embeddings, or a fused
- * {@link HybridRagIndex} of any {@link RagIndex} list).
+ * Retrieves passages for a natural-language query. Built-in indexes are BM25
+ * ({@link PreparedRag}), dense embeddings ({@link DenseRagIndex}), and a fused
+ * {@link HybridRagIndex}. Implement this interface for another ranking and pass that
+ * object to {@link com.igormaznitsa.nanollvm.llm.LLM#rag(RagIndex)}.
  *
  * <p>Implementations used with library sessions should be safe to share across threads.
  * {@link #retrieve} must not return {@code null}; prefer an unmodifiable list (empty when no hits).
