@@ -1,6 +1,7 @@
 /**
  * Runnable demos ({@link HelloWorld}, {@link NextTokenHelloWorld}, {@link LogTriageHelloWorld},
- * {@link AdvisorRagHelloWorld}, {@link RagTunerHelloWorld}, {@link EmbeddingsHelloWorld},
+ * {@link AdvisorRagHelloWorld}, {@link JVectorHelloWorld}, {@link RagTunerHelloWorld},
+ * {@link EmbeddingsHelloWorld},
  * {@link TranscribeHelloWorld}, {@link SynthesizeHelloWorld}, {@link VoiceReplyHelloWorld},
  * {@link LanguageIdHelloWorld}, {@link YoloStreetHelloWorld},
  * {@link ToolsHelloWorld}, {@link JevHelloWorld},

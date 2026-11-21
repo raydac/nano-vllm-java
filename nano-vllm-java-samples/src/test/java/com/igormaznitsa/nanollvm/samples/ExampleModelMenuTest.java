@@ -223,9 +223,19 @@ class ExampleModelMenuTest {
   @Test
   void ragMenuExit() throws Exception {
     Optional<RagMode> mode = Example.selectRagMode(
-      new BufferedReader(new StringReader("5\n")),
+      new BufferedReader(new StringReader("6\n")),
       silentConsole());
     assertTrue(mode.isEmpty());
+  }
+
+  @Test
+  void ragMenuSelectsJVectorWhenReady() throws Exception {
+    SampleModelAssumptions.requireRag();
+    SampleModelAssumptions.requireGteSmallGguf();
+    Optional<RagMode> mode = Example.selectRagMode(
+      new BufferedReader(new StringReader("5\n")),
+      silentConsole());
+    assertEquals(Optional.of(RagMode.JVECTOR), mode);
   }
 
   @Test

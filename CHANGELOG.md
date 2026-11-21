@@ -5,9 +5,11 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.5.0-SNAPSHOT] — Unreleased
+## [1.5.0] — 2026-11-21
 
-Development snapshot after the **1.4.0** public release.
+Public release of **nano-vllm-java** `1.5.0` (Maven coordinates `com.igormaznitsa:nano-vllm-java:1.5.0`).
+Qwen3.5 text chat, YOLO26 images, typed Jev decisions, local tool calls, EmbeddingGemma,
+and the weather and Russian checkers samples.
 
 ### Added
 - `./models/download-ornith-1.5-9b-gguf.sh` downloads the smallest Ornith-1.5-9B GGUF (`Ornith-1.5-9B-AD-IQ2_XXS-IQ1_M.gguf`, about 2.8 GB) into `models/`. That file loads as Qwen3.5 text chat, and the interactive example lists it with the thinking scratchpad on stderr, a short system cue that does not include a blank think block, and a short reply cap. The vision projector is not included. A Qwen3.5 ONNX folder is still refused.
@@ -20,6 +22,12 @@ Development snapshot after the **1.4.0** public release.
 - The weather sample looks up this computer's city and the weather there, prints a 64-column world map with that position marked, prints the temperature and sky, and logs how long each step took. Piper, the English Lessac voice, says it is looking for the location, then that it is getting the weather in that city, and then speaks the forecast. Each spoken line finishes before the next step starts. If the chat model or a Piper voice is missing, it stops before loading and prints the download command for each one.
 - YOLO26 nano reads a picture as packed `ArgbImage` pixels (`0xAARRGGBB`), so the library does not need `java.desktop`. The street sample converts a `BufferedImage`. Detection, instance segmentation, pose, and oriented boxes return objects in the original image's pixels. An instance mask is the contour of that object inside its box. Pose uses the wider keypoint tower, reads the person-only class head from the file, and places each body point by adding the cell anchor. Semantic segmentation and depth return a picture. Classification returns labels. Object heads drop a hit whose score is below the minimum on `LlmInImage` (`0.25` when the picture is passed alone). `addClass` on that builder sets a different score for one class name from `classes.txt`; every other class keeps the minimum. An unknown name is rejected. Letterbox size, how many objects are kept, the pose-point cutoff, and how many class labels come back are set on that same input (640, 300, 0.5, and 5 when omitted). Class count and pose width are read from the file, and a pose joint index is the model's own. `./models/download-yolo26n.sh` downloads the seven nano ONNX files. Medium, large, and extra-large use that same call: the loader reads the stem width, and a second copy of the first block selects large when the stem matches medium. The class tower stays at least as wide as the first feature map, so a small or wider file loads. `open(path)` detects the kind and loads it through `open(path, LlmModelType)`. Pass that type when a renamed file does not say which kind it is. A YOLO constant selects the head, and the scale is still read from the weights. P2, P6, and YOLOE are refused. `YoloStreetHelloWorld` asks which object head to run, marks people, bicycles, and cars, and writes a PNG with each score. Pose joins the body points with green lines. Segmentation fills each outline at half strength. A box covering at least two percent of the picture is kept down to a score of 0.01, so a close car that segmentation scores quietly is still marked. Depth paints the street photo from red (near) to green (far), half transparent, and prints the nearest and farthest meters. Semantic paints each Cityscapes surface in its own color, half transparent, over that same photo. Classification writes the top five labels on the street photo. Each object carries the class index. `classNames()` is `classes.txt` from the same folder, in that order, and the picture read does not look the name up. Those lists live in `models/YOLO26n/<task>/`. Oriented boxes use an overhead parking lot. Recognition uses every processor. The sample prints how long the weights took to load and how long recognition took.
 - Chat can call Java functions registered with `LLM.Builder.tool`. Qwen3, Qwen3.5, LFM2, and Gemma 4 each use that model's own tool-call tokens. The function result is written back in the form that model expects, and the reply continues. A space inside the called name still matches the registered tool. Text the model writes after a call is not sent back, so a later step can still call another tool. A turn runs at most the call cap on `LLM.Builder.maxToolExecutions` (four when omitted). `ToolsHelloWorld` asks Qwen3-0.6B for the OS name, then for one directory listing.
+- Sample `RussianCheckersHelloWorld` plays Russian draughts in the terminal. You pick a colour and Qwen Jeff plays the other. Jeff's prompt lists every piece and notes what each legal move does (captures, promotion, an immediate win, or a landing the opponent can take). The decision is one letter.
+- Causal chat models can answer a typed decision. `LLM.builder(model).toJev()` reads a choice, a yes/no, or a score from the next-token distribution and returns a probability for every option. The default level, L0, rotates the options and removes the label prior. A yes/no ends on `Yes or No:` and `No or Yes:`. `jevLevel(JevLevel.RAW)` is one prefill in the order given. `JevHelloWorld` prints a choice at L0 and RAW, a yes/no, a score, and the label prior turning on after eight states. `Example` can open the same API: pick Jev after the model, set `/choice`, `/yesno`, or `/score`, then type a state on each line.
+- Qwen3.5 text chat loads from Hugging Face safetensors (`model_type` `qwen3_5`), including Jeff-Qwen3.5-0.8B via `models/download-jeff-qwen3.5-0.8b.sh`. The vision tower is skipped. `toJev()` works on that causal model the same way as on Qwen3.
+- Sample `KernelChatBench` compares scalar Java, the Vector API, and TornadoVM on the same greedy chat: one child JVM per kernel, a console tok/s table, and `kernel-chat-bench.svg`. The Vector child always starts with `--add-modules=jdk.incubator.vector`. The TornadoVM run starts through the `tornado` command. The same run recognizes the street photo with YOLO26n when that ONNX file is present, writes `kernel-yolo-bench.svg`, and finishes with chat tok/s beside YOLO milliseconds in `kernel-bench.svg`. `--skip-yolo` keeps the chat comparison. `--yolo` selects another detection file. Speech is timed the same way when a Whisper checkpoint and a Piper voice are present.
+- `KernelBackend.availableModes()` lists kernels this JVM can run. `FloatKernelsFactory.isTornadoAvailable()` mirrors the Vector API probe.
+- The interactive example can search `rag/` with a JVector graph when an embedding model is present. `JVectorHelloWorld` asks the Grimm questions on that graph (Gemma3-270M plus gte-small, otherwise the usual embedding fallback). The hit score is cosine. Neighbors far below the best score are dropped, and a query whose best cosine is below 0.28 skips retrieval. `JVectorRagIndex` lives in the samples module. JVector is not a library dependency.
 
 ### Changed
 - Wide image convolutions, including YOLO26, use the same matmul kernels as chat instead of a scalar filter loop. A layer with fewer than 128 outputs is split by image rows, so every processor takes a band of the picture. Position attention and SiLU use that same pool. A 3×3 window copies its interior without a bounds check on every pixel. Classification and semantic heads use the engine's CPU threads for that work. When TornadoVM is the kernel backend, each convolution runs on the device from the picture itself, keeps its weights there, and applies SiLU in that same task.
@@ -28,14 +36,14 @@ Development snapshot after the **1.4.0** public release.
 - `TranscribeHelloWorld` and `SynthesizeHelloWorld` print how long the weights took to load and how long decode or synthesis took. Both use every processor. `KernelChatBench` also times Piper synthesis and Whisper transcription of `Hello, World.` on each kernel when those models are present.
 - Nucleus sampling keeps the smallest high-probability prefix without sorting the whole vocabulary.
 - `Bench` can record an async-profiler sample of the timed generate
-  (`mvn22 -pl nano-vllm-java-samples -am -Pbench package exec:exec@bench`).
+  (`mvn -pl nano-vllm-java-samples -am -Pbench package exec:exec@bench`).
   `-Dbench.kernels=scalar|vector` selects the math backend. Flat and collapsed reports are written
   under `nano-vllm-java-samples/target/bench-profile/`.
 - Prompt prefill keeps each 8-row block of a layer weight in cache and applies it to every
   token before the next block, instead of reading the matrix again for every token.
 - Chat steps reuse activation buffers across a forward, keep one paged KV slot index per
   sequence, and draw top-k without boxing the vocabulary.
-- Optional TornadoVM dependencies are `8.0.0-jdk22plus`. TornadoVM mode runs dense GEMV,
+- Optional TornadoVM dependencies are `8.1.0-jdk22plus`. TornadoVM mode runs dense GEMV,
   attention, and the elementwise kernels on the device, including one-token decode. One decode
   matmul is one device launch. On OpenCL, a multi-token dense GEMV uses CLBlast when `libclblast`
   runs. One-token GEMV uses a workgroup-per-row device kernel (one workgroup reads each weight
@@ -71,43 +79,6 @@ Development snapshot after the **1.4.0** public release.
 - Chat splits thinking from the answer using the special tokens that checkpoint defines. A `<think>` … `</think>` quoted inside the scratchpad stays in thinking; the answer is the text after the close that balances the opening tag. Those delimiters stay in the decode and do not stop generation.
 - Weight load fails on a duplicate or wrong-shaped tensor, and still accepts the same modules under common wrapper prefixes (`language_model`, `text_model`, `base_model`, repeated `model.`). A swapped `[in, out]` matrix is stored as `[out, in]`.
 - On Windows, TornadoVM samples start `tornado.exe`. The extensionless `tornado` file in the SDK is a shell script, and Windows cannot run it. When `TORNADOVM_HOME` is set, Maven `-Ptornado` launches `$TORNADOVM_HOME/bin` rather than relying on `PATH` alone. Kernel chat bench quotes TornadoVM worker classpath and model paths for `cmd.exe` so `;` and drive letters survive the launcher's `os.system` command line.
-
-### Added
-- Sample `RussianCheckersHelloWorld` plays Russian draughts in the terminal. You pick a colour
-  and Qwen Jeff plays the other. Jeff's prompt lists every piece and notes what each legal move
-  does (captures, promotion, an immediate win, or a landing the opponent can take), because the
-  decision is one letter and the model does not write a plan.
-- Causal chat models can answer a typed decision. `LLM.builder(model).toJev()` reads a choice, a
-  yes/no, or a score from the next-token distribution and returns a probability for every option.
-  The default level, L0, rotates the options and removes the label prior without any training
-  labels. A yes/no ends on the two labels (`Yes or No:` and `No or Yes:`) so the model is not
-  asked to continue the word Answer. `jevLevel(JevLevel.RAW)` is one prefill in the order given.
-  `JevHelloWorld` prints a choice
-  at L0 and RAW, a yes/no, a score, and the label prior turning on after eight states. It then
-  repeats two of those states so the change in probability is visible. `Example`
-  can open the same API as a prompt: pick Jev after the model, set `/choice`, `/yesno`, or
-  `/score`, then type a state on each line.
-- Qwen3.5 text chat loads from Hugging Face safetensors (`model_type` `qwen3_5`), including
-  Jeff-Qwen3.5-0.8B via `models/download-jeff-qwen3.5-0.8b.sh`. The vision tower is skipped.
-  `LLM.builder(model).toJev()` works on that causal model the same way as on Qwen3.
-- Sample `KernelChatBench` compares scalar Java, Vector API, and TornadoVM (skipped when no
-  device) on the same greedy chat: one child JVM per kernel, a console tok/s table, and a
-  well-formed `kernel-chat-bench.svg` bar chart. Default checkpoint prefers Qwen3-0.6B / Gemma3
-  over compact ONNX demos, with a longer prompt and 128-token budget so TornadoVM is not judged
-  only on launch overhead. Vector API always runs in a child with
-  `--add-modules=jdk.incubator.vector` (the TornadoVM parent launcher often cannot see the
-  incubator module, which previously dropped the vector bar). The TornadoVM run starts through
-  the `tornado` command when that command is on `PATH`, because a Maven `exec:java` parent
-  cannot see SDK devices. Child JVMs take the sample classpath from the launching class loader,
-  so `mvn exec:java` does not start them on Maven's own classpath. The same run then recognizes
-  the street photo with YOLO26n when `models/YOLO26n/detect/yolo26n.onnx` is present, prints
-  milliseconds per image and images per second, and writes `kernel-yolo-bench.svg`.
-  `--skip-yolo` keeps the chat comparison only. `--yolo <onnx>` selects another detection file.
-  The run ends with one table of chat tok/s beside YOLO milliseconds, and `kernel-bench.svg`
-  draws those two speeds on separate scales. The number sits in its own column so the fastest
-  bar does not cover it.
-- `KernelBackend.availableModes()` lists kernels this JVM can run; `FloatKernelsFactory.isTornadoAvailable()`
-  mirrors the existing Vector API probe.
 
 ## [1.4.0] — 2026-09-06
 

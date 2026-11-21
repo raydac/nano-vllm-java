@@ -20,7 +20,7 @@ with **Meta fastText** (`*.bin` / `*.ftz`); (**since 1.5.0**) reading a picture 
 (**since 1.5.0**) a causal chat model can answer a typed **Jev** decision — a choice, a yes/no, or a score — with a
 probability for every option, and `chat` / `chatOnce` can call Java functions you register (chapter **7h**).
 Java package / JPMS module: `com.igormaznitsa.nanollvm`. This guide matches **1.5.0**
-(previous public release **1.4.0**, 2026-09-06; **1.3.0**, 2026-08-29).
+(2026-11-21; previous public release **1.4.0**, 2026-09-06; **1.3.0**, 2026-08-29).
 
 Where a topic has a standard paper or format specification, a short **Further reading** note lists links. Those are
 optional depth; the exposition here is self-contained. A curated **learning path** (what to read in which order) is
@@ -89,6 +89,7 @@ The rest of this guide unpacks that sentence without assuming prior ML coursewor
 
 **In the code:** front door is `LLM` / `LLM.Builder`; interactive demo is `samples.Example`; linear mains include
 `HelloWorld`, `NextTokenHelloWorld`, `LogTriageHelloWorld`, `AdvisorRagHelloWorld`,
+`JVectorHelloWorld`,
 `RagTunerHelloWorld`, `EmbeddingsHelloWorld`, `TranscribeHelloWorld`, `SynthesizeHelloWorld`,
 `VoiceReplyHelloWorld`, `LanguageIdHelloWorld`, `YoloStreetHelloWorld`,
 `JevHelloWorld`, `ToolsHelloWorld`,
@@ -3964,7 +3965,7 @@ packages. Demos live in `nano-vllm-java-samples`. The weather desk is `nano-vllm
 | `layers/` — `Attention`, `BidirectionalAttention`, `GatedDeltaNet`, `Sampler`, `Linear`, `Norms`, …     | Attention, Qwen3.5 linear attention, sampling, projections, norms/RoPE         | **no** |
 | `tensor/` — `Tensor`, `Ops`, `MatmulRuntime`, `LinearKernel`, `EmbeddingKernel`, …     | Arrays, float ops, parallel GEMM                     | **no** |
 | `prompts/` — `ChatPrompts`, `RagPrompts`, `AdvisorPrompts`                             | Default system / RAG / advisor wording               | **no** |
-| *(Maven module `nano-vllm-java-samples`)* `Example`, `HelloWorld`, `NextTokenHelloWorld`, `Bench`, `KernelChatBench`, `EmbeddingsHelloWorld`, `TranscribeHelloWorld`, `SynthesizeHelloWorld`, `VoiceReplyHelloWorld`, `LanguageIdHelloWorld`, `YoloStreetHelloWorld`, `LogTriageHelloWorld`, `AdvisorRagHelloWorld`, `RagTunerHelloWorld`, `JevHelloWorld`, `ToolsHelloWorld`, `RussianCheckersHelloWorld`, `utils/Bundled*` | Runnable demos (not in the library JAR) | n/a |
+| *(Maven module `nano-vllm-java-samples`)* `Example`, `HelloWorld`, `NextTokenHelloWorld`, `Bench`, `KernelChatBench`, `EmbeddingsHelloWorld`, `TranscribeHelloWorld`, `SynthesizeHelloWorld`, `VoiceReplyHelloWorld`, `LanguageIdHelloWorld`, `YoloStreetHelloWorld`, `LogTriageHelloWorld`, `AdvisorRagHelloWorld`, `JVectorHelloWorld`, `RagTunerHelloWorld`, `JevHelloWorld`, `ToolsHelloWorld`, `RussianCheckersHelloWorld`, `utils/Bundled*` | Runnable demos (not in the library JAR) | n/a |
 | *(Maven module `nano-vllm-java-weather-sample`)* `WeatherSample` | City from the public address, a 64-column world card, then Open-Meteo. Piper says, in English, that it is looking up the location, then the weather in that city, then speaks the forecast | n/a |
 
 `Config.HfConfig` (in `llm/Config`) holds the blueprint plus per-LLM engine knobs (`maxModelLen`, `kvHeapFraction`, …).
@@ -4068,7 +4069,7 @@ Interactive CLI wiring lives in `nano-vllm-java-samples` → `samples.Example.ma
 `samples.utils.OrderedConsole` (millis-stamped queue → stdout vs stderr), then **model menu**
 (downloaded first, Qwen3-0.6B preferred for chat quality; Enter = first; empty disk → download instructions).
 A causal checkpoint then asks **Chat or Jev** (**since 1.5.0**; Enter = chat). Chat continues to the
-**RAG-mode menu** (none / BM25 / dense / hybrid — dense needs a BERT-encoder checkpoint under `models/`; **since 1.1.0**; Enter =
+**RAG-mode menu** (none / BM25 / dense / hybrid / JVector — dense, hybrid, and JVector need an embedding checkpoint under `models/`; JVector is `samples.JVectorRagIndex`, not a library dependency; **since 1.1.0**, JVector **since 1.5.0**; Enter =
 none), **advisor-count menu** (`0`–`3`; Enter = none), then `llm.chat(…).streamTo(…)` or
 `llm.rag(index).streamTo(…)`. Jev skips RAG and advisors. Prepared-prompt
 `TEXT_DEBUG` lines are off by default (`ChatSession.emitDebugPrompts(true)` to enable; `Example`
@@ -4485,7 +4486,7 @@ nano-vllm-java/src/main/java/com/igormaznitsa/nanollvm/
   exceptions/…
 
 nano-vllm-java-samples/src/main/java/com/igormaznitsa/nanollvm/samples/
-  Example.java / HelloWorld.java / NextTokenHelloWorld.java / Bench.java / EmbeddingsHelloWorld.java / TranscribeHelloWorld.java / SynthesizeHelloWorld.java / VoiceReplyHelloWorld.java / LogTriageHelloWorld.java / AdvisorRagHelloWorld.java / RagTunerHelloWorld.java / YoloStreetHelloWorld.java
+  Example.java / HelloWorld.java / NextTokenHelloWorld.java / Bench.java / EmbeddingsHelloWorld.java / TranscribeHelloWorld.java / SynthesizeHelloWorld.java / VoiceReplyHelloWorld.java / LogTriageHelloWorld.java / AdvisorRagHelloWorld.java / JVectorHelloWorld.java / RagTunerHelloWorld.java / YoloStreetHelloWorld.java
   utils/BundledModels.java / BundledRag.java / OrderedConsole.java / EpubText.java
 ```
 
@@ -4542,7 +4543,7 @@ unused.
 
 **In the code (organization):** package `com.igormaznitsa.nanollvm.rag`; entry `RagFactory` → `PreparedRag` (and
 optionally `withEmbeddings`); session `LLM.rag(index)` → `RagSession`; demo corpus folder `rag/` via
-`samples.utils.BundledRag` in `samples.Example` (model → RAG-mode → advisor-count menus **since 1.1.0**)
+`samples.utils.BundledRag` in `samples.Example` (model → RAG-mode → advisor-count menus **since 1.1.0**; JVector graph via `samples.JVectorRagIndex` **since 1.5.0**)
 and the linear `samples.AdvisorRagHelloWorld` (one custom advisor + BM25 over `rag/`) plus
 `samples.RagTunerHelloWorld` (bundled *R.U.R.* EPUB through `RagTuner` extract + BM25).
 
@@ -4766,14 +4767,15 @@ an embedding checkpoint still opens an encoder-session menu: embed REPL, or few-
 `generate(…, EMBEDDING)` vectors (`samples.EmbeddingsHelloWorld` defaults to multilingual-e5-small
 ONNX and adds `query: ` for that family).
 `samples.AdvisorRagHelloWorld` is the non-interactive BM25 + custom-advisor path (Gemma3-270M, advisor Alex,
-Grimm names and father). `samples.RagTunerHelloWorld` extracts a bundled EPUB of Čapek's *R.U.R.* with
+Grimm names and father). `samples.JVectorHelloWorld` asks those same questions after a JVector search
+(Gemma3-270M plus gte-small). `samples.RagTunerHelloWorld` extracts a bundled EPUB of Čapek's *R.U.R.* with
 `RagTuner` filter / extract / preprocess (plain text via JDK zip + StAX), indexes with BM25,
 stamps the short OPF title on later chunks via a Markdown heading, isolates each generate from prior answers,
 and asks questions from the play (`LLM.Builder.deterministic()` so repeats keep the same tokens).
 
 ### What this RAG is *not*
 
-- Not an ANN / external vector database (dense search is in-process, linear).
+- Not an external vector database. Dense search in the library is in-process and linear. The samples module can search the same chunks with an in-process JVector graph (`JVectorHelloWorld`).
 - Not a query-time plugin — `RagTuner` runs only while the index is built.
 - Not a guarantee of factual truth — only a way to **offer** text; the generator may still mis-copy it.
 - Not a classifier of user intents or languages: preparation is about **documents**, not about scripting replies.

@@ -204,6 +204,8 @@ public final class Example {
           case BM25 -> runBm25RagSession(model, advisorCount.get(), debug, status, in, console);
           case DENSE -> runDenseRagSession(model, advisorCount.get(), debug, status, in, console);
           case HYBRID -> runHybridRagSession(model, advisorCount.get(), debug, status, in, console);
+          case JVECTOR ->
+            runJVectorRagSession(model, advisorCount.get(), debug, status, in, console);
         }
       }
     }
@@ -295,8 +297,9 @@ public final class Example {
   /**
    * Step 2 — choose how (or whether) the local {@code rag/} corpus grounds each turn.
    *
-   * <p>{@link RagMode#NONE} is always available. BM25 needs a corpus folder. Dense and hybrid also
-   * need a BERT-encoder checkpoint under {@code models/} (smallest matching GGUF or ONNX folder).
+   * <p>{@link RagMode#NONE} is always available. BM25 needs a corpus folder. Dense, hybrid, and
+   * JVector also need an embedding checkpoint under {@code models/} (smallest matching GGUF or
+   * ONNX folder). JVector stores those passage vectors in an in-memory graph.
    *
    * @return the chosen mode, or empty if the user exits
    */
@@ -320,8 +323,11 @@ public final class Example {
       console.println("  4) Hybrid BM25 + dense"
         + missingMark(!corpusPresent, "no corpus")
         + missingMark(ragEncoder.isEmpty(), "no embedding model"));
-      console.println("  5) Exit");
-      console.print("Choice [1-5, Enter=1]: ");
+      console.println("  5) JVector nearest neighbors (" + encoderLabel + ")"
+        + missingMark(!corpusPresent, "no corpus")
+        + missingMark(ragEncoder.isEmpty(), "no embedding model"));
+      console.println("  6) Exit");
+      console.print("Choice [1-6, Enter=1]: ");
 
       String line = in.readLine();
       if (line == null) {
@@ -358,11 +364,18 @@ public final class Example {
           }
           return Optional.of(RagMode.HYBRID);
         }
-        case "5", "q", "quit", "exit" -> {
+        case "5" -> {
+          if (!corpusPresent || ragEncoder.isEmpty()) {
+            console.println(denseHybridHint(corpusPresent, ragEncoder.isPresent()));
+            continue;
+          }
+          return Optional.of(RagMode.JVECTOR);
+        }
+        case "6", "q", "quit", "exit" -> {
           console.println("Bye.");
           return Optional.empty();
         }
-        default -> console.println("Enter 1, 2, 3, 4, or 5, or press Enter for 1.");
+        default -> console.println("Enter 1, 2, 3, 4, 5, or 6, or press Enter for 1.");
       }
     }
   }
@@ -1273,6 +1286,41 @@ public final class Example {
   }
 
   /**
+   * JVector RAG: embed every chunk, insert the vectors into an in-memory graph, and retrieve the
+   * nearest neighbors by cosine. The embedding model stays open for each question.
+   */
+  private static void runJVectorRagSession(
+    final LlmModel model,
+    final int advisorCount,
+    final boolean debug,
+    final LlmListener status,
+    final BufferedReader in,
+    final OrderedConsole console
+  ) throws Exception {
+    Optional<PreparedRag> lexical = prepareLexicalIndex(model, status, console);
+    Path encoderPath = findRagEmbeddingModel().orElse(null);
+    if (lexical.isEmpty() || encoderPath == null) {
+      console.printlnInfo("JVector RAG unavailable — falling back to plain chat.");
+      runPlainChatSession(model, advisorCount, debug, status, in, console);
+      return;
+    }
+
+    console.printlnInfo("Loading RAG embedding model from " + encoderPath);
+    try (LlmModel embed = LlmModelFactory.make(encoderPath, status)) {
+      console.printlnInfo("Building a JVector graph over " + lexical.get().size() + " chunks");
+      JVectorRagIndex index = JVectorRagIndex.of(lexical.get(), embed);
+      console.printlnInfo(
+        "RAG: JVector over " + BundledRag.ragRoot()
+          + " (" + index.size() + " chunks; encoder " + ragEmbeddingLabel(encoderPath)
+          + " / " + embed.architectureName() + ")");
+
+      try (LLM llm = openEngine(model, advisorCount, status, console)) {
+        converseWithRag(llm, index, debug, in, console);
+      }
+    }
+  }
+
+  /**
    * Builds one {@link LLM} on the loaded chat model.
    *
    * <p>Advisor count {@code 0} skips {@link LLM.Builder#advisors(LlmAdvisorMixer, LlmAdvisor...)}. Counts {@code 1..3} take
@@ -2012,7 +2060,8 @@ public final class Example {
     NONE,
     BM25,
     DENSE,
-    HYBRID
+    HYBRID,
+    JVECTOR
   }
 
   enum EncoderSession {

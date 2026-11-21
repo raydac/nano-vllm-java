@@ -7,14 +7,14 @@
     <parent>
         <groupId>com.igormaznitsa</groupId>
         <artifactId>nano-vllm-java-pom</artifactId>
-        <version>1.5.0-SNAPSHOT</version>
+        <version>1.5.0</version>
     </parent>
 
     <artifactId>nano-vllm-java</artifactId>
     <name>nano-vllm-java</name>
-    <description>Pure Java 21+ CPU inference (continuous batching, paged KV cache, safetensors / GGUF / ONNX):
-        chat, BERT embeddings, Whisper speech-to-text, and Piper text-to-speech. Inspired by
-        GeeeekExplorer/nano-vllm
+    <description>Pure Java 21+ CPU inference: chat (Qwen3, Qwen3.5 text, Gemma 3, Gemma 4 text, Llama, LFM2),
+        sentence embeddings, Whisper, Piper, fastText labels, YOLO26 images, typed decisions, and local
+        tool calls. Safetensors, GGUF, and ONNX. Inspired by GeeeekExplorer/nano-vllm
     </description>
 
     <dependencies>
@@ -42,12 +42,6 @@
         <dependency>
             <groupId>org.junit.jupiter</groupId>
             <artifactId>junit-jupiter</artifactId>
-            <scope>test</scope>
-        </dependency>
-        <dependency>
-            <groupId>io.github.jbellis</groupId>
-            <artifactId>jvector</artifactId>
-            <version>4.0.2</version>
             <scope>test</scope>
         </dependency>
     </dependencies>
