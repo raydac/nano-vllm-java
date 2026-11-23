@@ -34,7 +34,7 @@ public enum YoloTask {
       case YOLO_CLASSIFY -> CLASSIFY;
       case YOLO_POSE -> POSE;
       case YOLO_OBB -> OBB;
-      case GGUF, HUGGING_FACE, PIPER, FASTTEXT ->
+      case GGUF, HUGGING_FACE, PIPER, TINY_VOCA, FASTTEXT ->
         throw new IllegalArgumentException("not a YOLO head: " + type);
     };
   }

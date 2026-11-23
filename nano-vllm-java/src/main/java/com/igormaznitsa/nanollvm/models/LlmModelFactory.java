@@ -21,6 +21,8 @@ import com.igormaznitsa.nanollvm.models.internal.SpeechToText;
 import com.igormaznitsa.nanollvm.models.internal.TextToSpeech;
 import com.igormaznitsa.nanollvm.models.internal.WeightBag;
 import com.igormaznitsa.nanollvm.models.internal.fasttext.FastTextModel;
+import com.igormaznitsa.nanollvm.models.internal.tinyvoca.TinyVocaForTts;
+import com.igormaznitsa.nanollvm.models.internal.tinyvoca.TinyVocaLoader;
 import com.igormaznitsa.nanollvm.models.internal.yolo.Yolo26Loader;
 import com.igormaznitsa.nanollvm.models.internal.yolo.Yolo26Model;
 import com.igormaznitsa.nanollvm.models.internal.yolo.YoloTask;
@@ -549,6 +551,7 @@ public final class LlmModelFactory {
         case GGUF -> loadGgufFile(path, streams, allowUnpackParameters, frozen);
         case FASTTEXT -> loadFastText(path, streams, frozen);
         case PIPER -> loadPiperFolder(path, streams, frozen);
+        case TINY_VOCA -> loadTinyVoca(path, streams, frozen);
         case HUGGING_FACE -> loadHfFolder(path, streams, frozen);
         case YOLO_DETECT, YOLO_SEGMENT, YOLO_SEMANTIC, YOLO_DEPTH, YOLO_CLASSIFY, YOLO_POSE,
              YOLO_OBB -> loadNamedYolo(path, type, streams, frozen);
@@ -564,6 +567,9 @@ public final class LlmModelFactory {
     Path path = requireNonNull(modelPath, "modelPath").toAbsolutePath().normalize();
     try {
       if (isGgufFile(path)) {
+        if (ModelSupport.isTinyVocaCheckpoint(path)) {
+          return new Located(path, LlmModelType.TINY_VOCA);
+        }
         return new Located(path, LlmModelType.GGUF);
       }
       if (Files.isRegularFile(path) && ModelSupport.isClassificationCheckpoint(path)) {
@@ -579,6 +585,9 @@ public final class LlmModelFactory {
         LlmModelType yolo = yoloType(yoloFile).orElseThrow(
           () -> new ModelLoadException("not a YOLO26 ONNX file: " + yoloFile));
         return new Located(yoloFile, yolo);
+      }
+      if (ModelSupport.isTinyVocaCheckpoint(path)) {
+        return new Located(path, LlmModelType.TINY_VOCA);
       }
       if (ModelSupport.isSynthesisCheckpoint(path)) {
         return new Located(path, LlmModelType.PIPER);
@@ -597,7 +606,7 @@ public final class LlmModelFactory {
   private static ModelLoadException unrecognized(final Path path) {
     return new ModelLoadException(
       "model path is not an HF model folder (safetensors/ONNX), a Piper voice folder, "
-        + "a YOLO26 *.onnx, a fastText *.bin/*.ftz, or a .gguf file: "
+        + "a tiny-voca folder, a YOLO26 *.onnx, a fastText *.bin/*.ftz, or a .gguf file: "
         + path);
   }
 
@@ -706,6 +715,61 @@ public final class LlmModelFactory {
       return finishLoadedModel(
         modelFolder, bound, weights, tokenizer, io, t0, options);
     }
+  }
+
+  private static LlmModel loadTinyVoca(
+    final Path path,
+    final LlmListener io,
+    final Map<String, Object> options
+  ) throws IOException {
+    long t0 = System.nanoTime();
+    LlmListeners.info(io, null, "CPU backend: " + MatmulRuntime.sequential().backendInfo());
+    long tGraph = System.nanoTime();
+    TinyVocaLoader.Loaded loaded = TinyVocaLoader.load(path);
+    TinyVocaForTts synthesis = new TinyVocaForTts(
+      loaded.spec(),
+      loaded.graph(),
+      loaded.front(),
+      synthesisVoice(options),
+      synthesisNumber(options, LlmOptionalData.SYNTHESIS_SPEED, 1f),
+      synthesisNumber(options, LlmOptionalData.SYNTHESIS_PITCH, 0f),
+      synthesisNumber(options, LlmOptionalData.SYNTHESIS_RANGE, 1f));
+    Config.HfConfig config = Config.HfConfig.forTinyVoca(loaded.spec());
+    Tokenizer tokenizer = Tokenizer.fromJsonDocuments(
+      null, null, null, "{\"vocab_size\":" + Math.max(loaded.spec().symbols().size(), 1) + "}");
+    LlmListeners.infof(io, null, "Synthesis graph ready (%s) in %.1fs%n",
+      synthesis.architectureName(), (System.nanoTime() - tGraph) / 1e9);
+    LlmListeners.infof(io, null, "Model loaded in %.1fs%n", (System.nanoTime() - t0) / 1e9);
+    return new LlmModelImpl(path, config, new WeightBag(Map.of()), synthesis, tokenizer, options);
+  }
+
+  private static String synthesisVoice(final Map<String, Object> options) {
+    Object raw = options.get(LlmModel.OPTION_OPTIONAL_DATA);
+    if (!(raw instanceof Map<?, ?> data)) {
+      return null;
+    }
+    Object voice = data.get(LlmOptionalData.SYNTHESIS_VOICE.id());
+    return voice == null ? null : voice.toString();
+  }
+
+  private static float synthesisNumber(
+    final Map<String, Object> options,
+    final LlmOptionalData.Key<Float> key,
+    final float fallback
+  ) {
+    Object raw = options.get(LlmModel.OPTION_OPTIONAL_DATA);
+    if (!(raw instanceof Map<?, ?> data)) {
+      return fallback;
+    }
+    Object value = data.get(key.id());
+    if (value == null) {
+      return fallback;
+    }
+    if (value instanceof Number number) {
+      return number.floatValue();
+    }
+    throw new IllegalArgumentException(
+      "optionalData '" + key.id() + "' must be a number, got " + value.getClass().getName());
   }
 
   private static LlmModel loadPiperFolder(

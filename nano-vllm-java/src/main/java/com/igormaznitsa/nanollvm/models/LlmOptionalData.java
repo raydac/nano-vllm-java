@@ -29,6 +29,41 @@ public final class LlmOptionalData {
    */
   public static final Key<Path> ESPEAK_DATA = Key.of("espeak.data", Path.class);
 
+  /**
+   * Speaker name for a tiny-voca checkpoint. The names are {@link com.igormaznitsa.nanollvm.llm.TinyVocaSpec#speakers()}
+   * ({@code F2} and {@code M2} in English, {@code F} and {@code M} in Russian). Omit the key to
+   * use the first speaker. A line can still override it with a leading {@code voice=NAME}.
+   *
+   * @since 1.5.1
+   */
+  public static final Key<String> SYNTHESIS_VOICE = Key.of("synthesis.voice", String.class);
+
+  /**
+   * Speaking rate for a tiny-voca checkpoint. {@code 1} is the model's own pace. Values outside
+   * {@code 0.25} … {@code 4} are clamped. A line can still override it with a leading {@code speed=}.
+   *
+   * @since 1.5.1
+   */
+  public static final Key<Float> SYNTHESIS_SPEED = Key.of("synthesis.speed", Float.class);
+
+  /**
+   * Log-F0 offset for a tiny-voca checkpoint. {@code 0} leaves the pitch alone. {@code 0.058} is
+   * about one semitone. Values outside {@code -2} … {@code 2} are clamped. A line can still
+   * override it with a leading {@code pitch=}.
+   *
+   * @since 1.5.1
+   */
+  public static final Key<Float> SYNTHESIS_PITCH = Key.of("synthesis.pitch", Float.class);
+
+  /**
+   * Pitch-contour width for a tiny-voca checkpoint. {@code 1} keeps the model's contour, {@code 0}
+   * flattens it, and higher values widen it. Values outside {@code 0} … {@code 3} are clamped.
+   * A line can still override it with a leading {@code range=}.
+   *
+   * @since 1.5.1
+   */
+  public static final Key<Float> SYNTHESIS_RANGE = Key.of("synthesis.range", Float.class);
+
   private LlmOptionalData() {
   }
 
@@ -50,6 +85,9 @@ public final class LlmOptionalData {
     }
     if (key.type().isInstance(value)) {
       return key.type().cast(value);
+    }
+    if (key.type() == Float.class && value instanceof Number number) {
+      return key.type().cast(Float.valueOf(number.floatValue()));
     }
     throw new IllegalArgumentException(
       "optionalData '" + key.id() + "' must be a " + key.type().getSimpleName()

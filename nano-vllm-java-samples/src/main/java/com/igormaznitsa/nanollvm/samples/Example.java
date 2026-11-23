@@ -16,6 +16,7 @@ import com.igormaznitsa.nanollvm.llm.LLM;
 import com.igormaznitsa.nanollvm.llm.LlmAdvisor;
 import com.igormaznitsa.nanollvm.llm.LlmAdvisorMixer;
 import com.igormaznitsa.nanollvm.llm.SamplingParams;
+import com.igormaznitsa.nanollvm.llm.TinyVocaSpec;
 import com.igormaznitsa.nanollvm.models.LlmInSound;
 import com.igormaznitsa.nanollvm.models.LlmInText;
 import com.igormaznitsa.nanollvm.models.LlmModality;
@@ -159,6 +160,10 @@ public final class Example {
       LlmModelFactory.Builder load = LlmModelFactory.open(modelPath).listen(status);
       if (ModelSupport.isSynthesisCheckpoint(modelPath)) {
         load.optionalData(LlmOptionalData.ESPEAK_DATA, modelPath.resolve("espeak-ng-data"));
+      }
+      if (ModelSupport.isTinyVocaCheckpoint(modelPath) &&
+        !selectTinyVocaVoice(modelPath, load, in, console)) {
+        return;
       }
       try (LlmModel model = load.make()) {
         printSupportedModalities(model, console);
@@ -552,8 +557,17 @@ public final class Example {
       "Synthesis model (" + llm.model().architectureName()
         + ", " + llm.model().modalities() +
         ") — enter text. Commands: /exit");
-    console.println("Try: Hello world");
-    console.println("     Привет, мир");
+    TinyVocaSpec voices = llm.model().hfConfig().tinyVoca();
+    if (voices != null) {
+      String selected = llm.model().optionalData(LlmOptionalData.SYNTHESIS_VOICE)
+        .orElse(voices.speakers().getFirst());
+      console.println("Voice: " + selected);
+      console.println("Try: " + (voices.isRussian() ? "Привет, мир" : "Hello"));
+      console.println("One line may start with voice=NAME speed= pitch= range=");
+    } else {
+      console.println("Try: Hello world");
+      console.println("     Привет, мир");
+    }
     console.println();
     Path outDir = Path.of(".").toAbsolutePath().normalize();
     int n = 0;
@@ -575,7 +589,8 @@ public final class Example {
         long started = System.nanoTime();
         LlmOutSoundData sound = llm.generate(
           LlmInText.of(user), LlmModality.AUDIO);
-        Path wavPath = outDir.resolve("piper-%02d.wav".formatted(++n));
+        String stem = llm.model().hfConfig().isTinyVoca() ? "tiny-voca" : "piper";
+        Path wavPath = outDir.resolve((stem + "-%02d.wav").formatted(++n));
         Files.write(wavPath, sound.wav());
         console.printf(
           Locale.ROOT,
@@ -1634,7 +1649,15 @@ public final class Example {
       choice(
         "piper-ru-irina-medium (TTS Russian, onnx, ~63MB + espeak-ng-data)",
         BundledModels.PIPER_RU_IRINA_MEDIUM,
-        "Run models/download-piper-ru-irina-medium.sh")
+        "Run models/download-piper-ru-irina-medium.sh"),
+      choice(
+        "tiny-voca (TTS English, gguf, ~15MB + lexicon)",
+        BundledModels.TINY_VOCA,
+        "Run models/download-tiny-voca.sh"),
+      choice(
+        "tiny-voca-ru (TTS Russian, safetensors, ~18MB)",
+        BundledModels.TINY_VOCA_RU,
+        "Run models/download-tiny-voca-ru.sh")
     );
   }
 
@@ -1717,6 +1740,10 @@ public final class Example {
       "  ./models/download-piper-en-lessac-medium.sh  (English TTS, ~63MB + espeak-ng-data)");
     console.println(
       "  ./models/download-piper-ru-irina-medium.sh  (Russian TTS, ~63MB + espeak-ng-data)");
+    console.println(
+      "  ./models/download-tiny-voca.sh  (English Tiny Voca, ~15MB + lexicon)");
+    console.println(
+      "  ./models/download-tiny-voca-ru.sh  (Russian Tiny Voca, ~18MB)");
     console.println();
     console.println("Windows: matching .ps1 / .cmd scripts in models/.");
     console.println(
@@ -1743,6 +1770,35 @@ public final class Example {
     return modalities.isEmpty()
       ? "none"
       : modalities.stream().map(LlmModality::wireName).collect(joining("+"));
+  }
+
+  private static boolean selectTinyVocaVoice(
+    final Path modelPath,
+    final LlmModelFactory.Builder load,
+    final BufferedReader in,
+    final OrderedConsole console
+  ) throws IOException {
+    Path folder = Files.isDirectory(modelPath) ? modelPath : modelPath.getParent();
+    if (folder == null) {
+      return true;
+    }
+    Path config = folder.resolve("config.json");
+    if (!Files.isRegularFile(config)) {
+      return true;
+    }
+    TinyVocaSpec spec = TinyVocaSpec.parse(Files.readString(config));
+    String first = spec.speakers().getFirst();
+    console.println("Voices: " + String.join(", ", spec.speakers()));
+    console.print("Voice [Enter=" + first + "]: ");
+    String line = in.readLine();
+    if (line == null) {
+      return false;
+    }
+    String voice = line.strip();
+    if (!voice.isEmpty()) {
+      load.optionalData(LlmOptionalData.SYNTHESIS_VOICE, voice);
+    }
+    return true;
   }
 
   private static void printLoadHints(final Path path, final OrderedConsole console) {
@@ -1779,6 +1835,12 @@ public final class Example {
       console.printlnInfo(
         "This checkpoint is Whisper speech-to-text — LLM.builder then "
           + "generate(LlmInSound, TEXT).");
+    }
+    if (ModelSupport.isTinyVocaCheckpoint(path)) {
+      console.printlnInfo(
+        "This checkpoint is tiny-voca text-to-speech — LLM.builder then "
+          + "generate(LlmInText, AUDIO). The speaker, speed, pitch, and range are "
+          + "optionalData (SYNTHESIS_VOICE, SYNTHESIS_SPEED, SYNTHESIS_PITCH, SYNTHESIS_RANGE).");
     }
     if (ModelSupport.isSynthesisCheckpoint(path)) {
       console.printlnInfo(

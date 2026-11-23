@@ -81,6 +81,7 @@ final class GgufConfigs {
       null,
       null,
       null,
+      null,
       false
     );
   }
@@ -161,6 +162,7 @@ final class GgufConfigs {
         valueHeads,
         valueHeadDim,
         (float) rotaryDim / headDim),
+      null,
       false
     );
   }
@@ -224,6 +226,7 @@ final class GgufConfigs {
       null,
       null,
       null,
+      null,
       false
     );
   }
@@ -281,6 +284,7 @@ final class GgufConfigs {
       false,
       false,
       false,
+      null,
       null,
       null,
       null,

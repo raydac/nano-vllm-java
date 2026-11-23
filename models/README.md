@@ -356,6 +356,51 @@ try (LlmModel model = LlmModelFactory.open(Path.of("models/piper-ru-irina-medium
 Prefer `LLM.builder` for the shared matmul pool; do not use chat. Sample:
 `nano-vllm-java-samples` → `com.igormaznitsa.nanollvm.samples.SynthesizeHelloWorld`.
 
+## tiny-voca (optional, English text-to-speech)
+
+[n4ze3m/tiny-voca](https://huggingface.co/n4ze3m/tiny-voca) — 24 kHz source-filter voice
+(`config.json`, f16 GGUF, and `phonemizer/lexicon.tsv`, about 19 MB). Voices `F2` and `M2`.
+Not a chat model. Not ONNX Runtime. The `.pt` pickle is not loaded.
+
+```bash
+./models/download-tiny-voca.sh
+```
+
+Windows: `.\models\download-tiny-voca.ps1` or `models\download-tiny-voca.cmd`.
+
+```java
+try (LlmModel model = LlmModelFactory.open(Path.of("models/tiny-voca"))
+    .optionalData(LlmOptionalData.SYNTHESIS_VOICE, "F2")
+    .optionalData(LlmOptionalData.SYNTHESIS_SPEED, 1f)
+    .optionalData(LlmOptionalData.SYNTHESIS_PITCH, 0f)
+    .optionalData(LlmOptionalData.SYNTHESIS_RANGE, 1f)
+    .make()) {
+  LlmOutSoundData wav = model.generate(LlmInText.of("Hello"), LlmModality.AUDIO);
+}
+```
+
+In `Example`, pick the tiny-voca row and choose `F2` or `M2` before the model loads.
+
+## tiny-voca-ru (optional, Russian text-to-speech)
+
+[egnch/tiny-voca-ru](https://huggingface.co/egnch/tiny-voca-ru) — the same graph, Russian phones
+(`config.json` + `model.safetensors`, about 18 MB). Voices `F` and `M`. Stress is the last vowel
+unless `phonemizer/stress.txt` is added next to the checkpoint (`+` before a vowel and `ё` also mark stress).
+
+```bash
+./models/download-tiny-voca-ru.sh
+```
+
+Windows: `.\models\download-tiny-voca-ru.ps1` or `models\download-tiny-voca-ru.cmd`.
+
+```java
+try (LlmModel model = LlmModelFactory.open(Path.of("models/tiny-voca-ru"))
+    .optionalData(LlmOptionalData.SYNTHESIS_VOICE, "F")
+    .make()) {
+  LlmOutSoundData wav = model.generate(LlmInText.of("Привет"), LlmModality.AUDIO);
+}
+```
+
 ## YOLO26 nano (optional, images)
 
 Seven tasks: detect, instance segmentation, semantic segmentation, depth, classification, pose,

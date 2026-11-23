@@ -44,6 +44,8 @@ public final class OptionalModelAssumptions {
   private static final String XLM_ROBERTA_BASE = "xlm-roberta-base";
   private static final String TINY_LLM_ONNX = "Tiny-LLM-ONNX";
   private static final String YOLO26N = "YOLO26n";
+  private static final String TINY_VOCA = "tiny-voca";
+  private static final String TINY_VOCA_RU = "tiny-voca-ru";
 
   private OptionalModelAssumptions() {
   }
@@ -193,6 +195,20 @@ public final class OptionalModelAssumptions {
       "models/download-piper-ru-irina-medium.sh");
   }
 
+  public static Path requireTinyVoca() {
+    return require(
+      findModel(TINY_VOCA),
+      "tiny-voca",
+      "models/download-tiny-voca.sh");
+  }
+
+  public static Path requireTinyVocaRussian() {
+    return require(
+      findModel(TINY_VOCA_RU),
+      "tiny-voca-ru",
+      "models/download-tiny-voca-ru.sh");
+  }
+
   public static Path requireFastTextLid() {
     return require(
       findModel(FASTTEXT_LID_176),
@@ -298,6 +314,7 @@ public final class OptionalModelAssumptions {
   private static boolean isModel(final Path path) {
     return isGgufFile(path) || isHfModelDir(path) || isDirWithGguf(path)
       || ModelSupport.isSynthesisCheckpoint(path)
+      || ModelSupport.isTinyVocaCheckpoint(path)
       || ModelSupport.isClassificationCheckpoint(path);
   }
 

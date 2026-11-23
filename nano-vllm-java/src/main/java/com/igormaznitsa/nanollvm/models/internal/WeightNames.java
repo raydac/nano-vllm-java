@@ -53,6 +53,12 @@ public final class WeightNames {
    */
   public static final String ARCH_PIPER = "piper";
   /**
+   * Tiny Voca source-filter text-to-speech ({@code config.json} plus safetensors, GGUF, or ONNX).
+   *
+   * @since 1.5.1
+   */
+  public static final String ARCH_TINY_VOCA = "tiny_voca";
+  /**
    * Meta fastText supervised classifier ({@code *.bin} / {@code *.ftz}), including language id.
    *
    * @since 1.4.0

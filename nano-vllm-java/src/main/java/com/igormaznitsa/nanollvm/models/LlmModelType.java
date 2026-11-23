@@ -12,6 +12,13 @@ public enum LlmModelType {
   GGUF,
   HUGGING_FACE,
   PIPER,
+  /**
+   * Tiny Voca text-to-speech folder ({@code config.json} plus safetensors, GGUF, or ONNX)
+   * or a tiny-voca {@code .gguf} file.
+   *
+   * @since 1.5.1
+   */
+  TINY_VOCA,
   FASTTEXT,
   YOLO_DETECT,
   YOLO_SEGMENT,

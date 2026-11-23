@@ -10,6 +10,7 @@ import static com.igormaznitsa.nanollvm.models.internal.WeightNames.ARCH_LLAMA;
 import static com.igormaznitsa.nanollvm.models.internal.WeightNames.ARCH_PIPER;
 import static com.igormaznitsa.nanollvm.models.internal.WeightNames.ARCH_QWEN3;
 import static com.igormaznitsa.nanollvm.models.internal.WeightNames.ARCH_QWEN3_5;
+import static com.igormaznitsa.nanollvm.models.internal.WeightNames.ARCH_TINY_VOCA;
 import static com.igormaznitsa.nanollvm.models.internal.WeightNames.ARCH_WHISPER;
 import static com.igormaznitsa.nanollvm.utils.NanoLlvmProps.PROP_ARCH;
 import static java.nio.charset.StandardCharsets.UTF_8;
@@ -52,11 +53,13 @@ public final class ModelSupport {
       Embeddings from GGUF or ONNX: bert encoder (bert / roberta / xlm-roberta)
       Speech from a Hugging Face folder (config.json + *.safetensors): whisper (openai/whisper-*)
       Speech synthesis from a Piper voice folder (*.onnx + *.onnx.json): piper
+      Speech synthesis from a tiny-voca folder (config.json + safetensors, GGUF, or ONNX) or a tiny-voca .gguf: tiny_voca
       Text classification / language id from a Meta fastText file (*.bin / *.ftz): fasttext (lid.176)
       Images from a fused YOLO26 ONNX file (nms=False, imgsz 640): yolo26n, yolo26s, yolo26m, yolo26l, and yolo26x detect, seg, sem, depth, cls, pose, obb
     Not supported: Qwen2 / Qwen2.5, Qwen3-Next, Qwen3.5 MoE, vision-language chat, YOLO26 m/l/x, P2/P6, YOLOE, Gemma 1 / 2, \
     Gemma 4 vision/audio towers, Mistral / Mixtral, Phi, MoE, GGUF Llama / Gemma, Hugging Face BERT safetensors, \
     CTranslate2 / faster-whisper model.bin, Whisper GGUF / ONNX, ONNX Runtime Piper execution, \
+    tiny-voca .pt pickle, \
     unsupervised fastText word vectors, JNI fastText bindings.""";
 
   private static final Pattern HF_CLASS_SUFFIX = Pattern.compile(
@@ -242,6 +245,37 @@ public final class ModelSupport {
    *
    * @since 1.3.0
    */
+  /**
+   * {@code true} when {@code path} is a tiny-voca folder ({@code config.json} with hop, channels,
+   * speakers, and a symbol inventory) or a GGUF whose architecture is {@code tiny-voca},
+   * without loading weights.
+   *
+   * @since 1.5.1
+   */
+  public static boolean isTinyVocaCheckpoint(final Path path) {
+    Path file = requireNonNull(path, "path").toAbsolutePath().normalize();
+    if (isGgufFile(file)) {
+      try {
+        String arch = normalize(GgufReader.peekArchitecture(file));
+        return "tiny_voca".equals(arch) || "tinyvoca".equals(arch);
+      } catch (IOException | RuntimeException ignored) {
+        return false;
+      }
+    }
+    if (!Files.isDirectory(file)) {
+      return false;
+    }
+    Path config = file.resolve("config.json");
+    if (!Files.isRegularFile(config)) {
+      return false;
+    }
+    try {
+      return com.igormaznitsa.nanollvm.llm.TinyVocaSpec.looksLike(Files.readString(config, UTF_8));
+    } catch (IOException | RuntimeException ignored) {
+      return false;
+    }
+  }
+
   public static boolean isSynthesisCheckpoint(final Path path) {
     Path file = requireNonNull(path, "path").toAbsolutePath().normalize();
     if (isGgufFile(file) || !Files.isDirectory(file)) {
@@ -747,6 +781,9 @@ public final class ModelSupport {
       case "piper", "piper_vits", "pipervits", "vits" -> {
         return Verdict.ok(ARCH_PIPER, Kind.SYNTHESIS);
       }
+      case "tiny_voca", "tinyvoca" -> {
+        return Verdict.ok(ARCH_TINY_VOCA, Kind.SYNTHESIS);
+      }
       case "fasttext", "fast_text", "lid", "language_id", "languageidentification" -> {
         return Verdict.ok(ARCH_FASTTEXT, Kind.CLASSIFICATION);
       }
@@ -894,6 +931,7 @@ public final class ModelSupport {
       case ARCH_BERT, "roberta", "xlm-roberta", "xlm_roberta" -> ARCH_BERT;
       case ARCH_WHISPER -> ARCH_WHISPER;
       case ARCH_PIPER -> ARCH_PIPER;
+      case ARCH_TINY_VOCA, "tiny-voca" -> ARCH_TINY_VOCA;
       default -> null;
     };
   }

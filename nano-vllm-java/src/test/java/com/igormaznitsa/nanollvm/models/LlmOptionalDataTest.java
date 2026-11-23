@@ -17,6 +17,13 @@ final class LlmOptionalDataTest {
   }
 
   @Test
+  void synthesisKeysAcceptANumber() {
+    assertEquals(1.25f, LlmOptionalData.cast(LlmOptionalData.SYNTHESIS_SPEED, 1.25d));
+    assertEquals(0.1f, LlmOptionalData.cast(LlmOptionalData.SYNTHESIS_PITCH, 0.1f));
+    assertEquals("synthesis.range", LlmOptionalData.SYNTHESIS_RANGE.id());
+  }
+
+  @Test
   void asPathRejectsBlankAndNonPath() {
     assertThrows(IllegalArgumentException.class, () -> LlmOptionalData.asPath("  "));
     assertThrows(IllegalArgumentException.class, () -> LlmOptionalData.asPath(12));

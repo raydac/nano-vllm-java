@@ -97,6 +97,20 @@ public final class BundledModels {
   public static final String PIPER_EN_LESSAC_MEDIUM =
     DEFAULT_MODELS_DIR + "/piper-en-lessac-medium";
   /**
+   * Bundled Tiny Voca English folder under {@link #DEFAULT_MODELS_DIR}.
+   *
+   * @since 1.5.1
+   */
+  public static final String TINY_VOCA =
+    DEFAULT_MODELS_DIR + "/tiny-voca";
+  /**
+   * Bundled Tiny Voca Russian folder under {@link #DEFAULT_MODELS_DIR}.
+   *
+   * @since 1.5.1
+   */
+  public static final String TINY_VOCA_RU =
+    DEFAULT_MODELS_DIR + "/tiny-voca-ru";
+  /**
    * Bundled Meta fastText language-id folder ({@code lid.176.bin}) under {@link #DEFAULT_MODELS_DIR}.
    *
    * @since 1.4.0
@@ -339,6 +353,8 @@ public final class BundledModels {
       case "whisper-tiny" -> "models/download-whisper-tiny.sh";
       case "piper-en-lessac-medium" -> "models/download-piper-en-lessac-medium.sh";
       case "piper-ru-irina-medium" -> "models/download-piper-ru-irina-medium.sh";
+      case "tiny-voca" -> "models/download-tiny-voca.sh";
+      case "tiny-voca-ru" -> "models/download-tiny-voca-ru.sh";
       case "fasttext-lid-176" -> "models/download-fasttext-lid-176.sh";
       case "Tiny-LLM-ONNX" -> "models/download-tiny-llm-onnx.sh";
       case "SmolLM2-135M-Instruct-ONNX" -> "models/download-smollm2-135m-instruct-onnx.sh";
@@ -359,6 +375,7 @@ public final class BundledModels {
   private static boolean isModel(final Path path) {
     return isGgufFile(path) || isHfModelDir(path) || isDirWithGguf(path)
       || ModelSupport.isSynthesisCheckpoint(path)
+      || ModelSupport.isTinyVocaCheckpoint(path)
       || ModelSupport.isClassificationCheckpoint(path);
   }
 

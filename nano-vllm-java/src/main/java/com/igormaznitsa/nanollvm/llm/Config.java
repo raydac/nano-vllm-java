@@ -526,6 +526,7 @@ public final class Config {
    * @param whisper               Whisper encoder/decoder extras; {@code null} for other families
    * @param piper                 Piper VITS extras; {@code null} for other families
    * @param qwen35                Qwen3.5 linear-attention extras; {@code null} for other families
+   * @param tinyVoca              tiny-voca text-to-speech extras; {@code null} for other families
    * @param bidirectionalAttention {@code use_bidirectional_attention}; Gemma 3 text embeddings
    *                              attend both ways. Causal checkpoints leave this {@code false}
    */
@@ -562,6 +563,7 @@ public final class Config {
     WhisperSpec whisper,
     PiperSpec piper,
     Qwen35Text qwen35,
+    TinyVocaSpec tinyVoca,
     boolean bidirectionalAttention
   ) {
     public HfConfig {
@@ -750,6 +752,7 @@ public final class Config {
         whisper,
         piper,
           qwen35,
+        null,
           Json.asBoolean(m.get("use_bidirectional_attention"), false)
       );
     }
@@ -892,6 +895,7 @@ public final class Config {
         null,
         spec,
           null,
+        null,
           false);
     }
 
@@ -942,6 +946,7 @@ public final class Config {
         null,
         null,
         null,
+        null,
           null,
           false);
     }
@@ -989,8 +994,56 @@ public final class Config {
         null,
         null,
         null,
+        null,
           null,
           false);
+    }
+
+    /**
+     * Blueprint for a loaded tiny-voca text-to-speech checkpoint.
+     *
+     * @param spec inventory and acoustic sizes; must not be {@code null}
+     * @return blueprint with {@link #tinyVoca()} set and {@link #isTinyVoca()} true
+     * @since 1.5.1
+     */
+    public static HfConfig forTinyVoca(final TinyVocaSpec spec) {
+      requireNonNull(spec, "spec");
+      int heads = spec.heads();
+      return new HfConfig(
+        spec.symbols().size(),
+        spec.channels(),
+        spec.feedforward(),
+        spec.encoderLayers(),
+        heads,
+        heads,
+        spec.channels() / heads,
+        spec.maxTokens(),
+        1e-5f,
+        "gelu",
+        false,
+        true,
+        10_000f,
+        null,
+        "float32",
+        "tiny_voca",
+        List.of("TinyVoca"),
+        "gelu",
+        0,
+        List.of(),
+        0f,
+        0f,
+        0,
+        false,
+        false,
+        false,
+        false,
+        false,
+        null,
+        null,
+        null,
+        null,
+        spec,
+        false);
     }
 
     private static PiperSpec parsePiper(final Map<String, Object> root, final String modelType) {
@@ -1319,6 +1372,15 @@ public final class Config {
      */
     public boolean isPiper() {
       return this.piper != null;
+    }
+
+    /**
+     * {@code true} when this blueprint is a tiny-voca text-to-speech model.
+     *
+     * @since 1.5.1
+     */
+    public boolean isTinyVoca() {
+      return this.tinyVoca != null;
     }
 
     /**
