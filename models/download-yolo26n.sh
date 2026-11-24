@@ -29,8 +29,26 @@ download cls yolo26n-cls.onnx
 download pose yolo26n-pose.onnx
 download obb yolo26n-obb.onnx
 
+require_classes() {
+  local folder="$1"
+  local count="$2"
+  local sidecar="$DEST/$folder/classes.txt"
+  if [[ ! -f "$sidecar" ]]; then
+    echo "Missing $sidecar ($count names, one per line)." >&2
+    echo "Those lists are in the git tree. This script downloads only the ONNX file." >&2
+    exit 1
+  fi
+}
+
+require_classes detect 80
+require_classes seg 80
+require_classes sem 19
+require_classes cls 1000
+require_classes pose 1
+require_classes obb 15
+
 echo "Installed to $DEST"
 find "$DEST" -type f -name '*.onnx' -exec ls -lh {} +
 echo "Class names are classes.txt in the same folder as the ONNX file. Depth has none."
-echo "Replace classes.txt when the head was trained on another list."
+echo "Those lists ship with the repository. Replace classes.txt when a head was trained on another list."
 echo "Load: LlmModelFactory.make(Path.of(\"models/YOLO26n/detect/yolo26n.onnx\"))"

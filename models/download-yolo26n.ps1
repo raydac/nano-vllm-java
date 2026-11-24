@@ -41,7 +41,23 @@ Download-Onnx 'cls' 'yolo26n-cls.onnx'
 Download-Onnx 'pose' 'yolo26n-pose.onnx'
 Download-Onnx 'obb' 'yolo26n-obb.onnx'
 
+function Require-Classes([string]$Folder, [int]$Count) {
+    $sidecar = Join-Path (Join-Path $Dest $Folder) 'classes.txt'
+    if (-not (Test-Path -LiteralPath $sidecar -PathType Leaf)) {
+        Write-Host "Missing $sidecar ($Count names, one per line)." -ForegroundColor Red
+        Write-Host 'Those lists are in the git tree. This script downloads only the ONNX file.' -ForegroundColor Red
+        exit 1
+    }
+}
+
+Require-Classes 'detect' 80
+Require-Classes 'seg' 80
+Require-Classes 'sem' 19
+Require-Classes 'cls' 1000
+Require-Classes 'pose' 1
+Require-Classes 'obb' 15
+
 Write-Host "Installed to $Dest"
 Get-ChildItem $Dest -Recurse -Filter *.onnx | Format-Table FullName, Length
 Write-Host 'Class names are classes.txt in the same folder as the ONNX file. Depth has none.'
-Write-Host 'Replace classes.txt when the head was trained on another list.'
+Write-Host 'Those lists ship with the repository. Replace classes.txt when a head was trained on another list.'

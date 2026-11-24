@@ -26,6 +26,7 @@ models/tiny-voca/
 models/tiny-voca-ru/
 models/fasttext-lid-176/
 models/Jeff-Qwen3.5-0.8B/
+# Weights only. classes.txt in each task folder is part of the tree.
 models/YOLO26n/**/*.onnx
 
 *.wav
@@ -48,12 +49,6 @@ models/YOLO26n/**/*.onnx
 /yolo-street-pose.png
 /yolo-street-cls.png
 /yolo-street-sem.png
-/models/YOLO26n/cls/classes.txt
-/models/YOLO26n/detect/classes.txt
-/models/YOLO26n/obb/classes.txt
-/models/YOLO26n/pose/classes.txt
-/models/YOLO26n/seg/classes.txt
-/models/YOLO26n/sem/classes.txt
 /models/EmbeddingGemma-300M/1_Pooling/config.json
 /models/EmbeddingGemma-300M/2_Dense/config.json
 /models/EmbeddingGemma-300M/2_Dense/model.safetensors

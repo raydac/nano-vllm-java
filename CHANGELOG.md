@@ -12,6 +12,10 @@ Development snapshot after the **1.5.0** public release.
 
 - Tiny Voca speaks text to a WAV (`n4ze3m/tiny-voca` and the Russian `egnch/tiny-voca-ru` checkpoint). `./models/download-tiny-voca.sh` and `./models/download-tiny-voca-ru.sh` fetch the weights, and the interactive example lists both. The speaker, speed, pitch, and range are set with `optionalData` when the model is opened (`SYNTHESIS_VOICE`, `SYNTHESIS_SPEED`, `SYNTHESIS_PITCH`, `SYNTHESIS_RANGE`). Russian prepositions with no vowel, such as «в», stay in the audio and join the next word.
 
+### Fixed
+
+- YOLO26 class name lists ship in `models/YOLO26n/<task>/classes.txt`. A clone can load the nano ONNX files. The download script still fetches only the weights. Depth has no list.
+
 ## [1.5.0] — 2026-11-21
 
 Public release of **nano-vllm-java** `1.5.0` (Maven coordinates `com.igormaznitsa:nano-vllm-java:1.5.0`). Qwen3.5 text chat, YOLO26 images, typed Jev decisions, local tool calls, EmbeddingGemma, and the weather and Russian checkers samples.
