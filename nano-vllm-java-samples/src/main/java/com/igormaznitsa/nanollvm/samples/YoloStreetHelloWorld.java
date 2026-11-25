@@ -75,6 +75,7 @@ public final class YoloStreetHelloWorld {
   private static final float QUIET_AREA_FRACTION = 0.02f;
 
   private static final Color LIMB = new Color(0, 200, 70);
+  static final Font MARK_FONT = new Font(Font.SANS_SERIF, Font.BOLD, 16);
   private static final int MASK_ALPHA = 128;
   private static final int DEPTH_ALPHA = 128;
 
@@ -181,7 +182,7 @@ public final class YoloStreetHelloWorld {
       photo.getWidth(), photo.getHeight(), BufferedImage.TYPE_INT_RGB);
     Graphics2D pen = canvas.createGraphics();
     pen.drawImage(photo, 0, 0, null);
-    pen.setFont(new Font(Font.SANS_SERIF, Font.BOLD, 16));
+    pen.setFont(MARK_FONT);
     FontMetrics metrics = pen.getFontMetrics();
     int top = 8;
     for (LlmLabelScore score : labels) {
@@ -507,7 +508,7 @@ public final class YoloStreetHelloWorld {
     pen.setRenderingHint(
       RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
     pen.setStroke(new BasicStroke(2f));
-    pen.setFont(new Font(Font.SANS_SERIF, Font.BOLD, 16));
+    pen.setFont(MARK_FONT);
     List<VisionHit> ranked = hits.stream()
       .sorted(Comparator.comparingDouble(VisionHit::probability).reversed())
       .toList();

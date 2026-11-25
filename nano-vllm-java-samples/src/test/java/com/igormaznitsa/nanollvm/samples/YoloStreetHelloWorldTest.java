@@ -16,6 +16,7 @@ import com.igormaznitsa.nanollvm.models.VisionHit;
 import com.igormaznitsa.nanollvm.samples.YoloStreetHelloWorld.Selection;
 import com.igormaznitsa.nanollvm.samples.YoloStreetHelloWorld.StreetHead;
 import java.awt.Color;
+import java.awt.Graphics2D;
 import java.awt.image.BufferedImage;
 import java.io.BufferedReader;
 import java.io.ByteArrayOutputStream;
@@ -114,6 +115,16 @@ class YoloStreetHelloWorldTest {
 
   private static int blend(final int channel) {
     return (channel * 128 + 255 * 127 + 127) / 255;
+  }
+
+  private static int shapeTopBelowLabel() {
+    Graphics2D pen = new BufferedImage(1, 1, BufferedImage.TYPE_INT_RGB).createGraphics();
+    pen.setFont(YoloStreetHelloWorld.MARK_FONT);
+    try {
+      return pen.getFontMetrics().getHeight() + 2;
+    } finally {
+      pen.dispose();
+    }
   }
 
   private static int sceneOnWhite(final int red, final int green, final int blue) {
@@ -301,34 +312,41 @@ class YoloStreetHelloWorldTest {
 
   @Test
   void poseDrawsAGreenLimbBetweenVisibleJoints() {
-    BufferedImage source = new BufferedImage(80, 80, BufferedImage.TYPE_INT_RGB);
+    int top = shapeTopBelowLabel();
+    int jointY = top + 32;
+    BufferedImage source = new BufferedImage(80, jointY + 40, BufferedImage.TYPE_INT_RGB);
     VisionHit person = new VisionHit(
       classId("person"),
       0.9f,
-      new Box(8, 8, 70, 70),
-      List.of(new Keypoint(5, 20, 40), new Keypoint(7, 60, 40)));
+      new Box(8, top, 70, top + 62),
+      List.of(new Keypoint(5, 20, jointY), new Keypoint(7, 60, jointY)));
 
     BufferedImage marked = YoloStreetHelloWorld.mark(source, List.of(person), NAMES);
 
-    assertEquals(new Color(0, 200, 70).getRGB(), marked.getRGB(40, 40));
-    assertEquals(new Color(220, 40, 40).getRGB(), marked.getRGB(20, 40));
+    assertEquals(new Color(0, 200, 70).getRGB(), marked.getRGB(40, jointY));
+    assertEquals(new Color(220, 40, 40).getRGB(), marked.getRGB(20, jointY));
   }
 
   @Test
   void segmentationFillsTheOutlineAtHalfStrength() {
-    int[] white = new int[120 * 100];
+    int top = shapeTopBelowLabel();
+    int width = 120;
+    int height = top + 80;
+    int[] white = new int[width * height];
     Arrays.fill(white, 0xffffff);
-    BufferedImage source = new BufferedImage(120, 100, BufferedImage.TYPE_INT_RGB);
-    source.setRGB(0, 0, 120, 100, white, 0, 120);
+    BufferedImage source = new BufferedImage(width, height, BufferedImage.TYPE_INT_RGB);
+    source.setRGB(0, 0, width, height, white, 0, width);
     VisionHit person = new VisionHit(classId("person"), 0.9f, new Polygon(List.of(
-      new Point2D(30, 20), new Point2D(90, 20), new Point2D(60, 80))));
+      new Point2D(30, top), new Point2D(90, top), new Point2D(60, top + 60))));
 
     BufferedImage filled = YoloStreetHelloWorld.mark(
       source, List.of(person), NAMES, StreetHead.SEGMENT);
     BufferedImage outlined = YoloStreetHelloWorld.mark(
       source, List.of(person), NAMES, StreetHead.OBB);
 
-    assertEquals(new Color(blend(220), blend(40), blend(40)).getRGB(), filled.getRGB(60, 40));
-    assertEquals(0xffffffff, outlined.getRGB(60, 40));
+    int interior = top + 20;
+    assertEquals(
+      new Color(blend(220), blend(40), blend(40)).getRGB(), filled.getRGB(60, interior));
+    assertEquals(0xffffffff, outlined.getRGB(60, interior));
   }
 }
