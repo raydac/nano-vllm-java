@@ -153,6 +153,51 @@ final class YoloMath {
     return current;
   }
 
+  static int[] descendingOrder(final float[] keys) {
+    int[] order = new int[keys.length];
+    for (int i = 0; i < order.length; i++) {
+      order[i] = i;
+    }
+    if (order.length < 2) {
+      return order;
+    }
+    mergeDescending(order, new int[order.length], keys, 0, order.length);
+    return order;
+  }
+
+  private static void mergeDescending(
+    final int[] order,
+    final int[] scratch,
+    final float[] keys,
+    final int from,
+    final int to
+  ) {
+    int span = to - from;
+    if (span < 2) {
+      return;
+    }
+    int mid = (from + to) >>> 1;
+    mergeDescending(order, scratch, keys, from, mid);
+    mergeDescending(order, scratch, keys, mid, to);
+
+    int left = from;
+    int right = mid;
+    int cursor = from;
+    while (left < mid && right < to) {
+      scratch[cursor++] = keys[order[right]] > keys[order[left]]
+        ? order[right++]
+        : order[left++];
+    }
+    while (left < mid) {
+      scratch[cursor++] = order[left++];
+    }
+    while (right < to) {
+      scratch[cursor++] = order[right++];
+    }
+
+    System.arraycopy(scratch, from, order, from, span);
+  }
+
   private static void requireSame(final Tensor left, final Tensor right) {
     int[] a = left.shape();
     int[] b = right.shape();

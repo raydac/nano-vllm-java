@@ -1,9 +1,11 @@
 package com.igormaznitsa.nanollvm.engine;
 
+import com.igormaznitsa.nanollvm.internal.EmptyArrays;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Deque;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -74,7 +76,7 @@ public final class BlockManager {
    * @param prefix   previous page hash, or {@code -1} for the first page
    * @return page hash used as the prefix-cache map key
    */
-  public static long computeHash(final List<Integer> tokenIds, final long prefix) {
+  public static long computeHash(final int[] tokenIds, final long prefix) {
     long h = 0xCBF29CE484222325L;
     if (prefix != -1L) {
       h ^= prefix;
@@ -91,7 +93,7 @@ public final class BlockManager {
       }
     }
     CRC32 crc = new CRC32();
-    ByteBuffer all = ByteBuffer.allocate(8 + tokenIds.size() * 4).order(ByteOrder.LITTLE_ENDIAN);
+    ByteBuffer all = ByteBuffer.allocate(8 + tokenIds.length * 4).order(ByteOrder.LITTLE_ENDIAN);
     all.putLong(prefix);
     for (int token : tokenIds) {
       all.putInt(token);
@@ -149,10 +151,10 @@ public final class BlockManager {
     int numCachedBlocks = 0;
     int numNewBlocks = seq.numBlocks();
     for (int i = 0; i < seq.numBlocks() - 1; i++) {
-      List<Integer> tokenIds = seq.block(i);
+      int[] tokenIds = seq.block(i);
       h = computeHash(tokenIds, h);
       int blockId = this.hashToBlockId.getOrDefault(h, -1);
-      if (blockId == -1 || !this.blocks.get(blockId).tokenIds().equals(tokenIds)) {
+      if (blockId == -1 || !Arrays.equals(this.blocks.get(blockId).tokenIds(), tokenIds)) {
         break;
       }
       numCachedBlocks++;
@@ -181,7 +183,7 @@ public final class BlockManager {
     }
     long h = -1L;
     for (int i = 0; i < numCachedBlocks; i++) {
-      List<Integer> tokenIds = seq.block(i);
+      int[] tokenIds = seq.block(i);
       h = computeHash(tokenIds, h);
       int blockId = this.hashToBlockId.get(h);
       Block block = this.blocks.get(blockId);
@@ -258,7 +260,7 @@ public final class BlockManager {
     long h = start > 0 ? this.blocks.get(seq.blockTable().get(start - 1)).hash() : -1L;
     for (int i = start; i < end; i++) {
       Block block = this.blocks.get(seq.blockTable().get(i));
-      List<Integer> tokenIds = seq.block(i);
+      int[] tokenIds = seq.block(i);
       h = computeHash(tokenIds, h);
       block.update(h, tokenIds);
       this.hashToBlockId.put(h, block.blockId());
@@ -273,21 +275,21 @@ public final class BlockManager {
     private final int blockId;
     private int refCount;
     private long hash;
-    private List<Integer> tokenIds;
+    private int[] tokenIds;
 
     Block(final int blockId) {
       this.blockId = blockId;
       this.refCount = 0;
       this.hash = -1L;
-      this.tokenIds = List.of();
+      this.tokenIds = EmptyArrays.INTS;
     }
 
     /**
-     * Records a full-page hash and an immutable token snapshot for prefix matching.
+     * Records a full-page hash and takes ownership of {@code tokenIds} for prefix matching.
      */
-    void update(final long hash, final List<Integer> tokenIds) {
+    void update(final long hash, final int[] tokenIds) {
       this.hash = hash;
-      this.tokenIds = List.copyOf(tokenIds);
+      this.tokenIds = tokenIds;
     }
 
     /**
@@ -296,7 +298,7 @@ public final class BlockManager {
     void reset() {
       this.refCount = 1;
       this.hash = -1L;
-      this.tokenIds = List.of();
+      this.tokenIds = EmptyArrays.INTS;
     }
 
     int blockId() {
@@ -323,7 +325,7 @@ public final class BlockManager {
       return this.hash;
     }
 
-    List<Integer> tokenIds() {
+    int[] tokenIds() {
       return this.tokenIds;
     }
   }

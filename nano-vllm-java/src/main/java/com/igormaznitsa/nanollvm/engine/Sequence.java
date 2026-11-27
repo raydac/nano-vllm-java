@@ -9,6 +9,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.stream.IntStream;
 
 /**
  * One generate request: prompt + completion tokens, paged KV block table, and sampling knobs.
@@ -18,8 +19,9 @@ import java.util.concurrent.atomic.AtomicInteger;
  * {@link #appendToken(int) appends} one sampled id per step until stop / max tokens / max model
  * length / {@link #hasDegenerateRepetition()}.
  *
- * <p>{@link #tokenIds()} and {@link #blockTable()} are live lists owned by this object. The
- * scheduler mutates them; callers must not replace or reorder entries. {@link #seqId()} is unique
+ * <p>Token ids live in a primitive buffer. {@link #tokenIds()} returns a copy.
+ * {@link #blockTable()} is the live page-id list: the scheduler appends to it, and callers must
+ * not replace or reorder entries. {@link #seqId()} is unique
  * in the process (monotonic {@link AtomicInteger}), used as the conv-arena key.
  *
  * <p><strong>Thread safety:</strong> not concurrent-safe; used on the generate thread only.
@@ -33,7 +35,7 @@ public final class Sequence {
 
   private final int seqId;
   private final int blockSize;
-  private final List<Integer> tokenIds;
+  private int[] tokenIds;
   private final int numPromptTokens;
   private final List<Integer> blockTable;
   private int[] slotIndex = EmptyArrays.INTS;
@@ -75,9 +77,12 @@ public final class Sequence {
     this.seqId = NEXT_SEQ_ID.getAndIncrement();
     this.blockSize = blockSize;
     this.status = Status.WAITING;
-    this.tokenIds = new ArrayList<>(tokenIds);
-    this.lastToken = tokenIds.getLast();
-    this.numTokens = tokenIds.size();
+    this.tokenIds = new int[tokenIds.size()];
+    for (int i = 0; i < this.tokenIds.length; i++) {
+      this.tokenIds[i] = tokenIds.get(i);
+    }
+    this.lastToken = this.tokenIds[this.tokenIds.length - 1];
+    this.numTokens = this.tokenIds.length;
     this.numPromptTokens = tokenIds.size();
     this.numCachedTokens = 0;
     this.numScheduledTokens = 0;
@@ -129,12 +134,15 @@ public final class Sequence {
   }
 
   /**
-   * Live prompt + completion ids. Mutated only through {@link #appendToken(int)}.
+   * Copy of the prompt and completion ids.
    *
-   * @return this sequence's token list (not a copy)
+   * @return token ids in order
    */
   public List<Integer> tokenIds() {
-    return this.tokenIds;
+    return IntStream.range(0, this.numTokens)
+      .map(index -> this.tokenIds[index])
+      .boxed()
+      .toList();
   }
 
   /**
@@ -144,7 +152,7 @@ public final class Sequence {
    * @return token id
    */
   public int tokenAt(final int index) {
-    return this.tokenIds.get(index);
+    return this.tokenIds[index];
   }
 
   /**
@@ -347,7 +355,10 @@ public final class Sequence {
    * @return immutable completion list
    */
   public List<Integer> completionTokenIds() {
-    return List.copyOf(this.tokenIds.subList(this.numPromptTokens, this.numTokens));
+    return IntStream.range(this.numPromptTokens, this.numTokens)
+      .map(index -> this.tokenIds[index])
+      .boxed()
+      .toList();
   }
 
   /**
@@ -372,16 +383,16 @@ public final class Sequence {
    * Copy of token ids that belong to KV page {@code i}.
    *
    * @param i block index in {@code [0, numBlocks)}
-   * @return immutable page contents
+   * @return page contents
    * @throws IndexOutOfBoundsException if {@code i} is out of range
    */
-  public List<Integer> block(final int i) {
+  public int[] block(final int i) {
     if (i < 0 || i >= this.numBlocks()) {
       throw new IndexOutOfBoundsException("block " + i);
     }
     int from = i * this.blockSize;
     int to = Math.min(from + this.blockSize, this.numTokens);
-    return List.copyOf(this.tokenIds.subList(from, to));
+    return Arrays.copyOfRange(this.tokenIds, from, to);
   }
 
   /**
@@ -390,9 +401,11 @@ public final class Sequence {
    * @param tokenId newly sampled id
    */
   public void appendToken(final int tokenId) {
-    this.tokenIds.add(tokenId);
+    if (this.numTokens == this.tokenIds.length) {
+      this.tokenIds = Arrays.copyOf(this.tokenIds, this.tokenIds.length * 2);
+    }
+    this.tokenIds[this.numTokens++] = tokenId;
     this.lastToken = tokenId;
-    this.numTokens++;
   }
 
   /**
@@ -434,7 +447,7 @@ public final class Sequence {
   private int sameTokenStreak() {
     int streak = 0;
     for (int i = this.numTokens - 1; i >= this.numPromptTokens; i--) {
-      if (this.tokenIds.get(i) != this.lastToken) {
+      if (this.tokenIds[i] != this.lastToken) {
         break;
       }
       streak++;
@@ -451,7 +464,7 @@ public final class Sequence {
       return false;
     }
     for (int i = 0; i < period; i++) {
-      if (!this.tokenIds.get(start + i).equals(this.tokenIds.get(start + period + i))) {
+      if (this.tokenIds[start + i] != this.tokenIds[start + period + i]) {
         return false;
       }
     }
@@ -473,7 +486,7 @@ public final class Sequence {
     for (int start = from; start <= this.numTokens - ngram; start++) {
       long hash = 0x9E3779B97F4A7C15L;
       for (int i = 0; i < ngram; i++) {
-        hash = 31L * hash + this.tokenIds.get(start + i);
+        hash = 31L * hash + this.tokenIds[start + i];
       }
       int hits = counts.merge(hash, 1, Integer::sum);
       if (hits >= minHits) {

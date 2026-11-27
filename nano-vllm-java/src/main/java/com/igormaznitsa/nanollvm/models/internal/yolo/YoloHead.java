@@ -329,11 +329,11 @@ final class YoloHead {
   }
 
   private static List<Pick> topPicks(final List<Raw> raws, final int maxDetections) {
-    Integer[] order = new Integer[raws.size()];
-    for (int i = 0; i < order.length; i++) {
-      order[i] = i;
+    float[] best = new float[raws.size()];
+    for (int i = 0; i < best.length; i++) {
+      best[i] = raws.get(i).best();
     }
-    Arrays.sort(order, Comparator.comparingDouble((Integer i) -> raws.get(i).best).reversed());
+    int[] order = YoloMath.descendingOrder(best);
     int anchors = Math.min(maxDetections, order.length);
     List<Pick> ranked = new ArrayList<>();
     for (int i = 0; i < anchors; i++) {
@@ -979,11 +979,7 @@ final class YoloHead {
         logits[row] = (float) Math.exp(logits[row] - max);
         normalizer += logits[row];
       }
-      Integer[] order = new Integer[classes];
-      for (int i = 0; i < classes; i++) {
-        order[i] = i;
-      }
-      Arrays.sort(order, Comparator.comparingDouble((Integer i) -> logits[i]).reversed());
+      int[] order = YoloMath.descendingOrder(logits);
       int keep = Math.min(maxLabels, classes);
       List<LlmLabelScore> labels = new ArrayList<>();
       for (int i = 0; i < keep; i++) {

@@ -373,7 +373,7 @@ public final class LLM implements AutoCloseable {
 
   private StepResult stepUnlocked() {
     Scheduler.ScheduleResult scheduled = this.scheduler.schedule();
-    List<Integer> nextTokenIds = this.runForwardAndSample(scheduled);
+    int[] nextTokenIds = this.runForwardAndSample(scheduled);
     List<int[]> appendedTokens = this.applySchedulerPostprocess(scheduled, nextTokenIds);
     return new StepResult(
       this.collectFinishedOutputs(scheduled.sequences()),
@@ -381,13 +381,13 @@ public final class LLM implements AutoCloseable {
       this.measureStepWorkload(scheduled));
   }
 
-  private List<Integer> runForwardAndSample(final Scheduler.ScheduleResult scheduled) {
+  private int[] runForwardAndSample(final Scheduler.ScheduleResult scheduled) {
     return this.transformer.step(scheduled.sequences(), scheduled.prefill());
   }
 
   private List<int[]> applySchedulerPostprocess(
     final Scheduler.ScheduleResult scheduled,
-    final List<Integer> nextTokenIds
+    final int[] nextTokenIds
   ) {
     List<int[]> appendedTokens = new ArrayList<>();
     this.scheduler.postprocess(
@@ -1332,7 +1332,7 @@ public final class LLM implements AutoCloseable {
         break;
       }
       this.transformer.prefillCache(scheduled.sequences());
-      this.scheduler.postprocess(scheduled.sequences(), List.of(0), true);
+      this.scheduler.postprocess(scheduled.sequences(), new int[] {0}, true);
     }
     if (logits == null) {
       throw new IllegalStateException("label readout did not reach the answer position");

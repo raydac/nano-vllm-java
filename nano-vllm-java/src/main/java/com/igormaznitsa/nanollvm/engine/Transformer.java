@@ -13,8 +13,6 @@ import com.igormaznitsa.nanollvm.models.internal.LlmModelImpl;
 import com.igormaznitsa.nanollvm.tensor.ActivationWorkspace;
 import com.igormaznitsa.nanollvm.tensor.MatmulRuntime;
 import com.igormaznitsa.nanollvm.tensor.Tensor;
-import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.List;
 import java.util.Random;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -178,22 +176,6 @@ public final class Transformer implements AutoCloseable {
     }
   }
 
-  /**
-   * Packs a list of integer token / position ids into a rank-1 float {@link Tensor}
-   * (model embeddings expect float storage for gather indices).
-   */
-  private static Tensor toTensor1d(final List<Integer> values) {
-    float[] data = new float[values.size()];
-    for (int i = 0; i < values.size(); i++) {
-      data[i] = values.get(i);
-    }
-    return Tensor.of(data, values.size());
-  }
-
-  private static int[] toInts(final List<Integer> values) {
-    return values.stream().mapToInt(Integer::intValue).toArray();
-  }
-
   private static List<Sequence> requirePrefill(final List<Sequence> seqs) {
     requireNonNull(seqs, "seqs");
     if (seqs.isEmpty()) {
@@ -271,13 +253,13 @@ public final class Transformer implements AutoCloseable {
     return this.network.computeLogits(hidden, this.stepContext);
   }
 
-  private List<Integer> sampleTokens(final Tensor logits, final SamplingControls sampling) {
-    return this.toTokenIdList(this.sampler.forward(
+  private int[] sampleTokens(final Tensor logits, final SamplingControls sampling) {
+    return this.sampler.forward(
       logits,
       sampling.temperatures(),
       sampling.topKs(),
       sampling.topPs(),
-      this.sampleRandom));
+      this.sampleRandom);
   }
 
   private PreparedInputs prepareInputs(final List<Sequence> seqs, final boolean isPrefill) {
@@ -295,10 +277,6 @@ public final class Transformer implements AutoCloseable {
       topPs[i] = seq.topP();
     }
     return new SamplingControls(temperatures, topKs, topPs);
-  }
-
-  private List<Integer> toTokenIdList(final int[] tokenIds) {
-    return Arrays.stream(tokenIds).boxed().toList();
   }
 
   /**
@@ -401,7 +379,7 @@ public final class Transformer implements AutoCloseable {
    * @return sampled next-token id for each sequence, same order as {@code seqs}
    * @throws IllegalStateException if this transformer is {@linkplain #close() closed}
    */
-  public List<Integer> step(final List<Sequence> seqs, final boolean isPrefill) {
+  public int[] step(final List<Sequence> seqs, final boolean isPrefill) {
     this.requireOpen();
     try {
       this.bindStep();
@@ -423,66 +401,79 @@ public final class Transformer implements AutoCloseable {
    * when some tokens are already cached (prefix reuse) and every sequence has a block table.
    */
   private PreparedInputs preparePrefill(final List<Sequence> seqs) {
-    List<Integer> inputIds = new ArrayList<>();
-    List<Integer> positions = new ArrayList<>();
-    List<Integer> cuSeqlensQ = new ArrayList<>();
-    List<Integer> cuSeqlensK = new ArrayList<>();
-    List<Integer> seqIds = new ArrayList<>();
-    cuSeqlensQ.add(0);
-    cuSeqlensK.add(0);
-    int maxSeqlenQ = 0;
-    int maxSeqlenK = 0;
-    List<Integer> slotMapping = new ArrayList<>();
+    int tokens = 0;
+    int slotted = 0;
     boolean anyBlockTable = false;
-
     for (Sequence seq : seqs) {
-      int start = seq.numCachedTokens();
-      int seqlenQ = seq.numScheduledTokens();
-      int end = start + seqlenQ;
-
-      for (int i = start; i < end; i++) {
-        inputIds.add(seq.tokenAt(i));
-        positions.add(i);
-        seqIds.add(seq.seqId());
-      }
-
-      cuSeqlensQ.add(cuSeqlensQ.getLast() + seqlenQ);
-      cuSeqlensK.add(cuSeqlensK.getLast() + end);
-      maxSeqlenQ = Math.max(maxSeqlenQ, seqlenQ);
-      maxSeqlenK = Math.max(maxSeqlenK, end);
-
+      int scheduled = seq.numScheduledTokens();
+      tokens += scheduled;
       if (seq.blockTable().isEmpty()) {
         continue;
       }
       anyBlockTable = true;
-      this.appendPrefillSlots(seq, start, end, slotMapping);
+      slotted += scheduled;
     }
 
-    int[][] blockTables = cuSeqlensK.getLast() > cuSeqlensQ.getLast() && anyBlockTable
+    float[] inputIds = new float[tokens];
+    float[] positions = new float[tokens];
+    int[] seqIds = new int[tokens];
+    int[] cuSeqlensQ = new int[seqs.size() + 1];
+    int[] cuSeqlensK = new int[seqs.size() + 1];
+    int[] slotMapping = new int[slotted];
+    int cursor = 0;
+    int slotCursor = 0;
+    int maxSeqlenQ = 0;
+    int maxSeqlenK = 0;
+
+    for (int index = 0; index < seqs.size(); index++) {
+      Sequence seq = seqs.get(index);
+      int start = seq.numCachedTokens();
+      int seqlenQ = seq.numScheduledTokens();
+      int end = start + seqlenQ;
+      int seqId = seq.seqId();
+      for (int token = start; token < end; token++) {
+        inputIds[cursor] = seq.tokenAt(token);
+        positions[cursor] = token;
+        seqIds[cursor] = seqId;
+        cursor++;
+      }
+
+      cuSeqlensQ[index + 1] = cuSeqlensQ[index] + seqlenQ;
+      cuSeqlensK[index + 1] = cuSeqlensK[index] + end;
+      maxSeqlenQ = Math.max(maxSeqlenQ, seqlenQ);
+      maxSeqlenK = Math.max(maxSeqlenK, end);
+      if (!seq.blockTable().isEmpty()) {
+        slotCursor = this.writePrefillSlots(seq, start, end, slotMapping, slotCursor);
+      }
+    }
+
+    int[][] blockTables = cuSeqlensK[seqs.size()] > cuSeqlensQ[seqs.size()] && anyBlockTable
       ? this.prepareBlockTables(seqs)
       : null;
     this.stepContext.set(
       true,
-      toInts(cuSeqlensQ),
-      toInts(cuSeqlensK),
+      cuSeqlensQ,
+      cuSeqlensK,
       maxSeqlenQ,
       maxSeqlenK,
-      toInts(slotMapping),
+      slotMapping,
       null,
       blockTables,
-      toInts(seqIds));
+      seqIds);
     if (blockTables != null) {
       this.stepContext.bindPagedSlots(this.pagedSlots(seqs, true));
     }
-    return new PreparedInputs(toTensor1d(inputIds), toTensor1d(positions));
+    return new PreparedInputs(Tensor.of(inputIds, tokens), Tensor.of(positions, tokens));
   }
 
-  private void appendPrefillSlots(
+  private int writePrefillSlots(
     final Sequence seq,
     final int start,
     final int end,
-    final List<Integer> slotMapping
+    final int[] slotMapping,
+    final int cursor
   ) {
+    int written = cursor;
     int startBlock = start / this.blockSize;
     int endBlock = (end + this.blockSize - 1) / this.blockSize;
     for (int block = startBlock; block < endBlock; block++) {
@@ -492,9 +483,10 @@ public final class Transformer implements AutoCloseable {
         ? pageBase + end - block * this.blockSize
         : pageBase + this.blockSize;
       for (int slot = slotStart; slot < slotEnd; slot++) {
-        slotMapping.add(slot);
+        slotMapping[written++] = slot;
       }
     }
+    return written;
   }
 
   /**

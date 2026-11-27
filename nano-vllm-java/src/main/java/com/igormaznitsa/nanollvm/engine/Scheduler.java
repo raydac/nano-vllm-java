@@ -3,13 +3,11 @@ package com.igormaznitsa.nanollvm.engine;
 import static java.util.Objects.requireNonNull;
 
 import com.igormaznitsa.nanollvm.llm.Config;
-
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
 import java.util.List;
 import java.util.function.IntConsumer;
-import java.util.stream.IntStream;
 
 /**
  * Continuous batching scheduler for one {@link com.igormaznitsa.nanollvm.llm.LLM} engine.
@@ -332,9 +330,9 @@ public final class Scheduler {
    * @param seqs      same order as {@link #schedule()}
    * @param tokenIds  one sampled id per sequence
    * @param isPrefill {@code true} if this batch was a prefill step
-   * @see #postprocess(List, List, boolean, List)
+   * @see #postprocess(List, int[], boolean, List)
    */
-  public void postprocess(final List<Sequence> seqs, final List<Integer> tokenIds,
+  public void postprocess(final List<Sequence> seqs, final int[] tokenIds,
                           final boolean isPrefill) {
     this.postprocess(seqs, tokenIds, isPrefill, null);
   }
@@ -344,7 +342,7 @@ public final class Scheduler {
    *
    * <p>Always hashes / accounts scheduled KV tokens via {@link BlockManager#hashBlocks}. Mid-prefill
    * chunks that have not yet covered the full prompt return early (no completion token appended).
-   * Otherwise appends {@code tokenIds.get(i)}, optionally records {@code [seqId, tokenId]} into
+   * Otherwise appends {@code tokenIds[i]}, optionally records {@code [seqId, tokenId]} into
    * {@code appendedOut}, and finishes the sequence on stop-id, {@code maxTokens},
    * {@code maxModelLen}, or a detected degenerate token-loop.
    *
@@ -355,12 +353,13 @@ public final class Scheduler {
    */
   public void postprocess(
     final List<Sequence> seqs,
-    final List<Integer> tokenIds,
+    final int[] tokenIds,
     final boolean isPrefill,
     final List<int[]> appendedOut
   ) {
-    IntStream.range(0, seqs.size())
-      .forEach(i -> this.postprocessOne(seqs.get(i), tokenIds.get(i), isPrefill, appendedOut));
+    for (int i = 0; i < seqs.size(); i++) {
+      this.postprocessOne(seqs.get(i), tokenIds[i], isPrefill, appendedOut);
+    }
   }
 
   /**

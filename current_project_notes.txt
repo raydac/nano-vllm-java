@@ -1,4 +1,5 @@
 ## 1. Implementation Progress
+- Prefill packing, sampled token ids, sequence token storage, and KV page snapshots are primitive arrays. YOLO rank and classification order indexes by `float[]` (stable descending merge). fastText top-k is an `int` heap. Public `List<Integer>` token ids stay at the tokenizer and `GenerationOutput` boundary.
 - TornadoVM 8.2.0 (installed OpenCL SDK `da4cd10`, Maven `8.2.0-jdk22plus`) was checked against the OpenCL path. No kernel or graph change. See the 8.2 note in Architecture.
 - YOLO26 `classes.txt` (detect 80, seg 80, sem 19, cls 1000, pose 1, obb 15) is tracked again. It had been gitignored, so a pull plus `download-yolo26n` left the ONNX files without names and `Yolo26Test.nanoOnnxLoadsAndForwards` failed with `ModelLoad`. Depth still has no sidecar. The download script checks that the six lists are present and does not fetch them.
 - Tiny Voca speaks text to WAV. English is `models/tiny-voca` (`./models/download-tiny-voca.sh`: config, f16 GGUF, `phonemizer/lexicon.tsv`). Russian is `models/tiny-voca-ru` (`./models/download-tiny-voca-ru.sh`: config + safetensors). The loaded speaker, speed, pitch, and range are `LlmOptionalData` (`SYNTHESIS_VOICE`, `SYNTHESIS_SPEED`, `SYNTHESIS_PITCH`, `SYNTHESIS_RANGE`). The example asks for the voice before load. A leading `voice=` / `speed=` / `pitch=` / `range=` overrides one line. `TinyVocaLoadTest` spoke "Hello" and "Привет" (24 kHz, peak above 0.05) in about 4 s.
@@ -69,6 +70,7 @@
 - `LLM` still has many one-line generate overloads. They exist so callers do not pass unused flags.
 
 ## 4. Current Work In Progress
+- Primitive buffers replaced the boxed token lists on the prefill, sample, and prefix-cache paths, and the boxed index sorts in YOLO and fastText. Generation output and tokenizer encode still return `List<Integer>`.
 - YOLO26 class lists are tracked under `models/YOLO26n/<task>/classes.txt`. They still need a commit and a pull on the Windows tree before that build sees them. The ONNX files already downloaded there can stay.
 - Tiny Voca is in the library and the example. Both downloaded checkpoints synthesized an audible clip (`TinyVocaLoadTest`, then `SynthesizeHelloWorld`: `models/tiny-voca/hello.wav`, `models/tiny-voca-ru/privet.wav`). English OOV is letter spelling. Russian stress is the last vowel unless `phonemizer/stress.txt` (or `+` / `ё`) marks one. `.pt` is refused.
 - The tree version is **1.5.1-SNAPSHOT**, opened after **1.5.0** was published on 2026-11-21.

@@ -10,7 +10,6 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
-import java.util.PriorityQueue;
 
 /**
  * Meta fastText supervised model (dense or ProductQuantizer) for language-id and similar tasks.
@@ -189,28 +188,76 @@ public final class FastTextModel {
   }
 
   private List<Prediction> findKBest(final float[] scores, final int k, final float threshold) {
-    final PriorityQueue<int[]> heap = new PriorityQueue<>(
-      Comparator.comparingDouble(a -> scores[a[0]]));
+    if (k < 1) {
+      return List.of();
+    }
+    int limit = Math.min(k, scores.length);
+    int[] heap = new int[limit];
+    int size = 0;
     for (int i = 0; i < scores.length; i++) {
       if (scores[i] < threshold) {
         continue;
       }
-      if (heap.size() == k && scores[i] <= scores[heap.peek()[0]]) {
+      if (size == limit && scores[i] <= scores[heap[0]]) {
         continue;
       }
-      heap.offer(new int[] {i});
-      if (heap.size() > k) {
-        heap.poll();
+      if (size < limit) {
+        heap[size] = i;
+        this.siftUpWorst(scores, heap, size);
+        size++;
+        continue;
       }
+      heap[0] = i;
+      this.siftDownWorst(scores, heap, size, 0);
     }
 
-    final List<Prediction> result = new ArrayList<>(heap.size());
-    while (!heap.isEmpty()) {
-      final int labelId = heap.poll()[0];
+    List<Prediction> result = new ArrayList<>(size);
+    for (int i = 0; i < size; i++) {
+      int labelId = heap[i];
       result.add(new Prediction(this.dictionary.getLabel(labelId), scores[labelId]));
     }
     result.sort(Comparator.comparingDouble(Prediction::probability).reversed());
     return List.copyOf(result);
+  }
+
+  private void siftUpWorst(final float[] scores, final int[] heap, final int index) {
+    int node = index;
+    while (node > 0) {
+      int parent = (node - 1) / 2;
+      if (scores[heap[node]] >= scores[heap[parent]]) {
+        break;
+      }
+      this.swap(heap, node, parent);
+      node = parent;
+    }
+  }
+
+  private void siftDownWorst(
+    final float[] scores, final int[] heap, final int size, final int index
+  ) {
+    int node = index;
+    while (true) {
+      int left = node * 2 + 1;
+      if (left >= size) {
+        return;
+      }
+      int right = left + 1;
+      int worst = left;
+      if (right < size && scores[heap[right]] < scores[heap[left]]) {
+        worst = right;
+      }
+      if (scores[heap[worst]] >= scores[heap[node]]) {
+        return;
+      }
+      this.swap(heap, node, worst);
+      node = worst;
+    }
+  }
+
+  private void swap(final int[] values, final int left, final int right) {
+    int held = values[left];
+    values[left] = values[right];
+    values[right] = held;
   }
 
   /**
