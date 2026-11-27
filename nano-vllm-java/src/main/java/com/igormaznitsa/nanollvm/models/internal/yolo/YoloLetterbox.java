@@ -10,33 +10,17 @@ import java.util.Arrays;
 /**
  * Letterbox to 640×640: keep aspect, pad with gray 114, store RGB in {@code [0, 1]}.
  */
-final class YoloLetterbox {
+record YoloLetterbox(
+  Tensor tensor,
+  int sourceWidth,
+  int sourceHeight,
+  float scale,
+  float padX,
+  float padY
+) {
 
   static final int SIZE = 640;
   private static final float PAD = 114f / 255f;
-
-  final Tensor tensor;
-  final int sourceWidth;
-  final int sourceHeight;
-  final float scale;
-  final float padX;
-  final float padY;
-
-  private YoloLetterbox(
-    final Tensor tensor,
-    final int sourceWidth,
-    final int sourceHeight,
-    final float scale,
-    final float padX,
-    final float padY
-  ) {
-    this.tensor = tensor;
-    this.sourceWidth = sourceWidth;
-    this.sourceHeight = sourceHeight;
-    this.scale = scale;
-    this.padX = padX;
-    this.padY = padY;
-  }
 
   static YoloLetterbox of(final ArgbImage image) {
     return of(image, SIZE);

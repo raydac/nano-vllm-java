@@ -6,27 +6,13 @@ import com.igormaznitsa.nanollvm.exceptions.ModelLoadException;
  * Compound scales from the published YOLO26 YAML. Medium and larger force a {@code C3k} inner
  * block. Large and extra-large also repeat those blocks.
  */
-final class YoloScale {
-
-  final String suffix;
-  private final float depth;
-  private final float width;
-  private final int maxChannels;
-  private final boolean c3k;
-
-  private YoloScale(
-    final String suffix,
-    final float depth,
-    final float width,
-    final int maxChannels,
-    final boolean c3k
-  ) {
-    this.suffix = suffix;
-    this.depth = depth;
-    this.width = width;
-    this.maxChannels = maxChannels;
-    this.c3k = c3k;
-  }
+record YoloScale(
+  String suffix,
+  float depth,
+  float width,
+  int maxChannels,
+  boolean usesC3k
+) {
 
   static YoloScale from(final YoloTensors weights) {
     int stem = weights.stemChannels();
@@ -57,21 +43,5 @@ final class YoloScale {
     final boolean c3k
   ) {
     return new YoloScale(suffix, depth, width, maxChannels, c3k);
-  }
-
-  boolean usesC3k() {
-    return this.c3k;
-  }
-
-  float depth() {
-    return this.depth;
-  }
-
-  float width() {
-    return this.width;
-  }
-
-  int maxChannels() {
-    return this.maxChannels;
   }
 }

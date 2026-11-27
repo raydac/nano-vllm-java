@@ -120,10 +120,10 @@ final class YoloHead {
     int channels = Math.min(proto.size(0), raw.extra.length);
     int height = proto.size(1);
     int width = proto.size(2);
-    int x0 = protoPixel(raw.x1, width, letter.tensor.size(2), false);
-    int y0 = protoPixel(raw.y1, height, letter.tensor.size(1), false);
-    int x1 = protoPixel(raw.x2, width, letter.tensor.size(2), true);
-    int y1 = protoPixel(raw.y2, height, letter.tensor.size(1), true);
+    int x0 = protoPixel(raw.x1, width, letter.tensor().size(2), false);
+    int y0 = protoPixel(raw.y1, height, letter.tensor().size(1), false);
+    int x1 = protoPixel(raw.x2, width, letter.tensor().size(2), true);
+    int y1 = protoPixel(raw.y2, height, letter.tensor().size(1), true);
     if (x1 - x0 < 1 || y1 - y0 < 1) {
       return rectangle(bounds);
     }
@@ -309,8 +309,8 @@ final class YoloHead {
     final int height,
     final YoloLetterbox letter
   ) {
-    int letterWidth = letter.tensor.size(2);
-    int letterHeight = letter.tensor.size(1);
+    int letterWidth = letter.tensor().size(2);
+    int letterHeight = letter.tensor().size(1);
     return local.stream()
       .map(point -> letter.toSource(
         (x0 + point.x() + 0.5f) * letterWidth / width,
@@ -373,7 +373,7 @@ final class YoloHead {
     }
     int masks = task == YoloTask.SEGMENT ? 32 : 0;
     int protos = task == YoloTask.SEGMENT
-      ? YoloMath.channels(256, width.scale.width(), width.scale.maxChannels())
+      ? YoloMath.channels(256, width.scale().width(), width.scale().maxChannels())
       : 0;
     Proto proto = masks == 0 ? null : Proto.load(weights, channels, protos, masks);
     return new YoloHead(task, levels, proto, null, null, null);
@@ -704,12 +704,12 @@ final class YoloHead {
     final int height,
     final YoloLetterbox letter
   ) {
-    float scaleX = width / (float) letter.tensor.size(2);
-    float scaleY = height / (float) letter.tensor.size(1);
-    float originX = letter.padX * scaleX;
-    float originY = letter.padY * scaleY;
-    float spanX = Math.max(letter.sourceWidth * letter.scale * scaleX, 1f);
-    float spanY = Math.max(letter.sourceHeight * letter.scale * scaleY, 1f);
+    float scaleX = width / (float) letter.tensor().size(2);
+    float scaleY = height / (float) letter.tensor().size(1);
+    float originX = letter.padX() * scaleX;
+    float originY = letter.padY() * scaleY;
+    float spanX = Math.max(letter.sourceWidth() * letter.scale() * scaleX, 1f);
+    float spanY = Math.max(letter.sourceHeight() * letter.scale() * scaleY, 1f);
     int left = Math.clamp((int) Math.floor(originX), 0, width - 1);
     int top = Math.clamp((int) Math.floor(originY), 0, height - 1);
     int right = Math.clamp((int) Math.ceil(originX + spanX), left + 1, width);
@@ -724,14 +724,14 @@ final class YoloHead {
       }
     }
     float span = Math.max(max - min, 1e-6f);
-    int[] pixels = new int[letter.sourceWidth * letter.sourceHeight];
-    for (int y = 0; y < letter.sourceHeight; y++) {
-      float depthY = originY + (y + 0.5f) * spanY / letter.sourceHeight;
-      for (int x = 0; x < letter.sourceWidth; x++) {
-        float depthX = originX + (x + 0.5f) * spanX / letter.sourceWidth;
+    int[] pixels = new int[letter.sourceWidth() * letter.sourceHeight()];
+    for (int y = 0; y < letter.sourceHeight(); y++) {
+      float depthY = originY + (y + 0.5f) * spanY / letter.sourceHeight();
+      for (int x = 0; x < letter.sourceWidth(); x++) {
+        float depthX = originX + (x + 0.5f) * spanX / letter.sourceWidth();
         float value = sample(meters, width, height, depthX, depthY);
         int gray = Math.clamp(Math.round((value - min) / span * 255f), 0, 255);
-        pixels[y * letter.sourceWidth + x] = opaqueGray(gray);
+        pixels[y * letter.sourceWidth() + x] = opaqueGray(gray);
       }
     }
     return new DepthPicture(pixels, min, max);
@@ -776,18 +776,18 @@ final class YoloHead {
       }
     }
 
-    float scaleX = width / (float) letter.tensor.size(2);
-    float scaleY = height / (float) letter.tensor.size(1);
-    float originX = letter.padX * scaleX;
-    float originY = letter.padY * scaleY;
-    float spanX = Math.max(letter.sourceWidth * letter.scale * scaleX, 1e-6f);
-    float spanY = Math.max(letter.sourceHeight * letter.scale * scaleY, 1e-6f);
-    int[] pixels = new int[letter.sourceWidth * letter.sourceHeight];
-    for (int y = 0; y < letter.sourceHeight; y++) {
-      int srcY = classCell(originY, spanY, letter.sourceHeight, height, y);
-      for (int x = 0; x < letter.sourceWidth; x++) {
-        int srcX = classCell(originX, spanX, letter.sourceWidth, width, x);
-        pixels[y * letter.sourceWidth + x] = opaqueGray(chosen[srcY * width + srcX]);
+    float scaleX = width / (float) letter.tensor().size(2);
+    float scaleY = height / (float) letter.tensor().size(1);
+    float originX = letter.padX() * scaleX;
+    float originY = letter.padY() * scaleY;
+    float spanX = Math.max(letter.sourceWidth() * letter.scale() * scaleX, 1e-6f);
+    float spanY = Math.max(letter.sourceHeight() * letter.scale() * scaleY, 1e-6f);
+    int[] pixels = new int[letter.sourceWidth() * letter.sourceHeight()];
+    for (int y = 0; y < letter.sourceHeight(); y++) {
+      int srcY = classCell(originY, spanY, letter.sourceHeight(), height, y);
+      for (int x = 0; x < letter.sourceWidth(); x++) {
+        int srcX = classCell(originX, spanX, letter.sourceWidth(), width, x);
+        pixels[y * letter.sourceWidth() + x] = opaqueGray(chosen[srcY * width + srcX]);
       }
     }
     return pixels;
@@ -847,8 +847,8 @@ final class YoloHead {
       Tensor logits = this.project.forward(this.conv.forward(feature, runtime));
       return new LlmOutImage(
         new ArgbImage(
-          letter.sourceWidth,
-          letter.sourceHeight,
+          letter.sourceWidth(),
+          letter.sourceHeight(),
           semanticPicture(
             logits.data(),
             logits.offset(),
@@ -921,7 +921,7 @@ final class YoloHead {
       }
       DepthPicture picture = depthPicture(meters, width, height, letter);
       return new LlmOutImage(
-        new ArgbImage(letter.sourceWidth, letter.sourceHeight, picture.pixels()),
+        new ArgbImage(letter.sourceWidth(), letter.sourceHeight(), picture.pixels()),
         picture.minimum(),
         picture.maximum());
     }

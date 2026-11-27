@@ -161,9 +161,9 @@ final class Yolo26Test {
   void letterboxKeepsAspectAndMapsBack() {
     YoloLetterbox letter = YoloLetterbox.of(new ArgbImage(320, 160, new int[320 * 160]));
 
-    assertEquals(3, letter.tensor.size(0));
-    assertEquals(YoloLetterbox.SIZE, letter.tensor.size(1));
-    assertEquals(YoloLetterbox.SIZE, letter.tensor.size(2));
+    assertEquals(3, letter.tensor().size(0));
+    assertEquals(YoloLetterbox.SIZE, letter.tensor().size(1));
+    assertEquals(YoloLetterbox.SIZE, letter.tensor().size(2));
     assertEquals(160f, letter.toSource(320f, 320f).x(), 1e-3f);
     assertEquals(80f, letter.toSource(320f, 320f).y(), 1e-3f);
   }
@@ -264,16 +264,16 @@ final class Yolo26Test {
 
   @Test
   void stemAndSecondBlockSelectTheScale() {
-    assertEquals("n", YoloScale.from(YoloTensors.synthetic()).suffix);
-    assertEquals("s", YoloScale.from(YoloTensors.synthetic(32, false)).suffix);
-    assertEquals("m", YoloScale.from(YoloTensors.synthetic(64, false)).suffix);
-    assertEquals("l", YoloScale.from(YoloTensors.synthetic(64, true)).suffix);
-    assertEquals("x", YoloScale.from(YoloTensors.synthetic(96, true)).suffix);
+    assertEquals("n", YoloScale.from(YoloTensors.synthetic()).suffix());
+    assertEquals("s", YoloScale.from(YoloTensors.synthetic(32, false)).suffix());
+    assertEquals("m", YoloScale.from(YoloTensors.synthetic(64, false)).suffix());
+    assertEquals("l", YoloScale.from(YoloTensors.synthetic(64, true)).suffix());
+    assertEquals("x", YoloScale.from(YoloTensors.synthetic(96, true)).suffix());
     assertEquals("m", YoloScale.from(YoloTensors.of(Map.of(
-      "model.0.conv.weight", Tensor.zeros(64, 3, 3, 3)))).suffix);
+      "model.0.conv.weight", Tensor.zeros(64, 3, 3, 3)))).suffix());
     assertEquals("l", YoloScale.from(YoloTensors.of(Map.of(
       "model.0.conv.weight", Tensor.zeros(64, 3, 3, 3),
-      "model.2.m.1.cv1.weight", Tensor.zeros(1)))).suffix);
+      "model.2.m.1.cv1.weight", Tensor.zeros(1)))).suffix());
     assertThrows(ModelLoadException.class, () -> YoloScale.from(YoloTensors.synthetic(48, false)));
   }
 

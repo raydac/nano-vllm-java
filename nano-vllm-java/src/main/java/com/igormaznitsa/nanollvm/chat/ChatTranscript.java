@@ -160,21 +160,7 @@ final class ChatTranscript {
     return -1;
   }
 
-  static final class Entry {
-    private final ChatMessage message;
-    private final boolean inHistory;
-
-    private Entry(final ChatMessage message, final boolean inHistory) {
-      this.message = message;
-      this.inHistory = inHistory;
-    }
-
-    ChatMessage message() {
-      return this.message;
-    }
-
-    boolean inHistory() {
-      return this.inHistory;
-    }
+  record Entry(ChatMessage message, boolean inHistory) {
   }
 }
+

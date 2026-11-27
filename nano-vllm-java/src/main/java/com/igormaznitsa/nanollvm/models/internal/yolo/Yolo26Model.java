@@ -64,7 +64,7 @@ public final class Yolo26Model {
   }
 
   public String architectureName() {
-    return "yolo26" + this.scale.suffix + "-" + this.task.wireName();
+    return "yolo26" + this.scale.suffix() + "-" + this.task.wireName();
   }
 
   public YoloTask task() {
@@ -129,7 +129,7 @@ public final class Yolo26Model {
     this.requireImageRequest(request);
     MatmulRuntime kernels = runtime == null ? MatmulRuntime.sequential() : runtime;
     return reusingPatches(() -> this.head.read(
-      this.trunk.forward(letter.tensor, kernels),
+      this.trunk.forward(letter.tensor(), kernels),
       letter,
       this.names,
       request,

@@ -1,4 +1,5 @@
 ## 1. Implementation Progress
+- `ChatTranscript.Entry`, `YoloWidths`, `YoloScale`, and `YoloLetterbox` are records. Call sites use the component accessors (`suffix()`, `scale()`, `tensor()`, `padX()`).
 - Prefill packing, sampled token ids, sequence token storage, and KV page snapshots are primitive arrays. YOLO rank and classification order indexes by `float[]` (stable descending merge). fastText top-k is an `int` heap. Public `List<Integer>` token ids stay at the tokenizer and `GenerationOutput` boundary.
 - TornadoVM 8.2.0 (installed OpenCL SDK `da4cd10`, Maven `8.2.0-jdk22plus`) was checked against the OpenCL path. No kernel or graph change. See the 8.2 note in Architecture.
 - YOLO26 `classes.txt` (detect 80, seg 80, sem 19, cls 1000, pose 1, obb 15) is tracked again. It had been gitignored, so a pull plus `download-yolo26n` left the ONNX files without names and `Yolo26Test.nanoOnnxLoadsAndForwards` failed with `ModelLoad`. Depth still has no sidecar. The download script checks that the six lists are present and does not fetch them.
